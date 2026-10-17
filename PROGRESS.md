@@ -78,11 +78,42 @@
   - Live `ShotSpec` state viewer and ComfyUI hardware/job telemetry tab.
   - Accessible via header pill or `~` / backtick hotkey.
 
+### Phase 7 / Tier 1: ComfyUI Connection Manager, MiniMax Adapter & Directing Presets `[DONE]`
+- **Dedicated ComfyUI Connection Manager**:
+  - Dedicated **Settings (`Settings` ⚙️)** button in top navigation bar and interactive Comfy status pill.
+  - [ComfyConnectionModal.tsx](file:///e:/work/Comfy%20AI%20Director/src/components/ComfyConnectionModal.tsx):
+    - Real-time endpoint configuration (`http://127.0.0.1:8188`, LAN IP, or remote cloud GPU).
+    - Latency Ping diagnostic with millisecond response timing.
+    - Connected hardware telemetry: GPU accelerator model, VRAM budget, system RAM, OS.
+    - Model Discovery: Automatic detection of LTX-2.5, MiniMax H3, Wan 2.1, and custom director nodes.
+    - Direct Engine Mode Switcher: One-click toggle between Real ComfyUI Server and Offline Mock Directing Engine.
+    - LocalStorage persistence for user configuration.
+- **MiniMax (Hailuo) Model Capability Adapter**:
+  - Built [minimaxAdapter.ts](file:///e:/work/Comfy%20AI%20Director/src/adapters/minimaxAdapter.ts) implementing `ModelCapabilityAdapter`.
+  - Rich narrative prompt translation emphasizing natural human micro-expressions, fluid choreography, and organic motion dynamics.
+  - ComfyUI workflow graph generator with `MiniMaxModelLoader`, `MiniMaxVideoSampler`, and reference image injection.
+  - Registered in [src/adapters/index.ts](file:///e:/work/Comfy%20AI%20Director/src/adapters/index.ts).
+  - Verified with dedicated unit tests in [tests/minimaxAdapter.test.ts](file:///e:/work/Comfy%20AI%20Director/tests/minimaxAdapter.test.ts).
+- **Cinematic Mood & Intent Presets ("Direct by Feeling")**:
+  - Built [CinematicPresetsModal.tsx](file:///e:/work/Comfy%20AI%20Director/src/components/CinematicPresetsModal.tsx): 8 curated Hollywood directorial styles:
+    - *Fincher Neo-Noir Suspense* (35mm, slow dolly push-in, low-angle, high contrast).
+    - *Spielberg Cinematic Wonder* (24mm, slow pedestal-up, golden-hour rim backlit).
+    - *Hitchcock Vertigo Unease* (85mm telephoto, Dutch angle tilt, rapid dynamic push).
+    - *Villeneuve Brutalist Sci-Fi* (18mm ultra-wide, overhead descent, foggy moonlight).
+    - *Wong Kar-Wai Neon Melancholy* (50mm normal eye, gentle orbit, neon cyberpunk).
+    - *Kubrick Geometric Dread* (18mm ultra-wide, one-point symmetry dolly-in).
+    - *Tarantino Ground-Level Punch* (24mm ground skim, whip-pan energy).
+    - *Adrenaline High-Speed Trucking* (24mm rapid lateral tracking, motion parallax).
+  - Complete with filmmaker educational context explaining *why* each configuration works.
+- **Filmmaker Educational Guidance**:
+  - Optical impact explainers for all focal lengths (18mm to 135mm).
+  - Emotional angle psychology callouts inside [CameraDeck.tsx](file:///e:/work/Comfy%20AI%20Director/src/components/CameraDeck.tsx).
+
 ---
 
 ## Verification Summary
-- **Tests**: `cmd /c "npm test"` → **PASS** (11 tests passed in 4 files).
-- **Build**: `cmd /c "npm run build"` → **PASS** (zero TypeScript or bundle errors, 5.6s).
+- **Tests**: `cmd /c "npm test"` → **PASS** (15 tests passed across 5 test suites).
+- **Build**: `cmd /c "npm run build"` → **PASS** (zero TypeScript or bundle errors).
 - **Desktop Launch**: Native Electron window with no CMD window via [Launch AI Director Studio.vbs](file:///e:/work/Comfy%20AI%20Director/Launch%20AI%20Director%20Studio.vbs) or [run.bat](file:///e:/work/Comfy%20AI%20Director/run.bat).
 - **Workflows**: `workflows/` contains verified JSON graphs ready for ComfyUI.
 - **Rules Compliance**: 100% compliant with competition requirements.

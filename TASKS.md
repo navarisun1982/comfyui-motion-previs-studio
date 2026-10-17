@@ -114,3 +114,28 @@
 - [x] Full Verification:
   - All 11 unit tests pass (`npm test`).
   - Production build compiles with 0 errors in 5.6s (`npm run build`).
+
+---
+
+## Phase 7 / Tier 1: ComfyUI Connection Manager, MiniMax Adapter & Directing Presets `[DONE]`
+- [x] ComfyUI Connection Manager & Settings Modal ([src/components/ComfyConnectionModal.tsx](file:///e:/work/Comfy%20AI%20Director/src/components/ComfyConnectionModal.tsx)):
+  - Dedicated **Settings (`Settings` ⚙️)** button in top navigation bar and interactive Comfy status pill.
+  - Configurable server endpoint with localStorage persistence.
+  - Real-time latency ping diagnostic (`/system_stats`).
+  - Connected hardware diagnostics: GPU model, VRAM budget, system RAM, OS.
+  - Video model discovery: checks for LTX-2.5, MiniMax H3, Wan 2.1, and custom director nodes.
+  - Direct engine mode switch: Real ComfyUI Server vs. Offline Mock Directing Engine.
+- [x] MiniMax (Hailuo) Model Capability Adapter ([src/adapters/minimaxAdapter.ts](file:///e:/work/Comfy%20AI%20Director/src/adapters/minimaxAdapter.ts)):
+  - Full prompt compilation with character motion physics, facial nuances, and optical depth.
+  - ComfyUI workflow graph generator with `MiniMaxModelLoader`, `MiniMaxVideoSampler`, and reference image input.
+  - Registered in adapter index and verified with unit tests in [tests/minimaxAdapter.test.ts](file:///e:/work/Comfy%20AI%20Director/tests/minimaxAdapter.test.ts).
+- [x] Cinematic Mood & Intent Presets ("Direct by Feeling") ([src/components/CinematicPresetsModal.tsx](file:///e:/work/Comfy%20AI%20Director/src/components/CinematicPresetsModal.tsx)):
+  - 8 curated Hollywood styles (Fincher Noir, Spielberg Wonder, Hitchcock Tension, Villeneuve Sci-Fi, Wong Kar-Wai Romance, Kubrick Symmetry, Tarantino Punch, Action Trucking).
+  - One-click application of lens, angle, trajectory movement, speed, lighting, and aspect ratio.
+  - Educational explanation on why each visual style works emotionally.
+- [x] Filmmaker Educational Tooltips:
+  - Lens optical impact notes (18mm to 135mm) in [src/components/CameraDeck.tsx](file:///e:/work/Comfy%20AI%20Director/src/components/CameraDeck.tsx).
+  - Dynamic camera angle psychology callout in [src/components/CameraDeck.tsx](file:///e:/work/Comfy%20AI%20Director/src/components/CameraDeck.tsx).
+- [x] Verification:
+  - 15/15 unit tests pass (`npm test`).
+  - Production bundle compiles with 0 errors (`npm run build`).
