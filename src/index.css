@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    border-color: #2A3044;
+  }
+  
+  body {
+    background-color: #08090C;
+    color: #F1F5F9;
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Custom subtle scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0E1017;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2A3044;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3B4460;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    background: rgba(21, 24, 34, 0.75);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .glass-card {
+    background: rgba(30, 34, 48, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .glass-control {
+    background: rgba(14, 16, 23, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: all 0.15s ease-in-out;
+  }
+  
+  .glass-control:hover {
+    border-color: rgba(245, 158, 11, 0.5);
+    background: rgba(21, 24, 34, 0.95);
+  }
+
+  .glass-control:focus, .glass-control:focus-within {
+    border-color: #F59E0B;
+    box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.4);
+    outline: none;
+  }
+
+  .cinema-glow {
+    box-shadow: 0 0 20px -3px rgba(245, 158, 11, 0.25);
+  }
+
+  .stage-grid {
+    background-image: 
+      linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+}

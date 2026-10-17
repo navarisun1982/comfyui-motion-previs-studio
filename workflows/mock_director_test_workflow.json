@@ -1,0 +1,32 @@
+{
+  "1": {
+    "class_type": "MockVideoGenerator",
+    "inputs": {
+      "prompt": "cinematic neon cyberpunk alley in gentle rain, wet asphalt reflections, moody atmospheric steam Subject blocking: a lone traveler in a weathered jacket (turns head slowly toward the camera with focused gaze). medium shot, neutral eye-level framing, balanced horizontal composition. steady camera dolly-in push, camera physically moving forward toward the subject at a slow, controlled pace, creating increasing emotional intimacy. Shot on classic 35mm cinema prime, natural human perspective, gentle background separation at f/2.8. Lighting: natural cinematic film lighting, realistic ambient bounce, side key illumination with balanced cinematic contrast. Cinematic film aesthetic, 24fps motion cadence, natural shutter angle, high dynamic range.",
+      "negative": "jitter, warping, distorted faces, blurry, cartoon, low quality, 3d render, plastic skin, jittery camera shake",
+      "camera_type": "dolly-in",
+      "camera_speed": "slow-cinematic",
+      "focal_length": "35mm",
+      "duration": 4,
+      "fps": 24,
+      "reference_image": "none",
+      "seed": 42
+    },
+    "_meta": {
+      "title": "Mock Video Generation Node"
+    }
+  },
+  "2": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": [
+        "1",
+        0
+      ],
+      "filename_prefix": "Director_Cyberpunk_Alley_Dolly_Push"
+    },
+    "_meta": {
+      "title": "Save Video Output"
+    }
+  }
+}

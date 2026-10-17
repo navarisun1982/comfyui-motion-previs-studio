@@ -1,0 +1,165 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "LTX2.5\\ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Load LTX-2.5 Transformer (INT8)"
+    }
+  },
+  "2": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "LTX2.5\\gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "clip_name2": "LTX2.5\\gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "type": "ltxv"
+    },
+    "_meta": {
+      "title": "Load Gemma 12B CLIP"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "LTX-VAE.ckpt"
+    },
+    "_meta": {
+      "title": "Load LTX VAE"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "text": "cinematic desert landscape at dusk, lone operative looking over ancient monument Subject blocking: a lone traveler in a weathered jacket (turns head slowly toward the camera with focused gaze). wide shot, low-angle perspective looking up at subject, conveying stature and authority. vertical pedestal-up movement, camera physically elevating upward vertically at a slow, controlled pace. Shot on wide 24mm prime lens, environmental framing with cinematic presence, crisp background context. Lighting: natural cinematic film lighting, realistic ambient bounce, side key illumination with balanced cinematic contrast. Cinematic film aesthetic, 24fps motion cadence, natural shutter angle, high dynamic range."
+    },
+    "_meta": {
+      "title": "Compiled Director Prompt"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "text": "jitter, warping, distorted faces, blurry, cartoon, low quality, 3d render, plastic skin, jittery camera shake"
+    },
+    "_meta": {
+      "title": "Negative Conditioning"
+    }
+  },
+  "6": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "example_start_frame.png"
+    },
+    "_meta": {
+      "title": "Reference Start Frame"
+    }
+  },
+  "7": {
+    "class_type": "LTXVConditioning",
+    "inputs": {
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ],
+      "image": [
+        "6",
+        0
+      ],
+      "frame_rate": 24,
+      "crf": 18
+    },
+    "_meta": {
+      "title": "LTX-2.5 Conditioning"
+    }
+  },
+  "8": {
+    "class_type": "EmptyLTXVLatentVideo",
+    "inputs": {
+      "width": 768,
+      "height": 432,
+      "length": 97,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Empty LTX Video Latent"
+    }
+  },
+  "9": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "seed": 42,
+      "steps": 25,
+      "cfg": 3,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "positive": [
+        "7",
+        0
+      ],
+      "negative": [
+        "7",
+        1
+      ],
+      "latent_image": [
+        "8",
+        0
+      ],
+      "denoise": 1
+    },
+    "_meta": {
+      "title": "LTX Sampler (25 steps)"
+    }
+  },
+  "10": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "9",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode Video Latents"
+    }
+  },
+  "11": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "images": [
+        "10",
+        0
+      ],
+      "filename_prefix": "AIDirector_Hero_Reveal_Crane_Up_v1",
+      "fps": 24
+    },
+    "_meta": {
+      "title": "Save Generated Video (MP4)"
+    }
+  }
+}

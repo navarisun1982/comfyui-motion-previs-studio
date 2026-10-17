@@ -1,0 +1,130 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "LTX2.5\\ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "Load LTX-2.5 Transformer (INT8)"
+    }
+  },
+  "2": {
+    "class_type": "DualCLIPLoader",
+    "inputs": {
+      "clip_name1": "LTX2.5\\gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "clip_name2": "LTX2.5\\gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "type": "ltxv"
+    },
+    "_meta": {
+      "title": "Load Gemma 12B CLIP"
+    }
+  },
+  "3": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "LTX-VAE.ckpt"
+    },
+    "_meta": {
+      "title": "Load LTX VAE"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "text": "cinematic neon cyberpunk alley in gentle rain, wet asphalt reflections, moody atmospheric steam Subject blocking: a lone traveler in a weathered jacket (turns head slowly toward the camera with focused gaze). medium shot, neutral eye-level framing, balanced horizontal composition. steady camera dolly-in push, camera physically moving forward toward the subject at a slow, controlled pace, creating increasing emotional intimacy. Shot on classic 35mm cinema prime, natural human perspective, gentle background separation at f/2.8. Lighting: natural cinematic film lighting, realistic ambient bounce, side key illumination with balanced cinematic contrast. Cinematic film aesthetic, 24fps motion cadence, natural shutter angle, high dynamic range."
+    },
+    "_meta": {
+      "title": "Compiled Director Prompt"
+    }
+  },
+  "5": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "2",
+        0
+      ],
+      "text": "jitter, warping, distorted faces, blurry, cartoon, low quality, 3d render, plastic skin, jittery camera shake"
+    },
+    "_meta": {
+      "title": "Negative Conditioning"
+    }
+  },
+  "8": {
+    "class_type": "EmptyLTXVLatentVideo",
+    "inputs": {
+      "width": 768,
+      "height": 432,
+      "length": 97,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "Empty LTX Video Latent"
+    }
+  },
+  "9": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "1",
+        0
+      ],
+      "seed": 42,
+      "steps": 25,
+      "cfg": 3,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "positive": [
+        "4",
+        0
+      ],
+      "negative": [
+        "5",
+        0
+      ],
+      "latent_image": [
+        "8",
+        0
+      ],
+      "denoise": 1
+    },
+    "_meta": {
+      "title": "LTX Sampler (25 steps)"
+    }
+  },
+  "10": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "9",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "Decode Video Latents"
+    }
+  },
+  "11": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "images": [
+        "10",
+        0
+      ],
+      "filename_prefix": "AIDirector_Cyberpunk_Alley_Dolly_Push_v1",
+      "fps": 24
+    },
+    "_meta": {
+      "title": "Save Generated Video (MP4)"
+    }
+  }
+}
