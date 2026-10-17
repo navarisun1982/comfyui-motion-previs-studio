@@ -9,6 +9,8 @@ import { DirectorTimeline } from './components/DirectorTimeline';
 import { DirectorDiffInspector } from './components/DirectorDiffInspector';
 import { ComfyExecutionPanel } from './components/ComfyExecutionPanel';
 import { InAppDebugger, DebuggerTogglePill } from './components/InAppDebugger';
+import { ComfyConnectionModal } from './components/ComfyConnectionModal';
+import { CinematicPresetsModal } from './components/CinematicPresetsModal';
 import { useLogStore } from './stores/useLogStore';
 import {
   Clapperboard,
@@ -19,6 +21,7 @@ import {
   Code2,
   RotateCcw,
   Sparkles,
+  Settings,
 } from 'lucide-react';
 
 type StudioTab = 'directing' | 'diff';
@@ -26,12 +29,13 @@ type LeftPanelTab = 'camera' | 'actors' | 'environment';
 
 export default function App() {
   const { shot, validation, compiledPrompt, resetToDefault } = useShotStore();
-  const { connectionStatus, systemStats } = useComfyStore();
+  const { connectionStatus, systemStats, openSettings, isMockMode } = useComfyStore();
   const { revisions } = useHistoryStore();
 
   const [activeStudioTab, setActiveStudioTab] = useState<StudioTab>('directing');
   const [leftTab, setLeftTab] = useState<LeftPanelTab>('camera');
   const [showPromptModal, setShowPromptModal] = useState<boolean>(false);
+  const [showPresetsModal, setShowPresetsModal] = useState<boolean>(false);
   const { toggleOpen: toggleDebugger } = useLogStore();
 
   // Keyboard shortcut: Press `~` or `F12` to toggle in-app debugger
@@ -101,45 +105,73 @@ export default function App() {
         </div>
 
         {/* Backend & Hardware Status */}
-        <div className="flex items-center gap-3 font-mono text-xs">
+        <div className="flex items-center gap-2.5 font-mono text-xs">
+          {/* Directing Mood Presets Button */}
+          <button
+            onClick={() => setShowPresetsModal(true)}
+            className="flex items-center gap-1.5 rounded-lg glass-control px-2.5 py-1 text-[11px] text-director-gold hover:text-white border-director-gold/40 hover:border-director-gold transition-all"
+            title="Choose a cinematic mood preset (direct by feeling)"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-director-gold" />
+            <span>Directing Presets</span>
+          </button>
+
+          {/* Settings & ComfyUI Connection Button */}
+          <button
+            onClick={openSettings}
+            className="flex items-center gap-1.5 rounded-lg glass-control px-2.5 py-1 text-[11px] text-slate-200 hover:text-white border-slate-700 hover:border-director-cyan transition-all"
+            title="ComfyUI Connection & Directing Engine Settings"
+          >
+            <Settings className="h-3.5 w-3.5 text-director-cyan" />
+            <span>Settings</span>
+          </button>
+
           {/* In-App Debugger Console Pill */}
           <DebuggerTogglePill />
 
           {/* Quick Prompt Inspector Button */}
           <button
             onClick={() => setShowPromptModal(!showPromptModal)}
-            className="flex items-center gap-1.5 rounded-md glass-control px-2.5 py-1 text-[11px] text-slate-300 hover:text-white"
+            className="flex items-center gap-1.5 rounded-lg glass-control px-2.5 py-1 text-[11px] text-slate-300 hover:text-white"
             title="Inspect compiled prompt"
           >
             <Code2 className="h-3.5 w-3.5 text-director-gold" />
-            Prompt Inspector
+            <span>Prompt</span>
           </button>
 
           <button
             onClick={resetToDefault}
-            className="flex items-center gap-1 rounded-md glass-control px-2 py-1 text-[11px] text-slate-400 hover:text-white"
+            className="flex items-center gap-1 rounded-lg glass-control px-2 py-1 text-[11px] text-slate-400 hover:text-white"
             title="Reset Shot to Default"
           >
             <RotateCcw className="h-3 w-3" />
             Reset
           </button>
 
-          {/* Comfy Status Pill */}
-          <div className="flex items-center gap-2 rounded-lg border border-director-border bg-director-surface px-2.5 py-1">
+          {/* Comfy Status Pill (Clickable to open settings) */}
+          <button
+            onClick={openSettings}
+            className="flex items-center gap-2 rounded-lg border border-director-border bg-director-surface px-2.5 py-1 hover:border-director-gold/60 transition-all text-left"
+            title="Click to configure ComfyUI connection"
+          >
             <span
-              className={`h-2 w-2 rounded-full ${
-                connectionStatus === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'
+              className={`h-2 w-2 rounded-full shrink-0 ${
+                isMockMode
+                  ? 'bg-director-cyan'
+                  : connectionStatus === 'connected'
+                  ? 'bg-emerald-400 animate-pulse'
+                  : 'bg-rose-400'
               }`}
             />
             <div className="flex flex-col text-[10px] leading-tight">
               <span className="text-white font-semibold">
-                {connectionStatus === 'connected' ? 'ComfyUI Online' : 'ComfyUI Offline'}
+                {isMockMode ? 'Mock Engine Active' : connectionStatus === 'connected' ? 'ComfyUI Online' : 'ComfyUI Offline'}
               </span>
-              <span className="text-slate-400">
-                {systemStats ? `${systemStats.gpuName.split(' ')[0]} ${systemStats.gpuName.split(' ')[1]} (${systemStats.vramFreeGb}GB free)` : ':8188'}
+              <span className="text-slate-400 truncate max-w-[130px]">
+                {isMockMode ? 'Offline Previs' : systemStats ? `${systemStats.gpuName.split(' ')[0]} ${systemStats.gpuName.split(' ')[1]} (${systemStats.vramFreeGb}GB free)` : ':8188'}
               </span>
             </div>
-          </div>
+          </button>
         </div>
       </header>
 
@@ -282,6 +314,15 @@ export default function App() {
 
       {/* Docked In-App Debugger & Action Console */}
       <InAppDebugger />
+
+      {/* ComfyUI Connection & Settings Modal */}
+      <ComfyConnectionModal />
+
+      {/* Cinematic Mood & Intent Presets Modal */}
+      <CinematicPresetsModal
+        isOpen={showPresetsModal}
+        onClose={() => setShowPresetsModal(false)}
+      />
     </div>
   );
 }

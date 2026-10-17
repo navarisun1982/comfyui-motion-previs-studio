@@ -33,16 +33,34 @@ export interface GeneratedOutput {
   timestamp: number;
 }
 
+const SERVER_URL_KEY = 'ai_director_comfy_server_url';
+const MOCK_MODE_KEY = 'ai_director_comfy_mock_mode';
+
 interface ComfyState {
   serverUrl: string;
   connectionStatus: 'connected' | 'connecting' | 'disconnected' | 'error';
   systemStats: ComfySystemStats | null;
+  latencyMs: number | null;
+  detectedModels: {
+    ltx: boolean;
+    minimax: boolean;
+    wan: boolean;
+    customNodes: string[];
+  };
+  isSettingsOpen: boolean;
+  isMockMode: boolean;
   activeJob: ActiveJob | null;
   recentOutputs: GeneratedOutput[];
 
   setServerUrl: (url: string) => void;
   setConnectionStatus: (status: ComfyState['connectionStatus']) => void;
   setSystemStats: (stats: ComfySystemStats | null) => void;
+  setLatencyMs: (latency: number | null) => void;
+  setDetectedModels: (detected: ComfyState['detectedModels']) => void;
+  openSettings: () => void;
+  closeSettings: () => void;
+  toggleSettings: () => void;
+  setMockMode: (mock: boolean) => void;
   startJob: (promptId: string, shotId: string, shotName: string) => void;
   updateJobProgress: (progress: number, currentNodeTitle?: string) => void;
   setJobCompleted: (outputVideoUrl: string, outputFilename: string) => void;
@@ -51,16 +69,56 @@ interface ComfyState {
   addRecentOutput: (output: GeneratedOutput) => void;
 }
 
+const initialServerUrl = typeof window !== 'undefined' && window.localStorage?.getItem(SERVER_URL_KEY)
+  ? window.localStorage.getItem(SERVER_URL_KEY)!
+  : 'http://127.0.0.1:8188';
+
+const initialMockMode = typeof window !== 'undefined' && window.localStorage?.getItem(MOCK_MODE_KEY) === 'true';
+
 export const useComfyStore = create<ComfyState>((set, get) => ({
-  serverUrl: 'http://127.0.0.1:8188',
+  serverUrl: initialServerUrl,
   connectionStatus: 'disconnected',
   systemStats: null,
+  latencyMs: null,
+  detectedModels: {
+    ltx: false,
+    minimax: false,
+    wan: false,
+    customNodes: [],
+  },
+  isSettingsOpen: false,
+  isMockMode: initialMockMode,
   activeJob: null,
   recentOutputs: [],
 
-  setServerUrl: (serverUrl) => set({ serverUrl }),
+  setServerUrl: (serverUrl) => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(SERVER_URL_KEY, serverUrl);
+      }
+    } catch {
+      // ignore
+    }
+    set({ serverUrl });
+  },
+
   setConnectionStatus: (connectionStatus) => set({ connectionStatus }),
   setSystemStats: (systemStats) => set({ systemStats }),
+  setLatencyMs: (latencyMs) => set({ latencyMs }),
+  setDetectedModels: (detectedModels) => set({ detectedModels }),
+  openSettings: () => set({ isSettingsOpen: true }),
+  closeSettings: () => set({ isSettingsOpen: false }),
+  toggleSettings: () => set({ isSettingsOpen: !get().isSettingsOpen }),
+  setMockMode: (isMockMode) => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(MOCK_MODE_KEY, String(isMockMode));
+      }
+    } catch {
+      // ignore
+    }
+    set({ isMockMode });
+  },
 
   startJob: (promptId, shotId, shotName) => {
     set({

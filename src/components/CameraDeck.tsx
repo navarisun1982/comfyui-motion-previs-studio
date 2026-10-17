@@ -3,13 +3,13 @@ import { useShotStore } from '../stores/useShotStore';
 import { FocalLength, CameraMovementType, CameraAngle, ShotType, MovementSpeed } from '../types/shotspec';
 import { Camera, Compass, Move, Aperture, Video, Gauge } from 'lucide-react';
 
-const FOCAL_LENGTHS: { value: FocalLength; label: string; fov: string; note: string }[] = [
-  { value: '18mm', label: '18mm', fov: '100°', note: 'Ultra-wide angle' },
-  { value: '24mm', label: '24mm', fov: '84°', note: 'Environmental' },
-  { value: '35mm', label: '35mm', fov: '63°', note: 'Classic cinema' },
-  { value: '50mm', label: '50mm', fov: '47°', note: 'Natural eye' },
-  { value: '85mm', label: '85mm', fov: '28°', note: 'Portrait telephoto' },
-  { value: '135mm', label: '135mm', fov: '18°', note: 'Compressed bokeh' },
+const FOCAL_LENGTHS: { value: FocalLength; label: string; fov: string; note: string; feeling: string }[] = [
+  { value: '18mm', label: '18mm', fov: '100°', note: 'Ultra-wide angle', feeling: 'Vast scale & deep perspective. Swallows subjects in massive environments.' },
+  { value: '24mm', label: '24mm', fov: '84°', note: 'Environmental', feeling: 'Dynamic immersive wide. Captures character and surrounding world in motion.' },
+  { value: '35mm', label: '35mm', fov: '63°', note: 'Classic cinema', feeling: 'The Hollywood storytelling standard. Natural balance between character and space.' },
+  { value: '50mm', label: '50mm', fov: '47°', note: 'Natural eye', feeling: 'Human eye perspective. Zero lens distortion; honest, grounded emotional realism.' },
+  { value: '85mm', label: '85mm', fov: '28°', note: 'Portrait telephoto', feeling: 'Emotional close-ups. Compresses background into creamy cinematic bokeh.' },
+  { value: '135mm', label: '135mm', fov: '18°', note: 'Compressed bokeh', feeling: 'Extreme telephoto isolation. Creates voyeuristic intimacy and flattened depth.' },
 ];
 
 const MOVEMENTS: { value: CameraMovementType; label: string; group: string }[] = [
@@ -32,13 +32,13 @@ const MOVEMENTS: { value: CameraMovementType; label: string; group: string }[] =
   { value: 'whip-pan', label: 'Whip-Pan Swish', group: 'Dynamic' },
 ];
 
-const ANGLES: { value: CameraAngle; label: string }[] = [
-  { value: 'eye-level', label: 'Eye Level' },
-  { value: 'low-angle', label: 'Low Angle' },
-  { value: 'high-angle', label: 'High Angle' },
-  { value: 'dutch-angle', label: 'Dutch Angle' },
-  { value: 'overhead-gods-eye', label: "God's Eye (Top-Down)" },
-  { value: 'ground-level', label: 'Ground Skim' },
+const ANGLES: { value: CameraAngle; label: string; feeling: string }[] = [
+  { value: 'eye-level', label: 'Eye Level', feeling: 'Neutral, objective equality with the character.' },
+  { value: 'low-angle', label: 'Low Angle', feeling: 'Power, authority, heroism, or looming intimidation.' },
+  { value: 'high-angle', label: 'High Angle', feeling: 'Vulnerability, weakness, or feeling watched.' },
+  { value: 'dutch-angle', label: 'Dutch Angle', feeling: 'Psychological disorientation, tension, and impending doom.' },
+  { value: 'overhead-gods-eye', label: "God's Eye (Top-Down)", feeling: 'Omniscient, detached, fateful overhead perspective.' },
+  { value: 'ground-level', label: 'Ground Skim', feeling: 'Visceral speed, energy, and ground-up dynamism.' },
 ];
 
 const SHOT_SIZES: { value: ShotType; label: string }[] = [
@@ -55,6 +55,9 @@ export const CameraDeck: React.FC = () => {
   const { shot, setFocalLength, setCameraMovement, setCameraAngle, setShotType } = useShotStore();
   const currentMovement = shot.camera.movement.type;
   const currentSpeed = shot.camera.movement.speed;
+
+  const currentLensInfo = FOCAL_LENGTHS.find((l) => l.value === shot.camera.lens.focalLength);
+  const currentAngleInfo = ANGLES.find((a) => a.value === shot.camera.angle);
 
   return (
     <div className="flex flex-col gap-5 p-4 text-xs">
@@ -97,6 +100,16 @@ export const CameraDeck: React.FC = () => {
             );
           })}
         </div>
+
+        {/* Dynamic Lens Insight Callout */}
+        {currentLensInfo && (
+          <div className="rounded-lg bg-director-panel/60 p-2.5 border border-director-border/60 text-[11px] leading-relaxed text-slate-300">
+            <span className="font-mono text-[10px] text-director-gold font-bold block mb-0.5">
+              OPTICAL IMPACT ({currentLensInfo.label})
+            </span>
+            {currentLensInfo.feeling}
+          </div>
+        )}
       </div>
 
       {/* Camera Movement Type */}
@@ -195,6 +208,16 @@ export const CameraDeck: React.FC = () => {
           </select>
         </div>
       </div>
+
+      {/* Dynamic Angle Insight Callout */}
+      {currentAngleInfo && (
+        <div className="rounded-lg bg-director-panel/40 p-2 border border-director-border/40 text-[10px] text-slate-400 font-sans">
+          <span className="text-director-cyan font-bold block mb-0.5">
+            ANGLE PSYCHOLOGY ({currentAngleInfo.label}):
+          </span>
+          {currentAngleInfo.feeling}
+        </div>
+      )}
     </div>
   );
 };

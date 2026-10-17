@@ -36,6 +36,86 @@ export class ComfyClient {
     return this.clientId;
   }
 
+  getServerUrl(): string {
+    return this.baseUrl;
+  }
+
+  updateServerUrl(serverUrl: string) {
+    const isBrowser = typeof window !== 'undefined';
+    const isDevServer = isBrowser && window.location.port === '5173' && (serverUrl.includes('127.0.0.1:8188') || serverUrl.includes('localhost:8188'));
+    
+    this.baseUrl = isDevServer ? '/api/comfy' : serverUrl.replace(/\/+$/, '');
+    
+    if (isDevServer) {
+      const loc = window.location;
+      const wsProtocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+      this.wsUrl = `${wsProtocol}//${loc.host}/ws`;
+    } else {
+      this.wsUrl = serverUrl.replace(/\/+$/, '').replace(/^http/, 'ws') + '/ws';
+    }
+
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {
+        // ignore
+      }
+      this.ws = null;
+    }
+    logger.system(`ComfyUI client updated endpoint to: ${this.baseUrl}`);
+  }
+
+  async ping(targetUrl?: string): Promise<{ ok: boolean; latencyMs: number; stats?: ComfySystemStats; error?: string }> {
+    const start = performance.now();
+    const url = targetUrl ? targetUrl.replace(/\/+$/, '') : this.baseUrl;
+    try {
+      const res = await fetch(`${url}/system_stats`, { signal: AbortSignal.timeout(5000) });
+      const latencyMs = Math.round(performance.now() - start);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      const data = await res.json();
+      
+      const gpu = data.devices?.[0];
+      const stats: ComfySystemStats = {
+        os: data.system?.os || 'windows',
+        ramTotalGb: Math.round((data.system?.ram_total || 0) / (1024 * 1024 * 1024)),
+        ramFreeGb: Math.round((data.system?.ram_free || 0) / (1024 * 1024 * 1024)),
+        comfyVersion: data.system?.comfyui_version || 'unknown',
+        gpuName: gpu?.name || 'NVIDIA GPU',
+        vramTotalGb: Math.round((gpu?.vram_total || 0) / (1024 * 1024 * 1024)),
+        vramFreeGb: Math.round((gpu?.vram_free || 0) / (1024 * 1024 * 1024)),
+      };
+
+      return { ok: true, latencyMs, stats };
+    } catch (err: unknown) {
+      const latencyMs = Math.round(performance.now() - start);
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, latencyMs, error: msg };
+    }
+  }
+
+  async detectModels(targetUrl?: string): Promise<{ ltxDetected: boolean; minimaxDetected: boolean; wanDetected: boolean; customNodes: string[] }> {
+    const url = targetUrl ? targetUrl.replace(/\/+$/, '') : this.baseUrl;
+    try {
+      const res = await fetch(`${url}/object_info`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) return { ltxDetected: false, minimaxDetected: false, wanDetected: false, customNodes: [] };
+      const data = await res.json();
+      const nodeKeys = Object.keys(data);
+      const ltxDetected = nodeKeys.some(k => k.toLowerCase().includes('ltx'));
+      const minimaxDetected = nodeKeys.some(k => k.toLowerCase().includes('minimax') || k.toLowerCase().includes('hailuo'));
+      const wanDetected = nodeKeys.some(k => k.toLowerCase().includes('wan'));
+      const customNodes = nodeKeys.filter(k => 
+        k.toLowerCase().includes('ltx') || 
+        k.toLowerCase().includes('director') || 
+        k.toLowerCase().includes('video')
+      ).slice(0, 15);
+      return { ltxDetected, minimaxDetected, wanDetected, customNodes };
+    } catch {
+      return { ltxDetected: false, minimaxDetected: false, wanDetected: false, customNodes: [] };
+    }
+  }
+
   async checkHealth(): Promise<{ ok: boolean; stats?: ComfySystemStats; raw?: unknown; error?: string }> {
     try {
       const res = await fetch(`${this.baseUrl}/system_stats`, { signal: AbortSignal.timeout(4000) });
