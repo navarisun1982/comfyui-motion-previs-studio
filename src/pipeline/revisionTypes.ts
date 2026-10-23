@@ -1,5 +1,38 @@
-import { ShotSpec } from '../types/shotspec';
+import { ShotSpec, CameraMovementType } from '../types/shotspec';
 import { ApiWorkflow, EngineId, GenerationMode, QualityProfile } from './templateTypes';
+
+export interface MotionVectorGridPoint {
+  x: number; // normalized 0..1
+  y: number; // normalized 0..1
+  dx: number;
+  dy: number;
+  magnitude: number;
+}
+
+export interface MotionFidelityAnalysis {
+  overallScore: number; // 0..100
+  directionalScore: number; // 0..100
+  speedScore: number; // 0..100
+  stabilityScore: number; // 0..100
+  detectedMovement: CameraMovementType;
+  directedMovement: CameraMovementType;
+  achievedVector: {
+    avgDx: number;
+    avgDy: number;
+    divergence: number;
+    magnitude: number;
+  };
+  expectedVector: {
+    expectedDx: number;
+    expectedDy: number;
+    expectedDivergence: number;
+  };
+  gridVectors?: MotionVectorGridPoint[];
+  classification: 'excellent' | 'good' | 'fair' | 'drift';
+  summary: string;
+  recommendations: string[];
+  analyzedAt: number;
+}
 
 export interface ShotRevisionV2 {
   id: string;
@@ -31,4 +64,5 @@ export interface ShotRevisionV2 {
   isCircled?: boolean;
   rating?: number;
   takeNumber?: number;
+  motionFidelity?: MotionFidelityAnalysis;
 }

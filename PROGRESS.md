@@ -333,3 +333,41 @@ See the deferred table in [TASKS.md](TASKS.md).
    - Full test suite: 27 test files, 173/173 tests passing in 4.74s (`npm run test`).
    - Production build: `npm run build` completed in 10.51s with 0 errors and 0 warnings.
    - In-browser UI verification: verified ComfyUI Studio panel loading, multi-seed queue controls (1, 3, 5 takes), seed mode switching, and takes contact sheet.
+
+## 2026-10-23 — S8 Motion Fidelity Scoring (`stage/08-motion-fidelity`)
+
+**Goal:** Ground the core competition premise ("Direct the Shot, Not the Prompt") by comparing generated video optical flow vectors against the directed 3D camera trajectory, computing an authentic 0–100% Motion Fidelity Score, rendering a visual vector HUD, and offering actionable directorial feedback.
+
+### Accomplishments
+
+1. **Optical Flow Motion Vector Analyzer (`src/engine/motionFidelityAnalyzer.ts`):**
+   - Implemented block-matching optical flow on grayscale frame buffers with contrast/variance gating to filter textureless patches.
+   - Derived radial divergence formulas to measure forward/backward camera movement (`dolly-in` expansion vs `dolly-out` contraction).
+   - Inverted camera-to-flow kinematics: properly accounts for background flow moving opposite to physical camera trajectory (e.g. `pan-left` $\implies$ $+dx$ background flow; `tilt-up` $\implies$ $+dy$ background flow).
+   - Speed & magnitude scoring: checks pixel flow velocity against camera speed profiles (`slow-cinematic`, `moderate`, `rapid-dynamic`) and penalizes unintended camera motion on static shots.
+   - Stability scoring: evaluates velocity variance across sampled frame intervals.
+   - Generates composite weighted score (0–100%), classification (`excellent`, `good`, `fair`, `drift`), and concrete prompt/conditioning recommendations.
+
+2. **Visual Motion Vector Field HUD & Overlay (`src/components/MotionFidelityOverlay.tsx`):**
+   - High-contrast SVG vector field layer rendering directional motion arrows and anchor points over the video viewport.
+   - Directed vs. Achieved trajectory compass bar (`DIRECTED: PAN-LEFT` → `ACHIEVED: PAN-LEFT`).
+   - Interactive score badge with vector toggle button (`Vectors: ON/OFF`).
+   - Click-to-expand Directorial Guidance popover breaking down Directional, Speed, and Stability metrics with tailored recommendations.
+
+3. **Takes Grid & Multi-Seed Workflow Integration (`src/components/TakesGrid.tsx`):**
+   - Offscreen Canvas 2D frame extraction directly from video elements at sampling intervals.
+   - Added "Score Motion Fidelity" trigger button on take cards with live percentage indicator (`Scoring (XX%)...`).
+   - Embedded interactive `MotionFidelityOverlay` on take video previews.
+   - Persisted analysis state via `useHistoryStore` (`setTakeMotionFidelity`).
+
+4. **A/B Comparison Modal Integration (`src/components/TakeComparisonModal.tsx`):**
+   - Added vector overlay support on both Take A and Take B video viewports.
+   - Added master `Vectors: ON/OFF` toggle button in comparison header.
+   - Integrated Motion Fidelity Analysis Comparison section inside the Parameter Traceability drawer: side-by-side comparison of overall score, detected movement, directional match, and speed match.
+
+5. **Verification & Tests:**
+   - Unit tests (`tests/motionFidelity.test.ts`): 13 tests verifying expected vector mapping, speed scaling, motion classification, block matching on synthetic gratings, scoring, drift detection, static shot penalties, and store persistence.
+   - Full test suite: 28 test files, 186/186 tests passing in 4.85s (`npm run test`).
+   - Production build: `npm run build` completed in 10.23s with 0 errors and 0 warnings.
+   - In-browser UI verification: verified via subagent with recording `motion_fidelity_demo`.
+

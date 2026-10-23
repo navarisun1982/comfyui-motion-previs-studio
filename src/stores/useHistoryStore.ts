@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { ShotSpec } from '../types/shotspec';
 import { logger } from './useLogStore';
-import { ShotRevisionV2 } from '../pipeline/revisionTypes';
+import { ShotRevisionV2, MotionFidelityAnalysis } from '../pipeline/revisionTypes';
 import { safeGetItem, safeSetItem } from '../services/storage';
 
 export type ShotRevision = ShotRevisionV2;
@@ -49,6 +49,7 @@ interface HistoryState {
   setComparisonRevision: (id: string | null) => void;
   toggleCircledTake: (id: string) => void;
   setTakeRating: (id: string, rating: number) => void;
+  setTakeMotionFidelity: (id: string, analysis: MotionFidelityAnalysis) => void;
   getTakesForShot: (shotId: string) => ShotRevision[];
   deleteRevision: (id: string) => void;
   clearHistory: () => void;
@@ -122,7 +123,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
       version: versionNumber,
       createdAt: Date.now(),
       timestamp: Date.now(),
-      note: params.note || `Revision ${versionNumber}: ${params.engine} (${params.shot.camera.movement.type})`,
+      note: params.note || `Revision ${versionNumber}: ${params.engine} (${params.shot.camera?.movement?.type || 'shot'})`,
       engine: params.engine,
       templateId: params.templateId,
       templateHash: params.templateHash,
@@ -198,6 +199,22 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
     const updated = get().revisions.map((r) => {
       if (r.id !== id) return r;
       return { ...r, rating: clamped };
+    });
+    set({ revisions: updated });
+    persistRevisions(updated);
+  },
+
+  setTakeMotionFidelity: (id, analysis) => {
+    const updated = get().revisions.map((r) => {
+      if (r.id !== id) return r;
+      logger.action(
+        `Updated motion fidelity analysis for Take ${r.takeNumber ?? r.version}: ${analysis.overallScore}% (${analysis.classification.toUpperCase()})`,
+        {
+          revisionId: id,
+          score: analysis.overallScore,
+        }
+      );
+      return { ...r, motionFidelity: analysis };
     });
     set({ revisions: updated });
     persistRevisions(updated);
