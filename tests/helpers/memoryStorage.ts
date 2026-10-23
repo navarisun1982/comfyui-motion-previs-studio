@@ -26,5 +26,16 @@ export function createMemoryStorage(): Storage {
 export function installMemoryStorage(): Storage {
   const storage = createMemoryStorage();
   vi.stubGlobal('localStorage', storage);
+  if (typeof window !== 'undefined') {
+    try {
+      Object.defineProperty(window, 'localStorage', {
+        value: storage,
+        writable: true,
+        configurable: true,
+      });
+    } catch {
+      // ignore
+    }
+  }
   return storage;
 }

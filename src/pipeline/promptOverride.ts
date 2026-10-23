@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { hashString } from './hash';
+import { safeGetItem, safeSetItem } from '../services/storage';
 
 export interface PromptOverride {
   shotId: string;
@@ -45,22 +46,11 @@ export function computePromptHash(positive: string, negative: string): string {
 const STORAGE_KEY = 'comfy_previs_prompt_overrides_v1';
 
 function loadStoredOverrides(): Record<string, PromptOverride> {
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) return {};
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
+  return safeGetItem<Record<string, PromptOverride>>(STORAGE_KEY, {});
 }
 
 function persistOverrides(overrides: Record<string, PromptOverride>): void {
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
-  } catch {
-    // ignore
-  }
+  safeSetItem(STORAGE_KEY, overrides);
 }
 
 export const usePromptOverrideStore = create<PromptOverrideState>((set, get) => ({

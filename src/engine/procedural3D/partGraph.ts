@@ -11,6 +11,7 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 import type { ProceduralKitResult, QuadrupedMorphology } from './proceduralKits';
 import { createQuadrupedWalker, createBipedWalker } from './proceduralKits';
 import { createStandardPalette } from './craftForms';
+import { safeGetItem, safeSetItem } from '../../services/storage';
 
 export type Vec3 = [number, number, number];
 
@@ -505,9 +506,8 @@ function hydrate() {
   if (hydrated) return;
   hydrated = true;
   try {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
-    if (!raw) return;
-    const obj = JSON.parse(raw) as Record<string, PartGraph>;
+    const obj = safeGetItem<Record<string, PartGraph> | null>(STORAGE_KEY, null);
+    if (!obj) return;
     for (const [k, v] of Object.entries(obj)) registry.set(k, sanitizePartGraph(v));
   } catch {
     /* corrupted cache is ignored */
@@ -516,8 +516,7 @@ function hydrate() {
 
 function persist() {
   try {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(Object.fromEntries(registry)));
+    safeSetItem(STORAGE_KEY, Object.fromEntries(registry));
   } catch {
     /* quota exceeded: keep in-memory copy */
   }

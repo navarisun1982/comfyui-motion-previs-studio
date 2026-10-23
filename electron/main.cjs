@@ -1,6 +1,7 @@
-const { app, BrowserWindow, Menu, nativeTheme, shell, session } = require('electron');
+const { app, BrowserWindow, Menu, nativeTheme, shell, session, screen } = require('electron');
 const path = require('path');
 const http = require('http');
+const fs = require('fs');
 
 const APP_TITLE = 'ComfyUI Motion Previs Studio';
 
@@ -10,14 +11,87 @@ const APP_TITLE = 'ComfyUI Motion Previs Studio';
 // S2 (project files) migrates this data out; until then, keep this pin.
 app.setPath('userData', path.join(app.getPath('appData'), 'comfy-ai-director-studio'));
 
+const WINDOW_STATE_FILE = path.join(app.getPath('userData'), 'window-state.json');
+
+function loadWindowState() {
+  const defaults = {
+    width: 1480,
+    height: 940,
+    isMaximized: false,
+  };
+
+  try {
+    if (fs.existsSync(WINDOW_STATE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(WINDOW_STATE_FILE, 'utf-8'));
+      if (typeof data.width === 'number' && typeof data.height === 'number') {
+        // Validate coordinates against current display topology to prevent off-screen spawn
+        let isValidPosition = false;
+        if (typeof data.x === 'number' && typeof data.y === 'number') {
+          const displays = screen.getAllDisplays();
+          isValidPosition = displays.some((d) => {
+            const b = d.bounds;
+            return (
+              data.x >= b.x - 20 &&
+              data.x < b.x + b.width - 100 &&
+              data.y >= b.y - 20 &&
+              data.y < b.y + b.height - 100
+            );
+          });
+        }
+
+        return {
+          width: Math.max(1100, data.width),
+          height: Math.max(720, data.height),
+          x: isValidPosition ? data.x : undefined,
+          y: isValidPosition ? data.y : undefined,
+          isMaximized: Boolean(data.isMaximized),
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[electron] Could not read window-state.json, using defaults:', err);
+  }
+  return defaults;
+}
+
+let saveStateTimer = null;
+function saveWindowState(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const isMaximized = win.isMaximized();
+    const bounds = isMaximized ? win.getNormalBounds() : win.getBounds();
+    const state = {
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      isMaximized,
+    };
+    fs.writeFileSync(WINDOW_STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('[electron] Failed to save window state:', err);
+  }
+}
+
+function scheduleSaveWindowState(win) {
+  if (saveStateTimer) clearTimeout(saveStateTimer);
+  saveStateTimer = setTimeout(() => {
+    saveWindowState(win);
+  }, 400);
+}
+
 let mainWindow = null;
 
 nativeTheme.themeSource = 'dark';
 
 function createWindow() {
+  const windowState = loadWindowState();
+
   mainWindow = new BrowserWindow({
-    width: 1480,
-    height: 940,
+    width: windowState.width,
+    height: windowState.height,
+    x: windowState.x,
+    y: windowState.y,
     minWidth: 1100,
     minHeight: 720,
     title: APP_TITLE,
@@ -30,6 +104,14 @@ function createWindow() {
       webSecurity: true,
     },
   });
+
+  if (windowState.isMaximized) {
+    mainWindow.maximize();
+  }
+
+  mainWindow.on('resize', () => scheduleSaveWindowState(mainWindow));
+  mainWindow.on('move', () => scheduleSaveWindowState(mainWindow));
+  mainWindow.on('close', () => saveWindowState(mainWindow));
 
   Menu.setApplicationMenu(null);
 
@@ -72,7 +154,6 @@ function createWindow() {
     });
   };
 
-  const fs = require('fs');
   const distDir = path.join(__dirname, '../dist');
   let reloadTimeout = null;
 
@@ -116,15 +197,22 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({
-      responseHeaders: {
-        ...details.responseHeaders,
-        'Access-Control-Allow-Origin': ['*'],
-        'Access-Control-Allow-Headers': ['*'],
-      },
-    });
-  });
+  // Tighten CORS header injection strictly to local ComfyUI endpoints
+  session.defaultSession.webRequest.onHeadersReceived(
+    {
+      urls: ['http://127.0.0.1:8188/*', 'http://localhost:8188/*'],
+    },
+    (details, callback) => {
+      callback({
+        responseHeaders: {
+          ...details.responseHeaders,
+          'Access-Control-Allow-Origin': ['*'],
+          'Access-Control-Allow-Headers': ['*'],
+          'Access-Control-Allow-Methods': ['GET, POST, OPTIONS, PUT, DELETE'],
+        },
+      });
+    }
+  );
 
   createWindow();
 

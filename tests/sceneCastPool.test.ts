@@ -1,5 +1,3 @@
-// @vitest-environment jsdom
-// (useShotStore gates persistence on `typeof window`; S2 replaces that layer.)
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useShotStore } from '../src/stores/useShotStore';
 import { installMemoryStorage } from './helpers/memoryStorage';

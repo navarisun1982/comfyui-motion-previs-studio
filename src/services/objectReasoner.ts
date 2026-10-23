@@ -16,6 +16,7 @@ import {
   sanitizePartGraph,
 } from '../engine/procedural3D/partGraph';
 import { EnvironmentSpec, CINEMATIC_ENVIRONMENT_PRESETS } from '../types/environment';
+import { getRawStorage } from './storage';
 
 /* ------------------------------------------------------------------------------------------ */
 /* Provider settings                                                                           */
@@ -110,13 +111,7 @@ export function defaultReasonerSettings(): ReasonerSettings {
   };
 }
 
-const storage = (): Storage | null => {
-  try {
-    return typeof localStorage !== 'undefined' ? localStorage : null;
-  } catch {
-    return null;
-  }
-};
+const storage = (): Storage | null => getRawStorage();
 
 export function getReasonerSettings(): ReasonerSettings {
   const defaults = defaultReasonerSettings();

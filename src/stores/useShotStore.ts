@@ -4,6 +4,7 @@ import { getAdapter } from '../adapters';
 import { ValidationReport, CompiledPromptBundle } from '../adapters/types';
 import { logger } from './useLogStore';
 import { recordTrajectoryPositionAtTime } from '../engine/trajectoryMath';
+import { STORAGE_KEYS, safeGetItem, safeSetItem, sanitizeShotForStorage } from '../services/storage';
 
 interface ShotState {
   shot: ShotSpec;
@@ -84,26 +85,26 @@ interface ShotState {
   resetToDefault: () => void;
 }
 
-const loadCachedShots = (): Record<string, ShotSpec> => {
-  if (typeof window === 'undefined') return {};
-  try {
-    const raw = localStorage.getItem('comfy_ai_director_shots_cache_v1');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (typeof parsed === 'object' && parsed !== null) {
-        for (const key of Object.keys(parsed)) {
-          if (parsed[key] && !parsed[key].environment) {
-            parsed[key].environment = CINEMATIC_ENVIRONMENT_PRESETS[0].spec;
-          }
-        }
-        return parsed;
-      }
-    }
-  } catch {}
-  return {};
+const persistShotsMap = (shots: Record<string, ShotSpec>) => {
+  const sanitized: Record<string, ShotSpec> = {};
+  for (const [id, s] of Object.entries(shots)) {
+    sanitized[id] = sanitizeShotForStorage(s);
+  }
+  safeSetItem(STORAGE_KEYS.SHOTS_CACHE, sanitized);
 };
 
-const CAST_POOL_STORAGE_KEY = 'comfy_ai_director_cast_pool_v1';
+const loadCachedShots = (): Record<string, ShotSpec> => {
+  const parsed = safeGetItem<Record<string, ShotSpec>>(STORAGE_KEYS.SHOTS_CACHE, {});
+  if (typeof parsed === 'object' && parsed !== null) {
+    for (const key of Object.keys(parsed)) {
+      if (parsed[key] && !parsed[key].environment) {
+        parsed[key].environment = CINEMATIC_ENVIRONMENT_PRESETS[0].spec;
+      }
+    }
+    return parsed;
+  }
+  return {};
+};
 
 const DEFAULT_CAST_POOL: Actor[] = [
   {
@@ -145,22 +146,13 @@ const DEFAULT_CAST_POOL: Actor[] = [
 ];
 
 const loadCachedCastPool = (): Actor[] => {
-  if (typeof window === 'undefined') return DEFAULT_CAST_POOL;
-  try {
-    const raw = localStorage.getItem(CAST_POOL_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch {}
+  const parsed = safeGetItem<Actor[]>(STORAGE_KEYS.CAST_POOL, DEFAULT_CAST_POOL);
+  if (Array.isArray(parsed) && parsed.length > 0) return parsed;
   return DEFAULT_CAST_POOL;
 };
 
 const persistCastPool = (pool: Actor[]) => {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem(CAST_POOL_STORAGE_KEY, JSON.stringify(pool));
-  } catch {}
+  safeSetItem(STORAGE_KEYS.CAST_POOL, pool);
 };
 
 const initialCachedShots = loadCachedShots();
@@ -182,9 +174,7 @@ export const useShotStore = create<ShotState>((set, get) => {
   const commitShot = (updated: ShotSpec, extraState?: Partial<ShotState>) => {
     const currentShots = get().shotsById;
     const nextShots = { ...currentShots, [updated.id]: updated };
-    try {
-      localStorage.setItem('comfy_ai_director_shots_cache_v1', JSON.stringify(nextShots));
-    } catch {}
+    persistShotsMap(nextShots);
     set({
       shot: updated,
       shotsById: nextShots,
@@ -266,9 +256,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         currentMap[shotId] = targetShot;
       }
 
-      try {
-        localStorage.setItem('comfy_ai_director_shots_cache_v1', JSON.stringify(currentMap));
-      } catch {}
+      persistShotsMap(currentMap);
 
       logger.action(`Switched active shot to "${targetShot.name}" (${targetShot.id})`);
       set({
@@ -705,9 +693,7 @@ export const useShotStore = create<ShotState>((set, get) => {
       logger.action(`Loaded shot "${shot.name}" (${shot.id}) into active editor`);
       const currentShots = get().shotsById;
       const nextShots = { ...currentShots, [shot.id]: shot };
-      try {
-        localStorage.setItem('comfy_ai_director_shots_cache_v1', JSON.stringify(nextShots));
-      } catch {}
+      persistShotsMap(nextShots);
       set({
         shot,
         shotsById: nextShots,

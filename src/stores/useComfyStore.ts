@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { safeGetString, safeSetString } from '../services/storage';
 
 export interface ComfySystemStats {
   os: string;
@@ -70,9 +71,7 @@ interface ComfyState {
 
 export type SettingsTab = 'comfy' | 'llm';
 
-const initialServerUrl = typeof window !== 'undefined' && window.localStorage?.getItem(SERVER_URL_KEY)
-  ? window.localStorage.getItem(SERVER_URL_KEY)!
-  : 'http://127.0.0.1:8188';
+const initialServerUrl = safeGetString(SERVER_URL_KEY, 'http://127.0.0.1:8188');
 
 export const useComfyStore = create<ComfyState>((set, get) => ({
   serverUrl: initialServerUrl,
@@ -91,13 +90,7 @@ export const useComfyStore = create<ComfyState>((set, get) => ({
   recentOutputs: [],
 
   setServerUrl: (serverUrl) => {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(SERVER_URL_KEY, serverUrl);
-      }
-    } catch {
-      // ignore
-    }
+    safeSetString(SERVER_URL_KEY, serverUrl);
     set({ serverUrl });
   },
 

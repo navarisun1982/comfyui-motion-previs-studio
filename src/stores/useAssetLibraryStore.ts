@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { SubjectKind } from '../types/shotspec';
 import { reasonObject, ObjectReasonerError } from '../services/objectReasoner';
 import { PartGraph, registerPartGraph, removePartGraph } from '../engine/procedural3D/partGraph';
+import { safeGetItem, safeSetItem } from '../services/storage';
 
 export type AssetCategory =
   | 'all'
@@ -2615,31 +2616,12 @@ export const CURATED_3D_ASSETS: Asset3DItem[] = [
 
 const STORAGE_KEY = 'comfy_director_custom_3d_assets_v1';
 
-// Safe environment helpers for Node / SSR / Vitest tests
 const getSafeCustomAssets = (): Asset3DItem[] => {
-  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
-    return [];
-  }
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      return JSON.parse(raw);
-    }
-  } catch (err) {
-    console.warn('Could not parse saved 3D assets from localStorage:', err);
-  }
-  return [];
+  return safeGetItem<Asset3DItem[]>(STORAGE_KEY, []);
 };
 
 const persistCustomAssets = (assets: Asset3DItem[]) => {
-  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
-    return;
-  }
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(assets));
-  } catch (err) {
-    console.warn('Failed to persist custom 3D assets:', err);
-  }
+  safeSetItem(STORAGE_KEY, assets);
 };
 
 export interface AssetLibraryState {

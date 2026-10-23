@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { ShotSpec } from '../types/shotspec';
 import { logger } from './useLogStore';
 import { ShotRevisionV2 } from '../pipeline/revisionTypes';
+import { safeGetItem, safeSetItem } from '../services/storage';
 
 export type ShotRevision = ShotRevisionV2;
 
@@ -53,47 +54,42 @@ const STORAGE_KEY_V1 = 'ai_director_shot_revisions_v1';
 
 function loadPersistedRevisions(): ShotRevision[] {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return [];
-
     // Check v2 first
-    const rawV2 = window.localStorage.getItem(STORAGE_KEY_V2);
-    if (rawV2) {
-      return JSON.parse(rawV2);
+    const rawV2 = safeGetItem<ShotRevision[] | null>(STORAGE_KEY_V2, null);
+    if (rawV2 && Array.isArray(rawV2)) {
+      return rawV2;
     }
 
     // Migrate v1 if present
-    const rawV1 = window.localStorage.getItem(STORAGE_KEY_V1);
-    if (rawV1) {
-      const v1List = JSON.parse(rawV1);
-      if (Array.isArray(v1List)) {
-        const migrated: ShotRevision[] = v1List.map((r: any) => ({
-          id: r.id || `rev-${Date.now()}`,
-          shotId: r.shotSpec?.id || 'unknown',
-          version: r.version || 1,
-          createdAt: r.timestamp || Date.now(),
-          timestamp: r.timestamp || Date.now(),
-          note: r.note || 'Legacy revision',
-          engine: (r.shotSpec?.targetModel as any) === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5',
-          templateId: 'legacy_template',
-          templateHash: '',
-          bindingSchema: 1,
-          mode: 't2v',
-          profile: 'final',
-          seed: r.shotSpec?.seed ?? 42,
-          prompt: r.compiledPrompt || '',
-          compiledPrompt: r.compiledPrompt || '',
-          negative: r.shotSpec?.negativePrompt || '',
-          promptSource: 'compiled',
-          submittedWorkflow: {},
-          status: 'completed',
-          outputVideoUrl: r.outputVideoUrl,
-          outputFilename: undefined,
-          shotSpec: r.shotSpec || {},
-          isLegacy: true,
-        }));
-        persistRevisions(migrated);
-        return migrated;
-      }
+    const v1List = safeGetItem<any[] | null>(STORAGE_KEY_V1, null);
+    if (v1List && Array.isArray(v1List)) {
+      const migrated: ShotRevision[] = v1List.map((r: any) => ({
+        id: r.id || `rev-${Date.now()}`,
+        shotId: r.shotSpec?.id || 'unknown',
+        version: r.version || 1,
+        createdAt: r.timestamp || Date.now(),
+        timestamp: r.timestamp || Date.now(),
+        note: r.note || 'Legacy revision',
+        engine: (r.shotSpec?.targetModel as any) === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5',
+        templateId: 'legacy_template',
+        templateHash: '',
+        bindingSchema: 1,
+        mode: 't2v',
+        profile: 'final',
+        seed: r.shotSpec?.seed ?? 42,
+        prompt: r.compiledPrompt || '',
+        compiledPrompt: r.compiledPrompt || '',
+        negative: r.shotSpec?.negativePrompt || '',
+        promptSource: 'compiled',
+        submittedWorkflow: {},
+        status: 'completed',
+        outputVideoUrl: r.outputVideoUrl,
+        outputFilename: undefined,
+        shotSpec: r.shotSpec || {},
+        isLegacy: true,
+      }));
+      persistRevisions(migrated);
+      return migrated;
     }
     return [];
   } catch {
@@ -102,12 +98,7 @@ function loadPersistedRevisions(): ShotRevision[] {
 }
 
 function persistRevisions(revs: ShotRevision[]): void {
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    window.localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(revs));
-  } catch {
-    // Ignore quota errors
-  }
+  safeSetItem(STORAGE_KEY_V2, revs);
 }
 
 export const useHistoryStore = create<HistoryState>((set, get) => ({

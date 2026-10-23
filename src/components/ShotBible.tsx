@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useShotStore } from '../stores/useShotStore';
 import { ShotCreationMode, Actor, ShotSpec, createDefaultShotSpec, FocalLength } from '../types/shotspec';
+import { safeGetItem, safeSetItem, safeRemoveItem, STORAGE_KEYS } from '../services/storage';
 import {
   ChevronDown,
   ChevronRight,
@@ -567,21 +568,18 @@ const DEFAULT_SCENES: SceneItem[] = [
 
 const loadSavedScenes = (): SceneItem[] => {
   try {
-    const raw = localStorage.getItem('comfy_ai_director_scenes');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((scene: SceneItem) => ({
-          ...scene,
-          shots: (scene.shots || []).map((sh) => {
-            const num = parseInt(sh.duration, 10);
-            return {
-              ...sh,
-              duration: (!num || num > 15 || num < 1) ? '4s' : `${num}s`,
-            };
-          }),
-        }));
-      }
+    const parsed = safeGetItem<SceneItem[] | null>(STORAGE_KEYS.SCENES, null);
+    if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.map((scene: SceneItem) => ({
+        ...scene,
+        shots: (scene.shots || []).map((sh) => {
+          const num = parseInt(sh.duration, 10);
+          return {
+            ...sh,
+            duration: (!num || num > 15 || num < 1) ? '4s' : `${num}s`,
+          };
+        }),
+      }));
     }
   } catch {}
   return DEFAULT_SCENES;
@@ -615,9 +613,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
 
   // Persist scenes to localStorage
   useEffect(() => {
-    try {
-      localStorage.setItem('comfy_ai_director_scenes', JSON.stringify(scenes));
-    } catch {}
+    safeSetItem(STORAGE_KEYS.SCENES, scenes);
   }, [scenes]);
 
   const toggleScene = (sceneId: string) => {
@@ -778,9 +774,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
   const handleResetDemoScenes = () => {
     if (window.confirm('Reset all scenes and shots back to default demo project?')) {
       setScenes(DEFAULT_SCENES);
-      try {
-        localStorage.removeItem('comfy_ai_director_scenes');
-      } catch {}
+      safeRemoveItem(STORAGE_KEYS.SCENES);
       handleSelectShot(DEFAULT_SCENES[0].shots[0]);
     }
   };
