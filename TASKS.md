@@ -9,7 +9,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 |---|---|---|---|
 | S0 Foundation | `stage/00-foundation` | ✅ merged to master (`37cf23a`) | Repo clean, tests fast + green, build green, app renamed, docs truthful |
 | S1 Truthful pipeline | `stage/01-truthful-pipeline` | 🟡 ready for templates & live test | Pipeline built, tested & verified; awaiting user API templates & live generation |
-| S2 Desktop foundation | `stage/02-desktop-hygiene` | 🟡 ready for review | Offline self-hosted fonts, strict CSP, blob sanitization, safe storage service, electron window persistence & scoped ComfyUI CORS |
+| S2 Desktop foundation | `stage/02-desktop-hygiene` | ✅ merged to master (`ccee65d`) | Offline self-hosted fonts, strict CSP, blob sanitization, safe storage service, electron window persistence & scoped ComfyUI CORS |
 | S3 Editing safety | `stage/03-editing-safety` | ⬜ | One gesture = one undo step; first run is clear |
 | S4 Geometric conditioning | `stage/04-geometric-conditioning` | ⬜ | Directed dolly-in reproduced through IC-LoRA control template on the 3090 |
 | S5 Performance | `stage/05-performance` | ⬜ | Smooth drag; main chunk well under 1.67 MB |
@@ -65,7 +65,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 - [x] Hardened Electron main process (`electron/main.cjs`): scoped CORS headers to ComfyUI port 8188 and window state persistence (`window-state.json`) with multi-monitor topology bounds validation
 - [x] Unit test suite (`tests/storage.test.ts`) with 10 tests verifying blob sanitization, safe JSON parsing, and cache integration
 - [x] Verification: 22 test files, 138/138 tests passing in 4.5s with zero warnings or errors; production build green in 9.6s
-- [ ] Owner approval → merge `stage/02-desktop-hygiene` to `master`
+- [x] Owner approval → merge `stage/02-desktop-hygiene` to `master` (`ccee65d`)
 
 ## Deferred findings (tracked for later stages)
 
