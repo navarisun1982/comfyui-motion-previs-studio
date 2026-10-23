@@ -33,7 +33,9 @@ import {
   Undo2,
   Redo2,
   HelpCircle,
+  Film,
 } from 'lucide-react';
+import { useSequenceStore } from './stores/useSequenceStore';
 import { DebuggerTogglePill } from './components/DebuggerTogglePill';
 
 const ShotBible = lazy(() =>
@@ -63,8 +65,11 @@ const AssetLibraryModal = lazy(() =>
 const WelcomeModal = lazy(() =>
   import('./components/WelcomeModal').then((m) => ({ default: m.WelcomeModal }))
 );
+const SequenceTimelineDeck = lazy(() =>
+  import('./components/SequenceTimelineDeck').then((m) => ({ default: m.SequenceTimelineDeck }))
+);
 
-export type WorkspaceMode = 'previs' | 'vfx' | 'diffusion';
+export type WorkspaceMode = 'previs' | 'vfx' | 'diffusion' | 'sequence';
 export type StepTab = WorkspaceMode | 'shot' | 'analyze' | 'plan' | 'export';
 
 export default function App() {
@@ -270,6 +275,21 @@ export default function App() {
             <Zap className="h-3.5 w-3.5 fill-current" />
             <span>ComfyUI Studio</span>
           </button>
+
+          <button
+            onClick={() => {
+              setWorkspaceMode('sequence');
+            }}
+            className={`flex items-center gap-1.5 rounded-md px-3.5 py-1 font-semibold transition-all ${
+              workspaceMode === 'sequence'
+                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold shadow-md shadow-purple-600/20'
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
+            }`}
+            title="Multi-Shot Timeline Assembly, Continuity Checking & NLE Export"
+          >
+            <Film className="h-3.5 w-3.5" />
+            <span>Sequence Assembly</span>
+          </button>
         </div>
 
         {/* Right: Actions, Modals & Unified Comfy Status */}
@@ -452,14 +472,37 @@ export default function App() {
                     else if (id === 'shot-01d') setActiveShotTitle('Shot 01D Low Angle');
                     else if (id === 'shot-01e') setActiveShotTitle('Shot 01E Over Shoulder');
                   }}
+                  onAssembleScene={(scene) => {
+                    setActiveSceneName(scene.name);
+                    useSequenceStore.getState().initializeFromScene(
+                      scene.id,
+                      scene.name,
+                      scene.shots,
+                      useShotStore.getState().shotsById,
+                      useHistoryStore.getState().revisions
+                    );
+                    setWorkspaceMode('sequence');
+                  }}
                 />
               </Suspense>
             </div>
           </aside>
 
-          {/* Center Column: Stage Previs OR VFX Multi-Pass Analyzer depending on workspaceMode */}
+          {/* Center Column: Stage Previs OR VFX Multi-Pass Analyzer OR Sequence Assembly depending on workspaceMode */}
           <main className="flex flex-1 min-w-0 min-h-0 flex-col overflow-hidden bg-[#090b10]">
-            {workspaceMode === 'vfx' ? (
+            {workspaceMode === 'sequence' ? (
+              <div className="flex-1 overflow-hidden">
+                <Suspense
+                  fallback={
+                    <div className="flex h-full w-full items-center justify-center text-slate-500 font-mono text-xs">
+                      Loading Sequence Assembly...
+                    </div>
+                  }
+                >
+                  <SequenceTimelineDeck />
+                </Suspense>
+              </div>
+            ) : workspaceMode === 'vfx' ? (
               <div className="flex-1 overflow-y-auto">
                 <Suspense
                   fallback={

@@ -406,4 +406,44 @@ See the deferred table in [TASKS.md](TASKS.md).
    - Production build: `npm run build` completed in 10.41s with 0 errors and 0 warnings.
    - In-browser UI verification: verified via subagent with recording `stage9_steering_verify_1792787404162.webp`.
 
+## 2026-10-23 — S10 Multi-Shot Timeline & Sequence Assembly (`stage/10-sequence`)
+
+**Goal:** Transform the single-shot studio into a complete multi-shot directorial workstation by providing an NLE-style sequence timeline, synchronized sequential playback, automated cinematic continuity and pacing verification, and professional editorial interchange (OpenTimelineIO, CMX 3600 EDL, Final Cut Pro XML).
+
+### Accomplishments
+
+1. **Canonical Sequence Data Models & SMPTE Math (`src/types/sequenceTypes.ts`, `src/engine/timecodeMath.ts`):**
+   - Built robust timecode engine with `secondsToTimecode`, `timecodeToSeconds`, `secondsToFrames`, and `framesToTimecode` conforming to 24 FPS SMPTE Non-Drop Frame standard.
+   - Derived effective shot duration with non-destructive in/out trimming (`getEffectiveShotDuration`, `calculateShotTimeRanges`, `calculateSequenceDuration`).
+   - Real-time time lookup (`findShotAtTime`) mapping global sequence playhead positions to local shot playback timestamps.
+
+2. **Automated Cinematic Continuity & Pacing Verification Engine (`src/engine/sequenceContinuityEngine.ts`):**
+   - Evaluates inter-shot cut transitions against classical cinematographic rules:
+     - **180-Degree Rule / Screen Direction**: Detects axis flips where actors abruptly invert screen position across adjacent cuts without neutral coverage.
+     - **30-Degree Rule / Jump Cut Detection**: Flags discontinuous cuts sharing identical focal lengths, shot framing, and camera angles without spatial repositioning.
+     - **Kinetic Vector Clash**: Detects jarring motion whiplash (e.g., rapid `pan-left` cutting immediately into an opposing `pan-right`).
+     - **Lighting & Atmosphere Consistency**: Detects extreme color palette or lighting style mismatches within the same scene.
+     - **Pacing & Cadence Diagnostics**: Flags flash cuts (< 1.0s), dragging takes (> 10.0s), and monotonous duration rhythms.
+   - Computes weighted composite score (0–100%) and directorial rating (`exemplary`, `sound`, `needs_coverage`, `disjointed`) with per-cut actionable guidance.
+
+3. **Professional NLE Editorial Exporters (`src/engine/sequenceExporters.ts`):**
+   - **OpenTimelineIO (`.otio`)**: Industry-standard Schema 1.0 JSON format for VFX pipelines and modern NLE conforming with rational time ranges and directorial metadata.
+   - **CMX 3600 EDL (`.edl`)**: SMPTE non-drop frame edit decision list with clean clip naming, take notes, and camera motion tracking.
+   - **Final Cut Pro XML (`.xml` / `.fcpxml`)**: Full Apple FCP 7 / DaVinci Resolve compliant XML timeline format.
+
+4. **Multi-Shot Sequence Store & Interactive UI (`src/stores/useSequenceStore.ts`, `src/components/`):**
+   - `useSequenceStore`: Centralized state management for sequence assembly, playhead scrubbing, sequential playback, shot reordering, hero take bindings, and safe local persistence.
+   - Top-level `Sequence Assembly` workspace mode added to `src/App.tsx`.
+   - `SequenceTimelineDeck.tsx`: Full viewport sequence playback with slate/timecode HUD, transport bar (Play, Pause, Loop, Jump, Speed toggle), zoomable time ruler, playhead marker, shot blocks with drag/move reordering, hero take selector, and transition pills (`CUT`, `DISSOLVE`, `FADE`).
+   - `SequenceContinuityModal.tsx`: Visual diagnostic modal detailing overall continuity score, clean cuts breakdown, and cut-by-cut directorial recommendations.
+   - `SequenceExportModal.tsx`: Multi-tab export modal with formatted code preview, clipboard copy, and direct `.otio` / `.edl` / `.xml` file downloads.
+   - `ShotBible.tsx`: One-click "Assemble in Sequence Timeline" button directly on scene headers.
+
+5. **Verification & Tests:**
+   - Unit tests (`tests/sequenceAssembly.test.ts`): 15 tests verifying SMPTE conversions, duration summing, time range lookup, 180-degree axis break detection, jump cut detection, kinetic motion clashes, exemplary sequence scoring, OTIO JSON validity, CMX 3600 EDL syntax, FCP XML formatting, shot reordering, hero take assignment, and clip trimming.
+   - Full test suite: 30 test files, 209/209 tests passing in 5.00s (`npm run test`).
+   - Production build: `npm run build` completed in 10.36s with 0 errors and 0 warnings (SequenceTimelineDeck emitted at 34.14 kB).
+   - In-browser UI verification: verified via subagent with recording `stage10_sequence_assembly_1792788543682.webp`.
+
+
 

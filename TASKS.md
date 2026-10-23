@@ -17,7 +17,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S7 Takes + queue | `stage/07-takes-queue` | ✅ merged to master (`b3d3faf`) | Multi-seed take generator, queue runner, contact sheet, circling hero takes, and A/B comparison |
 | S8 Motion fidelity | `stage/08-motion-fidelity` | ✅ merged to master (`f8e3781`) | Optical flow vector analyzer, directional & speed fidelity scoring, visual vector overlay HUD, A/B motion diffing |
 | S9 Closed-loop steering | `stage/09-closed-loop-steering` | ✅ merged to master (`fc9865c`) | Optical-flow-driven compensatory patches, prompt auto-correction, IC-LoRA modulation, steering modal, lineage tracking |
-| S10 Sequence / Assembly | `stage/10-sequence` | ⬜ | (grill first) |
+| S10 Sequence / Assembly | `stage/10-sequence` | 🟡 ready for review & merge | Multi-shot timeline, sequential playback, continuity & 180° rule checking, OTIO/EDL/FCPXML NLE exporters |
 
 ## S4 checklist (Geometric Conditioning — "Direct the Shot, Not the Prompt")
 
@@ -204,6 +204,39 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
   - Production build: `npm run build` completed with zero TypeScript errors and bundle created cleanly
   - In-browser UI verified via subagent with recording `stage9_steering_verify_1792787404162.webp`
 - [x] Owner approval → merge `stage/09-closed-loop-steering` to `master` (`fc9865c`)
+
+## S10 checklist (Multi-Shot Timeline & Sequence Assembly)
+
+- [x] Canonical Sequence Models & SMPTE Math:
+  - Defined `CinematicSequence`, `SequenceShotItem`, `SequenceTransition`, and `SequenceContinuityReport` (`src/types/sequenceTypes.ts`)
+  - SMPTE Non-Drop Frame timecode conversion (`HH:MM:SS:FF`), fractional second parsing, and timeline range mapping (`src/engine/timecodeMath.ts`)
+- [x] Automated Cinematic Continuity & Pacing Engine (`src/engine/sequenceContinuityEngine.ts`):
+  - 180-degree rule axis violation detection between adjacent shots
+  - Discontinuous jump cut detection (identical focal length, shot size, and camera angle)
+  - Kinetic motion clash analysis (opposing pan/tilt/dolly velocity whiplash)
+  - Lighting palette & mood discrepancy detection
+  - Aspect ratio mismatch detection
+  - Pacing cadence & duration analysis (monotonous pacing, flash cuts < 1s, dragging takes > 10s)
+  - Composite continuity score (0–100%) and directorial ratings (`exemplary`, `sound`, `needs_coverage`, `disjointed`)
+- [x] Professional NLE Timeline Exporters (`src/engine/sequenceExporters.ts`):
+  - OpenTimelineIO (`.otio`) Schema 1.0 JSON export with full clip tracks, rational time ranges, media targets, and directorial metadata
+  - CMX 3600 EDL (`.edl`) SMPTE non-drop frame edit decision list with clip names and hero take notes
+  - Apple Final Cut Pro 7 / DaVinci Resolve XML (`.xml`) timeline export
+- [x] Sequence State Management (`src/stores/useSequenceStore.ts`):
+  - Multi-shot timeline state, timecode scrubbing, sequential playback, shot reordering, clip trimming, hero take bindings, and safe local persistence
+- [x] Interactive UI Components:
+  - Sequence Assembly workspace mode in top navigation bar (`src/App.tsx`)
+  - Master sequence playback viewport with HUD (timecode, slate, camera move, hero take) and sequential player transport (`src/components/SequenceTimelineDeck.tsx`)
+  - NLE multi-track timeline deck with zoomable time ruler, playhead marker, shot blocks, reorder buttons, hero take picker, and cut transition pills (`src/components/SequenceTimelineDeck.tsx`)
+  - Directorial Continuity & Pacing Report Modal (`src/components/SequenceContinuityModal.tsx`)
+  - Professional NLE Timeline Export Modal (`src/components/SequenceExportModal.tsx`)
+  - Shot Bible integration: added one-click "Assemble Scene in Sequence Timeline" button to scene headers (`src/components/ShotBible.tsx`)
+- [x] Unit Test Suite (`tests/sequenceAssembly.test.ts`):
+  - 15 comprehensive tests covering SMPTE conversions, duration summing, time range lookup, 180-degree axis break detection, jump cut detection, kinetic motion clashes, exemplary sequence scoring, OTIO JSON validity, CMX 3600 EDL syntax, FCP XML formatting, shot reordering, hero take assignment, and clip trimming
+- [x] Full Verification:
+  - 30 test files, 209/209 tests passing in 5.00s (`npm run test`)
+  - Production build: `npm run build` succeeded with 0 errors in 10.36s (SequenceTimelineDeck chunk emitted at 34.14 kB)
+  - Browser verification verified via subagent with recording `stage10_sequence_assembly_1792788543682.webp`
 
 ## Deferred findings (tracked for later stages)
 

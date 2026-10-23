@@ -18,6 +18,7 @@ import {
   Trash2,
   Copy,
   RotateCcw,
+  Film,
 } from 'lucide-react';
 
 export interface ShotBibleItem {
@@ -586,14 +587,16 @@ const loadSavedScenes = (): SceneItem[] => {
   return DEFAULT_SCENES;
 };
 
-interface ShotBibleProps {
+export interface ShotBibleProps {
   activeShotId?: string;
   onSelectShot?: (shotId: string, shotTitle?: string, sceneName?: string) => void;
+  onAssembleScene?: (scene: SceneItem) => void;
 }
 
 export const ShotBible: React.FC<ShotBibleProps> = ({
   activeShotId = 'shot-01a',
   onSelectShot,
+  onAssembleScene,
 }) => {
   const { switchShot, shot } = useShotStore();
   const [scenes, setScenes] = useState<SceneItem[]>(loadSavedScenes);
@@ -923,6 +926,16 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
 
                 {/* Scene Action Buttons */}
                 <div className="flex items-center gap-0.5 opacity-0 group-hover/scene:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAssembleScene?.(scene);
+                    }}
+                    className="p-1 rounded hover:bg-purple-600/30 text-slate-400 hover:text-purple-300 transition-colors"
+                    title={`Assemble ${scene.name} in Sequence Timeline`}
+                  >
+                    <Film className="h-3 w-3" />
+                  </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
