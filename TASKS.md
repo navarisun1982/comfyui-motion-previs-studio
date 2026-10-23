@@ -10,7 +10,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S0 Foundation | `stage/00-foundation` | ✅ merged to master (`37cf23a`) | Repo clean, tests fast + green, build green, app renamed, docs truthful |
 | S1 Truthful pipeline | `stage/01-truthful-pipeline` | 🟡 ready for templates & live test | Pipeline built, tested & verified; awaiting user API templates & live generation |
 | S2 Desktop foundation | `stage/02-desktop-hygiene` | ✅ merged to master (`ccee65d`) | Offline self-hosted fonts, strict CSP, blob sanitization, safe storage service, electron window persistence & scoped ComfyUI CORS |
-| S3 Editing safety | `stage/03-editing-safety` | ⬜ | One gesture = one undo step; first run is clear |
+| S3 Editing safety | `stage/03-editing-safety` | 🟡 ready for owner approval | One gesture = one undo step; first run is clear |
 | S4 Geometric conditioning | `stage/04-geometric-conditioning` | ⬜ | Directed dolly-in reproduced through IC-LoRA control template on the 3090 |
 | S5 Performance | `stage/05-performance` | ⬜ | Smooth drag; main chunk well under 1.67 MB |
 | S6 UX overhaul | `stage/06-ux-overhaul` | ⬜ | Clean at 1280×720 / 1440×900 / 1920×1080 / 2560×1440 |
@@ -66,6 +66,20 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 - [x] Unit test suite (`tests/storage.test.ts`) with 10 tests verifying blob sanitization, safe JSON parsing, and cache integration
 - [x] Verification: 22 test files, 138/138 tests passing in 4.5s with zero warnings or errors; production build green in 9.6s
 - [x] Owner approval → merge `stage/02-desktop-hygiene` to `master` (`ccee65d`)
+
+## S3 checklist (Editing Safety & Undo/Redo Engine)
+
+- [x] Per-shot undo/redo engine with structurally shared snapshots (`src/stores/useShotStore.ts`)
+- [x] "One gesture = one undo step" collapsing: continuous 3D Soundstage floor pointer drag collapses into single undo snapshot on release (`beginGesture` / `endGesture` in `src/components/StagePrevis3D.tsx`)
+- [x] Per-shot history stack isolation: switching shots maintains independent past/future stacks without cross-talk
+- [x] Redo branch invalidation: making a new edit after undo cleanly purges future branch
+- [x] Global keyboard shortcuts (`Ctrl+Z`, `Ctrl+Shift+Z`, `Ctrl+Y`) with editable element guard in `src/App.tsx` (never eats keystrokes in `<input>`/`<textarea>`)
+- [x] Fixed backtick/tilde shortcut handler in `src/App.tsx` so typing in inputs never accidentally toggles the debugger
+- [x] Studio header Undo and Redo icon buttons (`Undo2`, `Redo2`) with dynamic disabled states and tooltips
+- [x] First-run Welcome / Getting Started modal (`src/components/WelcomeModal.tsx`) with 3D/VFX/ComfyUI quickstart, persistent dismissal, and "Help" re-trigger button
+- [x] Computed reactive Project Info in `src/components/ShotBible.tsx` replacing hardcoded fake stats (`01:34:12`, etc.) with real computed shot durations, aspect-ratio-derived resolutions, frame rates, and scene counts
+- [x] Vitest suite (`tests/editingSafety.test.ts`): 9 tests covering gesture collapse, per-shot isolation, redo invalidation, stack limits, storage persistence, and computed metrics
+- [x] Full validation: 23 test files, 147/147 tests passing in 4.5s; production build green with 0 errors in 9.5s; in-browser UI verified via subagent
 
 ## Deferred findings (tracked for later stages)
 

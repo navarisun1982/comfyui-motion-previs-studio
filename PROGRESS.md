@@ -120,5 +120,47 @@ See the deferred table in [TASKS.md](TASKS.md).
    - TypeScript & production build: 0 errors (`npm run build` in 9.6s).
    - In-browser verification: zero CSP violations in console, offline fonts rendered, 3D Virtual Soundstage active.
 
+## 2026-10-23 — S3 Editing Safety & Undo/Redo Engine (`stage/03-editing-safety`)
+
+**Goal:** Establish safe directorial editing with per-shot undo/redo, continuous drag gesture collapsing, shortcut guards, a first-run welcome tour, and truthful computed project metrics.
+
+### Accomplishments
+
+1. **Per-Shot Undo / Redo Engine (`src/stores/useShotStore.ts`):**
+   - Implemented per-shot history stacks (`historyByShot: Record<string, { past: ShotSpec[]; future: ShotSpec[] }>`) capped at `MAX_HISTORY_STEPS = 50`.
+   - Structural sharing: only modified properties change; switching shots maintains isolated past/future stacks without cross-talk.
+   - Branch invalidation: making a new edit after undo cleanly purges the redo future stack.
+   - Integrated with `loadShot`, `switchShot`, and `resetToDefault`.
+
+2. **"One Gesture = One Undo Step" Collapsing (`src/components/StagePrevis3D.tsx`):**
+   - Wired `beginGesture()` on pointer down when clicking an actor or camera in the 3D Soundstage.
+   - Continuous pointer movements update live 3D coordinates without creating dozens of intermediate undo snapshots.
+   - Calling `endGesture()` on pointer release collapses the entire interaction into a single undo step.
+   - Added gesture tracking to Lateral, Depth, and Elevation HUD range sliders.
+
+3. **Global Shortcuts & Input Safety (`src/App.tsx`):**
+   - Added global `Ctrl+Z` (undo) and `Ctrl+Shift+Z` / `Ctrl+Y` (redo).
+   - Implemented `isEditingText` guard (`activeEl?.tagName === 'INPUT' || activeEl?.tagName === 'TEXTAREA' || activeEl?.isContentEditable`) preventing global shortcuts from intercepting text editing.
+   - Fixed the backtick / tilde handler which previously hijacked user input when typing in description or prompt fields.
+   - Added studio header Undo and Redo icon buttons (`Undo2`, `Redo2`) with dynamic disabled states and tooltips.
+
+4. **First-Run Welcome / Getting Started Modal (`src/components/WelcomeModal.tsx`):**
+   - High-aesthetic glassmorphism modal introducing the 3 core studio workflows (3D Previs Soundstage, VFX Plate Solver, ComfyUI Diffusion Engine) and directorial safety shortcuts.
+   - Persistent dismissal using safe storage (`STORAGE_KEYS.WELCOME_DISMISSED`).
+   - "Help" button added to the studio top navigation bar to re-trigger the guide at any time.
+
+5. **Truthful Computed Project Info (`src/components/ShotBible.tsx`):**
+   - Replaced hardcoded fake statistics (`01:34:12`, `1920 × 1080`, `24 fps`, `Oct 18, 2026`) with truthful computed metrics.
+   - Reactive duration calculated from all shots across all scenes (`scenes.reduce(...)`).
+   - Aspect-ratio derived resolution (`1920 × 1080` for 16:9, `1920 × 804` for 2.39:1, `1080 × 1920` for 9:16, `1440 × 1080` for 4:3, `1080 × 1080` for 1:1).
+   - Real scene count, shot count, frame rate, active shot duration/lens, and reactive workflow status badge.
+
+6. **Verification & Tests:**
+   - Unit tests: `tests/editingSafety.test.ts` (9 tests) verifying undo/redo, gesture collapsing, shot isolation, redo invalidation, stack limits, storage persistence, and computed metrics.
+   - Vitest suite: 23 test files, 147/147 tests passing in 4.5s.
+   - TypeScript & production build: 0 errors across main project and scripts (`npm run build` in 9.5s).
+   - In-browser UI verification: verified Welcome Modal dismissal, header buttons, live focal length undo/redo flow, help modal re-opening, and Project Info reactive stats.
+
+
 
 

@@ -83,6 +83,15 @@ interface ShotState {
   // Full Reset / Load
   loadShot: (shot: ShotSpec) => void;
   resetToDefault: () => void;
+
+  // Per-Shot Undo / Redo & Editing Safety
+  canUndo: boolean;
+  canRedo: boolean;
+  undo: () => void;
+  redo: () => void;
+  beginGesture: () => void;
+  endGesture: () => void;
+  clearHistory: (shotId?: string) => void;
 }
 
 const persistShotsMap = (shots: Record<string, ShotSpec>) => {
@@ -163,6 +172,25 @@ const initialShotsMap: Record<string, ShotSpec> = {
 };
 const initialAdapter = getAdapter(initialShot.targetModel);
 
+const MAX_HISTORY_STEPS = 50;
+
+interface ShotHistory {
+  past: ShotSpec[];
+  future: ShotSpec[];
+}
+
+const historyByShot: Record<string, ShotHistory> = {};
+
+function getShotHistory(shotId: string): ShotHistory {
+  if (!historyByShot[shotId]) {
+    historyByShot[shotId] = { past: [], future: [] };
+  }
+  return historyByShot[shotId];
+}
+
+let isGestureActive = false;
+let gestureStartShot: ShotSpec | null = null;
+
 export const useShotStore = create<ShotState>((set, get) => {
   const evaluate = (shot: ShotSpec) => {
     const adapter = getAdapter(shot.targetModel);
@@ -171,7 +199,29 @@ export const useShotStore = create<ShotState>((set, get) => {
     return { validation, compiledPrompt };
   };
 
-  const commitShot = (updated: ShotSpec, extraState?: Partial<ShotState>) => {
+  const commitShot = (
+    updated: ShotSpec,
+    extraState?: Partial<ShotState>,
+    options?: { skipHistory?: boolean }
+  ) => {
+    const currentShot = get().shot;
+    const shotHistory = getShotHistory(updated.id);
+
+    if (!options?.skipHistory && currentShot.id === updated.id) {
+      if (isGestureActive) {
+        if (!gestureStartShot) {
+          gestureStartShot = currentShot;
+        }
+      } else {
+        shotHistory.past.push(currentShot);
+        if (shotHistory.past.length > MAX_HISTORY_STEPS) {
+          shotHistory.past.shift();
+        }
+        shotHistory.future = [];
+        gestureStartShot = null;
+      }
+    }
+
     const currentShots = get().shotsById;
     const nextShots = { ...currentShots, [updated.id]: updated };
     persistShotsMap(nextShots);
@@ -180,6 +230,8 @@ export const useShotStore = create<ShotState>((set, get) => {
       shotsById: nextShots,
       ...evaluate(updated),
       isDirty: true,
+      canUndo: shotHistory.past.length > 0,
+      canRedo: shotHistory.future.length > 0,
       ...extraState,
     });
   };
@@ -191,6 +243,8 @@ export const useShotStore = create<ShotState>((set, get) => {
     validation: initialAdapter.validate(initialShot),
     compiledPrompt: initialAdapter.compilePrompt(initialShot),
     isDirty: false,
+    canUndo: false,
+    canRedo: false,
     activeDeckTab: 'camera',
     selectedActorId: initialShot.actors[0]?.id,
     previsVideoUrl: undefined,
@@ -245,6 +299,10 @@ export const useShotStore = create<ShotState>((set, get) => {
     setCompiledPrompt: (compiledPrompt) => set({ compiledPrompt }),
 
     switchShot: (shotId: string, initialFallback?: () => ShotSpec) => {
+      if (isGestureActive) {
+        get().endGesture();
+      }
+      gestureStartShot = null;
       const { shot, shotsById } = get();
       // 1. Ensure current active shot is stored in cache
       const currentMap: Record<string, ShotSpec> = { ...shotsById, [shot.id]: shot };
@@ -257,6 +315,7 @@ export const useShotStore = create<ShotState>((set, get) => {
       }
 
       persistShotsMap(currentMap);
+      const targetHistory = getShotHistory(targetShot.id);
 
       logger.action(`Switched active shot to "${targetShot.name}" (${targetShot.id})`);
       set({
@@ -265,6 +324,8 @@ export const useShotStore = create<ShotState>((set, get) => {
         selectedActorId: targetShot.actors[0]?.id,
         ...evaluate(targetShot),
         isDirty: false,
+        canUndo: targetHistory.past.length > 0,
+        canRedo: targetHistory.future.length > 0,
         previsVideoUrl: undefined,
         previsVideoBlob: undefined,
         isRenderingPrevis: false,
@@ -691,15 +752,19 @@ export const useShotStore = create<ShotState>((set, get) => {
 
     loadShot: (shot) => {
       logger.action(`Loaded shot "${shot.name}" (${shot.id}) into active editor`);
+      gestureStartShot = null;
       const currentShots = get().shotsById;
       const nextShots = { ...currentShots, [shot.id]: shot };
       persistShotsMap(nextShots);
+      const shotHistory = getShotHistory(shot.id);
       set({
         shot,
         shotsById: nextShots,
         selectedActorId: shot.actors[0]?.id,
         ...evaluate(shot),
         isDirty: false,
+        canUndo: shotHistory.past.length > 0,
+        canRedo: shotHistory.future.length > 0,
         previsVideoUrl: undefined,
         previsVideoBlob: undefined,
         isRenderingPrevis: false,
@@ -710,13 +775,102 @@ export const useShotStore = create<ShotState>((set, get) => {
     resetToDefault: () => {
       logger.action(`Reset director studio state to default master shot`);
       const fresh = createDefaultShotSpec({ id: get().shot.id, name: get().shot.name });
-      commitShot(fresh, {
-        isDirty: false,
-        previsVideoUrl: undefined,
-        previsVideoBlob: undefined,
-        isRenderingPrevis: false,
-        previsProgress: 0,
-      });
+      const history = getShotHistory(fresh.id);
+      history.past = [];
+      history.future = [];
+      gestureStartShot = null;
+      isGestureActive = false;
+      commitShot(
+        fresh,
+        {
+          isDirty: false,
+          canUndo: false,
+          canRedo: false,
+          previsVideoUrl: undefined,
+          previsVideoBlob: undefined,
+          isRenderingPrevis: false,
+          previsProgress: 0,
+        },
+        { skipHistory: true }
+      );
+    },
+
+    undo: () => {
+      const currentShot = get().shot;
+      const history = getShotHistory(currentShot.id);
+      if (history.past.length === 0) return;
+
+      const previousShot = history.past.pop()!;
+      history.future.push(currentShot);
+      if (history.future.length > MAX_HISTORY_STEPS) {
+        history.future.shift();
+      }
+
+      logger.action(`Undo in "${currentShot.name}"`);
+      commitShot(
+        previousShot,
+        {
+          canUndo: history.past.length > 0,
+          canRedo: history.future.length > 0,
+        },
+        { skipHistory: true }
+      );
+    },
+
+    redo: () => {
+      const currentShot = get().shot;
+      const history = getShotHistory(currentShot.id);
+      if (history.future.length === 0) return;
+
+      const nextShot = history.future.pop()!;
+      history.past.push(currentShot);
+      if (history.past.length > MAX_HISTORY_STEPS) {
+        history.past.shift();
+      }
+
+      logger.action(`Redo in "${currentShot.name}"`);
+      commitShot(
+        nextShot,
+        {
+          canUndo: history.past.length > 0,
+          canRedo: history.future.length > 0,
+        },
+        { skipHistory: true }
+      );
+    },
+
+    beginGesture: () => {
+      isGestureActive = true;
+      gestureStartShot = get().shot;
+    },
+
+    endGesture: () => {
+      if (!isGestureActive) return;
+      isGestureActive = false;
+      const currentShot = get().shot;
+      if (gestureStartShot && gestureStartShot !== currentShot) {
+        const history = getShotHistory(currentShot.id);
+        history.past.push(gestureStartShot);
+        if (history.past.length > MAX_HISTORY_STEPS) {
+          history.past.shift();
+        }
+        history.future = [];
+        set({
+          canUndo: history.past.length > 0,
+          canRedo: false,
+        });
+      }
+      gestureStartShot = null;
+    },
+
+    clearHistory: (shotId?: string) => {
+      const id = shotId || get().shot.id;
+      if (historyByShot[id]) {
+        historyByShot[id] = { past: [], future: [] };
+      }
+      if (id === get().shot.id) {
+        set({ canUndo: false, canRedo: false });
+      }
     },
   };
 });

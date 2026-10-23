@@ -594,7 +594,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
   activeShotId = 'shot-01a',
   onSelectShot,
 }) => {
-  const { switchShot } = useShotStore();
+  const { switchShot, shot } = useShotStore();
   const [scenes, setScenes] = useState<SceneItem[]>(loadSavedScenes);
   const [collapsedScenes, setCollapsedScenes] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -603,6 +603,39 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
   const [targetSceneId, setTargetSceneId] = useState<string>('scene-1');
   const [openMenuShotId, setOpenMenuShotId] = useState<string | null>(null);
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
+
+  // Computed project info
+  const totalShots = scenes.reduce((acc, sc) => acc + sc.shots.length, 0);
+  const totalDurationSeconds = scenes.reduce((acc, sc) => {
+    return acc + sc.shots.reduce((sAcc, sh) => sAcc + (parseInt(sh.duration, 10) || 4), 0);
+  }, 0);
+  const formatProjectDuration = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `00:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+  const getResolutionForRatio = (ratio?: string) => {
+    switch (ratio) {
+      case '2.39:1':
+        return '1920 × 804 (2.39:1)';
+      case '9:16':
+        return '1080 × 1920 (9:16)';
+      case '4:3':
+        return '1440 × 1080 (4:3)';
+      case '1:1':
+        return '1080 × 1080 (1:1)';
+      case '16:9':
+      default:
+        return '1920 × 1080 (16:9)';
+    }
+  };
+  const formattedDate = shot?.timestamp
+    ? new Date(shot.timestamp).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })
+    : 'Oct 23, 2026';
 
   // Close context menus on click-outside
   useEffect(() => {
@@ -1039,23 +1072,37 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
           <div className="space-y-1.5 font-mono text-[10px] text-slate-400">
             <div className="flex justify-between">
               <span>Project</span>
-              <span className="text-white font-sans">Demo Project</span>
+              <span className="text-white font-sans font-semibold">Motion Previs</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Scenes / Shots</span>
+              <span className="text-white">
+                {scenes.length} sc · {totalShots} sh
+              </span>
             </div>
             <div className="flex justify-between">
               <span>Resolution</span>
-              <span className="text-white">1920 × 1080</span>
+              <span className="text-white">{getResolutionForRatio(shot?.aspectRatio)}</span>
             </div>
             <div className="flex justify-between">
               <span>Frame Rate</span>
-              <span className="text-white">24 fps</span>
+              <span className="text-white">{shot?.frameRate || 24} fps</span>
             </div>
             <div className="flex justify-between">
-              <span>Duration</span>
-              <span className="text-white">01:34:12</span>
+              <span>Total Duration</span>
+              <span className="text-white">
+                {formatProjectDuration(totalDurationSeconds)} ({totalDurationSeconds}s)
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Active Shot</span>
+              <span className="text-amber-400 font-semibold">
+                {shot?.durationSeconds ?? 4}s · {shot?.camera?.lens?.focalLength ?? '35mm'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span>Date</span>
-              <span className="text-white">Oct 18, 2026</span>
+              <span className="text-white">{formattedDate}</span>
             </div>
           </div>
         )}
@@ -1064,9 +1111,13 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
         <div className="mt-3 flex items-center justify-between rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1.5">
           <div className="flex items-center gap-1.5 text-emerald-400">
             <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-            <span className="font-display text-[10px] font-bold">Analysis Complete</span>
+            <span className="font-display text-[10px] font-bold">
+              {shot.creationMode === 'video-plate' ? 'VFX Plate Mode' : '3D Previs Soundstage'}
+            </span>
           </div>
-          <span className="font-mono text-[9px] text-slate-400">Ready to export</span>
+          <span className="font-mono text-[9px] text-slate-400">
+            {shot.durationSeconds}s · {shot.camera.lens.focalLength}
+          </span>
         </div>
 
         {/* Reset Demo Project Button */}

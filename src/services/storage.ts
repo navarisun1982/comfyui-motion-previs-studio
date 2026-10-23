@@ -11,6 +11,7 @@ export const STORAGE_KEYS = {
   PART_GRAPHS: 'comfy_director_part_graphs_v1',
   SCENES: 'comfy_ai_director_scenes',
   REASONER_SETTINGS: 'comfy_director_reasoner_settings_v1',
+  WELCOME_DISMISSED: 'comfy_ai_director_welcome_dismissed_v1',
 } as const;
 
 /**

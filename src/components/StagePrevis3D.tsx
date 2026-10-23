@@ -161,6 +161,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     registerPrevisRenderer,
     setPrevisVideo,
     setPrevisRendering,
+    beginGesture,
+    endGesture,
   } = useShotStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode);
@@ -1934,10 +1936,12 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     if (clickedActorId) {
       setSelectedActorId(clickedActorId);
       setIsFloorDragging(true);
+      beginGesture();
       if (stageControlsRef.current) stageControlsRef.current.enabled = false;
     } else if (clickedCamera) {
       setSelectedActorId('__camera__');
       setIsFloorDragging(true);
+      beginGesture();
       if (stageControlsRef.current) stageControlsRef.current.enabled = false;
     }
   };
@@ -1985,6 +1989,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     isPointerDownRef.current = false;
     if (isFloorDragging) {
       setIsFloorDragging(false);
+      endGesture();
       if (stageControlsRef.current) stageControlsRef.current.enabled = true;
     }
   };
@@ -2352,6 +2357,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
                         min={0}
                         max={100}
                         value={pos.x}
+                        onPointerDown={() => beginGesture()}
+                        onPointerUp={() => endGesture()}
                         onChange={(e) => handleSetPos(Number(e.target.value), pos.y, pos.z)}
                         className="w-full h-1 bg-director-surface rounded appearance-none cursor-pointer accent-director-gold"
                       />
@@ -2388,6 +2395,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
                         min={0}
                         max={100}
                         value={pos.y}
+                        onPointerDown={() => beginGesture()}
+                        onPointerUp={() => endGesture()}
                         onChange={(e) => handleSetPos(pos.x, Number(e.target.value), pos.z)}
                         className="w-full h-1 bg-director-surface rounded appearance-none cursor-pointer accent-director-cyan"
                       />
@@ -2424,6 +2433,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
                         min={0}
                         max={100}
                         value={pos.z ?? 0}
+                        onPointerDown={() => beginGesture()}
+                        onPointerUp={() => endGesture()}
                         onChange={(e) => handleSetPos(pos.x, pos.y, Number(e.target.value))}
                         className="w-full h-1 bg-director-surface rounded appearance-none cursor-pointer accent-emerald-400"
                       />

@@ -12,11 +12,13 @@ import { InAppDebugger, DebuggerTogglePill } from './components/InAppDebugger';
 import { ComfyConnectionModal } from './components/ComfyConnectionModal';
 import { CinematicPresetsModal } from './components/CinematicPresetsModal';
 import { AssetLibraryModal } from './components/AssetLibraryModal';
+import { WelcomeModal } from './components/WelcomeModal';
 import { useAssetLibraryStore } from './stores/useAssetLibraryStore';
 import { useLogStore } from './stores/useLogStore';
 import { getReasonerConfig, PROVIDERS } from './services/objectReasoner';
 import { directPromptWithAI } from './services/aiPromptDirector';
 import { getAdapter } from './adapters';
+import { safeGetItem, STORAGE_KEYS } from './services/storage';
 import {
   Clapperboard,
   GitCompare,
@@ -34,13 +36,27 @@ import {
   Wand2,
   ChevronDown,
   ChevronUp,
+  Undo2,
+  Redo2,
+  HelpCircle,
 } from 'lucide-react';
 
 export type WorkspaceMode = 'previs' | 'vfx' | 'diffusion';
 export type StepTab = WorkspaceMode | 'shot' | 'analyze' | 'plan' | 'export';
 
 export default function App() {
-  const { shot, validation, compiledPrompt, setActiveDeckTab, setCompiledPrompt, updateTargetModel } = useShotStore();
+  const {
+    shot,
+    validation,
+    compiledPrompt,
+    setActiveDeckTab,
+    setCompiledPrompt,
+    updateTargetModel,
+    canUndo,
+    canRedo,
+    undo,
+    redo,
+  } = useShotStore();
   const { connectionStatus, openSettings } = useComfyStore();
   const { revisions } = useHistoryStore();
 
@@ -55,6 +71,9 @@ export default function App() {
   const [isDirectingPrompt, setIsDirectingPrompt] = useState<boolean>(false);
   const [aiDirectorFeedback, setAiDirectorFeedback] = useState<string | null>(null);
   const [showTimelineDetails, setShowTimelineDetails] = useState<boolean>(true);
+  const [showWelcomeModal, setShowWelcomeModal] = useState<boolean>(
+    () => !safeGetItem<boolean>(STORAGE_KEYS.WELCOME_DISMISSED, false)
+  );
   const { toggleOpen: toggleDebugger } = useLogStore();
   const openAssetLibrary = useAssetLibraryStore((s) => s.openLibrary);
 
@@ -85,17 +104,45 @@ export default function App() {
     setTimeout(() => setAiDirectorFeedback(null), 3000);
   };
 
-  // Keyboard shortcut: Press `~` or `F12` to toggle in-app debugger
+  // Global Keyboard Shortcuts (Undo/Redo, Debugger) with Editable Element Guard
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '`' || e.key === '~') {
+      const activeEl = document.activeElement;
+      const isEditingText =
+        activeEl?.tagName === 'INPUT' ||
+        activeEl?.tagName === 'TEXTAREA' ||
+        (activeEl as HTMLElement)?.isContentEditable;
+
+      if (isEditingText) return;
+
+      // Debugger toggle
+      if (e.key === '`' || e.key === '~' || e.key === 'F12') {
         e.preventDefault();
         toggleDebugger();
+        return;
+      }
+
+      // Undo: Ctrl+Z (without shift)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+
+      // Redo: Ctrl+Shift+Z or Ctrl+Y
+      if (
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && e.shiftKey) ||
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y')
+      ) {
+        e.preventDefault();
+        redo();
+        return;
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleDebugger]);
+  }, [toggleDebugger, undo, redo]);
 
   return (
     <div className="flex h-screen w-screen flex-col bg-[#08090d] text-slate-100 font-sans overflow-hidden">
@@ -174,6 +221,36 @@ export default function App() {
 
         {/* Right: Actions, Modals & Unified Comfy Status */}
         <div className="flex items-center gap-2 font-mono text-xs">
+          {/* Undo / Redo Controls */}
+          <div className="flex items-center rounded-md bg-white/5 border border-white/10 p-0.5">
+            <button
+              onClick={() => undo()}
+              disabled={!canUndo}
+              aria-label="Undo"
+              className={`p-1 rounded transition-colors ${
+                canUndo
+                  ? 'text-slate-200 hover:text-white hover:bg-white/10 cursor-pointer'
+                  : 'text-slate-600 cursor-not-allowed'
+              }`}
+              title="Undo (Ctrl+Z)"
+            >
+              <Undo2 className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => redo()}
+              disabled={!canRedo}
+              aria-label="Redo"
+              className={`p-1 rounded transition-colors ${
+                canRedo
+                  ? 'text-slate-200 hover:text-white hover:bg-white/10 cursor-pointer'
+                  : 'text-slate-600 cursor-not-allowed'
+              }`}
+              title="Redo (Ctrl+Shift+Z or Ctrl+Y)"
+            >
+              <Redo2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
           {/* Director Diff Button */}
           <button
             onClick={() => setShowDiffInspector(!showDiffInspector)}
@@ -221,6 +298,16 @@ export default function App() {
           >
             <Code2 className="h-3 w-3 text-blue-400" />
             <span>Prompt</span>
+          </button>
+
+          {/* Quickstart Help Guide Button */}
+          <button
+            onClick={() => setShowWelcomeModal(true)}
+            className="flex items-center gap-1 rounded-md bg-white/5 hover:bg-white/10 px-2 py-1 text-[11px] text-slate-300 hover:text-white border border-white/10"
+            title="Getting Started & Tour Guide"
+          >
+            <HelpCircle className="h-3.5 w-3.5 text-blue-400" />
+            <span className="hidden xl:inline">Help</span>
           </button>
 
           {/* In-App Debugger Toggle */}
@@ -593,6 +680,13 @@ export default function App() {
 
       {/* 3D Asset Library & AI Generator Modal */}
       <AssetLibraryModal />
+
+      {/* Getting Started & Tour Guide Modal */}
+      <WelcomeModal
+        isOpen={showWelcomeModal}
+        onClose={() => setShowWelcomeModal(false)}
+        onOpenWorkspace={(mode) => setWorkspaceMode(mode)}
+      />
     </div>
   );
 }
