@@ -184,13 +184,25 @@ export const DIRECTOR_PRESETS: DirectorPreset[] = [
   },
 ];
 
+import { useShallow } from 'zustand/react/shallow';
+
 interface CinematicPresetsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
 export const CinematicPresetsModal: React.FC<CinematicPresetsModalProps> = ({ isOpen, onClose }) => {
-  const { setFocalLength, setShotType, setCameraAngle, setCameraMovement, setLighting, updateAspectRatio } = useShotStore();
+  const { setFocalLength, setShotType, setCameraAngle, setCameraMovement, setLighting, updateAspectRatio } =
+    useShotStore(
+      useShallow((s) => ({
+        setFocalLength: s.setFocalLength,
+        setShotType: s.setShotType,
+        setCameraAngle: s.setCameraAngle,
+        setCameraMovement: s.setCameraMovement,
+        setLighting: s.setLighting,
+        updateAspectRatio: s.updateAspectRatio,
+      }))
+    );
 
   if (!isOpen) return null;
 

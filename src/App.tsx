@@ -1,18 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense, lazy } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useShotStore } from './stores/useShotStore';
 import { useComfyStore } from './stores/useComfyStore';
 import { useHistoryStore } from './stores/useHistoryStore';
-import { ShotBible } from './components/ShotBible';
 import { MotionPrevisStage } from './components/MotionPrevisStage';
 import { PrevisParametersDeck } from './components/PrevisParametersDeck';
-import { DirectorDiffInspector } from './components/DirectorDiffInspector';
-import { ComfyExecutionPanel } from './components/ComfyExecutionPanel';
-import { VFXVideoDeck } from './components/VFXVideoDeck';
-import { InAppDebugger, DebuggerTogglePill } from './components/InAppDebugger';
-import { ComfyConnectionModal } from './components/ComfyConnectionModal';
-import { CinematicPresetsModal } from './components/CinematicPresetsModal';
-import { AssetLibraryModal } from './components/AssetLibraryModal';
-import { WelcomeModal } from './components/WelcomeModal';
 import { useAssetLibraryStore } from './stores/useAssetLibraryStore';
 import { useLogStore } from './stores/useLogStore';
 import { getReasonerConfig, PROVIDERS } from './services/objectReasoner';
@@ -40,6 +32,35 @@ import {
   Redo2,
   HelpCircle,
 } from 'lucide-react';
+import { DebuggerTogglePill } from './components/DebuggerTogglePill';
+
+const ShotBible = lazy(() =>
+  import('./components/ShotBible').then((m) => ({ default: m.ShotBible }))
+);
+const DirectorDiffInspector = lazy(() =>
+  import('./components/DirectorDiffInspector').then((m) => ({ default: m.DirectorDiffInspector }))
+);
+const ComfyExecutionPanel = lazy(() =>
+  import('./components/ComfyExecutionPanel').then((m) => ({ default: m.ComfyExecutionPanel }))
+);
+const VFXVideoDeck = lazy(() =>
+  import('./components/VFXVideoDeck').then((m) => ({ default: m.VFXVideoDeck }))
+);
+const InAppDebugger = lazy(() =>
+  import('./components/InAppDebugger').then((m) => ({ default: m.InAppDebugger }))
+);
+const ComfyConnectionModal = lazy(() =>
+  import('./components/ComfyConnectionModal').then((m) => ({ default: m.ComfyConnectionModal }))
+);
+const CinematicPresetsModal = lazy(() =>
+  import('./components/CinematicPresetsModal').then((m) => ({ default: m.CinematicPresetsModal }))
+);
+const AssetLibraryModal = lazy(() =>
+  import('./components/AssetLibraryModal').then((m) => ({ default: m.AssetLibraryModal }))
+);
+const WelcomeModal = lazy(() =>
+  import('./components/WelcomeModal').then((m) => ({ default: m.WelcomeModal }))
+);
 
 export type WorkspaceMode = 'previs' | 'vfx' | 'diffusion';
 export type StepTab = WorkspaceMode | 'shot' | 'analyze' | 'plan' | 'export';
@@ -56,9 +77,23 @@ export default function App() {
     canRedo,
     undo,
     redo,
-  } = useShotStore();
-  const { connectionStatus, openSettings } = useComfyStore();
-  const { revisions } = useHistoryStore();
+  } = useShotStore(
+    useShallow((s) => ({
+      shot: s.shot,
+      validation: s.validation,
+      compiledPrompt: s.compiledPrompt,
+      setActiveDeckTab: s.setActiveDeckTab,
+      setCompiledPrompt: s.setCompiledPrompt,
+      updateTargetModel: s.updateTargetModel,
+      canUndo: s.canUndo,
+      canRedo: s.canRedo,
+      undo: s.undo,
+      redo: s.redo,
+    }))
+  );
+  const connectionStatus = useComfyStore((s) => s.connectionStatus);
+  const openSettings = useComfyStore((s) => s.openSettings);
+  const revisions = useHistoryStore((s) => s.revisions);
 
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('previs');
   const [activeShotId, setActiveShotId] = useState('shot-01a');
@@ -344,32 +379,56 @@ export default function App() {
       {/* Main Studio Body */}
       {showDiffInspector ? (
         <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
-          <DirectorDiffInspector onClose={() => setShowDiffInspector(false)} />
+          <Suspense
+            fallback={
+              <div className="flex h-full w-full items-center justify-center bg-director-darkest text-slate-500 font-mono text-xs">
+                Loading Diff Inspector...
+              </div>
+            }
+          >
+            <DirectorDiffInspector onClose={() => setShowDiffInspector(false)} />
+          </Suspense>
         </div>
       ) : (
         <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
           {/* Left Column: Permanent Shot Bible & Scene Project Hierarchy */}
           <aside className="flex w-64 min-w-[256px] max-w-[256px] flex-col border-r border-white/10 bg-[#0b0d13] shrink-0 overflow-hidden">
-            <ShotBible
-              activeShotId={activeShotId}
-              onSelectShot={(id, title) => {
-                setActiveShotId(id);
-                if (title) {
-                  setActiveShotTitle(title);
-                } else if (id === 'shot-01a') setActiveShotTitle('Shot 01A Tracking In');
-                else if (id === 'shot-01b') setActiveShotTitle('Shot 01B Pan Right');
-                else if (id === 'shot-01c') setActiveShotTitle('Shot 01C Push In');
-                else if (id === 'shot-01d') setActiveShotTitle('Shot 01D Low Angle');
-                else if (id === 'shot-01e') setActiveShotTitle('Shot 01E Over Shoulder');
-              }}
-            />
+            <Suspense
+              fallback={
+                <div className="flex h-full w-full items-center justify-center text-slate-500 font-mono text-xs">
+                  Loading Shot Bible...
+                </div>
+              }
+            >
+              <ShotBible
+                activeShotId={activeShotId}
+                onSelectShot={(id, title) => {
+                  setActiveShotId(id);
+                  if (title) {
+                    setActiveShotTitle(title);
+                  } else if (id === 'shot-01a') setActiveShotTitle('Shot 01A Tracking In');
+                  else if (id === 'shot-01b') setActiveShotTitle('Shot 01B Pan Right');
+                  else if (id === 'shot-01c') setActiveShotTitle('Shot 01C Push In');
+                  else if (id === 'shot-01d') setActiveShotTitle('Shot 01D Low Angle');
+                  else if (id === 'shot-01e') setActiveShotTitle('Shot 01E Over Shoulder');
+                }}
+              />
+            </Suspense>
           </aside>
 
           {/* Center Column: Stage Previs OR VFX Multi-Pass Analyzer depending on workspaceMode */}
           <main className="flex flex-1 min-w-0 min-h-0 flex-col overflow-hidden bg-[#090b10]">
             {workspaceMode === 'vfx' ? (
               <div className="flex-1 overflow-y-auto">
-                <VFXVideoDeck />
+                <Suspense
+                  fallback={
+                    <div className="flex h-full w-full items-center justify-center text-slate-500 font-mono text-xs">
+                      Loading VFX Analyzer...
+                    </div>
+                  }
+                >
+                  <VFXVideoDeck />
+                </Suspense>
               </div>
             ) : (
               <MotionPrevisStage
@@ -384,7 +443,15 @@ export default function App() {
           <aside className="flex w-80 min-w-[320px] max-w-[320px] flex-col border-l border-white/10 bg-[#0b0d13] shrink-0 overflow-y-auto overflow-x-hidden">
             {workspaceMode === 'diffusion' ? (
               <div className="flex flex-col h-full">
-                <ComfyExecutionPanel onBackToPrevis={() => setWorkspaceMode('previs')} />
+                <Suspense
+                  fallback={
+                    <div className="flex h-full w-full items-center justify-center text-slate-500 font-mono text-xs">
+                      Loading ComfyUI Deck...
+                    </div>
+                  }
+                >
+                  <ComfyExecutionPanel onBackToPrevis={() => setWorkspaceMode('previs')} />
+                </Suspense>
                 {/* Directorial Capability Breakdown */}
                 <div className="p-4 pt-0 space-y-2 font-mono text-[10px]">
                   <span className="text-slate-400 font-bold uppercase tracking-wider">
@@ -666,27 +733,21 @@ export default function App() {
         </div>
       )}
 
-      {/* Docked In-App Debugger */}
-      <InAppDebugger />
-
-      {/* ComfyUI Connection & Settings Modal */}
-      <ComfyConnectionModal />
-
-      {/* Cinematic Mood & Intent Presets Modal */}
-      <CinematicPresetsModal
-        isOpen={showPresetsModal}
-        onClose={() => setShowPresetsModal(false)}
-      />
-
-      {/* 3D Asset Library & AI Generator Modal */}
-      <AssetLibraryModal />
-
-      {/* Getting Started & Tour Guide Modal */}
-      <WelcomeModal
-        isOpen={showWelcomeModal}
-        onClose={() => setShowWelcomeModal(false)}
-        onOpenWorkspace={(mode) => setWorkspaceMode(mode)}
-      />
+      {/* Docked In-App Debugger & Modals wrapped in Suspense */}
+      <Suspense fallback={null}>
+        <InAppDebugger />
+        <ComfyConnectionModal />
+        <CinematicPresetsModal
+          isOpen={showPresetsModal}
+          onClose={() => setShowPresetsModal(false)}
+        />
+        <AssetLibraryModal />
+        <WelcomeModal
+          isOpen={showWelcomeModal}
+          onClose={() => setShowWelcomeModal(false)}
+          onOpenWorkspace={(mode) => setWorkspaceMode(mode)}
+        />
+      </Suspense>
     </div>
   );
 }

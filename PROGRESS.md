@@ -203,3 +203,53 @@ See the deferred table in [TASKS.md](TASKS.md).
    - Full test suite: 25 test files, 160/160 tests passing in 4.6s (`npm run test`).
    - TypeScript & production build: 0 errors across main project, scripts, and tests (`npm run build` in 12.6s).
    - Browser verification: verified mode switching, IC-LoRA HUD controls, and offline package exporter.
+
+
+## 2026-10-23 — S5 Performance (60 FPS Previs & Bundle Splitting) (`stage/05-performance`)
+
+**Goal:** Eliminate hot-path storage serialization during continuous 60 FPS 3D and slider interactions, halve active WebGL contexts by eliminating invisible viewport renderers, split vendor and component bundles into clean lazy chunks, and optimize Zustand store subscriptions.
+
+### Accomplishments
+
+1. **Bundle Splitting & Code Chunking (`vite.config.ts`):**
+   - Configured Rollup `manualChunks` to split heavy vendor modules into standalone chunks:
+     - `vendor-three`: 688 kB
+     - `vendor-react`: 224 kB
+     - `vendor-icons`: 38 kB
+     - `vendor-muxer`: 31 kB
+   - Extracted lightweight `DebuggerTogglePill` component (`src/components/DebuggerTogglePill.tsx`) to allow full `InAppDebugger` dynamic chunking without circular static imports.
+   - Slashed main application bundle from **1,760 kB down to 606 kB** (**65% reduction**), easily exceeding the competition requirement of keeping the main chunk well under 1.67 MB.
+
+2. **On-Demand Dynamic Loading (`src/App.tsx`):**
+   - Converted secondary and modal components to `React.lazy` with `Suspense` fallbacks:
+     - `ComfyExecutionPanel` (31.85 kB)
+     - `ShotBible` (31.63 kB)
+     - `ComfyConnectionModal` (22.71 kB)
+     - `AssetLibraryModal` (22.06 kB)
+     - `VFXVideoDeck` (21.00 kB)
+     - `CinematicPresetsModal` (10.59 kB)
+     - `comfyClient` (9.73 kB)
+     - `InAppDebugger` (9.12 kB)
+     - `DirectorDiffInspector` (8.66 kB)
+     - `WelcomeModal` (7.45 kB)
+
+3. **Hot-Path Debounced Persistence (`src/stores/useShotStore.ts`):**
+   - Eliminated synchronous JSON serialization and `localStorage` I/O during 60 FPS continuous pointer moves and slider scrubbing.
+   - When gesturing (`isGestureActive === true`), storage writes are automatically debounced off the hot path using a trailing timer.
+   - Immediate synchronous flushes occur upon `endGesture()`, `switchShot()`, `loadShot()`, `resetToDefault()`, and `window.beforeunload`.
+   - Exposed `flushShotsPersistence()` for manual flush synchronization.
+
+4. **WebGL Dual-Viewport Context Halving (`src/components/StagePrevis3D.tsx`):**
+   - Eliminated redundant WebGL renderer instantiation: previously both the Stage Orbit renderer and Viewfinder renderer were created unconditionally in each instance, resulting in 4 active contexts across `MotionPrevisStage`.
+   - Lazily instantiates only the requested active viewport (`stageRenderer` for `'stage' | 'split'`, `vfRenderer` for `'viewfinder' | 'split'`), cutting active contexts in the studio from **4 down to 2**.
+   - Guarded continuous render loop in `animate()` to only render active visible viewports.
+   - Hardened cleanup: calls `forceContextLoss()`, `controls.dispose()`, and cleans up all DOM child nodes on unmount.
+
+5. **Zustand Fine-Grained & `useShallow` Selector Optimization:**
+   - Optimized store subscriptions in `App.tsx`, `AssetLibraryModal.tsx`, `DirectorDiffInspector.tsx`, and `CinematicPresetsModal.tsx` using `useShallow` and targeted selectors, preventing full-tree re-renders on actor or playhead updates.
+
+6. **Verification & Tests:**
+   - Unit tests: `tests/performance.test.ts` (3 tests) verifying hot-path write elimination, gesture release flush, immediate flush triggers, and manual flush API.
+   - Vitest suite: 26 test files, 163/163 tests passing in 4.5s (`npm run test`).
+   - Production build: `npm run build` succeeds with zero errors and zero warnings across main code, scripts, and tests.
+   - In-browser UI verification: tested 3D Soundstage direct manipulation, fluid floor dragging, lazy chunk loading on navigation, shot switching, and modal interactions.
