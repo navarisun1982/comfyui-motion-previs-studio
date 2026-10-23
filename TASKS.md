@@ -7,8 +7,8 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 
 | Stage | Branch | Status | Done when |
 |---|---|---|---|
-| S0 Foundation | `stage/00-foundation` | 🟡 awaiting approval | Repo clean, tests fast + green, build green, app renamed, docs truthful |
-| S1 Truthful pipeline | `stage/01-truthful-pipeline` | ⬜ | One real LTX T2V generation from the app + exact-seed reproducible revision |
+| S0 Foundation | `stage/00-foundation` | ✅ merged to master (`37cf23a`) | Repo clean, tests fast + green, build green, app renamed, docs truthful |
+| S1 Truthful pipeline | `stage/01-truthful-pipeline` | 🟡 ready for templates & live test | Pipeline built, tested & verified; awaiting user API templates & live generation |
 | S2 Desktop foundation | `stage/02-desktop-foundation` | ⬜ | Electron + browser work with no CORS hacks; keys never in localStorage; reload loses nothing |
 | S3 Editing safety | `stage/03-editing-safety` | ⬜ | One gesture = one undo step; first run is clear |
 | S4 Geometric conditioning | `stage/04-geometric-conditioning` | ⬜ | Directed dolly-in reproduced through IC-LoRA control template on the 3090 |
@@ -31,6 +31,30 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 - [x] Rename to **ComfyUI Motion Previs Studio** (header, title, package, Electron, launchers, logs, exports) with userData path pinned
 - [x] Launchers rebuild when sources are newer than `dist/` and fail loudly on build errors
 - [x] Docs truth pass: README, AGENTS, ARCHITECTURE (new), DECISIONS (ADR-005…009), RISK_REGISTER, templates contract
+- [x] Owner approval → merged to `master` (`37cf23a`)
+
+## S1 checklist (Truthful Pipeline)
+
+- [x] Deterministic SHA-256 and JSON stable stringification (`src/pipeline/hash.ts`)
+- [x] Strict Zod schemas for bindings, nodes, fields, and workflows (`src/pipeline/templateTypes.ts`)
+- [x] Versioned timeline patcher registry (`src/pipeline/timelinePatchers.ts`)
+- [x] Template verifier enforcing node existence, type matching, link absence (`src/pipeline/templateVerifier.ts`)
+- [x] Pure functional template binder with frame snapping (8n+1) and quality profiles (`src/pipeline/templateBinder.ts`)
+- [x] Template registry for verified templates with engine/mode lookup (`src/pipeline/templateRegistry.ts`)
+- [x] Bundled template auto-discovery loader (`src/pipeline/templateLoader.ts`)
+- [x] Prompt override store with staleness detection (`src/pipeline/promptOverride.ts`)
+- [x] ShotRevisionV2 schema and backward-compatible history migration (`src/pipeline/revisionTypes.ts`, `src/stores/useHistoryStore.ts`)
+- [x] Offline Package Mode exporter (`src/pipeline/packageExporter.ts`)
+- [x] ComfyClient v2 with multiplexed WebSocket routing and cancellation (`src/services/comfyClient.ts`)
+- [x] Singleton `JobRunner` with targeted output node extraction (`src/pipeline/jobRunner.ts`)
+- [x] Delete dead legacy `src/services/directorExecutor.ts`
+- [x] Update adapters with honest capability tiers and deprecated `buildWorkflow` (`src/adapters/`)
+- [x] Overhaul `ComfyExecutionPanel.tsx` with read-only engine badge, quality profile selector, cancel support, and offline package export
+- [x] Fix `DirectorDiffInspector.tsx` for v2 revisions
+- [x] Comprehensive test coverage with 126 tests passing in 4.4s (`npm run test`)
+- [x] Full build verification with zero TypeScript or Vite bundle errors (`npm run build`)
+- [ ] Ingest user-supplied API templates (`ltx25_stubelius.api.json`, `h3_stubelius.api.json`) & companion bindings into `workflows/templates/`
+- [ ] Run live generation test on RTX 3090 and verify revision reproduction
 - [ ] Owner approval → merge to `master`
 
 ## Deferred findings (tracked for later stages)

@@ -47,7 +47,7 @@ export interface ComfyNode {
   inputs: Record<string, unknown>;
   class_type: string;
   _meta?: {
-    title: string;
+    title?: string;
   };
 }
 
@@ -72,5 +72,10 @@ export interface ModelCapabilityAdapter {
 
   validate(shot: ShotSpec): ValidationReport;
   compilePrompt(shot: ShotSpec): CompiledPromptBundle;
+  /**
+   * @deprecated Legacy hand-crafted graph builder. In S1+, execution is template-driven
+   * via JobRunner, ApiWorkflow templates, and TemplateBinding schemas. Kept for backwards
+   * compatibility with standalone adapter tests.
+   */
   buildWorkflow(shot: ShotSpec, uploadedImageFilename?: string): ComfyWorkflowGraph;
 }

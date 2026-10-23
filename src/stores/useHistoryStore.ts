@@ -1,16 +1,9 @@
 import { create } from 'zustand';
 import { ShotSpec } from '../types/shotspec';
 import { logger } from './useLogStore';
+import { ShotRevisionV2 } from '../pipeline/revisionTypes';
 
-export interface ShotRevision {
-  id: string;
-  version: number;
-  timestamp: number;
-  note: string;
-  shotSpec: ShotSpec;
-  compiledPrompt: string;
-  outputVideoUrl?: string;
-}
+export type ShotRevision = ShotRevisionV2;
 
 export interface ParameterDiffItem {
   category: 'Camera' | 'Actors' | 'Lighting' | 'Canvas' | 'Prompt';
@@ -20,11 +13,33 @@ export interface ParameterDiffItem {
   changed: boolean;
 }
 
+export interface SaveRevisionParams {
+  shot: ShotSpec;
+  engine: ShotRevisionV2['engine'];
+  templateId: string;
+  templateHash: string;
+  bindingSchema: number;
+  mode: ShotRevisionV2['mode'];
+  profile: ShotRevisionV2['profile'];
+  seed: number;
+  prompt: string;
+  negative: string;
+  promptSource: ShotRevisionV2['promptSource'];
+  submittedWorkflow: ShotRevisionV2['submittedWorkflow'];
+  promptId?: string;
+  status?: ShotRevisionV2['status'];
+  outputVideoUrl?: string;
+  outputFilename?: string;
+  note?: string;
+}
+
 interface HistoryState {
   revisions: ShotRevision[];
   activeRevisionId: string | null;
   comparisonRevisionId: string | null;
 
+  saveRevisionV2: (params: SaveRevisionParams) => string;
+  /** Backwards compatible signature for existing UI callers. */
   saveRevision: (shot: ShotSpec, compiledPrompt: string, outputVideoUrl?: string, note?: string) => string;
   setActiveRevision: (id: string | null) => void;
   setComparisonRevision: (id: string | null) => void;
@@ -33,14 +48,54 @@ interface HistoryState {
   getRevision: (id: string) => ShotRevision | undefined;
 }
 
-const STORAGE_KEY = 'ai_director_shot_revisions_v1';
+const STORAGE_KEY_V2 = 'comfy_previs_shot_revisions_v2';
+const STORAGE_KEY_V1 = 'ai_director_shot_revisions_v1';
 
 function loadPersistedRevisions(): ShotRevision[] {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return [];
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw);
+
+    // Check v2 first
+    const rawV2 = window.localStorage.getItem(STORAGE_KEY_V2);
+    if (rawV2) {
+      return JSON.parse(rawV2);
+    }
+
+    // Migrate v1 if present
+    const rawV1 = window.localStorage.getItem(STORAGE_KEY_V1);
+    if (rawV1) {
+      const v1List = JSON.parse(rawV1);
+      if (Array.isArray(v1List)) {
+        const migrated: ShotRevision[] = v1List.map((r: any) => ({
+          id: r.id || `rev-${Date.now()}`,
+          shotId: r.shotSpec?.id || 'unknown',
+          version: r.version || 1,
+          createdAt: r.timestamp || Date.now(),
+          timestamp: r.timestamp || Date.now(),
+          note: r.note || 'Legacy revision',
+          engine: (r.shotSpec?.targetModel as any) === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5',
+          templateId: 'legacy_template',
+          templateHash: '',
+          bindingSchema: 1,
+          mode: 't2v',
+          profile: 'final',
+          seed: r.shotSpec?.seed ?? 42,
+          prompt: r.compiledPrompt || '',
+          compiledPrompt: r.compiledPrompt || '',
+          negative: r.shotSpec?.negativePrompt || '',
+          promptSource: 'compiled',
+          submittedWorkflow: {},
+          status: 'completed',
+          outputVideoUrl: r.outputVideoUrl,
+          outputFilename: undefined,
+          shotSpec: r.shotSpec || {},
+          isLegacy: true,
+        }));
+        persistRevisions(migrated);
+        return migrated;
+      }
+    }
+    return [];
   } catch {
     return [];
   }
@@ -49,9 +104,9 @@ function loadPersistedRevisions(): ShotRevision[] {
 function persistRevisions(revs: ShotRevision[]): void {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(revs));
+    window.localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(revs));
   } catch {
-    // Ignore storage quota or environment restrictions
+    // Ignore quota errors
   }
 }
 
@@ -60,18 +115,35 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
   activeRevisionId: null,
   comparisonRevisionId: null,
 
-  saveRevision: (shot, compiledPrompt, outputVideoUrl, note) => {
+  saveRevisionV2: (params) => {
     const existing = get().revisions;
-    const versionNumber = existing.filter((r) => r.shotSpec.id === shot.id).length + 1;
-    
+    const versionNumber = existing.filter((r) => r.shotId === params.shot.id).length + 1;
+
     const revision: ShotRevision = {
       id: `rev-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      shotId: params.shot.id,
       version: versionNumber,
+      createdAt: Date.now(),
       timestamp: Date.now(),
-      note: note || `Revision ${versionNumber}: ${shot.camera.movement.type} (${shot.camera.lens.focalLength})`,
-      shotSpec: JSON.parse(JSON.stringify(shot)),
-      compiledPrompt,
-      outputVideoUrl,
+      note: params.note || `Revision ${versionNumber}: ${params.engine} (${params.shot.camera.movement.type})`,
+      engine: params.engine,
+      templateId: params.templateId,
+      templateHash: params.templateHash,
+      bindingSchema: params.bindingSchema,
+      mode: params.mode,
+      profile: params.profile,
+      seed: params.seed,
+      prompt: params.prompt,
+      compiledPrompt: params.prompt,
+      negative: params.negative,
+      promptSource: params.promptSource,
+      submittedWorkflow: params.submittedWorkflow,
+      promptId: params.promptId,
+      status: params.status || 'completed',
+      outputVideoUrl: params.outputVideoUrl,
+      outputFilename: params.outputFilename,
+      shotSpec: JSON.parse(JSON.stringify(params.shot)),
+      isLegacy: false,
     };
 
     const updated = [revision, ...existing];
@@ -79,6 +151,25 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
     persistRevisions(updated);
     logger.action(`Saved shot revision #${versionNumber} ("${revision.note}")`, { revisionId: revision.id });
     return revision.id;
+  },
+
+  saveRevision: (shot, compiledPrompt, outputVideoUrl, note) => {
+    return get().saveRevisionV2({
+      shot,
+      engine: shot.targetModel === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5',
+      templateId: 'unspecified',
+      templateHash: '',
+      bindingSchema: 1,
+      mode: 't2v',
+      profile: 'final',
+      seed: shot.seed ?? 42,
+      prompt: compiledPrompt,
+      negative: shot.negativePrompt,
+      promptSource: 'compiled',
+      submittedWorkflow: {},
+      outputVideoUrl,
+      note,
+    });
   },
 
   setActiveRevision: (id) => {

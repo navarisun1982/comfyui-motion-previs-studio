@@ -46,3 +46,39 @@ README, AGENTS, new living ARCHITECTURE, DECISIONS (ADR-005…009), RISK_REGISTE
 ### Not done in S0 (by design)
 
 See the deferred table in [TASKS.md](TASKS.md).
+
+## 2026-10-23 — S1 Truthful Pipeline (`stage/01-truthful-pipeline`)
+
+**Goal:** Replace broken hand-crafted graphs with a truthful, template-driven generation pipeline based on real ComfyUI API-format workflows and validated binding schemas.
+
+### Accomplishments
+
+1. **Pipeline Core (`src/pipeline/`):**
+   - Pure functional binding (`templateBinder.ts`) with frame snapping (`8n+1` for LTX) and quality profile handling.
+   - Strict Zod validation and fingerprint verification (`templateVerifier.ts`) preventing injection into altered or disconnected nodes.
+   - Versioned patcher registry (`timelinePatchers.ts`) for deterministic timeline injection (`ltx.firstFrameSegment@1`, `h3.firstFrameCharacter@1`).
+   - Deterministic SHA-256 and JSON stable hashing (`hash.ts`).
+   - In-memory registry (`templateRegistry.ts`) and automatic Vite-based template discovery (`templateLoader.ts`).
+   - Scoped prompt override store with staleness detection (`promptOverride.ts`).
+   - Offline Package Mode exporter (`packageExporter.ts`) generating standalone API workflows and manifests.
+   - Provenance tracking with `ShotRevisionV2` capturing exact workflow, seed, and template hashes (`revisionTypes.ts`, `useHistoryStore.ts`).
+
+2. **Client & Execution Orchestration:**
+   - ComfyClient upgraded to v2 (`comfyClient.ts`): multiplexed WebSocket listeners filtered by `prompt_id`, content-addressed uploads (`uploadContentAddressed`), targeted output extraction by output node ID, and job cancellation via `/interrupt`.
+   - Singleton `JobRunner` (`jobRunner.ts`): orchestrates preflight, asset upload, binding, prompt submission, progress tracking, and single-revision persistence.
+   - Dead code removal: deleted `src/services/directorExecutor.ts`.
+   - Adapters updated: marked `buildWorkflow` deprecated and honest capability tiers documented.
+
+3. **UI Polish & Controls (`ComfyExecutionPanel.tsx`):**
+   - Connected to `defaultJobRunner.run()`.
+   - Read-only target engine badge with open weights status and "Change Engine" navigation link.
+   - Quality Profile selector (`Draft` vs `Final`).
+   - Cancel generation button wired to active job handle.
+   - "Export Generation Package (Offline Mode)" button for offline or remote execution.
+   - Backward-compatible revision diff inspection in `DirectorDiffInspector.tsx`.
+
+4. **Verification:**
+   - Test suite: 21 test files, 126 tests passing in 4.4s (`npm run test`).
+   - TypeScript & build: 0 errors across main project and scripts (`npm run build`).
+   - In-browser UI: verified and screenshotted at `http://127.0.0.1:5173`.
+
