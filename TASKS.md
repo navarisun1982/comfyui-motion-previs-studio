@@ -175,6 +175,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
   - Motion Fidelity Comparison block in parameter diff drawer comparing overall score, detected movement, directional match, and speed match
 - [x] Unit test suite (`tests/motionFidelity.test.ts`): 13 tests covering expected vector mapping, speed scaling, motion classification, block matching, scoring, drift detection, static shot penalties, and store persistence
 - [x] Full validation: 28 test files, 186/186 tests passing in 4.8s; production build green with 0 errors in 10.2s; in-browser UI verified via subagent
+- [x] Owner approval → merge `stage/08-motion-fidelity` to `master` (`f8e3781`)
 
 ## Deferred findings (tracked for later stages)
 
