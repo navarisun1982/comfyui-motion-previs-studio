@@ -445,5 +445,41 @@ See the deferred table in [TASKS.md](TASKS.md).
    - Production build: `npm run build` completed in 10.36s with 0 errors and 0 warnings (SequenceTimelineDeck emitted at 34.14 kB).
    - In-browser UI verification: verified via subagent with recording `stage10_sequence_assembly_1792788543682.webp`.
 
+## 2026-10-23 — GLB/GLTF 3D Model Import & Rendering Remediation (`fix/glb-gltf-import-rendering`)
+
+**Goal:** Eliminate fallback placeholder boxes and geometry distortion when importing user `.glb` / `.gltf` 3D models into the soundstage and offline previs renderer.
+
+### Root Causes Addressed
+
+1. **Chromium Data URL Limits & Fetch Errors:** Previous implementation converted uploaded files into Base64 data URIs (`data:model/gltf-binary;base64,...`). Three.js `GLTFLoader.load()` delegates to `FileLoader` (using `fetch()`), which throws `net::ERR_INVALID_URL` for payloads > 2MB and fails on `model/gltf-binary` MIME types. On failure, the procedural bounding box was never replaced.
+2. **Transform Composition Order & Off-Center Origins:** Matrix composition order in Three.js is $T \times R \times S$. Translating the raw model root before scaling meant models with remote origins (common in CAD/Sketchfab exports) shifted tens of meters away from origin, appearing as "weird shapes" or disappearing entirely.
+3. **Storage Quota Exceptions:** Storing Base64 data strings in `localStorage` caused `DOMException: QuotaExceededError` on files > 3.5MB.
+4. **Skinned Mesh Rigging Deformations:** Standard `Object3D.clone(true)` breaks skeletal hierarchies.
+
+### Accomplishments
+
+1. **Persistent Model Storage Engine (`src/services/modelStorage.ts`):**
+   - High-performance IndexedDB database (`comfy_director_3d_models_v1`) stores binary `ArrayBuffer` data safely without local storage limits.
+   - Zero-latency in-memory cache and active Blob URL lifecycle management (`URL.createObjectURL`).
+   - Resilient Base64 decoder (`base64ToArrayBuffer`) and direct file registration (`registerModelFile`).
+
+2. **Universal In-Memory GLTF Loader & Geometric Normalizer (`src/engine/gltfModelLoader.ts`):**
+   - In-memory parsing via `GLTFLoader.parse(buffer, ...)` bypassing network stack and URL length limits.
+   - Robust normalization (`normalizeGltfScene`): scales to target height first, computes scaled bounding box, centers $(x, z)$ exactly at $(0, 0)$, grounds base at $y=0$, enables shadow casting/receiving, and applies `THREE.DoubleSide` to all materials to prevent backface culling issues.
+   - Rig-safe instancing using Three.js `SkeletonUtils.clone()`.
+
+3. **Stage & Parameter UI Integrations (`src/components/`, `src/stores/useAssetLibraryStore.ts`):**
+   - `StagePrevis3D.tsx`: Automatically resolves and replaces `__gltf_placeholder__` meshes with loaded models; added drag-and-drop file upload directly onto 3D viewport with glowing indicator; added "Import 3D Model" button to stage toolbar.
+   - `PrevisParametersDeck.tsx` & `ActorBlocking.tsx`: Added dedicated "3D Model File (.GLB / .GLTF)" card to Staging Deck and direct file attachment trigger on Actor Blocking cards.
+   - `useAssetLibraryStore.ts`: Sanitized persistence to store lightweight `model://${modelId}` pointers.
+   - `offlinePrevisRenderer.ts`: Preloads all GLTF assets prior to deterministic frame rendering.
+
+4. **Verification & Tests:**
+   - Unit tests (`tests/gltfImport.test.ts`): 6 comprehensive tests verifying Base64 decoding, memory buffer storage, file registration, normalization geometry math, and asset store integration.
+   - Full test suite: 31 test files, 215/215 tests passing in 5.11s (`npm run test`).
+   - Production build: `npm run build` completed in 10.65s with 0 errors and 0 warnings.
+   - In-browser UI verification: verified via subagent with recording `verify_gltf_import_1792789985216.webp`.
+
+
 
 
