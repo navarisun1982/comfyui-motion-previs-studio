@@ -13,20 +13,8 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S3 Editing safety | `stage/03-editing-safety` | ✅ merged to master (`65978dd`) | One gesture = one undo step; first run is clear |
 | S4 Geometric conditioning | `stage/04-geometric-conditioning` | ✅ merged to master (`cb27783`) | Directed camera move rendered via deterministic offline previs & conditioned via IC-LoRA |
 | S5 Performance | `stage/05-performance` | ✅ merged to master (`9a602b5`) | Smooth 60 FPS drag; main chunk 606 kB (down from 1.76 MB); 2 WebGL contexts |
-| S6 UX overhaul | `stage/06-ux-overhaul` | ⬜ | Clean at 1280×720 / 1440×900 / 1920×1080 / 2560×1440 |
-
-## S5 checklist (Performance & 60 FPS Previs Engine)
-
-- [x] Bundle Splitting & Code Chunking (`vite.config.ts`): manual vendor chunking for `vendor-three` (688 kB), `vendor-react` (224 kB), `vendor-icons` (38 kB), `vendor-muxer` (31 kB).
-- [x] Lazy Loading with React.lazy & Suspense (`src/App.tsx`): 10 dynamic chunks on-demand (`ComfyExecutionPanel`, `ShotBible`, `VFXVideoDeck`, `DirectorDiffInspector`, `InAppDebugger`, `ComfyConnectionModal`, `CinematicPresetsModal`, `AssetLibraryModal`, `WelcomeModal`).
-- [x] Massive main chunk reduction: main application chunk slashed by **65%**, from **1.76 MB down to 606 kB** (far exceeding the "well under 1.67 MB" target).
-- [x] Off-the-hot-path Debounced Persistence (`src/stores/useShotStore.ts`): eliminated synchronous JSON serialization and `localStorage` I/O during continuous 60 FPS pointer drag and slider scrub events; immediate flushes on `endGesture()`, `switchShot()`, `loadShot()`, `resetToDefault()`, and `window.beforeunload`.
-- [x] WebGL Dual-Viewport Context Halving (`src/components/StagePrevis3D.tsx`): lazily creates only the requested active viewport renderer (`stage` vs `viewfinder`), eliminating redundant hidden renderers and cutting active contexts from 4 down to 2; calls `forceContextLoss()` and `controls.dispose()` on unmount.
-- [x] Zustand Fine-Grained & `useShallow` Selector Optimization across components (`App.tsx`, `AssetLibraryModal.tsx`, `DirectorDiffInspector.tsx`, `CinematicPresetsModal.tsx`) to avoid whole-store re-render subscriptions.
-- [x] Unit test suite (`tests/performance.test.ts`): 3 tests verifying zero synchronous writes on hot path, gesture release flush, immediate flush triggers, and manual flush API.
-- [x] Full verification: 26 test files, 163/163 tests passing in 4.5s; production build green with 0 errors or warnings in 10s; in-browser UI verified via subagent.
-
-| S7 Takes + queue | `stage/07-takes-queue` | ⬜ | (grill first) |
+| S6 UX overhaul | `stage/06-ux-overhaul` | ✅ merged to master (`4094de4`, `eddcb9f`) | Clean at 1280×720 / 1440×900 / 1920×1080 / 2560×1440; responsive sidebars |
+| S7 Takes + queue | `stage/07-takes-queue` | 🟡 ready for review | Multi-seed take generator, queue runner, contact sheet, circling hero takes, and A/B comparison |
 | S8 Motion fidelity | `stage/08-motion-fidelity` | ⬜ | (grill first) |
 | S9 NL → ShotSpec | `stage/09-nl-shotspec` | ⬜ | (grill first) |
 | S10 Sequence | `stage/10-sequence` | ⬜ | (grill first) |
@@ -144,6 +132,25 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 - [x] Eliminated all native blocking `alert()` calls across `VFXVideoDeck.tsx`, `ShotBible.tsx`, and `ComfyExecutionPanel.tsx`, replacing them with `logger.warn`/`logger.error` and styled in-app dismissible banners
 - [x] Full test pass (26 test files, 163/163 tests green) and production build pass (0 errors, 0 warnings)
 - [x] Multi-resolution browser verification via subagent across 1280×720, 1440×900, and 1920×1080
+- [x] Owner approval → merge `stage/06-ux-overhaul` to `master` (`4094de4`, `eddcb9f`)
+
+## S7 checklist (Takes Grid & Generation Queue)
+
+- [x] Multi-seed take generator (`src/pipeline/generationQueue.ts`): batch count selector (1, 3, 5 takes) with sequential (`+1`) and random seed strategies
+- [x] State-machine generation queue processor: manages `queued`, `running`, `completed`, `failed`, `cancelled` states, auto-advances sequentially through jobs, and supports per-item cancellation and clearing the queue
+- [x] Reactive Zustand queue store (`src/stores/useQueueStore.ts`) synchronizing queue state with UI components
+- [x] Takes Contact Sheet / Grid (`src/components/TakesGrid.tsx`): visual card grid for all takes of the active shot with filter to view all shots, thumbnail video previews, and seed/engine/mode/profile badges
+- [x] Circling hero takes: `isCircled` toggle (⭐) and 0–5 star ratings persisted safely in `useHistoryStore.ts`
+- [x] Direct active plate assignment: `setTakeAsActivePlate` in `src/stores/useShotStore.ts` injecting selected take video into the 3D Soundstage and Video Deck
+- [x] Synchronized A/B player comparison modal (`src/components/TakeComparisonModal.tsx`):
+  - Side-by-side dual viewport view
+  - Split wipe comparison slider with interactive draggable divider handle
+  - Master synchronized transport controls: simultaneous play/pause, synchronized timeline scrubber, speed presets (`0.25x`, `0.5x`, `1.0x`), Spacebar shortcut, and loop toggle
+  - Staging & camera parameter deviation traceability table
+  - Direct "Circle Take" and "Set as Active Plate" actions for both Take A and Take B
+- [x] Unit test suite (`tests/takesAndQueue.test.ts`): 10 tests covering batch enqueueing, seed strategies, cancellation, queue clearing, retries, take numbering, circling, rating, plate assignment, and parameter diffing
+- [x] Full test suite pass (27 test files, 173/173 tests passing in 4.7s) and production build pass (`npm run build` in 10.5s, 0 errors, 0 warnings)
+- [x] In-browser UI verification via subagent with screenshots (`takes_contact_sheet_1792784795432.png`)
 
 ## Deferred findings (tracked for later stages)
 

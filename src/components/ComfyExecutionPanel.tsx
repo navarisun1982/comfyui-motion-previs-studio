@@ -7,6 +7,7 @@ import { logger } from '../stores/useLogStore';
 import { defaultJobRunner, ActiveJobHandle } from '../pipeline/jobRunner';
 import { exportOfflinePackageForShot } from '../pipeline/packageExporter';
 import { QualityProfile, GenerationMode } from '../pipeline/templateTypes';
+import { TakesGrid } from './TakesGrid';
 import {
   Play,
   Upload,
@@ -882,6 +883,15 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
           </div>
         </div>
       </div>
+
+      {/* SECTION 3: TAKES CONTACT SHEET & GENERATION QUEUE */}
+      <TakesGrid
+        currentProfile={profile}
+        currentMode={effectiveMode}
+        icLoraModel={icLoraModel}
+        icLoraStrength={icLoraStrength}
+        onNotice={(notice) => setPanelNotice(notice)}
+      />
     </div>
   );
 };

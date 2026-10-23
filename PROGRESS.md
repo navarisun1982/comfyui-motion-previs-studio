@@ -289,3 +289,47 @@ See the deferred table in [TASKS.md](TASKS.md).
    - Full test suite: 26 test files, 163/163 tests passing in 4.78s (`npm run test`).
    - Production build: `npm run build` completed in 9.98s with 0 errors and 0 warnings.
    - In-browser UI verification: tested multi-resolution layouts (1280×720, 1440×900, 1920×1080), sidebar collapse/expand animations, dynamic scene updates in the header, timeline trimming/volume, and in-app banner dismissal.
+
+## 2026-10-23 — S7 Takes Grid & Generation Queue (`stage/07-takes-queue`)
+
+**Goal:** Provide professional directorial take management: multi-seed batch generation queue, takes contact sheet grid, hero take circling (⭐), direct shot plate assignment, and synchronized side-by-side A/B player comparison.
+
+### Accomplishments
+
+1. **Multi-Seed Take Generator & Generation Queue (`src/pipeline/generationQueue.ts`, `src/stores/useQueueStore.ts`):**
+   - Implemented `GenerationQueueManager` with sequential (`+1`) and random seed strategies.
+   - Batch queue controls: configurable take batching (1, 3, 5 takes).
+   - Robust queue lifecycle state machine: tracks `queued`, `running`, `completed`, `failed`, `cancelled` statuses.
+   - Auto-advancing execution loop: sequentially runs items through `defaultJobRunner.run()`, preserves full `shotSpec` context, updates real-time node progress, and automatically proceeds to next queued item.
+   - Per-item cancellation and full queue clearing actions (`cancelItem`, `clearQueue`, `clearCompleted`).
+   - Created reactive Zustand store `useQueueStore` for synchronized UI state.
+
+2. **Takes Contact Sheet / Grid (`src/components/TakesGrid.tsx`):**
+   - Embedded directly in `ComfyExecutionPanel.tsx` as Section 3.
+   - Visual card grid displaying all generated takes for the active shot, with quick filter toggle to view all shots across the project.
+   - Detailed metadata on every take: Take #, seed number, target engine badge, generation mode badge, quality profile badge, and timestamp.
+   - Real-time active queue progress list with live node titles, progress bars, and cancel buttons.
+
+3. **Circling Hero Takes & Take Ratings (`src/stores/useHistoryStore.ts`, `src/pipeline/revisionTypes.ts`):**
+   - Extended `ShotRevisionV2` with `takeNumber`, `isCircled` (⭐ circled hero take), and `rating` (0–5).
+   - Added `toggleCircledTake(id)`, `setTakeRating(id, rating)`, and `getTakesForShot(shotId)` with safe persistent storage serialization.
+
+4. **Direct Active Plate Assignment (`src/stores/useShotStore.ts`):**
+   - Created `setTakeAsActivePlate(videoUrl, fileName)` in `useShotStore`.
+   - Allows the director to click "Set as Plate" on any generated take to immediately inject it as the active background plate in the 3D Soundstage, Timeline, and VFX Video Deck.
+
+5. **Synchronized A/B Player Comparison Modal (`src/components/TakeComparisonModal.tsx`):**
+   - Side-by-side dual viewport view and interactive split wipe comparison slider with draggable divider handle.
+   - Master synchronized transport controls:
+     - Simultaneous play/pause (with Spacebar keyboard shortcut).
+     - Synchronized scrubbing slider updating both video viewports in real-time.
+     - Playback speed presets: `1x`, `0.5x`, `0.25x` slow motion for forensic motion analysis.
+     - Audio mute and loop toggles with millisecond timecode display.
+   - Integrated parameter traceability table highlighting differences in seed, engine, mode, profile, and camera movement between Take A and Take B.
+   - Instant "Circle Take" and "Set as Active Plate" actions directly from the comparison modal.
+
+6. **Verification & Tests:**
+   - Unit tests (`tests/takesAndQueue.test.ts`): 10 tests verifying batch enqueueing, seed strategies, cancellation, queue clearing, retries, take numbering, circling, rating, plate assignment, and parameter diffing.
+   - Full test suite: 27 test files, 173/173 tests passing in 4.74s (`npm run test`).
+   - Production build: `npm run build` completed in 10.51s with 0 errors and 0 warnings.
+   - In-browser UI verification: verified ComfyUI Studio panel loading, multi-seed queue controls (1, 3, 5 takes), seed mode switching, and takes contact sheet.

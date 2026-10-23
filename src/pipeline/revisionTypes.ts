@@ -28,4 +28,7 @@ export interface ShotRevisionV2 {
   outputFilename?: string;
   shotSpec: ShotSpec;
   isLegacy?: boolean;
+  isCircled?: boolean;
+  rating?: number;
+  takeNumber?: number;
 }

@@ -32,6 +32,9 @@ export interface SaveRevisionParams {
   outputVideoUrl?: string;
   outputFilename?: string;
   note?: string;
+  isCircled?: boolean;
+  rating?: number;
+  takeNumber?: number;
 }
 
 interface HistoryState {
@@ -44,6 +47,9 @@ interface HistoryState {
   saveRevision: (shot: ShotSpec, compiledPrompt: string, outputVideoUrl?: string, note?: string) => string;
   setActiveRevision: (id: string | null) => void;
   setComparisonRevision: (id: string | null) => void;
+  toggleCircledTake: (id: string) => void;
+  setTakeRating: (id: string, rating: number) => void;
+  getTakesForShot: (shotId: string) => ShotRevision[];
   deleteRevision: (id: string) => void;
   clearHistory: () => void;
   getRevision: (id: string) => ShotRevision | undefined;
@@ -135,12 +141,15 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
       outputFilename: params.outputFilename,
       shotSpec: JSON.parse(JSON.stringify(params.shot)),
       isLegacy: false,
+      isCircled: params.isCircled ?? false,
+      rating: params.rating ?? 0,
+      takeNumber: params.takeNumber ?? versionNumber,
     };
 
     const updated = [revision, ...existing];
     set({ revisions: updated, activeRevisionId: revision.id });
     persistRevisions(updated);
-    logger.action(`Saved shot revision #${versionNumber} ("${revision.note}")`, { revisionId: revision.id });
+    logger.action(`Saved shot revision #${versionNumber} (Take ${revision.takeNumber}: "${revision.note}")`, { revisionId: revision.id });
     return revision.id;
   },
 
@@ -171,6 +180,31 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
   setComparisonRevision: (id) => {
     logger.action(`Comparison diff target set to ${id || 'none'}`);
     set({ comparisonRevisionId: id });
+  },
+
+  toggleCircledTake: (id) => {
+    const updated = get().revisions.map((r) => {
+      if (r.id !== id) return r;
+      const nextCircled = !r.isCircled;
+      logger.action(`${nextCircled ? 'Circled' : 'Uncircled'} take ${r.takeNumber ?? r.version}`, { revisionId: id });
+      return { ...r, isCircled: nextCircled };
+    });
+    set({ revisions: updated });
+    persistRevisions(updated);
+  },
+
+  setTakeRating: (id, rating) => {
+    const clamped = Math.max(0, Math.min(5, Math.round(rating)));
+    const updated = get().revisions.map((r) => {
+      if (r.id !== id) return r;
+      return { ...r, rating: clamped };
+    });
+    set({ revisions: updated });
+    persistRevisions(updated);
+  },
+
+  getTakesForShot: (shotId) => {
+    return get().revisions.filter((r) => r.shotId === shotId);
   },
 
   deleteRevision: (id) => {

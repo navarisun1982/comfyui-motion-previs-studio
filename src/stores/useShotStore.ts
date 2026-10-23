@@ -59,6 +59,7 @@ interface ShotState {
   setNegativePrompt: (neg: string) => void;
   setReferenceImage: (ref?: ShotSpec['referenceImage']) => void;
   updateVfxReference: (updates: Partial<NonNullable<ShotSpec['vfxReference']>>) => void;
+  setTakeAsActivePlate: (videoUrl: string, fileName?: string) => void;
   
   // UI Inspector Tab Coordination
   activeDeckTab: 'camera' | 'staging' | 'environment' | 'atmosphere' | 'vfx';
@@ -772,6 +773,29 @@ export const useShotStore = create<ShotState>((set, get) => {
       const vfxReference = { ...current, ...updates };
       const updated: ShotSpec = { ...shot, vfxReference };
       logger.action(`Updated VFX reference plate (${vfxReference.referenceMode}, depth: ${vfxReference.depthGuidanceWeight})`);
+      commitShot(updated);
+    },
+
+    setTakeAsActivePlate: (videoUrl, fileName) => {
+      const { shot } = get();
+      const current = shot.vfxReference || {
+        referenceMode: 'full-scene' as const,
+        depthGuidanceWeight: 0.8,
+        edgeFidelity: 0.6,
+        motionRetention: 0.7,
+        trimStartSeconds: 0,
+        trimEndSeconds: shot.durationSeconds,
+      };
+      const resolvedFileName = fileName || `Take_Plate_${shot.name.replace(/\s+/g, '_')}.mp4`;
+      const vfxReference = {
+        ...current,
+        videoUrl,
+        fileName: resolvedFileName,
+        enabled: true,
+        referenceMode: 'full-scene' as const,
+      };
+      const updated: ShotSpec = { ...shot, vfxReference };
+      logger.action(`Set Take as active shot plate: "${resolvedFileName}"`);
       commitShot(updated);
     },
 
