@@ -29,7 +29,9 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: 'jsdom',
+    // Pure engine/math tests run in plain Node (fast). Files that need a DOM
+    // opt in with a `// @vitest-environment jsdom` pragma on their first line.
+    environment: 'node',
     setupFiles: [],
   },
 });

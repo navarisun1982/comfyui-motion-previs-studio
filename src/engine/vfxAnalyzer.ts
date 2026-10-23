@@ -1027,7 +1027,7 @@ export function downloadBlob(blob: Blob, filename: string): void {
 export function exportTrackingData(result: VfxAnalysisResult, filename = 'camera_motion_and_tracking.json'): void {
   const data = {
     version: '1.0',
-    generator: 'AI Director Studio (Motion Previs & VFX Pipeline)',
+    generator: 'ComfyUI Motion Previs Studio (Motion Previs & VFX Pipeline)',
     timestamp: new Date().toISOString(),
     durationSeconds: result.durationSeconds,
     frameDimensions: { width: result.frameWidth, height: result.frameHeight },

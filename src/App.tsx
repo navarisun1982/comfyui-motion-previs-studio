@@ -99,7 +99,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen flex-col bg-[#08090d] text-slate-100 font-sans overflow-hidden">
-      {/* Top Main Navigation Bar matching Motion Previs Studio */}
+      {/* Top Main Navigation Bar */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4 bg-[#0d0f17] z-20">
         {/* Left: Project & Scene Branding */}
         <div className="flex items-center gap-3">
@@ -110,10 +110,7 @@ export default function App() {
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-display font-bold text-xs tracking-wider text-white">
-                  Motion Previs Studio
-                </span>
-                <span className="rounded bg-blue-500/20 px-1 py-0.2 font-mono text-[8px] font-bold text-blue-400 border border-blue-500/30">
-                  AI DIRECTOR
+                  <span className="text-blue-400">ComfyUI</span> Motion Previs Studio
                 </span>
               </div>
             </div>

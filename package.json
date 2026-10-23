@@ -1,5 +1,6 @@
 {
-  "name": "comfy-ai-director-studio",
+  "name": "comfyui-motion-previs-studio",
+  "productName": "ComfyUI Motion Previs Studio",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -11,7 +12,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "desktop": "tsc -b && vite build && electron .",
+    "desktop": "npm run build && electron .",
     "start:desktop": "electron ."
   },
   "dependencies": {

@@ -43,10 +43,10 @@ export function generateBlenderCameraScript(shot: ShotSpec): string {
   );
 
   return `"""
-AI Director Studio - Blender Camera & Staging Setup
+ComfyUI Motion Previs Studio - Blender Camera & Staging Setup
 Shot: ${shot.name}
 Duration: ${duration}s | Focal Length: ${focalLengthNum}mm | FPS: ${fps}
-Generated automatically by AI Director Studio.
+Generated automatically by ComfyUI Motion Previs Studio.
 Run this script inside Blender Scripting Workspace or via:
 blender --python script.py
 """
@@ -122,7 +122,7 @@ for act in actors:
             for kp in fcurve.keyframe_points:
                 kp.interpolation = 'BEZIER'
 
-print(f"[AI Director Studio] Successfully imported camera and {len(actors)} staging actors for shot '${shot.name}'.")
+print(f"[ComfyUI Motion Previs Studio] Successfully imported camera and {len(actors)} staging actors for shot '${shot.name}'.")
 `;
 }
 
@@ -167,7 +167,7 @@ export function generateRunwayCameraJson(
       focalLength: shot.camera.lens.focalLength,
       frameRate: shot.frameRate,
       actorsCount: shot.actors.length,
-      generator: 'AI Director Studio - Runway Gen-3 Exporter',
+      generator: 'ComfyUI Motion Previs Studio - Runway Gen-3 Exporter',
     },
   };
 }
@@ -202,7 +202,7 @@ export function generateKlingCameraJson(
       lighting: shot.lighting.style,
     },
     active_passes: layers,
-    source: 'AI Director Studio (Kling AI Bridge)',
+    source: 'ComfyUI Motion Previs Studio (Kling AI Bridge)',
   };
 }
 
@@ -320,7 +320,7 @@ export function generateSeedanceProductionPack(
 ): Record<string, any> {
   return {
     version: '2.0-seedance',
-    generator: 'AI Director Studio - Production Matrix Pipeline',
+    generator: 'ComfyUI Motion Previs Studio - Production Matrix Pipeline',
     timestamp: new Date().toISOString(),
     shotSpec: shot,
     cameraBundle: exportCameraPoseBundle(shot),

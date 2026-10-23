@@ -1,181 +1,65 @@
-# AI Director Studio — Technical Architecture & System Design
+# Architecture — ComfyUI Motion Previs Studio
 
-## 1. Architectural Philosophy: Direct the Shot, Not the Prompt
-
-Most AI video tools reduce directorial intent to arbitrary string manipulation ("cinematic drone shot, 8k, photorealistic"). **AI Director Studio** inverts this relationship:
-1. **The Director controls cinematic physics**: Camera placement, focal length, trajectory vectors (pan, tilt, pedestal, dolly, truck, zoom, roll, orbit), actor blocking, movement pacing, and lighting contrast.
-2. **The Studio compiles cinematic intent**: The structured `ShotSpec` is translated deterministically into model-specific guidance — combining precise workflow conditioning (e.g. latent guides, motion LoRAs, IC-LoRA) and specialized prompt syntax.
-3. **The Studio versions every directorial decision**: Through **Director Diff**, directors can iterate on camera speed or lighting without losing their previous shot parameters or generated video artifacts.
+> **Living document.** Describes the system *as it is now*, plus the target shape per remediation stage.
+> The original SVG-era design lives in [`archive/ARCHITECTURE_v1_svg_era.md`](archive/ARCHITECTURE_v1_svg_era.md).
+> Last updated: S0 (2026-10-23).
 
 ---
 
-## 2. High-Level System Architecture
+## 1. Runtime topology
 
 ```mermaid
-graph TD
-    subgraph UI ["User Interface Layer (React / Vite / Tailwind)"]
-        UI_Input["Reference Image & Frame Input"]
-        UI_Previs["2D Cinematic Stage Previs (SVG)"]
-        UI_Timeline["Director Timeline & Event Sequencer"]
-        UI_Controls["Camera & Actor Control Deck"]
-        UI_Diff["Director Diff Inspector"]
-    end
+flowchart LR
+  subgraph Renderer["Renderer (React 19 + Zustand)"]
+    UI["Components: Stage / Camera Deck / VFX deck / ComfyUI panel / Diff"]
+    Stores["Stores: useShotStore, useHistoryStore, useComfyStore, useLogStore, useAssetLibraryStore"]
+    Engine["Engine: prompt compiler, previs math, procedural 3D, VFX analysis, exporters"]
+    Adapters["Adapters: LTX-2.5, MiniMax H3, Seedance"]
+    Client["comfyClient (REST + WebSocket)"]
+  end
+  subgraph Electron["Electron main (desktop only)"]
+    Main["main.cjs: window, CORS header injection (removed in S2)"]
+  end
+  Comfy["ComfyUI :8188 (user-run)"]
+  LLM["LLM providers (Ollama / Gemini / OpenAI-compatible)"]
 
-    subgraph State ["Client State Management (Zustand & Zod)"]
-        ShotSpecStore["ShotSpec Store (Zod Validated)"]
-        RevisionHistory["Shot Version & Diff Registry"]
-        JobStore["Job Status & Execution Queue"]
-    end
-
-    subgraph Engine ["Director Engine Core"]
-        PrevisEngine["Deterministic 2D Geometry Engine"]
-        Compiler["Capability-Aware Prompt & Parameter Compiler"]
-        AdapterManager["Model Capability Adapter Manager"]
-    end
-
-    subgraph Adapters ["Model Adapters"]
-        LTXAdapter["LTX-2.5 Video Adapter (Open Weights / VFX)"]
-        MiniMaxAdapter["MiniMax H3 Adapter"]
-        MockAdapter["Deterministic Mock Adapter (Test / Offline)"]
-    end
-
-    subgraph Backend ["ComfyUI Bridge & Execution Client"]
-        ComfyClient["ComfyUI REST & WebSocket Client"]
-        UploadHandler["Image & Asset Uploader (/upload/image)"]
-        WSWatcher["WebSocket Event Streamer (/ws)"]
-        ResultFetcher["Output Retrieval & Cache (/view, /history)"]
-    end
-
-    subgraph ComfyServer ["Local ComfyUI Backend (Port 8188)"]
-        ComfyAPI["ComfyUI HTTP/WS API"]
-        ExecutionGraph["Dynamic Execution Graph (Prompt)"]
-        GPU["RTX 3090 (24GB VRAM)"]
-    end
-
-    UI --> State
-    State --> Engine
-    Engine --> Adapters
-    Adapters --> Backend
-    Backend <--> ComfyServer
-    Backend --> State
+  UI --> Stores --> Engine
+  Stores --> Adapters --> Client --> Comfy
+  Engine --> LLM
+  Main -. hosts .- Renderer
 ```
 
----
+- **Dev (browser):** Vite at `127.0.0.1:5173` proxies `/api/comfy` → `:8188` and `/ws` → `ws://:8188`.
+- **Desktop:** Electron loads `dist/index.html` (or the dev server if it is running; replaced by an explicit `--dev` flag in S2).
+- **Persistence:** browser/Electron `localStorage` (keys `comfy_ai_director_*`, `ai_director_*`, `aids.*`). Electron `userData` is pinned to `%APPDATA%\comfy-ai-director-studio`.
 
-## 3. The `ShotSpec` Canonical Schema
+## 2. Core data model
 
-The `ShotSpec` is the central immutable contract representing a directed shot:
+`ShotSpec` (`src/types/shotspec.ts`) is the canonical description of a shot: camera (lens, framing, angle, movement, keyframes), actors and objects with trajectories, environment, duration/fps/aspect, optional reference image or video plate. Revisions (`useHistoryStore`) snapshot ShotSpecs for Director Diff.
 
-```typescript
-interface ShotSpec {
-  id: string;
-  name: string;
-  version: number;
-  timestamp: number;
-  
-  // Canvas & Timing
-  aspectRatio: "16:9" | "9:16" | "2.39:1" | "1:1";
-  durationSeconds: number; // e.g. 3.0 to 10.0s
-  frameRate: number; // default 24
-  
-  // Reference Assets
-  referenceImage?: {
-    filename: string;
-    previewUrl: string;
-    subfolder?: string;
-  };
-  
-  // Camera Specification
-  camera: {
-    lens: {
-      focalLengthMm: number; // e.g. 24mm, 35mm, 50mm, 85mm
-      sensorSize: "full-frame" | "super35" | "anamorphic";
-      aperture: "f/1.4" | "f/2.8" | "f/5.6" | "f/11";
-    };
-    shotType: "extreme-wide" | "wide" | "medium" | "close-up" | "extreme-close-up";
-    angle: "eye-level" | "low-angle" | "high-angle" | "dutch-angle" | "overhead-gods-eye";
-    movement: {
-      type: "static" | "pan" | "tilt" | "dolly" | "truck" | "pedestal" | "zoom" | "orbit" | "handheld" | "whip-pan";
-      direction: "left-to-right" | "right-to-left" | "push-in" | "pull-out" | "crane-up" | "crane-down" | "clockwise" | "counter-clockwise";
-      speed: "slow" | "medium" | "rapid" | "dynamic-easing";
-      startPosition: { x: number; y: number; z: number }; // normalized 0..100
-      endPosition: { x: number; y: number; z: number };
-    };
-  };
+## 3. Generation path (current, to be replaced in S1)
 
-  // Actor & Subject Blocking
-  actors: Array<{
-    id: string;
-    name: string;
-    token: string; // e.g. "a cybernetic detective"
-    trajectory: {
-      startTimeSeconds: number;
-      startPosition: { x: number; y: number }; // 0..100
-      endPosition: { x: number; y: number };
-      actionDescription: string; // e.g. "walks cautiously forward, stops and looks up"
-    };
-  }>;
+1. The prompt compiler turns a ShotSpec into a prompt bundle.
+2. An adapter builds a ComfyUI graph **in code** and queues it via `/prompt`.
+3. Progress arrives over WebSocket; the output is fetched via `/view`.
 
-  // Environment & Lighting
-  lighting: {
-    style: "cinematic-natural" | "high-key" | "low-key-film-noir" | "neon-cyberpunk" | "golden-hour" | "moonlight-fog";
-    direction: "front" | "side-key" | "rim-backlit" | "top-down";
-    contrast: "soft" | "hard" | "dramatic";
-  };
+**Known defects (fixed in S1):** the graph is hand-built (wrong node inputs; video fed to `LoadImage`); the adapter recompiles the prompt instead of using the displayed one; the seed is randomized and not stored; sampler settings are wrong for the distilled model; duplicate revisions; fixed polling timeout.
 
-  sceneDescription: string;
-  negativePrompt?: string;
-  
-  // Execution Engine Constraints
-  targetModel: "ltx-2.5" | "minimax-h3" | "mock-engine";
-}
-```
+## 4. Target shape by stage
 
----
+| Stage | Architectural change |
+|---|---|
+| S1 | `workflows/templates/*.api.json` + `*.binding.json` → **binding engine** with fingerprint checks; single **JobRunner** (prompt-id-filtered WS, cancel via `/interrupt`, no fixed timeout); prompt override model; revisions store seed + exact submitted workflow + engine/template id; Package mode. |
+| S2 | Preload API (`window.aids.http` / `window.aids.llm`) via `net.fetch` in main; `safeStorage` for keys; strict CSP; project folders (`project.aids.json` + `media/`) with Zod-versioned schema + migrations; IndexedDB fallback in browser. |
+| S3 | Per-shot undo/redo with structurally shared snapshots; Welcome screen; computed project info. |
+| S4 | Deterministic offline renderer (fixed timestep, 8n+1 frames) → layout + depth MP4 via WebCodecs + `mp4-muxer`. |
+| S5 | Selector subscriptions, debounced persistence off the hot path, `React.lazy`, WebGL context/disposal audit. |
 
-## 4. Model Capability Adapter Architecture
+## 5. Known structural debt (tracked)
 
-Different video models offer varying degrees of native control:
-
-| Directing Capability | LTX-2.5 Adapter | MiniMax H3 Adapter | Mock Adapter |
-|:---|:---|:---|:---|
-| **Camera Movement Direction** | **Native** (via camera keywords + motion guides) | **Approximated** (via structured cinematic syntax) | Simulated |
-| **Focal Length & Shot Size** | **Native** (Gemma CLIP lens tokens) | **Approximated** | Simulated |
-| **Actor Trajectory Timing** | **Native** (Segment lengths & prompt relay) | **Approximated** | Simulated |
-| **Reference Image Start-Frame** | **Native** (Image conditioning & latent guide) | **Native** (FL2VA / Ref2VA) | Simulated |
-| **Lighting & Atmosphere** | **Native** (Prompt conditioning) | **Native** | Simulated |
-
-The `ModelCapabilityAdapter` interface guarantees uniform caller syntax:
-```typescript
-interface ModelCapabilityAdapter {
-  id: string;
-  name: string;
-  validate(shot: ShotSpec): ValidationResult;
-  compilePrompt(shot: ShotSpec): CompiledPromptBundle;
-  buildWorkflow(shot: ShotSpec, uploadedImageFilename?: string): ComfyWorkflowPrompt;
-  getCapabilities(): ModelCapabilities;
-}
-```
-
----
-
-## 5. Previsualization Engine (2D Cinematic Stage)
-
-The interactive 2D stage runs entirely client-side using responsive SVG:
-- **Zero-Latency**: Direct DOM rendering, never calls backend for rendering stage previews.
-- **Visual Elements**:
-  1. **Top-Down Stage Grid**: Normalized coordinate system `(0..100, 0..100)` representing the film set.
-  2. **Camera Frustum Gizmo**: Indicates camera position, facing angle, field of view (derived from focal length `24mm` = wide angle frustum vs `85mm` = narrow angle cone).
-  3. **Camera Trajectory Vector**: Animated arrow from start to end position displaying movement direction and speed.
-  4. **Actor Tokens & Paths**: Drag-and-drop actor points showing start and end blocking positions with timing indicators.
-  5. **Live Time Slider / Playback**: Plays back the simulated shot movement in real-time at 24/30/60 fps.
-
----
-
-## 6. Director Diff Engine
-
-When a director creates multiple iterations (e.g. "Revision 1: 35mm Push-In" vs "Revision 2: 24mm Crane-Up"):
-1. **Parameter Diff**: Highlights changed properties in the `ShotSpec` (camera angle, actor position, duration, etc.).
-2. **Prompt Diff**: Side-by-side textual diff of compiled prompts.
-3. **Media Diff**: Synchronized dual video player with scrubbing lock to visually compare motion fidelity between runs.
-4. **Instant Rollback**: One-click restore to any previous revision.
+- `useShotStore.commitShot` writes + validates + recompiles on every update (S5).
+- Several components subscribe to the whole store (S5).
+- Each `StagePrevis3D` instance creates two WebGL renderers; the Motion Previs Stage mounts two instances (S5).
+- Persistence guards are inconsistent (`typeof window` on some reads/writes only) (S2).
+- Uploaded plate blob URLs are persisted but die on reload (S2 media folder).
+- localStorage is origin-scoped: desktop data differs depending on whether it loaded `file://` or the dev server (S2 project files remove this).
