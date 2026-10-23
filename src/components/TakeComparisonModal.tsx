@@ -17,8 +17,10 @@ import {
   Sparkles,
   GitCompare,
   Compass,
+  Wand2,
 } from 'lucide-react';
 import { MotionFidelityOverlay } from './MotionFidelityOverlay';
+import { calculateFidelityImprovement } from '../engine/directorialSteeringEngine';
 
 interface TakeComparisonModalProps {
   takeA: ShotRevisionV2;
@@ -578,17 +580,34 @@ export const TakeComparisonModal: React.FC<TakeComparisonModalProps> = ({
             </div>
 
             {/* Motion Fidelity Comparison Block */}
-            {(currentTakeA.motionFidelity || currentTakeB.motionFidelity) && (
-              <div className="rounded-lg border border-white/10 bg-white/5 p-3 flex flex-col gap-2 mt-1">
-                <div className="flex items-center justify-between font-mono text-[10px]">
-                  <div className="flex items-center gap-1.5 text-director-cyan font-bold">
-                    <Compass className="h-3.5 w-3.5" />
-                    <span>Motion Fidelity Analysis Comparison</span>
+            {(currentTakeA.motionFidelity || currentTakeB.motionFidelity) && (() => {
+              const isSteeredLineage =
+                currentTakeB.steeredFromTakeId === currentTakeA.id ||
+                currentTakeA.steeredFromTakeId === currentTakeB.id;
+              const lineageImprovement = isSteeredLineage
+                ? currentTakeB.steeredFromTakeId === currentTakeA.id
+                  ? calculateFidelityImprovement(currentTakeA, currentTakeB)
+                  : calculateFidelityImprovement(currentTakeB, currentTakeA)
+                : null;
+
+              return (
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3 flex flex-col gap-2 mt-1">
+                  <div className="flex items-center justify-between font-mono text-[10px] flex-wrap gap-1">
+                    <div className="flex items-center gap-1.5 text-director-cyan font-bold">
+                      <Compass className="h-3.5 w-3.5" />
+                      <span>Motion Fidelity Analysis Comparison</span>
+                    </div>
+                    <span className="text-slate-400 text-[9px]">
+                      Directed: <strong className="text-white uppercase">{currentTakeA.motionFidelity?.directedMovement || currentTakeB.motionFidelity?.directedMovement || 'N/A'}</strong>
+                    </span>
                   </div>
-                  <span className="text-slate-400 text-[9px]">
-                    Directed: <strong className="text-white uppercase">{currentTakeA.motionFidelity?.directedMovement || currentTakeB.motionFidelity?.directedMovement || 'N/A'}</strong>
-                  </span>
-                </div>
+
+                  {lineageImprovement && (
+                    <div className="flex items-center gap-2 rounded bg-indigo-500/15 border border-indigo-500/30 p-2 font-mono text-[10px] text-indigo-200">
+                      <Wand2 className="h-4 w-4 text-director-gold shrink-0" />
+                      <span><strong>Closed-Loop Auto-Steering Lineage:</strong> {lineageImprovement.summary}</span>
+                    </div>
+                  )}
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 font-mono text-[10px]">
                   <div className="p-2 rounded bg-black/40 border border-white/5 flex flex-col gap-1">
@@ -644,7 +663,8 @@ export const TakeComparisonModal: React.FC<TakeComparisonModalProps> = ({
                   </div>
                 </div>
               </div>
-            )}
+            );
+          })()}
 
             {/* Any Changed ShotSpec Diff Parameters */}
             {diffItems.filter((d) => d.changed).length > 0 && (

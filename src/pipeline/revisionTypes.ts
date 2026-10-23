@@ -34,6 +34,20 @@ export interface MotionFidelityAnalysis {
   analyzedAt: number;
 }
 
+export interface DirectorialSteeringPatch {
+  sourceTakeId: string;
+  sourceTakeNumber?: number;
+  reason: string;
+  originalPositivePrompt: string;
+  steeredPositivePrompt: string;
+  originalNegativePrompt: string;
+  steeredNegativePrompt: string;
+  originalIcLoraStrength?: number;
+  steeredIcLoraStrength?: number;
+  suggestedSeedOffset?: number;
+  appliedDirectives: string[];
+}
+
 export interface ShotRevisionV2 {
   id: string;
   shotId: string;
@@ -65,4 +79,6 @@ export interface ShotRevisionV2 {
   rating?: number;
   takeNumber?: number;
   motionFidelity?: MotionFidelityAnalysis;
+  steeredFromTakeId?: string;
+  steeringPatch?: DirectorialSteeringPatch;
 }

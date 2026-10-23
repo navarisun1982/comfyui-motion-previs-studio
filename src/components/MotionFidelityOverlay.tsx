@@ -7,16 +7,19 @@ import {
   EyeOff,
   Sparkles,
   ArrowRight,
+  Wand2,
 } from 'lucide-react';
 
 interface MotionFidelityOverlayProps {
   analysis: MotionFidelityAnalysis;
   showVectorsDefault?: boolean;
+  onAutoSteer?: () => void;
 }
 
 export const MotionFidelityOverlay: React.FC<MotionFidelityOverlayProps> = ({
   analysis,
   showVectorsDefault = true,
+  onAutoSteer,
 }) => {
   const [showVectors, setShowVectors] = useState<boolean>(showVectorsDefault);
   const [showDetails, setShowDetails] = useState<boolean>(false);
@@ -183,6 +186,19 @@ export const MotionFidelityOverlay: React.FC<MotionFidelityOverlayProps> = ({
               ))}
             </ul>
           </div>
+
+          {onAutoSteer && (
+            <button
+              onClick={() => {
+                setShowDetails(false);
+                onAutoSteer();
+              }}
+              className="flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-director-gold to-amber-500 text-black px-3 py-1.5 font-mono text-[10px] font-bold transition-all hover:brightness-110 active:scale-95 shadow-md cursor-pointer mt-1"
+            >
+              <Wand2 className="h-3.5 w-3.5 fill-current" />
+              <span>Auto-Steer Next Take</span>
+            </button>
+          )}
         </div>
       )}
     </div>

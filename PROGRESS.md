@@ -371,3 +371,39 @@ See the deferred table in [TASKS.md](TASKS.md).
    - Production build: `npm run build` completed in 10.23s with 0 errors and 0 warnings.
    - In-browser UI verification: verified via subagent with recording `motion_fidelity_demo`.
 
+## 2026-10-23 — S9 Closed-Loop Directorial Auto-Steering (`stage/09-closed-loop-steering`)
+
+**Goal:** Close the directorial control loop ("Direct the Shot, Not the Prompt") by transforming diagnostic optical flow vector scores from Stage 8 into concrete, compensatory steering patches: reinforcing positive camera verbs, suppressing counter-motion vectors in the negative prompt, modulating geometric IC-LoRA conditioning, perturbing the seed to escape attractor basins, and tracking closed-loop revision lineage.
+
+### Accomplishments
+
+1. **Closed-Loop Directorial Steering Engine (`src/engine/directorialSteeringEngine.ts`):**
+   - Grounded root-cause inference: evaluates optical flow classifications (`drift`, `static_drift`, `velocity_mismatch`, `subtle_drift`) and vector divergence angles to isolate mechanical motion failure modes.
+   - Dynamic prompt verb reinforcement: injects cinematic action clauses with weighted emphasis (e.g., `(deliberate camera pan-left, steady pan-left tracking shot:1.35)` or `(dolly-in push forward, dynamic forward tracking shot:1.35)`) directly into the positive prompt.
+   - Counter-steering negative prompt suppression: appends explicit anti-motion tokens targeting the opposite drift vector (e.g., `camera pan right, static frame, unintended motion`) or enforcing absolute stillness (`camera pan, camera tilt, camera zoom, shaky cam`) for static shots.
+   - Geometric IC-LoRA modulation: increases IC-LoRA conditioning strength (by `+0.20` to `+0.25x`, capped at `1.85x`) to lock background geometry to 3D previs passes when drift exceeds tolerance.
+   - Attractor basin escape: deterministically computes an RNG seed offset (`+107`) to evade localized generative drift attractor basins.
+   - Pure utility functions: `applySteeringPatchToShot` and `calculateFidelityImprovement` for deterministic delta analysis.
+
+2. **Directorial Closed-Loop Auto-Steering Modal (`src/components/DirectorialSteeringModal.tsx`):**
+   - High-aesthetic diagnostic modal with glassmorphic cards and motion drift badges.
+   - Applied Directives list explaining each automated adjustment in directorial terminology.
+   - Visual side-by-side prompt diff panels showing original prompt vs. steered positive prompt (with reinforced verbs) and steered negative prompt (with counter-motion suppressions).
+   - Parameter change badges for IC-LoRA conditioning strength and target seed offset.
+   - Dual execution paths: "Apply to Active Shot" (instant state update) and "Apply & Queue Steered Re-Take" (updates shot and enqueues single steered generation into queue).
+
+3. **Queue & Lineage Tracking (`src/pipeline/generationQueue.ts`, `src/pipeline/revisionTypes.ts`, `src/components/TakesGrid.tsx`):**
+   - Extended `ShotRevisionV2` to record `steeredFromTakeId` and `steeringPatch` metadata.
+   - Generation queue preserves steering lineage and attaches provenance to completed take revisions.
+   - Takes Grid displays `STEERED (+XX%)` lineage badge on takes derived from prior takes, with tooltip showing original take number and score delta.
+   - Takes Grid take card actions include "Auto-Steer" button, triggering the steering modal.
+   - Motion fidelity overlay popover provides direct "Auto-Steer" button when optical flow analysis detects drift or low fidelity.
+   - A/B comparison modal displays a dedicated Closed-Loop Steering Lineage banner when comparing a source take against its steered descendant.
+
+4. **Verification & Tests:**
+   - Unit tests (`tests/directorialSteering.test.ts`): 8 tests verifying directional drift counter-steering, static camera locking, dolly push-in radial reinforcement, velocity amplification, seed offsetting, ShotSpec application, fidelity delta calculation, and queue lineage persistence.
+   - Full test suite: 29 test files, 194/194 tests passing in 4.89s (`npm run test`).
+   - Production build: `npm run build` completed in 10.41s with 0 errors and 0 warnings.
+   - In-browser UI verification: verified via subagent with recording `stage9_steering_verify_1792787404162.webp`.
+
+
