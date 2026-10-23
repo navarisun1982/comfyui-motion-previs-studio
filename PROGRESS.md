@@ -507,6 +507,27 @@ See the deferred table in [TASKS.md](TASKS.md).
    - Production build: `npm run build` completed in 10.43s with 0 errors and 0 warnings.
    - In-browser UI verification: Verified via subagent (recording `verify_no_arabic_1792790821778.webp`, screenshot `3d_asset_library_clean_1792790859491.png`) confirming zero Arabic characters on the soundstage, environment controls, or asset cards.
 
+## 2026-10-24 — Compact 3D Object Nametag Labels & Visibility Toggle (`fix/compact-object-labels`)
+
+**Goal:** Shrink the oversized 3D billboard labels on actors/props and provide an instant one-click toggle in the 3D Stage toolbar.
+
+### Accomplishments
+
+1. **Compact Sprite Banner Scale & Positioning (`src/components/StagePrevis3D.tsx`):**
+   - Reduced sprite scale from `10.0 × 2.5` meters down to `1.4 × 0.35` meters (an 86% size reduction), keeping nametags sleek, readable, and proportional to human actors (~1.8m tall).
+   - Repositioned the hovering Y-offset from `Math.max(4.5, size.y + 1.8)` down to `Math.max(1.8, size.y + 0.25)`, anchoring tags immediately above the subject rather than floating 4.5 meters in the sky.
+   - Upgraded canvas rendering to high-DPI (384 × 96, 4:1) with a dark rounded pill container (`rgba(9, 11, 17, 0.88)`), amber border, and modern sans-serif typography.
+
+2. **One-Click Toolbar Toggle (`src/components/StagePrevis3D.tsx`):**
+   - Added `showLabels` state with dynamic Three.js scene sprite traversal.
+   - Added a "Labels" button with `Tag` icon to the 3D Soundstage toolbar, allowing directors to toggle nametags on/off with a single click.
+
+3. **Verification & Tests:**
+   - Full test suite: 31 test files, 215/215 tests passing in 4.97s (`npm run test`).
+   - Production build: `npm run build` completed in 10.34s with 0 errors and 0 warnings.
+   - In-browser UI verification: Verified via subagent (recording `verify_compact_labels_1792791411798.webp`).
+
+
 
 
 

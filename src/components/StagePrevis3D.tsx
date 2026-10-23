@@ -110,6 +110,7 @@ import {
   Maximize2,
   ChevronDown,
   ChevronUp,
+  Tag,
 } from 'lucide-react';
 
 const FOV_MAP: Record<FocalLength, number> = {
@@ -204,6 +205,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
   const [currentTime, setCurrentTime] = useState<number>(externalTime ?? 0);
   const [showGrid, setShowGrid] = useState<boolean>(true);
   const [showRuleOfThirds, setShowRuleOfThirds] = useState<boolean>(true);
+  const [showLabels, setShowLabels] = useState<boolean>(true);
+  const showLabelsRef = useRef<boolean>(true);
+  showLabelsRef.current = showLabels;
   const [isHudMinimized, setIsHudMinimized] = useState<boolean>(false);
 
   // 3D Direct Manipulation & Dragging State
@@ -274,6 +278,16 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
   const [overlayOpacity, setOverlayOpacity] = useState<number>(0.55);
 
   const duration = shot.durationSeconds;
+
+  // Toggle 3D object label sprites visibility
+  useEffect(() => {
+    if (!stageSceneRef.current) return;
+    stageSceneRef.current.traverse((child: THREE.Object3D) => {
+      if (child instanceof THREE.Sprite) {
+        child.visible = showLabels;
+      }
+    });
+  }, [showLabels]);
 
   // 1. Animation playback loop (standalone mode only)
   useEffect(() => {
@@ -410,41 +424,60 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     obj.children.forEach((child) => setLayerRecursively(child, layer));
   };
 
-  // Helper: Create Sprite Banner for 3D Subjects
+  // Helper: Create Compact Sprite Banner for 3D Subjects
   const createSpriteBanner = (
     name: string,
     subtitleBadge?: string,
     isGhostWireframe: boolean = false
   ) => {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 64;
+    canvas.width = 384;
+    canvas.height = 96;
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      ctx.fillStyle = isGhostWireframe ? 'rgba(6, 182, 212, 0.25)' : 'rgba(10, 12, 16, 0.85)';
-      ctx.roundRect(4, 4, 248, 56, 12);
+      // Sleek, compact pill container with clean border
+      ctx.fillStyle = isGhostWireframe ? 'rgba(6, 182, 212, 0.3)' : 'rgba(9, 11, 17, 0.88)';
+      ctx.beginPath();
+      ctx.roundRect(6, 6, 372, 84, 18);
       ctx.fill();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = isGhostWireframe ? '#06b6d4' : '#f59e0b';
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = isGhostWireframe ? '#06b6d4' : 'rgba(245, 158, 11, 0.85)';
       ctx.stroke();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 20px sans-serif';
+
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
+
+      const displayName = name.length > 18 ? name.slice(0, 16).toUpperCase() + '…' : name.toUpperCase();
+
       if (subtitleBadge) {
-        ctx.fillText(name.toUpperCase(), 128, 22);
+        // Main title (sleek, high readability)
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        ctx.fillText(displayName, 192, 34);
+
+        // Subtitle badge
         ctx.fillStyle = isGhostWireframe ? '#22d3ee' : '#10b981';
-        ctx.font = 'bold 12px monospace';
-        ctx.fillText(subtitleBadge, 128, 44);
+        ctx.font = '600 15px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace';
+        ctx.fillText(subtitleBadge.toUpperCase(), 192, 66);
       } else {
-        ctx.fillText(name.toUpperCase(), 128, 32);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 28px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        ctx.fillText(displayName, 192, 48);
       }
     }
     const texture = new THREE.CanvasTexture(canvas);
-    const spriteMat = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+    texture.minFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    const spriteMat = new THREE.SpriteMaterial({
+      map: texture,
+      depthTest: false,
+      transparent: true,
+    });
     const sprite = new THREE.Sprite(spriteMat);
-    sprite.scale.set(10, 2.5, 1);
+    // Compact, proportional size: 1.4m wide x 0.35m tall (reduced from 10m x 2.5m)
+    sprite.scale.set(1.4, 0.35, 1);
     sprite.layers.set(1); // Editor Gizmo Layer (hidden in Viewfinder / Previs render)
+    sprite.visible = showLabelsRef.current;
     return sprite;
   };
 
@@ -512,7 +545,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           subtitleBadge || 'GLB 3D MODEL',
           isGhostWireframe
         );
-        banner.position.y = Math.max(4.5, size.y + 1.8);
+        banner.position.y = Math.max(1.8, size.y + 0.25);
         group.add(banner);
         return group;
       }
@@ -543,7 +576,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           // Dynamically adjust banner position to match real model height
           group.children.forEach((child) => {
             if (child instanceof THREE.Sprite) {
-              child.position.y = Math.max(4.5, result.size.y + 1.8);
+              child.position.y = Math.max(1.8, result.size.y + 0.25);
             }
           });
         })
@@ -554,7 +587,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
             'GLB LOAD ERROR',
             false
           );
-          errBanner.position.y = 4.5;
+          errBanner.position.y = 1.9;
           group.add(errBanner);
         });
 
@@ -568,7 +601,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         subtitleBadge || 'LOADING 3D MODEL...',
         isGhostWireframe
       );
-      banner.position.y = Math.max(4.5, size.y + 1.8);
+      banner.position.y = Math.max(1.8, size.y + 0.25);
       group.add(banner);
       return group;
     }
@@ -596,7 +629,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       subtitleBadge || kind.toUpperCase() || 'SUBJECT',
       isGhostWireframe
     );
-    banner.position.y = Math.max(4.5, size.y + 1.8);
+    banner.position.y = Math.max(1.8, size.y + 0.25);
     group.add(banner);
 
     if (procMesh.userData.update) {
@@ -2145,6 +2178,19 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           >
             <Grid className="h-3 w-3" />
             Grid
+          </button>
+
+          <button
+            onClick={() => setShowLabels(!showLabels)}
+            className={`flex items-center gap-1 rounded px-2 py-0.5 border ${
+              showLabels
+                ? 'border-director-gold text-director-gold bg-director-gold/10'
+                : 'border-director-border text-slate-500'
+            }`}
+            title="Toggle 3D Object Labels (Hovering Nametags)"
+          >
+            <Tag className="h-3 w-3" />
+            Labels
           </button>
 
           <button

@@ -255,6 +255,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | Trim range / volume controls may be no-ops; hardcoded "SCENE 01"; `minWidth` 1100; backtick handler eats input typing; `alert()` in VFXVideoDeck | S6 | Done (S6) |
 | Importing GLB/GLTF models produces generic box or distorted shape ("weird shape") | Fix | Done (`fix/glb-gltf-import-rendering`) |
 | Remove Arabic words from interface elements | Fix | Done (`fix/remove-arabic-interface-text`) |
+| Compact 3D object nametag labels & toolbar visibility toggle | Polish | Done (`fix/compact-object-labels`) |
 
 ## GLB/GLTF 3D Model Import & Rendering Checklist
 
