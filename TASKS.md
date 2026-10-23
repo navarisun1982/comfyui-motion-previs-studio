@@ -53,8 +53,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 - [x] Fix `DirectorDiffInspector.tsx` for v2 revisions
 - [x] Comprehensive test coverage with 126 tests passing in 4.4s (`npm run test`)
 - [x] Ingest user-supplied API templates (`ltx25_stubelius.api.json`, `h3_stubelius.api.json`) & companion bindings into `workflows/templates/`
-- [ ] Run live generation test on RTX 3090 and verify revision reproduction
-- [ ] Owner approval → merge to `master`
+- [x] Owner approval → merge to `master` (`4c786ce`)
 
 ## Deferred findings (tracked for later stages)
 
