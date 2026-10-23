@@ -65,9 +65,20 @@ export class ComfyClient {
     logger.system(`ComfyUI client updated endpoint to: ${this.baseUrl}`);
   }
 
+  private resolveUrl(targetUrl?: string): string {
+    const isBrowser = typeof window !== 'undefined';
+    const isDevServer = isBrowser && window.location.port === '5173';
+    if (!targetUrl) return this.baseUrl;
+    const cleanUrl = targetUrl.replace(/\/+$/, '');
+    if (isDevServer && (cleanUrl.includes('127.0.0.1:8188') || cleanUrl.includes('localhost:8188'))) {
+      return '/api/comfy';
+    }
+    return cleanUrl;
+  }
+
   async ping(targetUrl?: string): Promise<{ ok: boolean; latencyMs: number; stats?: ComfySystemStats; error?: string }> {
     const start = performance.now();
-    const url = targetUrl ? targetUrl.replace(/\/+$/, '') : this.baseUrl;
+    const url = this.resolveUrl(targetUrl);
     try {
       const res = await fetch(`${url}/system_stats`, { signal: AbortSignal.timeout(5000) });
       const latencyMs = Math.round(performance.now() - start);
@@ -96,7 +107,7 @@ export class ComfyClient {
   }
 
   async detectModels(targetUrl?: string): Promise<{ ltxDetected: boolean; minimaxDetected: boolean; wanDetected: boolean; customNodes: string[] }> {
-    const url = targetUrl ? targetUrl.replace(/\/+$/, '') : this.baseUrl;
+    const url = this.resolveUrl(targetUrl);
     try {
       const res = await fetch(`${url}/object_info`, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) return { ltxDetected: false, minimaxDetected: false, wanDetected: false, customNodes: [] };
@@ -142,10 +153,11 @@ export class ComfyClient {
     }
   }
 
-  async uploadImage(file: File): Promise<{ name: string; subfolder: string; type: string }> {
-    logger.api(`Uploading reference image to ComfyUI: ${file.name} (${Math.round(file.size / 1024)} KB)`);
+  async uploadImage(file: File | Blob, customFilename?: string): Promise<{ name: string; subfolder: string; type: string }> {
+    const filename = customFilename || (file instanceof File ? file.name : 'director_previs_plate.mp4');
+    logger.api(`Uploading reference media to ComfyUI: ${filename} (${Math.round(file.size / 1024)} KB)`);
     const formData = new FormData();
-    formData.append('image', file);
+    formData.append('image', file, filename);
     formData.append('overwrite', 'true');
 
     const res = await fetch(`${this.baseUrl}/upload/image`, {
@@ -154,13 +166,13 @@ export class ComfyClient {
     });
 
     if (!res.ok) {
-      const err = `Failed to upload image: ${res.status} ${res.statusText}`;
+      const err = `Failed to upload media to ComfyUI: ${res.status} ${res.statusText}`;
       logger.error(err);
       throw new Error(err);
     }
 
     const data = await res.json();
-    logger.api(`Image successfully uploaded to ComfyUI`, data);
+    logger.api(`Media successfully uploaded to ComfyUI input`, data);
     return data;
   }
 
@@ -209,60 +221,81 @@ export class ComfyClient {
     onError?: (err: string) => void;
     onClose?: () => void;
   }): () => void {
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-      this.ws.close();
-    }
+    let isClosedManually = false;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+    let reconnectDelay = 1500;
 
-    const url = `${this.wsUrl}?clientId=${this.clientId}`;
-    logger.ws(`Connecting WebSocket to ${url}...`);
-    const ws = new WebSocket(url);
-    this.ws = ws;
-
-    ws.onopen = () => {
-      logger.ws(`WebSocket connection established with ComfyUI.`);
-      handlers.onOpen?.();
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        if (typeof event.data === 'string') {
-          const msg: ComfyWsMessage = JSON.parse(event.data);
-          
-          if (msg.type === 'progress') {
-            const val = msg.data.value as number;
-            const max = msg.data.max as number;
-            const node = (msg.data.node as string) || '';
-            logger.ws(`Sampling progress: ${val}/${max} (node: ${node})`);
-            handlers.onProgress?.(node, val, max);
-          } else if (msg.type === 'executing') {
-            const node = msg.data.node as string | null;
-            logger.ws(`Node executing: ${node || 'IDLE'}`);
-            handlers.onExecuting?.(node);
-          } else if (msg.type === 'executed') {
-            const node = msg.data.node as string;
-            const output = (msg.data.output as Record<string, unknown>) || {};
-            logger.ws(`Node executed successfully: ${node}`, output);
-            handlers.onExecuted?.(node, output);
-          } else if (msg.type === 'execution_error') {
-            const message = (msg.data.exception_message as string) || 'Execution error in ComfyUI';
-            logger.error(`ComfyUI Execution Error: ${message}`, msg.data);
-            handlers.onError?.(message);
-          }
-        }
-      } catch (e) {
-        console.error('Error handling Comfy WebSocket message', e);
+    const connect = () => {
+      if (isClosedManually) return;
+      if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
+        this.ws.close();
       }
+
+      const url = `${this.wsUrl}?clientId=${this.clientId}`;
+      logger.ws(`Connecting WebSocket to ${url}...`);
+      const ws = new WebSocket(url);
+      this.ws = ws;
+
+      ws.onopen = () => {
+        logger.ws(`WebSocket connection established with ComfyUI.`);
+        reconnectDelay = 1500;
+        handlers.onOpen?.();
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          if (typeof event.data === 'string') {
+            const msg: ComfyWsMessage = JSON.parse(event.data);
+            
+            if (msg.type === 'progress') {
+              const val = msg.data.value as number;
+              const max = msg.data.max as number;
+              const node = (msg.data.node as string) || '';
+              logger.ws(`Sampling progress: ${val}/${max} (node: ${node})`);
+              handlers.onProgress?.(node, val, max);
+            } else if (msg.type === 'executing') {
+              const node = msg.data.node as string | null;
+              logger.ws(`Node executing: ${node || 'IDLE'}`);
+              handlers.onExecuting?.(node);
+            } else if (msg.type === 'executed') {
+              const node = msg.data.node as string;
+              const output = (msg.data.output as Record<string, unknown>) || {};
+              logger.ws(`Node executed successfully: ${node}`, output);
+              handlers.onExecuted?.(node, output);
+            } else if (msg.type === 'execution_error') {
+              const message = (msg.data.exception_message as string) || 'Execution error in ComfyUI';
+              logger.error(`ComfyUI Execution Error: ${message}`, msg.data);
+              handlers.onError?.(message);
+            }
+          }
+        } catch (e) {
+          console.error('Error handling Comfy WebSocket message', e);
+        }
+      };
+
+      ws.onerror = () => {
+        handlers.onError?.('WebSocket connection error');
+      };
+
+      ws.onclose = () => {
+        handlers.onClose?.();
+        if (!isClosedManually) {
+          logger.ws(`WebSocket disconnected from ComfyUI. Auto-reconnecting in ${reconnectDelay}ms...`);
+          reconnectTimeout = setTimeout(() => {
+            reconnectDelay = Math.min(Math.round(reconnectDelay * 1.5), 10000);
+            connect();
+          }, reconnectDelay);
+        }
+      };
     };
 
-    ws.onerror = () => {
-      handlers.onError?.('WebSocket connection error');
-    };
-
-    ws.onclose = () => {
-      handlers.onClose?.();
-    };
+    connect();
 
     return () => {
+      isClosedManually = true;
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
+      }
       if (this.ws) {
         this.ws.close();
         this.ws = null;
@@ -288,6 +321,48 @@ export class ComfyClient {
       type,
     });
     return `${this.baseUrl}/view?${params.toString()}`;
+  }
+
+  extractVideoOutput(output: Record<string, unknown>): { filename: string; subfolder?: string; type?: string } | null {
+    if (!output || typeof output !== 'object') return null;
+
+    // 1. VHS_VideoCombine outputs gifs array
+    if (output.gifs && Array.isArray(output.gifs) && output.gifs.length > 0) {
+      const item = output.gifs[0];
+      if (item && typeof item === 'object' && 'filename' in item) {
+        return item as { filename: string; subfolder?: string; type?: string };
+      }
+    }
+
+    // 2. Standard video nodes output videos array
+    if (output.videos && Array.isArray(output.videos) && output.videos.length > 0) {
+      const item = output.videos[0];
+      if (item && typeof item === 'object' && 'filename' in item) {
+        return item as { filename: string; subfolder?: string; type?: string };
+      }
+    }
+
+    // 3. Custom video preview nodes output video array [filename, subfolder]
+    if (output.video && Array.isArray(output.video) && output.video.length > 0) {
+      const fn = output.video[0];
+      const subfolder = typeof output.video[1] === 'string' ? output.video[1] : '';
+      if (typeof fn === 'string' && fn.length > 0) {
+        return { filename: fn, subfolder, type: 'output' };
+      }
+    }
+
+    // 4. Output images that are actually video files (.mp4, .webm, .gif)
+    if (output.images && Array.isArray(output.images) && output.images.length > 0) {
+      const item = output.images[0];
+      if (item && typeof item === 'object' && 'filename' in item) {
+        const fn = (item as { filename: string }).filename;
+        if (typeof fn === 'string' && (fn.endsWith('.mp4') || fn.endsWith('.webm') || fn.endsWith('.gif'))) {
+          return item as { filename: string; subfolder?: string; type?: string };
+        }
+      }
+    }
+
+    return null;
   }
 }
 

@@ -15,6 +15,13 @@ export interface ModelCapabilities {
   lightingControl: CapabilityTier;
 }
 
+export interface TemporalPromptBeat {
+  timeRange: string;
+  cameraAction: string;
+  actorAction: string;
+  description: string;
+}
+
 export interface CompiledPromptBundle {
   positivePrompt: string;
   negativePrompt: string;
@@ -22,12 +29,17 @@ export interface CompiledPromptBundle {
   actorDirectives: string;
   lightingDirectives: string;
   styleDirectives: string;
+  temporalBeats?: TemporalPromptBeat[];
+  modelPromptParadigm?: 'ltx-continuous-narrative' | 'minimax-structured-cinematic' | 'seedance-motion-matrix';
   technicalMetadata: {
     targetModel: string;
     duration: number;
     fps: number;
     focalLength: string;
     aspectRatio: string;
+    vfxReferenceMode?: string;
+    depthGuidance?: number;
+    [key: string]: unknown;
   };
 }
 

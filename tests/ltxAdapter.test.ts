@@ -25,7 +25,7 @@ describe('LTXVideoAdapter', () => {
     expect(graph['3'].class_type).toBe('VAELoader');
     expect(graph['9'].class_type).toBe('KSampler');
     expect(graph['10'].class_type).toBe('VAEDecode');
-    expect(graph['11'].class_type).toBe('SaveVideo');
+    expect(graph['11'].class_type).toBe('VHS_VideoCombine');
   });
 
   it('should build image-to-video workflow with LoadImage when reference is present', () => {

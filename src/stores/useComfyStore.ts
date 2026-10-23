@@ -34,7 +34,6 @@ export interface GeneratedOutput {
 }
 
 const SERVER_URL_KEY = 'ai_director_comfy_server_url';
-const MOCK_MODE_KEY = 'ai_director_comfy_mock_mode';
 
 interface ComfyState {
   serverUrl: string;
@@ -48,7 +47,7 @@ interface ComfyState {
     customNodes: string[];
   };
   isSettingsOpen: boolean;
-  isMockMode: boolean;
+  settingsTab: SettingsTab;
   activeJob: ActiveJob | null;
   recentOutputs: GeneratedOutput[];
 
@@ -57,10 +56,10 @@ interface ComfyState {
   setSystemStats: (stats: ComfySystemStats | null) => void;
   setLatencyMs: (latency: number | null) => void;
   setDetectedModels: (detected: ComfyState['detectedModels']) => void;
-  openSettings: () => void;
+  openSettings: (tab?: SettingsTab) => void;
+  setSettingsTab: (tab: SettingsTab) => void;
   closeSettings: () => void;
   toggleSettings: () => void;
-  setMockMode: (mock: boolean) => void;
   startJob: (promptId: string, shotId: string, shotName: string) => void;
   updateJobProgress: (progress: number, currentNodeTitle?: string) => void;
   setJobCompleted: (outputVideoUrl: string, outputFilename: string) => void;
@@ -69,11 +68,11 @@ interface ComfyState {
   addRecentOutput: (output: GeneratedOutput) => void;
 }
 
+export type SettingsTab = 'comfy' | 'llm';
+
 const initialServerUrl = typeof window !== 'undefined' && window.localStorage?.getItem(SERVER_URL_KEY)
   ? window.localStorage.getItem(SERVER_URL_KEY)!
   : 'http://127.0.0.1:8188';
-
-const initialMockMode = typeof window !== 'undefined' && window.localStorage?.getItem(MOCK_MODE_KEY) === 'true';
 
 export const useComfyStore = create<ComfyState>((set, get) => ({
   serverUrl: initialServerUrl,
@@ -87,7 +86,7 @@ export const useComfyStore = create<ComfyState>((set, get) => ({
     customNodes: [],
   },
   isSettingsOpen: false,
-  isMockMode: initialMockMode,
+  settingsTab: 'comfy',
   activeJob: null,
   recentOutputs: [],
 
@@ -106,19 +105,11 @@ export const useComfyStore = create<ComfyState>((set, get) => ({
   setSystemStats: (systemStats) => set({ systemStats }),
   setLatencyMs: (latencyMs) => set({ latencyMs }),
   setDetectedModels: (detectedModels) => set({ detectedModels }),
-  openSettings: () => set({ isSettingsOpen: true }),
+  openSettings: (tab) =>
+    set((s) => ({ isSettingsOpen: true, settingsTab: tab === 'llm' || tab === 'comfy' ? tab : s.settingsTab })),
+  setSettingsTab: (settingsTab) => set({ settingsTab }),
   closeSettings: () => set({ isSettingsOpen: false }),
   toggleSettings: () => set({ isSettingsOpen: !get().isSettingsOpen }),
-  setMockMode: (isMockMode) => {
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(MOCK_MODE_KEY, String(isMockMode));
-      }
-    } catch {
-      // ignore
-    }
-    set({ isMockMode });
-  },
 
   startJob: (promptId, shotId, shotName) => {
     set({

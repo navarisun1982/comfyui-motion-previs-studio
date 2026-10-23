@@ -1,0 +1,535 @@
+{
+  "version": 1,
+  "name": "Camel in desert",
+  "route": "quadruped-walker",
+  "heightMeters": 1.8,
+  "identity": "Large desert dromedary with one prominent hump, long neck, thick eyelashes, and wide feet for walking on sand.",
+  "materials": [
+    {
+      "id": "camel_coat",
+      "color": "#d4c4a8",
+      "roughness": 0.5,
+      "metalness": 0,
+      "emissive": false
+    },
+    {
+      "id": "belly_skin",
+      "color": "#e8dcc8",
+      "roughness": 0.45,
+      "metalness": 0,
+      "emissive": false
+    },
+    {
+      "id": "hoof",
+      "color": "#3d2f1f",
+      "roughness": 0.6,
+      "metalness": 0,
+      "emissive": false
+    },
+    {
+      "id": "eye_lash",
+      "color": "#2a1f15",
+      "roughness": 0.3,
+      "metalness": 0,
+      "emissive": false
+    },
+    {
+      "id": "hair_tail",
+      "color": "#c9b896",
+      "roughness": 0.55,
+      "metalness": 0,
+      "emissive": false
+    }
+  ],
+  "parts": [
+    {
+      "id": "hump",
+      "shape": "capsule",
+      "size": [
+        0.4,
+        0.7,
+        0.2
+      ],
+      "position": [
+        0,
+        1.4,
+        0.3
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "camel_coat",
+      "mirrorX": false
+    },
+    {
+      "id": "back_main",
+      "shape": "cylinder",
+      "size": [
+        0.5,
+        0.6,
+        0.8
+      ],
+      "position": [
+        0,
+        1.2,
+        -0.1
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "camel_coat",
+      "mirrorX": false
+    },
+    {
+      "id": "neck",
+      "shape": "capsule",
+      "size": [
+        0.3,
+        1.4,
+        0.25
+      ],
+      "position": [
+        0,
+        1.1,
+        0.2
+      ],
+      "rotation": [
+        5,
+        0,
+        0
+      ],
+      "material": "camel_coat",
+      "mirrorX": false
+    },
+    {
+      "id": "head_main",
+      "shape": "capsule",
+      "size": [
+        0.35,
+        0.4,
+        0.35
+      ],
+      "position": [
+        0,
+        1.8,
+        0.6
+      ],
+      "rotation": [
+        -10,
+        0,
+        0
+      ],
+      "material": "camel_coat",
+      "mirrorX": false
+    },
+    {
+      "id": "snout",
+      "shape": "cone",
+      "size": [
+        0.25,
+        0.3,
+        0.15
+      ],
+      "position": [
+        0,
+        1.9,
+        0.75
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "camel_coat",
+      "mirrorX": false
+    },
+    {
+      "id": "ear_l",
+      "shape": "capsule",
+      "size": [
+        0.15,
+        0.25,
+        0.1
+      ],
+      "position": [
+        -0.35,
+        1.85,
+        0.65
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "camel_coat",
+      "mirrorX": false
+    },
+    {
+      "id": "ear_r",
+      "shape": "capsule",
+      "size": [
+        0.15,
+        0.25,
+        0.1
+      ],
+      "position": [
+        0.35,
+        1.85,
+        0.65
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "camel_coat",
+      "mirrorX": true
+    },
+    {
+      "id": "eye_l",
+      "shape": "ellipsoid",
+      "size": [
+        0.08,
+        0.08,
+        0.02
+      ],
+      "position": [
+        -0.1,
+        1.88,
+        0.7
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "eye_lash",
+      "mirrorX": false
+    },
+    {
+      "id": "eye_r",
+      "shape": "ellipsoid",
+      "size": [
+        0.08,
+        0.08,
+        0.02
+      ],
+      "position": [
+        0.1,
+        1.88,
+        0.7
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "eye_lash",
+      "mirrorX": false
+    },
+    {
+      "id": "nose_nostril_l",
+      "shape": "capsule",
+      "size": [
+        0.06,
+        0.15,
+        0.04
+      ],
+      "position": [
+        -0.08,
+        2,
+        0.78
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "belly_skin",
+      "mirrorX": false
+    },
+    {
+      "id": "nose_nostril_r",
+      "shape": "capsule",
+      "size": [
+        0.06,
+        0.15,
+        0.04
+      ],
+      "position": [
+        0.08,
+        2,
+        0.78
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "belly_skin",
+      "mirrorX": false
+    },
+    {
+      "id": "tail_base",
+      "shape": "cylinder",
+      "size": [
+        0.12,
+        0.3,
+        0.12
+      ],
+      "position": [
+        0,
+        0.6,
+        -0.4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "camel_coat",
+      "mirrorX": false
+    },
+    {
+      "id": "tail_hair",
+      "shape": "tube",
+      "size": [
+        0.08,
+        0.05,
+        0.05
+      ],
+      "position": [
+        0,
+        0.3,
+        -0.5
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "hair_tail",
+      "points": [
+        [
+          -0.1,
+          0.4,
+          -0.4
+        ],
+        [
+          0.1,
+          0.4,
+          -0.4
+        ],
+        [
+          0.2,
+          0.2,
+          -0.4
+        ],
+        [
+          -0.2,
+          0.2,
+          -0.4
+        ]
+      ],
+      "mirrorX": false
+    },
+    {
+      "id": "leg_fl_l",
+      "shape": "capsule",
+      "size": [
+        0.18,
+        1.3,
+        0.18
+      ],
+      "position": [
+        -0.5,
+        0.65,
+        0.4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "camel_coat",
+      "mirrorX": false
+    },
+    {
+      "id": "leg_fl_r",
+      "shape": "capsule",
+      "size": [
+        0.18,
+        1.3,
+        0.18
+      ],
+      "position": [
+        0.5,
+        0.65,
+        0.4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "camel_coat",
+      "mirrorX": true
+    },
+    {
+      "id": "leg_fr_l",
+      "shape": "capsule",
+      "size": [
+        0.18,
+        1.3,
+        0.18
+      ],
+      "position": [
+        -0.5,
+        0.65,
+        -0.4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "camel_coat",
+      "mirrorX": false
+    },
+    {
+      "id": "leg_fr_r",
+      "shape": "capsule",
+      "size": [
+        0.18,
+        1.3,
+        0.18
+      ],
+      "position": [
+        0.5,
+        0.65,
+        -0.4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "camel_coat",
+      "mirrorX": true
+    },
+    {
+      "id": "hoof_fl_l",
+      "shape": "cylinder",
+      "size": [
+        0.25,
+        0.15,
+        0.25
+      ],
+      "position": [
+        -0.5,
+        0,
+        0.4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "hoof",
+      "mirrorX": false
+    },
+    {
+      "id": "hoof_fl_r",
+      "shape": "cylinder",
+      "size": [
+        0.25,
+        0.15,
+        0.25
+      ],
+      "position": [
+        0.5,
+        0,
+        0.4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "hoof",
+      "mirrorX": true
+    },
+    {
+      "id": "hoof_fr_l",
+      "shape": "cylinder",
+      "size": [
+        0.25,
+        0.15,
+        0.25
+      ],
+      "position": [
+        -0.5,
+        0,
+        -0.4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "hoof",
+      "mirrorX": false
+    },
+    {
+      "id": "hoof_fr_r",
+      "shape": "cylinder",
+      "size": [
+        0.25,
+        0.15,
+        0.25
+      ],
+      "position": [
+        0.5,
+        0,
+        -0.4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "hoof",
+      "mirrorX": true
+    },
+    {
+      "id": "dewlap",
+      "shape": "capsule",
+      "size": [
+        0.2,
+        0.3,
+        0.15
+      ],
+      "position": [
+        0,
+        0.9,
+        -0.2
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "belly_skin",
+      "mirrorX": false
+    }
+  ],
+  "source": {
+    "model": "qwen3.5:9b-q4_K_M",
+    "generatedAt": "2026-10-21T20:50:59.442Z",
+    "ms": 27919
+  }
+}

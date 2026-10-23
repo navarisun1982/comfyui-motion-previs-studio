@@ -1,12 +1,12 @@
 import { ModelCapabilityAdapter } from './types';
 import { LTXVideoAdapter } from './ltxAdapter';
 import { MiniMaxAdapter } from './minimaxAdapter';
-import { MockModelAdapter } from './mockAdapter';
+import { SeedanceAdapter } from './seedanceAdapter';
 
 export const adapters: Record<string, ModelCapabilityAdapter> = {
   'ltx-2.5': new LTXVideoAdapter(),
   'minimax-h3': new MiniMaxAdapter(),
-  'mock-engine': new MockModelAdapter(),
+  'seedance': new SeedanceAdapter(),
 };
 
 export function getAdapter(modelId: string): ModelCapabilityAdapter {
@@ -20,4 +20,5 @@ export function getAllAdapters(): ModelCapabilityAdapter[] {
 export * from './types';
 export * from './ltxAdapter';
 export * from './minimaxAdapter';
-export * from './mockAdapter';
+export * from './seedanceAdapter';
+

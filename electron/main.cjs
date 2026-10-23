@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, nativeTheme } = require('electron');
+const { app, BrowserWindow, Menu, nativeTheme, shell, session } = require('electron');
 const path = require('path');
 const http = require('http');
 
@@ -19,17 +19,31 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false, // Allows direct local media streaming and ComfyUI websocket
+      webSecurity: true,
     },
   });
 
   Menu.setApplicationMenu(null);
 
-  // Register F12 and Ctrl+Shift+I shortcut to toggle Chromium DevTools if needed
+  // Prevent uncontrolled blank white child windows from window.open()
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http:') || url.startsWith('https:')) {
+      shell.openExternal(url);
+      return { action: 'deny' };
+    }
+    return { action: 'allow' };
+  });
+
+  // Register F12 / DevTools, and F5 / Ctrl+R reload shortcuts
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if ((input.key === 'F12' && input.type === 'keyDown') || 
         (input.control && input.shift && input.key.toLowerCase() === 'i' && input.type === 'keyDown')) {
       mainWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+    if ((input.key === 'F5' && input.type === 'keyDown') ||
+        (input.control && input.key.toLowerCase() === 'r' && input.type === 'keyDown')) {
+      mainWindow.webContents.reloadIgnoringCache();
       event.preventDefault();
     }
   });
@@ -51,6 +65,24 @@ function createWindow() {
   };
 
   const fs = require('fs');
+  const distDir = path.join(__dirname, '../dist');
+  let reloadTimeout = null;
+
+  if (fs.existsSync(distDir)) {
+    try {
+      fs.watch(distDir, { recursive: true }, () => {
+        if (reloadTimeout) clearTimeout(reloadTimeout);
+        reloadTimeout = setTimeout(() => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.reloadIgnoringCache();
+          }
+        }, 600);
+      });
+    } catch {
+      // ignore
+    }
+  }
+
   checkDevServer().then((isDevRunning) => {
     if (isDevRunning) {
       mainWindow.loadURL(devUrl);
@@ -76,6 +108,16 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Access-Control-Allow-Origin': ['*'],
+        'Access-Control-Allow-Headers': ['*'],
+      },
+    });
+  });
+
   createWindow();
 
   app.on('activate', () => {

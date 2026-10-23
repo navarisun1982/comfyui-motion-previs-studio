@@ -1,17 +1,21 @@
 import { create } from 'zustand';
-import { ShotSpec, createDefaultShotSpec, CameraMovementType, FocalLength, CameraAngle, LightingStyle, LightingDirection, Actor, ShotType } from '../types/shotspec';
+import { ShotSpec, createDefaultShotSpec, CameraMovementType, FocalLength, CameraAngle, LightingStyle, LightingDirection, Actor, ShotType, SubjectKind, ShotCreationMode, Point2D, Point3D, EnvironmentSpec, CINEMATIC_ENVIRONMENT_PRESETS } from '../types/shotspec';
 import { getAdapter } from '../adapters';
 import { ValidationReport, CompiledPromptBundle } from '../adapters/types';
 import { logger } from './useLogStore';
+import { recordTrajectoryPositionAtTime } from '../engine/trajectoryMath';
 
 interface ShotState {
   shot: ShotSpec;
+  shotsById: Record<string, ShotSpec>;
   validation: ValidationReport;
   compiledPrompt: CompiledPromptBundle;
   isDirty: boolean;
 
   // Setters & Actions
+  switchShot: (shotId: string, initialFallback?: () => ShotSpec) => void;
   updateShotName: (name: string) => void;
+  setCreationMode: (mode: ShotCreationMode) => void;
   updateDuration: (seconds: number) => void;
   updateAspectRatio: (ratio: ShotSpec['aspectRatio']) => void;
   updateTargetModel: (model: ShotSpec['targetModel']) => void;
@@ -22,11 +26,29 @@ interface ShotState {
   setCameraAngle: (angle: CameraAngle) => void;
   setCameraMovement: (type: CameraMovementType, speed?: ShotSpec['camera']['movement']['speed']) => void;
   setCameraPositions: (start: ShotSpec['camera']['movement']['startPosition'], end: ShotSpec['camera']['movement']['endPosition']) => void;
+  updateCameraPositionAtTime: (time: number, position: Point3D, duration: number) => void;
+  removeCameraKeyframe: (keyframeId: string) => void;
   
-  // Actors
+  // Actors & Scene Objects
+  sceneCastPool: Actor[];
+  addToCastPool: (actor: Actor) => void;
+  removeFromCastPool: (actorId: string) => void;
+  importFromCastPool: (actorId: string) => void;
   updateActor: (actorId: string, updates: Partial<Actor>) => void;
-  addActor: (name?: string) => void;
+  addActor: (
+    name?: string,
+    kind?: SubjectKind,
+    token?: string,
+    options?: { modelUrl?: string; scale?: number; conceptImageUrl?: string; actionDescription?: string }
+  ) => void;
   removeActor: (actorId: string) => void;
+  clearAllActors: () => void;
+  setActors: (actors: Actor[]) => void;
+  updateActorPositionAtTime: (actorId: string, time: number, position: Point2D, duration: number) => void;
+  removeActorKeyframe: (actorId: string, keyframeId: string) => void;
+
+  // Scene Environment & Location Setting
+  setEnvironment: (env: EnvironmentSpec | Partial<EnvironmentSpec>) => void;
 
   // Lighting & Mood
   setLighting: (style: LightingStyle, direction?: LightingDirection, contrast?: 'soft' | 'balanced' | 'high-contrast') => void;
@@ -35,13 +57,118 @@ interface ShotState {
   setSceneDescription: (desc: string) => void;
   setNegativePrompt: (neg: string) => void;
   setReferenceImage: (ref?: ShotSpec['referenceImage']) => void;
+  updateVfxReference: (updates: Partial<NonNullable<ShotSpec['vfxReference']>>) => void;
   
+  // UI Inspector Tab Coordination
+  activeDeckTab: 'camera' | 'staging' | 'environment' | 'atmosphere' | 'vfx';
+  setActiveDeckTab: (tab: 'camera' | 'staging' | 'environment' | 'atmosphere' | 'vfx') => void;
+  selectedActorId?: string;
+  setSelectedActorId: (id?: string) => void;
+
+  // In-App 3D Previs Video
+  previsVideoUrl?: string;
+  previsVideoBlob?: Blob;
+  isRenderingPrevis: boolean;
+  previsProgress: number;
+  previsRendererFn: (() => Promise<{ url: string; blob: Blob } | null>) | null;
+  registerPrevisRenderer: (fn: (() => Promise<{ url: string; blob: Blob } | null>) | null) => void;
+  renderPrevisVideo: () => Promise<{ url: string; blob: Blob } | null>;
+  setPrevisVideo: (url?: string, blob?: Blob) => void;
+  setPrevisRendering: (rendering: boolean, progress?: number) => void;
+
+  // Prompt Management
+  setCompiledPrompt: (bundle: CompiledPromptBundle) => void;
+
   // Full Reset / Load
   loadShot: (shot: ShotSpec) => void;
   resetToDefault: () => void;
 }
 
-const initialShot = createDefaultShotSpec();
+const loadCachedShots = (): Record<string, ShotSpec> => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem('comfy_ai_director_shots_cache_v1');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null) {
+        for (const key of Object.keys(parsed)) {
+          if (parsed[key] && !parsed[key].environment) {
+            parsed[key].environment = CINEMATIC_ENVIRONMENT_PRESETS[0].spec;
+          }
+        }
+        return parsed;
+      }
+    }
+  } catch {}
+  return {};
+};
+
+const CAST_POOL_STORAGE_KEY = 'comfy_ai_director_cast_pool_v1';
+
+const DEFAULT_CAST_POOL: Actor[] = [
+  {
+    id: 'cast-detective-miller',
+    name: 'Detective Miller',
+    kind: 'human',
+    token: 'a gritty detective in a weathered charcoal trench coat with keen observant eyes',
+    actionDescription: 'walks deliberately, scanning surroundings with intense focus',
+    trajectory: {
+      startTimeSeconds: 0,
+      startPosition: { x: 35, y: 50 },
+      endPosition: { x: 50, y: 50 },
+    },
+  },
+  {
+    id: 'cast-cyber-operative',
+    name: 'Cyber Operative',
+    kind: 'human',
+    token: 'a sleek tactical operative in matte carbon stealth suit with illuminated visor',
+    actionDescription: 'crouches quietly in low ready stance',
+    trajectory: {
+      startTimeSeconds: 0,
+      startPosition: { x: 65, y: 45 },
+      endPosition: { x: 65, y: 55 },
+    },
+  },
+  {
+    id: 'cast-recon-hound',
+    name: 'Cyber Hound',
+    kind: 'creature',
+    token: 'a quad-legged robotic reconnaissance hound with glowing blue ocular sensor',
+    actionDescription: 'trots forward alertly, tracking scent along the floor',
+    trajectory: {
+      startTimeSeconds: 0,
+      startPosition: { x: 45, y: 65 },
+      endPosition: { x: 55, y: 65 },
+    },
+  },
+];
+
+const loadCachedCastPool = (): Actor[] => {
+  if (typeof window === 'undefined') return DEFAULT_CAST_POOL;
+  try {
+    const raw = localStorage.getItem(CAST_POOL_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return DEFAULT_CAST_POOL;
+};
+
+const persistCastPool = (pool: Actor[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(CAST_POOL_STORAGE_KEY, JSON.stringify(pool));
+  } catch {}
+};
+
+const initialCachedShots = loadCachedShots();
+const initialShot = initialCachedShots['shot-01a'] || createDefaultShotSpec({ id: 'shot-01a', name: 'Shot 01A Tracking In' });
+const initialShotsMap: Record<string, ShotSpec> = {
+  ...initialCachedShots,
+  [initialShot.id]: initialShot,
+};
 const initialAdapter = getAdapter(initialShot.targetModel);
 
 export const useShotStore = create<ShotState>((set, get) => {
@@ -52,34 +179,139 @@ export const useShotStore = create<ShotState>((set, get) => {
     return { validation, compiledPrompt };
   };
 
+  const commitShot = (updated: ShotSpec, extraState?: Partial<ShotState>) => {
+    const currentShots = get().shotsById;
+    const nextShots = { ...currentShots, [updated.id]: updated };
+    try {
+      localStorage.setItem('comfy_ai_director_shots_cache_v1', JSON.stringify(nextShots));
+    } catch {}
+    set({
+      shot: updated,
+      shotsById: nextShots,
+      ...evaluate(updated),
+      isDirty: true,
+      ...extraState,
+    });
+  };
+
   return {
     shot: initialShot,
+    shotsById: initialShotsMap,
+    sceneCastPool: loadCachedCastPool(),
     validation: initialAdapter.validate(initialShot),
     compiledPrompt: initialAdapter.compilePrompt(initialShot),
     isDirty: false,
+    activeDeckTab: 'camera',
+    selectedActorId: initialShot.actors[0]?.id,
+    previsVideoUrl: undefined,
+    previsVideoBlob: undefined,
+    isRenderingPrevis: false,
+    previsProgress: 0,
+    previsRendererFn: null,
+    setActiveDeckTab: (tab) => set({ activeDeckTab: tab }),
+    setSelectedActorId: (id) => {
+      if (id && id !== '__camera__') {
+        set({ selectedActorId: id, activeDeckTab: 'staging' });
+      } else if (id === '__camera__') {
+        set({ selectedActorId: id, activeDeckTab: 'camera' });
+      } else {
+        set({ selectedActorId: id });
+      }
+    },
+
+    registerPrevisRenderer: (fn) => set({ previsRendererFn: fn }),
+
+    setPrevisRendering: (isRenderingPrevis, progress = 0) =>
+      set({ isRenderingPrevis, previsProgress: progress }),
+
+    setPrevisVideo: (url, blob) => {
+      const shot = get().shot;
+      const vfxRef = shot.vfxReference
+        ? {
+            ...shot.vfxReference,
+            videoUrl: url || shot.vfxReference.videoUrl,
+            fileName: `${shot.name.replace(/\s+/g, '_')}_previs.${blob?.type.includes('mp4') ? 'mp4' : 'webm'}`,
+            enabled: true,
+          }
+        : undefined;
+
+      const newShot = vfxRef ? { ...shot, vfxReference: vfxRef } : shot;
+      logger.action(url ? `In-app 3D Previs video ready: ${newShot.name}` : 'Cleared previs video');
+      commitShot(newShot, {
+        previsVideoUrl: url,
+        previsVideoBlob: blob,
+      });
+    },
+
+    renderPrevisVideo: async () => {
+      const fn = get().previsRendererFn;
+      if (!fn) {
+        console.warn('No active 3D Previs renderer registered');
+        return null;
+      }
+      return await fn();
+    },
+
+    setCompiledPrompt: (compiledPrompt) => set({ compiledPrompt }),
+
+    switchShot: (shotId: string, initialFallback?: () => ShotSpec) => {
+      const { shot, shotsById } = get();
+      // 1. Ensure current active shot is stored in cache
+      const currentMap: Record<string, ShotSpec> = { ...shotsById, [shot.id]: shot };
+
+      // 2. Lookup target shot or build via fallback
+      let targetShot = currentMap[shotId];
+      if (!targetShot) {
+        targetShot = initialFallback ? initialFallback() : createDefaultShotSpec({ id: shotId });
+        currentMap[shotId] = targetShot;
+      }
+
+      try {
+        localStorage.setItem('comfy_ai_director_shots_cache_v1', JSON.stringify(currentMap));
+      } catch {}
+
+      logger.action(`Switched active shot to "${targetShot.name}" (${targetShot.id})`);
+      set({
+        shot: targetShot,
+        shotsById: currentMap,
+        selectedActorId: targetShot.actors[0]?.id,
+        ...evaluate(targetShot),
+        isDirty: false,
+        previsVideoUrl: undefined,
+        previsVideoBlob: undefined,
+        isRenderingPrevis: false,
+        previsProgress: 0,
+      });
+    },
 
     updateShotName: (name) => {
       const shot = { ...get().shot, name };
       logger.action(`Renamed shot to "${name}"`);
-      set({ shot, ...evaluate(shot), isDirty: true });
+      commitShot(shot);
+    },
+
+    setCreationMode: (creationMode) => {
+      const shot = { ...get().shot, creationMode };
+      logger.action(`Switched shot workflow mode to ${creationMode === 'construct-3d' ? '3D Previs from Scratch' : 'Video Plate VFX Solve'}`);
+      commitShot(shot);
     },
 
     updateDuration: (durationSeconds) => {
       const shot = { ...get().shot, durationSeconds };
       logger.action(`Updated shot duration to ${durationSeconds}s`);
-      set({ shot, ...evaluate(shot), isDirty: true });
+      commitShot(shot);
     },
 
     updateAspectRatio: (aspectRatio) => {
       const shot = { ...get().shot, aspectRatio };
       logger.action(`Switched aspect ratio to ${aspectRatio}`);
-      set({ shot, ...evaluate(shot), isDirty: true });
+      commitShot(shot);
     },
 
     updateTargetModel: (targetModel) => {
       const shot = { ...get().shot, targetModel };
       logger.action(`Switched target model to "${targetModel}"`);
-      set({ shot, ...evaluate(shot), isDirty: true });
+      commitShot(shot);
     },
 
     setFocalLength: (focalLength) => {
@@ -92,7 +324,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         },
       };
       logger.action(`Changed camera focal length to ${focalLength}`);
-      set({ shot: updated, ...evaluate(updated), isDirty: true });
+      commitShot(updated);
     },
 
     setShotType: (shotType) => {
@@ -102,7 +334,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         camera: { ...shot.camera, shotType },
       };
       logger.action(`Changed shot framing to ${shotType}`);
-      set({ shot: updated, ...evaluate(updated), isDirty: true });
+      commitShot(updated);
     },
 
     setCameraAngle: (angle) => {
@@ -112,7 +344,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         camera: { ...shot.camera, angle },
       };
       logger.action(`Changed camera angle to ${angle}`);
-      set({ shot: updated, ...evaluate(updated), isDirty: true });
+      commitShot(updated);
     },
 
     setCameraMovement: (type, speed) => {
@@ -129,7 +361,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         },
       };
       logger.action(`Configured camera trajectory: ${type} (${speed || shot.camera.movement.speed})`);
-      set({ shot: updated, ...evaluate(updated), isDirty: true });
+      commitShot(updated);
     },
 
     setCameraPositions: (startPosition, endPosition) => {
@@ -146,45 +378,278 @@ export const useShotStore = create<ShotState>((set, get) => {
         },
       };
       logger.action(`Stage repositioned camera: (${startPosition.x}, ${startPosition.y}) -> (${endPosition.x}, ${endPosition.y})`);
-      set({ shot: updated, ...evaluate(updated), isDirty: true });
+      commitShot(updated);
+    },
+
+    updateCameraPositionAtTime: (time, position, duration) => {
+      const { shot } = get();
+      const curMov = shot.camera.movement;
+      const safeDuration = duration > 0 ? duration : 4.0;
+      const clampedTime = Math.max(0, Math.min(safeDuration, time));
+      const isAtStart = clampedTime <= 0.15;
+      const isAtEnd = clampedTime >= safeDuration - 0.15;
+
+      let newMov = { ...curMov };
+      if (isAtStart) {
+        newMov.startPosition = position;
+      } else if (isAtEnd) {
+        newMov.endPosition = position;
+      } else {
+        const kfs = [...(curMov.keyframes || [])];
+        const existingIdx = kfs.findIndex((k) => Math.abs(k.time - clampedTime) <= 0.25);
+        if (existingIdx >= 0) {
+          kfs[existingIdx] = { ...kfs[existingIdx], time: clampedTime, position };
+        } else {
+          kfs.push({
+            id: `cam_kf_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            time: Number(clampedTime.toFixed(2)),
+            position,
+          });
+        }
+        kfs.sort((a, b) => a.time - b.time);
+        newMov.keyframes = kfs;
+      }
+
+      logger.action(`Camera keyframed at ${clampedTime.toFixed(1)}s`, position);
+      const updated: ShotSpec = {
+        ...shot,
+        camera: { ...shot.camera, movement: newMov },
+      };
+      commitShot(updated);
+    },
+
+    removeCameraKeyframe: (keyframeId) => {
+      const { shot } = get();
+      const updated: ShotSpec = {
+        ...shot,
+        camera: {
+          ...shot.camera,
+          movement: {
+            ...shot.camera.movement,
+            keyframes: (shot.camera.movement.keyframes || []).filter((k) => k.id !== keyframeId),
+          },
+        },
+      };
+      logger.action(`Removed camera keyframe ${keyframeId}`);
+      commitShot(updated);
+    },
+
+    addToCastPool: (actor) => {
+      const { sceneCastPool } = get();
+      const existingIdx = sceneCastPool.findIndex(
+        (a) => a.id === actor.id || a.name.toLowerCase() === actor.name.toLowerCase()
+      );
+      let next: Actor[];
+      if (existingIdx >= 0) {
+        next = [...sceneCastPool];
+        next[existingIdx] = { ...actor };
+      } else {
+        next = [actor, ...sceneCastPool];
+      }
+      set({ sceneCastPool: next });
+      persistCastPool(next);
+      logger.action(`Saved "${actor.name}" to Scene Cast Pool`);
+    },
+
+    removeFromCastPool: (actorId) => {
+      const { sceneCastPool } = get();
+      const next = sceneCastPool.filter((a) => a.id !== actorId);
+      set({ sceneCastPool: next });
+      persistCastPool(next);
+      logger.action(`Removed actor ${actorId} from Scene Cast Pool`);
+    },
+
+    importFromCastPool: (actorId) => {
+      const { sceneCastPool, addActor } = get();
+      const target = sceneCastPool.find((a) => a.id === actorId);
+      if (!target) return;
+      addActor(target.name, target.kind, target.token, {
+        modelUrl: target.modelUrl,
+        scale: target.scale,
+        conceptImageUrl: target.conceptImageUrl,
+        actionDescription: target.actionDescription,
+      });
+      logger.action(`Imported "${target.name}" from Scene Cast Pool into active shot`);
     },
 
     updateActor: (actorId, updates) => {
       const { shot } = get();
       const updatedActors = shot.actors.map((a) => (a.id === actorId ? { ...a, ...updates } : a));
-      const targetActor = updatedActors.find(a => a.id === actorId);
+      const targetActor = updatedActors.find((a) => a.id === actorId);
       logger.action(`Updated actor "${targetActor?.name || actorId}" properties`, updates);
       const updated: ShotSpec = { ...shot, actors: updatedActors };
-      set({ shot: updated, ...evaluate(updated), isDirty: true });
+      commitShot(updated);
     },
 
-    addActor: (name = 'Supporting Character') => {
+    updateActorPositionAtTime: (actorId, time, position, duration) => {
       const { shot } = get();
+      const target = shot.actors.find((a) => a.id === actorId);
+      if (!target) return;
+      const updatedTrajectory = recordTrajectoryPositionAtTime(
+        target.trajectory,
+        time,
+        duration,
+        position
+      );
+      const updatedActors = shot.actors.map((a) =>
+        a.id === actorId ? { ...a, trajectory: updatedTrajectory } : a
+      );
+      logger.action(`Updated "${target.name}" position at ${time.toFixed(1)}s`, position);
+      const updated: ShotSpec = { ...shot, actors: updatedActors };
+      commitShot(updated);
+    },
+
+    removeActorKeyframe: (actorId, keyframeId) => {
+      const { shot } = get();
+      const updatedActors = shot.actors.map((a) => {
+        if (a.id !== actorId) return a;
+        return {
+          ...a,
+          trajectory: {
+            ...a.trajectory,
+            keyframes: (a.trajectory.keyframes || []).filter((k) => k.id !== keyframeId),
+          },
+        };
+      });
+      logger.action(`Removed keyframe for actor ${actorId}`);
+      const updated: ShotSpec = { ...shot, actors: updatedActors };
+      commitShot(updated);
+    },
+
+    addActor: (name, kind = 'human', token, options) => {
+      const { shot } = get();
+      const resolvedKind = (kind || 'human').trim().toLowerCase();
+      const defaultName = name && name.trim()
+        ? name.trim().charAt(0).toUpperCase() + name.trim().slice(1)
+        : resolvedKind !== 'human'
+        ? resolvedKind.charAt(0).toUpperCase() + resolvedKind.slice(1)
+        : `Character ${shot.actors.length + 1}`;
+
+      const defaultToken = token
+        ? token
+        : name && name.trim()
+        ? `a detailed ${name.trim().toLowerCase()}`
+        : resolvedKind === 'spaceship' || resolvedKind === 'space ship' || resolvedKind === 'starship'
+        ? 'a sleek futuristic sci-fi starship with glowing cyan ion thrusters and cockpit canopy'
+        : resolvedKind === 'mountain'
+        ? 'a majestic rugged mountain peak with alpine stone crags'
+        : resolvedKind === 'car'
+        ? 'a vintage automobile'
+        : resolvedKind === 'table'
+        ? 'a rustic wooden table'
+        : resolvedKind === 'tree'
+        ? 'a tall lush tree'
+        : resolvedKind === 'chair'
+        ? 'an armchair'
+        : resolvedKind === 'prop'
+        ? 'a storage crate'
+        : resolvedKind === 'sofa' || resolvedKind === 'couch'
+        ? 'a comfortable leather sofa'
+        : resolvedKind === 'house' || resolvedKind === 'building'
+        ? 'a rustic stone building'
+        : resolvedKind === 'tv' || resolvedKind === 'screen'
+        ? 'a high-definition television monitor'
+        : resolvedKind === 'bicycle' || resolvedKind === 'bike'
+        ? 'a classic bicycle'
+        : resolvedKind === 'lamp' || resolvedKind === 'streetlamp'
+        ? 'a vintage cast-iron streetlamp'
+        : resolvedKind === 'robot'
+        ? 'an advanced robotic humanoid droid'
+        : resolvedKind !== 'human'
+        ? `a detailed ${resolvedKind}`
+        : 'a central dramatic protagonist';
+
+      const defaultAction =
+        resolvedKind === 'spaceship' || resolvedKind === 'space ship' || resolvedKind === 'starship'
+          ? 'cruising smoothly through space with glowing ion thrusters'
+          : resolvedKind === 'mountain' || resolvedKind === 'hill' || resolvedKind === 'rock'
+          ? 'towering majestically in the background landscape'
+          : resolvedKind === 'human'
+          ? 'stands and surveys the scene'
+          : resolvedKind === 'car'
+          ? 'parked along the road'
+          : 'positioned on set in the environment';
+
+      const spawnX = 35 + Math.floor(Math.random() * 30);
+      const spawnY = 35 + Math.floor(Math.random() * 30);
+      const spawnZ = 0; // Default on ground
+
       const newActor: Actor = {
-        id: `actor-${Date.now()}`,
-        name,
-        token: 'a mysterious figure in the shadows',
-        actionDescription: 'watches intently from the edge of frame',
+        id: `actor-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        name: defaultName,
+        kind,
+        token: defaultToken,
+        actionDescription: options?.actionDescription || defaultAction,
         trajectory: {
-          startTimeSeconds: 1.0,
-          startPosition: { x: 30, y: 40 },
-          endPosition: { x: 35, y: 45 },
+          startTimeSeconds: 0,
+          startPosition: { x: spawnX, y: spawnY, z: spawnZ },
+          endPosition: { x: spawnX, y: spawnY, z: spawnZ },
         },
+        modelUrl: options?.modelUrl,
+        scale: options?.scale,
+        conceptImageUrl: options?.conceptImageUrl,
       };
-      logger.action(`Added character to stage: "${name}"`, newActor);
+      logger.action(`Added ${kind} to stage: "${defaultName}"`, newActor);
       const updated: ShotSpec = { ...shot, actors: [...shot.actors, newActor] };
-      set({ shot: updated, ...evaluate(updated), isDirty: true });
+      commitShot(updated, {
+        selectedActorId: newActor.id,
+        activeDeckTab: 'staging',
+      });
     },
 
     removeActor: (actorId) => {
-      const { shot } = get();
+      const { shot, selectedActorId } = get();
       const target = shot.actors.find(a => a.id === actorId);
       logger.action(`Removed character from stage: "${target?.name || actorId}"`);
+      const updatedActors = shot.actors.filter((a) => a.id !== actorId);
       const updated: ShotSpec = {
         ...shot,
-        actors: shot.actors.filter((a) => a.id !== actorId),
+        actors: updatedActors,
       };
-      set({ shot: updated, ...evaluate(updated), isDirty: true });
+      commitShot(updated, {
+        selectedActorId: selectedActorId === actorId ? (updatedActors[0]?.id || undefined) : selectedActorId,
+      });
+    },
+
+    clearAllActors: () => {
+      const { shot } = get();
+      logger.action(`Cleared all characters from stage`);
+      const updated: ShotSpec = {
+        ...shot,
+        actors: [],
+      };
+      commitShot(updated, {
+        selectedActorId: undefined,
+      });
+    },
+
+    setActors: (actors) => {
+      const { shot } = get();
+      logger.action(`Set ${actors.length} actors on stage`, actors);
+      const updated: ShotSpec = {
+        ...shot,
+        actors,
+      };
+      commitShot(updated);
+    },
+
+    setEnvironment: (env) => {
+      const { shot } = get();
+      const currentEnv = shot.environment || CINEMATIC_ENVIRONMENT_PRESETS[0].spec;
+      const nextEnv: EnvironmentSpec = {
+        ...currentEnv,
+        ...env,
+      };
+      logger.action(`Set scene environment to ${nextEnv.name} (${nextEnv.category})`, {
+        weather: nextEnv.weather,
+        timeOfDay: nextEnv.timeOfDay,
+        groundSurface: nextEnv.groundSurface,
+      });
+      const updated: ShotSpec = {
+        ...shot,
+        environment: nextEnv,
+      };
+      commitShot(updated);
     },
 
     setLighting: (style, direction, contrast) => {
@@ -198,36 +663,74 @@ export const useShotStore = create<ShotState>((set, get) => {
           contrast: contrast || shot.lighting.contrast,
         },
       };
-      set({ shot: updated, ...evaluate(updated), isDirty: true });
+      commitShot(updated);
     },
 
     setSceneDescription: (sceneDescription) => {
       const shot = { ...get().shot, sceneDescription };
       logger.action(`Updated scene narrative description (${sceneDescription.length} chars)`);
-      set({ shot, ...evaluate(shot), isDirty: true });
+      commitShot(shot);
     },
 
     setNegativePrompt: (negativePrompt) => {
       const shot = { ...get().shot, negativePrompt };
       logger.action(`Updated negative prompt filter (${negativePrompt.length} chars)`);
-      set({ shot, ...evaluate(shot), isDirty: true });
+      commitShot(shot);
     },
 
     setReferenceImage: (referenceImage) => {
       const shot = { ...get().shot, referenceImage };
       logger.action(`Assigned reference image for Image-to-Video`, { hasImage: !!referenceImage });
-      set({ shot, ...evaluate(shot), isDirty: true });
+      commitShot(shot);
+    },
+
+    updateVfxReference: (updates) => {
+      const { shot } = get();
+      const current = shot.vfxReference || {
+        referenceMode: 'actor-motion' as const,
+        depthGuidanceWeight: 0.7,
+        edgeFidelity: 0.5,
+        motionRetention: 0.65,
+        trimStartSeconds: 0,
+        trimEndSeconds: shot.durationSeconds,
+        enabled: true,
+      };
+      const vfxReference = { ...current, ...updates };
+      const updated: ShotSpec = { ...shot, vfxReference };
+      logger.action(`Updated VFX reference plate (${vfxReference.referenceMode}, depth: ${vfxReference.depthGuidanceWeight})`);
+      commitShot(updated);
     },
 
     loadShot: (shot) => {
       logger.action(`Loaded shot "${shot.name}" (${shot.id}) into active editor`);
-      set({ shot, ...evaluate(shot), isDirty: false });
+      const currentShots = get().shotsById;
+      const nextShots = { ...currentShots, [shot.id]: shot };
+      try {
+        localStorage.setItem('comfy_ai_director_shots_cache_v1', JSON.stringify(nextShots));
+      } catch {}
+      set({
+        shot,
+        shotsById: nextShots,
+        selectedActorId: shot.actors[0]?.id,
+        ...evaluate(shot),
+        isDirty: false,
+        previsVideoUrl: undefined,
+        previsVideoBlob: undefined,
+        isRenderingPrevis: false,
+        previsProgress: 0,
+      });
     },
 
     resetToDefault: () => {
       logger.action(`Reset director studio state to default master shot`);
-      const fresh = createDefaultShotSpec();
-      set({ shot: fresh, ...evaluate(fresh), isDirty: false });
+      const fresh = createDefaultShotSpec({ id: get().shot.id, name: get().shot.name });
+      commitShot(fresh, {
+        isDirty: false,
+        previsVideoUrl: undefined,
+        previsVideoBlob: undefined,
+        isRenderingPrevis: false,
+        previsProgress: 0,
+      });
     },
   };
 });

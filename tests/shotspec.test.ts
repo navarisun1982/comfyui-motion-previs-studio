@@ -41,6 +41,7 @@ describe('ShotSpec Canonical Schema', () => {
         {
           id: 'a1',
           name: 'Hero',
+          kind: 'human',
           token: 'detective in trenchcoat',
           actionDescription: 'steps into the alley light',
           trajectory: {
@@ -52,6 +53,7 @@ describe('ShotSpec Canonical Schema', () => {
         {
           id: 'a2',
           name: 'Nemesis',
+          kind: 'human',
           token: 'shadowy figure',
           actionDescription: 'watches from doorway',
           trajectory: {

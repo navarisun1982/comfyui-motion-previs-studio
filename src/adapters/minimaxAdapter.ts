@@ -65,6 +65,13 @@ export class MiniMaxAdapter implements ModelCapabilityAdapter {
       explanation: 'MiniMax excels at organic character motion, natural eye-lines, and realistic cloth/body dynamics.',
     });
 
+    warnings.push('MiniMax H3 / Hailuo is a proprietary cloud model. Execution in ComfyUI requires the MiniMax API node extension and API key.');
+    capabilityNotes.push({
+      feature: 'Cloud API Engine',
+      tier: 'approximated',
+      explanation: 'MiniMax runs through cloud inference, not local RTX weights. Use LTX-2.5 for local RTX 3090 inference.',
+    });
+
     return {
       valid: errors.length === 0,
       errors,
@@ -76,17 +83,27 @@ export class MiniMaxAdapter implements ModelCapabilityAdapter {
   compilePrompt(shot: ShotSpec): CompiledPromptBundle {
     const base = compilePromptForShot(shot, this.id);
 
-    // MiniMax prompt optimization: enrich with narrative continuity and sensory texture
-    const cameraMotion = shot.camera.movement.type.replace(/-/g, ' ');
-    const lensInfo = `${shot.camera.lens.focalLength} lens, shallow focus`;
-    const lightingMood = `${shot.lighting.style.replace(/-/g, ' ')}, ${shot.lighting.direction.replace(/-/g, ' ')} illumination`;
+    let vfxNote = '';
+    if (shot.vfxReference?.enabled) {
+      const mode = shot.vfxReference.referenceMode;
+      if (mode === 'actor-motion') {
+        vfxNote = ' [Choreography Reference: retaining exact human actor physical choreography, expressive facial nuances, photorealistic cinematic re-skinning]';
+      } else if (mode === 'camera-only') {
+        vfxNote = ' [Camera Trajectory Reference: replicating continuous optical flow camera movement from plate, completely original scene]';
+      } else if (mode === 'full-scene') {
+        vfxNote = ' [Full Scene VFX Reference: preserving spatial depth rhythm, volumetric lighting transformation]';
+      } else if (mode === 'object-motion') {
+        vfxNote = ' [Object Motion Reference: preserving motion vector dynamics, stylized redesign]';
+      }
+    }
 
-    const positivePrompt = `${base.positivePrompt}. Captured with a smooth continuous ${cameraMotion} motion, filmed on high-end cinema glass (${lensInfo}), beautiful volumetric ${lightingMood}, cinematic photorealism, lifelike human motion.`;
+    const positivePrompt = vfxNote ? `${base.positivePrompt} ${vfxNote}` : base.positivePrompt;
 
     return {
       ...base,
       positivePrompt,
       technicalMetadata: {
+        ...base.technicalMetadata,
         targetModel: 'MiniMax H3 / Hailuo',
         duration: shot.durationSeconds,
         fps: shot.frameRate,
@@ -153,12 +170,14 @@ export class MiniMaxAdapter implements ModelCapabilityAdapter {
           height,
           frames: frameCount,
           fps: shot.frameRate,
-          motion_bucket_id: 127,
+          motion_bucket_id: shot.vfxReference?.enabled
+            ? Math.round(80 + shot.vfxReference.motionRetention * 140)
+            : 127,
           cfg_scale: 6.0,
           steps: 25,
           seed: shot.timestamp % 1000000,
         },
-        _meta: { title: 'MiniMax Video Sampler' },
+        _meta: { title: shot.vfxReference?.enabled ? 'MiniMax Video Sampler (VFX Reference Guided)' : 'MiniMax Video Sampler' },
       },
       '5': {
         class_type: 'SaveAnimatedWEBP',

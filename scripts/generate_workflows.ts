@@ -1,5 +1,4 @@
 import { LTXVideoAdapter } from './src/adapters/ltxAdapter';
-import { MockModelAdapter } from './src/adapters/mockAdapter';
 import { createDefaultShotSpec } from './src/types/shotspec';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -10,7 +9,6 @@ if (!fs.existsSync(outDir)) {
 }
 
 const ltxAdapter = new LTXVideoAdapter();
-const mockAdapter = new MockModelAdapter();
 
 // 1. Text-to-Video LTX-2.5
 const shotT2V = createDefaultShotSpec({
@@ -65,14 +63,6 @@ const i2vWorkflow = ltxAdapter.buildWorkflow(shotI2V, 'example_start_frame.png')
 fs.writeFileSync(
   path.join(outDir, 'ltx_2.5_director_image_to_video.json'),
   JSON.stringify(i2vWorkflow, null, 2),
-  'utf-8'
-);
-
-// 3. Mock Workflow
-const mockWf = mockAdapter.buildWorkflow(shotT2V);
-fs.writeFileSync(
-  path.join(outDir, 'mock_director_test_workflow.json'),
-  JSON.stringify(mockWf, null, 2),
   'utf-8'
 );
 

@@ -1,14 +1,26 @@
-import { ShotSpec, CameraMovementType, FocalLength, CameraAngle, LightingStyle, LightingDirection } from '../types/shotspec';
-import { CompiledPromptBundle } from '../adapters/types';
+import { ShotSpec, CameraMovementType, FocalLength, CameraAngle, LightingStyle, LightingDirection, EnvironmentSpec } from '../types/shotspec';
+import { CompiledPromptBundle, TemporalPromptBeat } from '../adapters/types';
+
+export function formatEnvironment(env?: EnvironmentSpec): string {
+  if (!env) return '';
+  const parts = [
+    env.promptDescription || env.name,
+    env.weather && env.weather !== 'clear' ? `weather condition ${env.weather}` : '',
+    env.timeOfDay ? `time of day ${env.timeOfDay.replace(/-/g, ' ')}` : '',
+    env.groundSurface ? `ground surface ${env.groundSurface.replace(/-/g, ' ')}` : '',
+    env.fogDensity && env.fogDensity > 0.25 ? `atmospheric haze and volumetric fog (density ${Math.round(env.fogDensity * 100)}%)` : '',
+  ].filter(Boolean);
+  return parts.join(', ');
+}
 
 export function formatCameraMovement(type: CameraMovementType, speed: string): string {
   const speedPhrase = speed === 'slow-cinematic' ? 'slow, controlled' : speed === 'rapid-dynamic' ? 'fast, energetic' : 'steady, continuous';
   
   switch (type) {
     case 'dolly-in':
-      return `steady camera dolly-in push, camera physically moving forward toward the subject at a ${speedPhrase} pace, creating increasing emotional intimacy`;
+      return `steady camera dolly-in (dolly in) push, camera physically moving forward toward the subject at a ${speedPhrase} pace, creating increasing emotional intimacy`;
     case 'dolly-out':
-      return `smooth camera dolly-out pull, camera smoothly moving backward away from the subject at a ${speedPhrase} pace, revealing the surrounding environment`;
+      return `smooth camera dolly-out (dolly out) pull, camera smoothly moving backward away from the subject at a ${speedPhrase} pace, revealing the surrounding environment`;
     case 'truck-left':
       return `smooth horizontal truck left, camera laterally sliding to the left parallel to the action at a ${speedPhrase} pace`;
     case 'truck-right':
@@ -46,13 +58,13 @@ export function formatCameraMovement(type: CameraMovementType, speed: string): s
 export function formatLens(focalLength: FocalLength, aperture: string): string {
   switch (focalLength) {
     case '18mm':
-      return `ultra-wide 18mm cinematic lens, broad expansive field of view, subtle wide-angle perspective distortion at edges, deep focus`;
+      return `ultra-wide 18mm lens, broad expansive field of view, subtle wide-angle perspective distortion at edges, deep focus`;
     case '24mm':
-      return `wide 24mm prime lens, environmental framing with cinematic presence, crisp background context`;
+      return `wide 24mm lens, environmental framing with cinematic presence, crisp background context`;
     case '35mm':
-      return `classic 35mm cinema prime, natural human perspective, gentle background separation at ${aperture}`;
+      return `classic 35mm cinema prime lens, natural human perspective, gentle background separation at ${aperture}`;
     case '50mm':
-      return `50mm standard focal length, zero perspective distortion, natural cinematic depth of field at ${aperture}`;
+      return `50mm lens, standard focal length prime, zero perspective distortion, natural cinematic depth of field at ${aperture}`;
     case '85mm':
       return `85mm telephoto portrait lens, creamy shallow depth of field, compressed background bokeh at ${aperture}, isolated subject`;
     case '135mm':
@@ -106,40 +118,142 @@ export function formatLighting(style: LightingStyle, direction: LightingDirectio
   }
 }
 
-export function compilePromptForShot(shot: ShotSpec, targetModelId: string): CompiledPromptBundle {
+/**
+ * Builds chronological temporal stages for the shot based on stage duration,
+ * camera motion speed/pacing, and actor trajectory timing.
+ */
+export function buildTemporalTimeline(shot: ShotSpec): TemporalPromptBeat[] {
+  const duration = Math.max(1.0, shot.durationSeconds);
+  const t1 = Number((duration * 0.35).toFixed(1));
+  const t2 = Number((duration * 0.75).toFixed(1));
+
+  const camType = shot.camera.movement.type;
+  const speed = shot.camera.movement.speed;
+  const pacing = shot.camera.movement.pacing || 'ease-in-out';
+  const speedTerm = speed === 'slow-cinematic' ? 'gentle' : speed === 'rapid-dynamic' ? 'brisk' : 'steady';
+
+  // Helper for camera phase
+  const getCameraPhase = (phase: 'open' | 'mid' | 'close') => {
+    if (camType === 'static') return 'Camera holds a motionless locked-off frame';
+    if (phase === 'open') {
+      return `Camera establishes framing and initiates a ${speedTerm} ${camType.replace(/-/g, ' ')} with ${pacing} pacing`;
+    }
+    if (phase === 'mid') {
+      return `Camera continues active ${camType.replace(/-/g, ' ')} across the scene, maintaining dynamic framing and parallax`;
+    }
+    return `Camera smoothly decelerates, settling into the final composition and locking focus`;
+  };
+
+  // Helper for actor phase
+  const getActorPhase = (phase: 'open' | 'mid' | 'close') => {
+    if (!shot.actors || shot.actors.length === 0) {
+      return 'Scene environment exhibits continuous natural ambient motion';
+    }
+    return shot.actors.map((actor) => {
+      const actStart = actor.trajectory?.startTimeSeconds ?? 0;
+      const startPos = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
+      const endPos = actor.trajectory?.endPosition ?? { x: 50, y: 50 };
+      const hasDisplacement = Math.abs(startPos.x - endPos.x) > 3 || Math.abs(startPos.y - endPos.y) > 3;
+
+      if (phase === 'open') {
+        if (actStart > t1) {
+          return `${actor.name} holds initial stance at stage coordinates (${startPos.x}%, ${startPos.y}%), awaiting action cue`;
+        }
+        return `${actor.name} initiates action: ${actor.actionDescription} from mark (${startPos.x}%, ${startPos.y}%)`;
+      }
+      if (phase === 'mid') {
+        if (hasDisplacement) {
+          return `${actor.name} advances in continuous physical movement across the stage toward (${endPos.x}%, ${endPos.y}%), physical dynamics and attire shifting with locomotion`;
+        }
+        return `${actor.name} performs active physical gestures: ${actor.actionDescription}`;
+      }
+      // close
+      if (hasDisplacement) {
+        return `${actor.name} reaches target mark (${endPos.x}%, ${endPos.y}%), settling posture and holding eyeline`;
+      }
+      return `${actor.name} resolves action, holding steady presence in final frame`;
+    }).join('; ');
+  };
+
+  return [
+    {
+      timeRange: `0.0s - ${t1}s`,
+      cameraAction: getCameraPhase('open'),
+      actorAction: getActorPhase('open'),
+      description: `Opening beat: ${getCameraPhase('open')}. ${getActorPhase('open')}.`,
+    },
+    {
+      timeRange: `${t1}s - ${t2}s`,
+      cameraAction: getCameraPhase('mid'),
+      actorAction: getActorPhase('mid'),
+      description: `Progression beat: ${getCameraPhase('mid')}. ${getActorPhase('mid')}.`,
+    },
+    {
+      timeRange: `${t2}s - ${duration.toFixed(1)}s`,
+      cameraAction: getCameraPhase('close'),
+      actorAction: getActorPhase('close'),
+      description: `Resolution beat: ${getCameraPhase('close')}. ${getActorPhase('close')}.`,
+    },
+  ];
+}
+
+/**
+ * LTX-2.5 (Lightricks DiT) Prompt Compiler
+ * Follows official Lightricks DiT prompting guidelines:
+ * - Single continuous narrative paragraph in present tense ("walks, turns, looks, shifts").
+ * - Action verbs driving frame-to-frame motion mechanics instead of static adjectives.
+ * - Camera framing & motion defined first, followed by subject appearance and chronological motion.
+ * - Zero comma-soup/buzzwords ("masterpiece, 8k").
+ */
+export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
   const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed);
   const lensInfo = formatLens(shot.camera.lens.focalLength, shot.camera.lens.aperture);
   const angleInfo = formatCameraAngle(shot.camera.angle, shot.camera.shotType);
   const lightInfo = formatLighting(shot.lighting.style, shot.lighting.direction, shot.lighting.contrast);
+  const timeline = buildTemporalTimeline(shot);
 
-  // Actor blocking directives
-  const actorDescriptions = shot.actors.map((actor) => {
-    return `${actor.token} (${actor.actionDescription})`;
-  }).join('; ');
+  const duration = shot.durationSeconds.toFixed(1);
 
-  const cameraDirectives = `${angleInfo}. ${cameraMove}. Shot on ${lensInfo}.`;
-  const actorDirectives = actorDescriptions ? `Subject blocking: ${actorDescriptions}.` : '';
-  const lightingDirectives = `Lighting: ${lightInfo}.`;
-  const styleDirectives = `Cinematic film aesthetic, 24fps motion cadence, natural shutter angle, high dynamic range.`;
+  // Subject descriptors with scale
+  const subjectText = shot.actors.length > 0
+    ? shot.actors.map((actor) => {
+        const scale = actor.scale ?? 1.0;
+        const scalePrefix = scale >= 2.0 ? 'towering, massive ' : scale >= 1.4 ? 'large, prominent ' : scale <= 0.4 ? 'miniature, tiny ' : scale <= 0.7 ? 'small ' : '';
+        return `${scalePrefix}${actor.token} (${actor.name})`;
+      }).join(' and ')
+    : 'the scene subjects';
 
-  // Master assembled positive prompt
+  // Construct fluid, present-tense chronological narrative
+  const openingActorAction = timeline[0].actorAction;
+  const midActorAction = timeline[1].actorAction;
+  const closingActorAction = timeline[2].actorAction;
+
+  const narrativeProgression = `Throughout the continuous ${duration}-second take, the ${cameraMove}. At the opening of the shot (${timeline[0].timeRange}), ${openingActorAction}. Over the mid-shot progression (${timeline[1].timeRange}), ${timeline[1].cameraAction.toLowerCase()} as ${midActorAction}. Towards the final resolution (${timeline[2].timeRange}), ${closingActorAction}, while the camera smoothly holds focus.`;
+
+  const envText = shot.environment ? formatEnvironment(shot.environment) : '';
+
   const positivePrompt = [
-    shot.sceneDescription.trim(),
-    actorDirectives,
-    cameraDirectives,
-    lightingDirectives,
-    styleDirectives,
+    `Cinematic ${shot.aspectRatio} ${angleInfo}, filmed on a ${lensInfo}.`,
+    `In the scene, ${subjectText}.`,
+    envText ? `Setting: ${envText}.` : '',
+    `${shot.sceneDescription.trim()}.`,
+    `Atmospheric environment under ${lightInfo}, with volumetric light bounce, natural motion cadence at 24fps, and physical depth.`,
+    narrativeProgression,
   ].filter(Boolean).join(' ');
+
+  const negativePrompt = shot.negativePrompt || 'jitter, warping, temporal flicker, distorted anatomy, morphing faces, plastic skin, jittery frame skips, overexposed, low quality, 3d render, watermark, blurry';
 
   return {
     positivePrompt,
-    negativePrompt: shot.negativePrompt || 'jitter, warping, distorted faces, blurry, cartoon, low quality, 3d render, plastic skin, jittery camera shake',
-    cameraDirectives,
-    actorDirectives,
-    lightingDirectives,
-    styleDirectives,
+    negativePrompt,
+    cameraDirectives: `${angleInfo}. ${cameraMove}. Shot on ${lensInfo}.`,
+    actorDirectives: shot.actors.map((a) => `${a.token} (${a.actionDescription})`).join('; '),
+    lightingDirectives: `Lighting: ${lightInfo}.`,
+    styleDirectives: 'Cinematic film aesthetic, 24fps motion cadence, natural shutter angle, high dynamic range.',
+    temporalBeats: timeline,
+    modelPromptParadigm: 'ltx-continuous-narrative',
     technicalMetadata: {
-      targetModel: targetModelId,
+      targetModel: 'ltx-2.5',
       duration: shot.durationSeconds,
       fps: shot.frameRate,
       focalLength: shot.camera.lens.focalLength,
@@ -147,3 +261,136 @@ export function compilePromptForShot(shot: ShotSpec, targetModelId: string): Com
     },
   };
 }
+
+/**
+ * MiniMax H3 / Hailuo Prompt Compiler
+ * Follows official MiniMax / Hailuo prompting guidelines:
+ * - Structured multi-section formula:
+ *   [Camera Shot + Motion] + [Subject + Micro-Acting] + [Timeline Choreography] + [Scene Environment] + [Lighting & Tone] + [Cinematic Style & Optical Gear]
+ * - Prioritizes human micro-acting and expressive physical performance cues.
+ * - Explicit chronological time tags for sequential movement.
+ * - Real-world cinema camera & lens optical signatures (Arri Alexa 65).
+ */
+export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
+  const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed);
+  const lensInfo = formatLens(shot.camera.lens.focalLength, shot.camera.lens.aperture);
+  const angleInfo = formatCameraAngle(shot.camera.angle, shot.camera.shotType);
+  const lightInfo = formatLighting(shot.lighting.style, shot.lighting.direction, shot.lighting.contrast);
+  const timeline = buildTemporalTimeline(shot);
+  const envText = shot.environment ? formatEnvironment(shot.environment) : '';
+
+  // Subject with micro-acting nuances
+  const subjectBlocks = shot.actors.map((actor) => {
+    const scale = actor.scale ?? 1.0;
+    const scalePrefix = scale >= 2.0 ? 'towering, massive ' : scale >= 1.4 ? 'large, prominent ' : scale <= 0.4 ? 'miniature, tiny ' : scale <= 0.7 ? 'small ' : '';
+    return `${scalePrefix}${actor.token}, displaying nuanced physical presence, subtle micro-expressions, rhythmic chest breathing, and focused eye direction as they perform: ${actor.actionDescription}`;
+  }).join('; ');
+
+  // Chronological timeline section
+  const timelineString = timeline.map((beat) => `[${beat.timeRange}]: ${beat.cameraAction}; ${beat.actorAction}`).join(' | ');
+
+  const positivePrompt = [
+    `[Camera Shot & Motion]: ${angleInfo}, ${cameraMove}.`,
+    subjectBlocks ? `[Subject & Micro-Acting]: ${subjectBlocks}.` : '',
+    `[Timeline Choreography]: ${timelineString}.`,
+    `[Scene Environment]: ${shot.environment?.promptDescription || shot.sceneDescription.trim()}${envText ? ` (${envText})` : ''}, rich material textures and atmospheric depth.`,
+    `[Lighting & Atmosphere]: ${lightInfo}.`,
+    `[Cinematic Style & Gear]: Shot on Arri Alexa 65 with ${lensInfo}, 24fps motion cadence, natural 180-degree shutter angle, lifelike character physics and optical photorealism.`,
+  ].filter(Boolean).join(' ');
+
+  const negativePrompt = shot.negativePrompt || 'blurry, low quality, deformed limbs, floating artifacts, jerky camera, unnatural motion, digital noise, oversaturated, morphing';
+
+  return {
+    positivePrompt,
+    negativePrompt,
+    cameraDirectives: `${angleInfo}. ${cameraMove}. Shot on ${lensInfo}.`,
+    actorDirectives: subjectBlocks || 'None',
+    lightingDirectives: `Lighting: ${lightInfo}.`,
+    styleDirectives: 'Arri Alexa 65, cinematic realism, 24fps motion cadence, 180-degree shutter.',
+    temporalBeats: timeline,
+    modelPromptParadigm: 'minimax-structured-cinematic',
+    technicalMetadata: {
+      targetModel: 'MiniMax H3 / Hailuo',
+      duration: shot.durationSeconds,
+      fps: shot.frameRate,
+      focalLength: shot.camera.lens.focalLength,
+      aspectRatio: shot.aspectRatio,
+    },
+  };
+}
+
+/**
+ * Seedance 2.0 (ByteDance Seaweed / SeaDance) Prompt Compiler
+ * Follows official Seedance prompting guidelines:
+ * - Structured brackets emphasizing 6-axis camera motion matrix coordinates, subject locomotion physics,
+ *   sequential cue timetables, spatial volumetric lighting, and optical sensor profiles.
+ */
+export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
+  const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed);
+  const lensInfo = formatLens(shot.camera.lens.focalLength, shot.camera.lens.aperture);
+  const angleInfo = formatCameraAngle(shot.camera.angle, shot.camera.shotType);
+  const lightInfo = formatLighting(shot.lighting.style, shot.lighting.direction, shot.lighting.contrast);
+  const timeline = buildTemporalTimeline(shot);
+  const envText = shot.environment ? formatEnvironment(shot.environment) : '';
+
+  const dx = ((shot.camera.movement.endPosition.x - shot.camera.movement.startPosition.x) / 10.0).toFixed(2);
+  const dy = ((shot.camera.movement.endPosition.y - shot.camera.movement.startPosition.y) / 10.0).toFixed(2);
+  const dz = (((shot.camera.movement.endPosition.z ?? 50) - (shot.camera.movement.startPosition.z ?? 50)) / 10.0).toFixed(2);
+
+  // Subject with aerodynamic & locomotion physics
+  const subjectBlocks = shot.actors.map((actor) => {
+    const scale = actor.scale ?? 1.0;
+    const scalePrefix = scale >= 2.0 ? 'towering scale ' : scale >= 1.4 ? 'large scale ' : scale <= 0.5 ? 'miniature scale ' : '';
+    const start = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
+    const end = actor.trajectory?.endPosition ?? { x: 50, y: 50 };
+    return `${scalePrefix}${actor.token} [Stage Vector: (${start.x}%, ${start.y}%) -> (${end.x}%, ${end.y}%)], performing: ${actor.actionDescription}, attire aerodynamic drape and physical mass responding to acceleration`;
+  }).join('; ');
+
+  // Chronological cue beats
+  const timelineString = timeline.map((beat) => `[${beat.timeRange}]: ${beat.cameraAction}; ${beat.actorAction}`).join(' | ');
+
+  const positivePrompt = [
+    `[Camera 6-Axis Motion & Matrix Trajectory]: ${angleInfo}, ${cameraMove}, 3D displacement vector (dx: ${dx}, dy: ${dy}, dz: ${dz}), filmed on ${lensInfo}.`,
+    subjectBlocks ? `[Subject Dynamics & Aerodynamic Physics]: ${subjectBlocks}.` : '',
+    `[Temporal Cue Timetable]: ${timelineString}.`,
+    `[Atmospheric Space & Volumetric Lighting]: ${lightInfo}, volumetric shadow falloff, spatial air density, scene environment: ${shot.environment?.promptDescription || shot.sceneDescription.trim()}${envText ? ` (${envText})` : ''}.`,
+    `[Render & Motion Profile]: Optical photorealism, 24fps motion matrix coherence, natural 180-degree optical shutter angle, rich texture fidelity.`,
+  ].filter(Boolean).join(' ');
+
+  const negativePrompt = shot.negativePrompt || 'floating artifacts, frame tearing, flickering geometry, unnatural jerky acceleration, low resolution, warped proportions, morphing hands, plastic textures, watermark';
+
+  return {
+    positivePrompt,
+    negativePrompt,
+    cameraDirectives: `${angleInfo}. ${cameraMove}. 3D delta: (${dx}, ${dy}, dz: ${dz}). Shot on ${lensInfo}.`,
+    actorDirectives: subjectBlocks || 'None',
+    lightingDirectives: `Lighting: ${lightInfo}.`,
+    styleDirectives: 'Seedance 2.0 Motion Matrix, 24fps cinema cadence, optical shutter, spatial depth coherence.',
+    temporalBeats: timeline,
+    modelPromptParadigm: 'seedance-motion-matrix',
+    technicalMetadata: {
+      targetModel: 'Seedance 2.0',
+      duration: shot.durationSeconds,
+      fps: shot.frameRate,
+      focalLength: shot.camera.lens.focalLength,
+      aspectRatio: shot.aspectRatio,
+      cameraDelta: { dx, dy, dz },
+    },
+  };
+}
+
+/**
+ * Universal Director Prompt Compiler
+ * Automatically routes to the official prompting paradigm tailored to the target model.
+ */
+export function compilePromptForShot(shot: ShotSpec, targetModelId?: string): CompiledPromptBundle {
+  const model = targetModelId || shot.targetModel;
+  if (model === 'minimax-h3') {
+    return compileMiniMaxPrompt(shot);
+  }
+  if (model === 'seedance') {
+    return compileSeedancePrompt(shot);
+  }
+  return compileLtxPrompt(shot);
+}
+

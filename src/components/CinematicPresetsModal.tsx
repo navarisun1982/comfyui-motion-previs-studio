@@ -214,9 +214,9 @@ export const CinematicPresetsModal: React.FC<CinematicPresetsModalProps> = ({ is
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-      <div className="relative flex w-full max-w-4xl flex-col rounded-2xl border border-director-border bg-director-darkest/95 shadow-2xl glass-card overflow-hidden">
+      <div className="relative flex w-full max-w-4xl max-h-[85vh] flex-col rounded-2xl border border-director-border bg-director-darkest/95 shadow-2xl glass-card overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-director-border px-6 py-4 bg-director-panel/60">
+        <div className="flex shrink-0 items-center justify-between border-b border-director-border px-6 py-4 bg-director-panel/60">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-director-gold/20 text-director-gold border border-director-gold/30">
               <Sparkles className="h-5 w-5" />
@@ -242,7 +242,7 @@ export const CinematicPresetsModal: React.FC<CinematicPresetsModalProps> = ({ is
         </div>
 
         {/* Preset Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-6 overflow-y-auto max-h-[75vh]">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-6 overflow-y-auto flex-1 min-h-0">
           {DIRECTOR_PRESETS.map((p) => (
             <div
               key={p.id}

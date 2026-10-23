@@ -2,41 +2,88 @@ import { useState, useEffect } from 'react';
 import { useShotStore } from './stores/useShotStore';
 import { useComfyStore } from './stores/useComfyStore';
 import { useHistoryStore } from './stores/useHistoryStore';
-import { StagePrevis } from './components/StagePrevis';
-import { CameraDeck } from './components/CameraDeck';
-import { ActorBlocking } from './components/ActorBlocking';
-import { DirectorTimeline } from './components/DirectorTimeline';
+import { ShotBible } from './components/ShotBible';
+import { MotionPrevisStage } from './components/MotionPrevisStage';
+import { PrevisParametersDeck } from './components/PrevisParametersDeck';
 import { DirectorDiffInspector } from './components/DirectorDiffInspector';
 import { ComfyExecutionPanel } from './components/ComfyExecutionPanel';
+import { VFXVideoDeck } from './components/VFXVideoDeck';
 import { InAppDebugger, DebuggerTogglePill } from './components/InAppDebugger';
 import { ComfyConnectionModal } from './components/ComfyConnectionModal';
 import { CinematicPresetsModal } from './components/CinematicPresetsModal';
+import { AssetLibraryModal } from './components/AssetLibraryModal';
+import { useAssetLibraryStore } from './stores/useAssetLibraryStore';
 import { useLogStore } from './stores/useLogStore';
+import { getReasonerConfig, PROVIDERS } from './services/objectReasoner';
+import { directPromptWithAI } from './services/aiPromptDirector';
+import { getAdapter } from './adapters';
 import {
   Clapperboard,
-  Camera,
-  Users,
-  Sun,
   GitCompare,
   Code2,
-  RotateCcw,
   Sparkles,
   Settings,
+  Box,
+  Layers,
+  Zap,
+  Copy,
+  Check,
+  Brain,
+  Clock,
+  RefreshCw,
+  Wand2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
-type StudioTab = 'directing' | 'diff';
-type LeftPanelTab = 'camera' | 'actors' | 'environment';
+export type WorkspaceMode = 'previs' | 'vfx' | 'diffusion';
+export type StepTab = WorkspaceMode | 'shot' | 'analyze' | 'plan' | 'export';
 
 export default function App() {
-  const { shot, validation, compiledPrompt, resetToDefault } = useShotStore();
-  const { connectionStatus, systemStats, openSettings, isMockMode } = useComfyStore();
+  const { shot, validation, compiledPrompt, setActiveDeckTab, setCompiledPrompt, updateTargetModel } = useShotStore();
+  const { connectionStatus, openSettings } = useComfyStore();
   const { revisions } = useHistoryStore();
 
-  const [activeStudioTab, setActiveStudioTab] = useState<StudioTab>('directing');
-  const [leftTab, setLeftTab] = useState<LeftPanelTab>('camera');
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('previs');
+  const [activeShotId, setActiveShotId] = useState('shot-01a');
+  const [activeShotTitle, setActiveShotTitle] = useState('Shot 01A Tracking In');
   const [showPromptModal, setShowPromptModal] = useState<boolean>(false);
+  const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
+  const [copiedJson, setCopiedJson] = useState<boolean>(false);
   const [showPresetsModal, setShowPresetsModal] = useState<boolean>(false);
+  const [showDiffInspector, setShowDiffInspector] = useState<boolean>(false);
+  const [isDirectingPrompt, setIsDirectingPrompt] = useState<boolean>(false);
+  const [aiDirectorFeedback, setAiDirectorFeedback] = useState<string | null>(null);
+  const [showTimelineDetails, setShowTimelineDetails] = useState<boolean>(true);
   const { toggleOpen: toggleDebugger } = useLogStore();
+  const openAssetLibrary = useAssetLibraryStore((s) => s.openLibrary);
+
+  const handleDirectWithAi = async () => {
+    setIsDirectingPrompt(true);
+    setAiDirectorFeedback(null);
+    try {
+      const res = await directPromptWithAI(shot, shot.targetModel);
+      setCompiledPrompt({
+        ...compiledPrompt,
+        positivePrompt: res.positivePrompt,
+        negativePrompt: res.negativePrompt,
+      });
+      setAiDirectorFeedback(res.directorNotes);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAiDirectorFeedback(`AI Direction failed: ${msg}`);
+    } finally {
+      setIsDirectingPrompt(false);
+    }
+  };
+
+  const handleResetToDeterministicPrompt = () => {
+    const adapter = getAdapter(shot.targetModel);
+    const standard = adapter.compilePrompt(shot);
+    setCompiledPrompt(standard);
+    setAiDirectorFeedback('Reset to standard model-compiled prompt.');
+    setTimeout(() => setAiDirectorFeedback(null), 3000);
+  };
 
   // Keyboard shortcut: Press `~` or `F12` to toggle in-app debugger
   useEffect(() => {
@@ -51,268 +98,491 @@ export default function App() {
   }, [toggleDebugger]);
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-director-darkest text-slate-100 font-sans overflow-hidden">
-      {/* Top Main Navigation Bar */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-director-border px-5 glass-panel z-20">
-        {/* Brand & Mission */}
+    <div className="flex h-screen w-screen flex-col bg-[#08090d] text-slate-100 font-sans overflow-hidden">
+      {/* Top Main Navigation Bar matching Motion Previs Studio */}
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4 bg-[#0d0f17] z-20">
+        {/* Left: Project & Scene Branding */}
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-director-gold to-director-amber text-director-darkest font-black shadow-glow-gold">
-            <Clapperboard className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-display font-extrabold text-sm tracking-wider text-white">
-                AI DIRECTOR STUDIO
-              </h1>
-              <span className="rounded bg-director-gold/20 px-1.5 py-0.2 font-mono text-[9px] font-bold text-director-gold border border-director-gold/30">
-                OCT 2026 EDITION
-              </span>
+          <div className="flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-black shadow-md">
+              <Clapperboard className="h-4 w-4" />
             </div>
-            <p className="font-mono text-[10px] text-slate-400">DIRECT THE SHOT, NOT THE PROMPT</p>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-display font-bold text-xs tracking-wider text-white">
+                  Motion Previs Studio
+                </span>
+                <span className="rounded bg-blue-500/20 px-1 py-0.2 font-mono text-[8px] font-bold text-blue-400 border border-blue-500/30">
+                  AI DIRECTOR
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="hidden sm:flex items-center gap-1 rounded bg-black/40 border border-white/10 px-2 py-0.5 font-mono text-[10px] text-slate-400">
+            <span className="text-slate-300 font-bold">SCENE 01</span>
+            <span className="text-slate-600">/</span>
+            <span className="text-amber-400 font-semibold">{activeShotId.toUpperCase()}</span>
           </div>
         </div>
 
-        {/* Studio Workspace Mode Tabs */}
-        <div className="flex items-center rounded-lg bg-director-surface p-1 border border-director-border">
+        {/* Center: 3 Studio Workspaces (Directing Stage, VFX Plate Solver, ComfyUI Studio) */}
+        <div className="flex items-center gap-1 rounded-lg bg-[#11131c] p-1 border border-white/10 font-mono text-xs shadow-inner">
           <button
-            onClick={() => setActiveStudioTab('directing')}
-            className={`flex items-center gap-2 rounded-md px-3 py-1 font-display text-xs font-semibold tracking-wide transition-all ${
-              activeStudioTab === 'directing'
-                ? 'bg-director-gold text-director-darkest shadow-glow-gold'
-                : 'text-slate-400 hover:text-white'
+            onClick={() => {
+              setWorkspaceMode('previs');
+              setActiveDeckTab('camera');
+            }}
+            className={`flex items-center gap-1.5 rounded-md px-3.5 py-1 font-semibold transition-all ${
+              workspaceMode === 'previs'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
             }`}
+            title="3D Previs Stage, Camera Optics & Soundstage Actor Blocking"
           >
-            <Camera className="h-3.5 w-3.5" />
-            Stage & Directing
+            <Box className="h-3.5 w-3.5" />
+            <span>Directing Stage</span>
           </button>
 
           <button
-            onClick={() => setActiveStudioTab('diff')}
-            className={`flex items-center gap-2 rounded-md px-3 py-1 font-display text-xs font-semibold tracking-wide transition-all ${
-              activeStudioTab === 'diff'
-                ? 'bg-director-cyan text-director-darkest shadow-glow-cyan'
-                : 'text-slate-400 hover:text-white'
+            onClick={() => {
+              setWorkspaceMode('vfx');
+              setActiveDeckTab('vfx');
+            }}
+            className={`flex items-center gap-1.5 rounded-md px-3.5 py-1 font-semibold transition-all ${
+              workspaceMode === 'vfx'
+                ? 'bg-gradient-to-r from-teal-600 to-emerald-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
             }`}
+            title="VFX Video Plate Motion Tracking & Multi-Pass Computer Vision"
+          >
+            <Layers className="h-3.5 w-3.5" />
+            <span>VFX Plate Solver</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setWorkspaceMode('diffusion');
+            }}
+            className={`flex items-center gap-1.5 rounded-md px-3.5 py-1 font-semibold transition-all ${
+              workspaceMode === 'diffusion'
+                ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-black font-bold shadow-md shadow-amber-500/20'
+                : 'text-slate-400 hover:text-white hover:bg-white/5'
+            }`}
+            title="ComfyUI Generation, Diffusion Queue & Directorial Mapping"
+          >
+            <Zap className="h-3.5 w-3.5 fill-current" />
+            <span>ComfyUI Studio</span>
+          </button>
+        </div>
+
+        {/* Right: Actions, Modals & Unified Comfy Status */}
+        <div className="flex items-center gap-2 font-mono text-xs">
+          {/* Director Diff Button */}
+          <button
+            onClick={() => setShowDiffInspector(!showDiffInspector)}
+            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] border transition-colors ${
+              showDiffInspector
+                ? 'bg-cyan-600 text-white border-cyan-500'
+                : 'bg-white/5 text-slate-300 border-white/10 hover:text-white'
+            }`}
+            title="Director Revision Diff Inspector"
           >
             <GitCompare className="h-3.5 w-3.5" />
-            Director Diff
+            <span>Diff</span>
             {revisions.length > 0 && (
-              <span className="rounded-full bg-director-panel px-1.5 py-0.2 font-mono text-[9px] text-white">
+              <span className="rounded-full bg-cyan-500/20 px-1 font-mono text-[9px] text-cyan-300">
                 {revisions.length}
               </span>
             )}
           </button>
-        </div>
 
-        {/* Backend & Hardware Status */}
-        <div className="flex items-center gap-2.5 font-mono text-xs">
-          {/* Directing Mood Presets Button */}
+          {/* 3D Asset Library & AI Generator Button */}
+          <button
+            onClick={() => openAssetLibrary()}
+            className="flex items-center gap-1.5 rounded-md bg-gradient-to-r from-amber-600/90 to-indigo-600/90 hover:from-amber-500 hover:to-indigo-500 px-2.5 py-1 text-[11px] font-semibold text-white border border-amber-400/40 shadow-sm transition-all"
+            title="3D Asset Library, GLB Upload & AI 3D Generator"
+          >
+            <Box className="h-3.5 w-3.5 text-amber-300" />
+            <span>3D Library</span>
+          </button>
+
+          {/* Directing Presets Button */}
           <button
             onClick={() => setShowPresetsModal(true)}
-            className="flex items-center gap-1.5 rounded-lg glass-control px-2.5 py-1 text-[11px] text-director-gold hover:text-white border-director-gold/40 hover:border-director-gold transition-all"
-            title="Choose a cinematic mood preset (direct by feeling)"
+            className="flex items-center gap-1 rounded-md bg-white/5 hover:bg-white/10 px-2 py-1 text-[11px] text-amber-400 border border-amber-400/30 transition-all"
+            title="Cinematic Mood Presets"
           >
-            <Sparkles className="h-3.5 w-3.5 text-director-gold" />
-            <span>Directing Presets</span>
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>Presets</span>
           </button>
 
-          {/* Settings & ComfyUI Connection Button */}
+          {/* Prompt Inspector Button */}
           <button
-            onClick={openSettings}
-            className="flex items-center gap-1.5 rounded-lg glass-control px-2.5 py-1 text-[11px] text-slate-200 hover:text-white border-slate-700 hover:border-director-cyan transition-all"
-            title="ComfyUI Connection & Directing Engine Settings"
-          >
-            <Settings className="h-3.5 w-3.5 text-director-cyan" />
-            <span>Settings</span>
-          </button>
-
-          {/* In-App Debugger Console Pill */}
-          <DebuggerTogglePill />
-
-          {/* Quick Prompt Inspector Button */}
-          <button
-            onClick={() => setShowPromptModal(!showPromptModal)}
-            className="flex items-center gap-1.5 rounded-lg glass-control px-2.5 py-1 text-[11px] text-slate-300 hover:text-white"
+            onClick={() => setShowPromptModal(true)}
+            className="flex items-center gap-1 rounded-md bg-white/5 hover:bg-white/10 px-2 py-1 text-[11px] text-slate-300 hover:text-white border border-white/10"
             title="Inspect compiled prompt"
           >
-            <Code2 className="h-3.5 w-3.5 text-director-gold" />
+            <Code2 className="h-3 w-3 text-blue-400" />
             <span>Prompt</span>
           </button>
 
-          <button
-            onClick={resetToDefault}
-            className="flex items-center gap-1 rounded-lg glass-control px-2 py-1 text-[11px] text-slate-400 hover:text-white"
-            title="Reset Shot to Default"
-          >
-            <RotateCcw className="h-3 w-3" />
-            Reset
-          </button>
+          {/* In-App Debugger Toggle */}
+          <DebuggerTogglePill />
 
-          {/* Comfy Status Pill (Clickable to open settings) */}
+          {/* Unified Studio Settings button (ComfyUI connection + LLM reasoner) */}
           <button
-            onClick={openSettings}
-            className="flex items-center gap-2 rounded-lg border border-director-border bg-director-surface px-2.5 py-1 hover:border-director-gold/60 transition-all text-left"
-            title="Click to configure ComfyUI connection"
+            onClick={() => openSettings()}
+            id="studio-settings-button"
+            className="flex items-center gap-2 rounded-md border border-white/10 bg-[#131620] px-2.5 py-1 hover:border-amber-400/60 hover:bg-[#181d2a] transition-all"
+            title="Studio Settings: ComfyUI connection & LLM provider"
           >
-            <span
-              className={`h-2 w-2 rounded-full shrink-0 ${
-                isMockMode
-                  ? 'bg-director-cyan'
-                  : connectionStatus === 'connected'
-                  ? 'bg-emerald-400 animate-pulse'
-                  : 'bg-rose-400'
-              }`}
-            />
-            <div className="flex flex-col text-[10px] leading-tight">
-              <span className="text-white font-semibold">
-                {isMockMode ? 'Mock Engine Active' : connectionStatus === 'connected' ? 'ComfyUI Online' : 'ComfyUI Offline'}
-              </span>
-              <span className="text-slate-400 truncate max-w-[130px]">
-                {isMockMode ? 'Offline Previs' : systemStats ? `${systemStats.gpuName.split(' ')[0]} ${systemStats.gpuName.split(' ')[1]} (${systemStats.vramFreeGb}GB free)` : ':8188'}
-              </span>
-            </div>
+            <Settings className="h-3.5 w-3.5 text-amber-300" />
+            <span className="text-[11px] font-semibold text-white">Settings</span>
+            <span className="h-3 w-px bg-white/15" />
+            <span className="flex items-center gap-1 text-[9px] font-mono text-slate-300">
+              <span
+                className={`h-2 w-2 rounded-full shrink-0 ${
+                  connectionStatus === 'connected'
+                    ? 'bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.8)]'
+                    : 'bg-rose-400'
+                }`}
+              />
+              {connectionStatus === 'connected' ? 'ComfyUI' : 'Comfy offline'}
+            </span>
+            <span className="flex items-center gap-1 text-[9px] font-mono text-slate-300">
+              <Brain className="h-3 w-3 text-indigo-300" />
+              {PROVIDERS[getReasonerConfig().provider].label}
+            </span>
           </button>
         </div>
       </header>
 
-      {/* Main Workspace Body */}
-      {activeStudioTab === 'directing' ? (
-        <div className="flex flex-1 overflow-hidden">
-          {/* Left Column: Directing Controls (Camera / Actors / Environment) */}
-          <aside className="flex w-84 flex-col border-r border-director-border bg-director-darkest/95 shrink-0">
-            {/* Sub-Tabs */}
-            <div className="flex border-b border-director-border bg-director-panel font-mono text-[11px]">
-              <button
-                onClick={() => setLeftTab('camera')}
-                className={`flex flex-1 items-center justify-center gap-1.5 py-2.5 transition-all ${
-                  leftTab === 'camera'
-                    ? 'border-b-2 border-director-gold font-bold text-director-gold bg-director-darkest/50'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Camera className="h-3.5 w-3.5" />
-                Camera
-              </button>
-
-              <button
-                onClick={() => setLeftTab('actors')}
-                className={`flex flex-1 items-center justify-center gap-1.5 py-2.5 transition-all ${
-                  leftTab === 'actors'
-                    ? 'border-b-2 border-emerald-400 font-bold text-emerald-400 bg-director-darkest/50'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Users className="h-3.5 w-3.5" />
-                Actors ({shot.actors.length})
-              </button>
-
-              <button
-                onClick={() => setLeftTab('environment')}
-                className={`flex flex-1 items-center justify-center gap-1.5 py-2.5 transition-all ${
-                  leftTab === 'environment'
-                    ? 'border-b-2 border-director-cyan font-bold text-director-cyan bg-director-darkest/50'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Sun className="h-3.5 w-3.5" />
-                Scene
-              </button>
-            </div>
-
-            {/* Active Control Content */}
-            <div className="flex-1 overflow-y-auto">
-              {leftTab === 'camera' && <CameraDeck />}
-              {leftTab === 'actors' && <ActorBlocking />}
-              {leftTab === 'environment' && <DirectorTimeline />}
-            </div>
-          </aside>
-
-          {/* Center Column: 2D Stage Previsualization */}
-          <main className="flex flex-1 flex-col overflow-hidden">
-            <StagePrevis />
-          </main>
-
-          {/* Right Column: Execution, Reference Image & Output Video */}
-          <aside className="flex w-96 flex-col border-l border-director-border bg-director-darkest/95 shrink-0 overflow-y-auto">
-            <ComfyExecutionPanel />
-
-            {/* Capability Breakdown & Warnings */}
-            <div className="flex flex-col gap-2 p-4 pt-0">
-              <span className="font-mono text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                Directorial Capability Mapping
-              </span>
-              <div className="flex flex-col gap-1.5 rounded-lg border border-director-border bg-director-panel p-2.5 font-mono text-[10px]">
-                {validation.capabilityNotes.map((note, idx) => (
-                  <div key={idx} className="flex items-start gap-1.5 text-slate-300">
-                    <span
-                      className={`rounded px-1 text-[8px] font-bold uppercase shrink-0 mt-0.5 ${
-                        note.tier === 'native'
-                          ? 'bg-emerald-500/20 text-emerald-400'
-                          : note.tier === 'approximated'
-                          ? 'bg-amber-500/20 text-amber-400'
-                          : 'bg-rose-500/20 text-rose-400'
-                      }`}
-                    >
-                      {note.tier}
-                    </span>
-                    <div className="flex flex-col">
-                      <span className="font-bold text-white">{note.feature}</span>
-                      <span className="text-[9px] text-slate-400 font-sans">{note.explanation}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </aside>
+      {/* Main Studio Body */}
+      {showDiffInspector ? (
+        <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
+          <DirectorDiffInspector onClose={() => setShowDiffInspector(false)} />
         </div>
       ) : (
-        /* Director Diff Mode */
-        <div className="flex flex-1 overflow-hidden">
-          <DirectorDiffInspector />
+        <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
+          {/* Left Column: Permanent Shot Bible & Scene Project Hierarchy */}
+          <aside className="flex w-64 min-w-[256px] max-w-[256px] flex-col border-r border-white/10 bg-[#0b0d13] shrink-0 overflow-hidden">
+            <ShotBible
+              activeShotId={activeShotId}
+              onSelectShot={(id, title) => {
+                setActiveShotId(id);
+                if (title) {
+                  setActiveShotTitle(title);
+                } else if (id === 'shot-01a') setActiveShotTitle('Shot 01A Tracking In');
+                else if (id === 'shot-01b') setActiveShotTitle('Shot 01B Pan Right');
+                else if (id === 'shot-01c') setActiveShotTitle('Shot 01C Push In');
+                else if (id === 'shot-01d') setActiveShotTitle('Shot 01D Low Angle');
+                else if (id === 'shot-01e') setActiveShotTitle('Shot 01E Over Shoulder');
+              }}
+            />
+          </aside>
+
+          {/* Center Column: Stage Previs OR VFX Multi-Pass Analyzer depending on workspaceMode */}
+          <main className="flex flex-1 min-w-0 min-h-0 flex-col overflow-hidden bg-[#090b10]">
+            {workspaceMode === 'vfx' ? (
+              <div className="flex-1 overflow-y-auto">
+                <VFXVideoDeck />
+              </div>
+            ) : (
+              <MotionPrevisStage
+                shotTitle={activeShotTitle}
+                workspaceMode={workspaceMode}
+                onDirectWithComfy={() => setWorkspaceMode('diffusion')}
+              />
+            )}
+          </main>
+
+          {/* Right Column: Previs Parameters Deck or Full Comfy Execution Panel */}
+          <aside className="flex w-80 min-w-[320px] max-w-[320px] flex-col border-l border-white/10 bg-[#0b0d13] shrink-0 overflow-y-auto overflow-x-hidden">
+            {workspaceMode === 'diffusion' ? (
+              <div className="flex flex-col h-full">
+                <ComfyExecutionPanel onBackToPrevis={() => setWorkspaceMode('previs')} />
+                {/* Directorial Capability Breakdown */}
+                <div className="p-4 pt-0 space-y-2 font-mono text-[10px]">
+                  <span className="text-slate-400 font-bold uppercase tracking-wider">
+                    Directorial Capability Mapping
+                  </span>
+                  <div className="space-y-1.5 rounded-lg border border-white/10 bg-[#131620] p-2.5">
+                    {validation.capabilityNotes.map((note, idx) => (
+                      <div key={idx} className="flex items-start gap-1.5 text-slate-300">
+                        <span
+                          className={`rounded px-1 text-[8px] font-bold uppercase shrink-0 mt-0.5 ${
+                            note.tier === 'native'
+                              ? 'bg-emerald-500/20 text-emerald-400'
+                              : note.tier === 'approximated'
+                              ? 'bg-amber-500/20 text-amber-400'
+                              : 'bg-rose-500/20 text-rose-400'
+                          }`}
+                        >
+                          {note.tier}
+                        </span>
+                        <div className="flex flex-col">
+                          <span className="font-bold text-white">{note.feature}</span>
+                          <span className="text-[9px] text-slate-400 font-sans">{note.explanation}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <PrevisParametersDeck
+                onOpenPromptInspector={() => setShowPromptModal(true)}
+                onExportProductionPack={() => setWorkspaceMode('diffusion')}
+                onDirectShotWithComfy={() => setWorkspaceMode('diffusion')}
+              />
+            )}
+          </aside>
         </div>
       )}
 
-      {/* Floating Prompt Inspector Modal */}
+      {/* Floating Prompt Inspector Modal with Model-Specific Paradigm & Timeline */}
       {showPromptModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-6">
-          <div className="glass-panel w-full max-w-2xl rounded-2xl border border-director-border p-5 flex flex-col gap-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-director-border pb-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-director-gold" />
-                <h3 className="font-display font-bold text-sm text-white">Compiled Model Prompt Bundle</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 sm:p-6">
+          <div className="w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl border border-white/10 bg-[#0e111a] p-5 flex flex-col gap-4 shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-black shadow-md">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="font-display font-bold text-sm text-white">
+                    Compiled Directorial Prompt Pack
+                  </h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold uppercase tracking-wider border ${
+                      shot.targetModel === 'seedance'
+                        ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
+                        : shot.targetModel === 'minimax-h3'
+                          ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                          : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
+                    }`}>
+                      {shot.targetModel === 'seedance'
+                        ? 'Seedance 2.0 Motion Matrix'
+                        : shot.targetModel === 'minimax-h3'
+                          ? 'MiniMax H3 / Hailuo Formula'
+                          : 'LTX-2.5 DiT Narrative Flow'}
+                    </span>
+                    <span className="font-mono text-[10px] text-slate-400">
+                      {shot.targetModel === 'seedance'
+                        ? '6-Axis Coordinate Trajectory, Aerodynamic Physics & Sensor Profile'
+                        : shot.targetModel === 'minimax-h3'
+                          ? 'Structured Micro-Acting & Optical Photorealism'
+                          : 'Present-Tense Continuous Action & DiT Temporal Pacing'}
+                    </span>
+                  </div>
+                </div>
               </div>
               <button
                 onClick={() => setShowPromptModal(false)}
-                className="font-mono text-xs text-slate-400 hover:text-white"
+                className="font-mono text-xs text-slate-400 hover:text-white px-2 py-1 rounded bg-white/5 hover:bg-white/10 transition-colors"
               >
                 ✕ Close
               </button>
             </div>
 
+            {/* Target Model Selector Tabs */}
+            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-[#08090d] border border-white/10">
+              <span className="font-mono text-[10px] text-slate-400 px-2 font-bold uppercase tracking-wider shrink-0">
+                Target Model:
+              </span>
+              {[
+                { id: 'ltx-2.5', label: 'LTX-2.5', desc: 'DiT Narrative Flow' },
+                { id: 'minimax-h3', label: 'MiniMax H3', desc: 'Micro-Acting Formula' },
+                { id: 'seedance', label: 'Seedance 2.0', desc: '6-Axis Matrix & Physics' },
+              ].map((m) => {
+                const isActive = shot.targetModel === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      updateTargetModel(m.id as any);
+                      const adapter = getAdapter(m.id);
+                      setCompiledPrompt(adapter.compilePrompt({ ...shot, targetModel: m.id as any }));
+                      setAiDirectorFeedback(null);
+                    }}
+                    className={`flex-1 flex flex-col items-center py-1 px-2 rounded-lg text-xs font-display font-semibold transition-all ${
+                      isActive
+                        ? m.id === 'seedance'
+                          ? 'bg-cyan-600/30 text-cyan-200 border border-cyan-500/50 shadow-sm'
+                          : m.id === 'minimax-h3'
+                            ? 'bg-amber-600/30 text-amber-200 border border-amber-500/50 shadow-sm'
+                            : 'bg-indigo-600/30 text-indigo-200 border border-indigo-500/50 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
+                    }`}
+                  >
+                    <span>{m.label}</span>
+                    <span className="font-mono text-[8px] opacity-75">{m.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* AI Directing Toolbar */}
+            <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-gradient-to-r from-blue-950/40 via-indigo-950/20 to-purple-950/40 border border-blue-500/20">
+              <div className="flex items-center gap-2">
+                <Brain className="h-4 w-4 text-blue-400" />
+                <span className="font-display font-semibold text-xs text-slate-200">AI Prompt Reasoner:</span>
+                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                  {getReasonerConfig().provider.toUpperCase()}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleResetToDeterministicPrompt}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 text-slate-300 font-mono text-[11px] transition-colors border border-white/10"
+                  title="Reset to deterministic compiler output without AI rewrites"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  <span>Standard Compile</span>
+                </button>
+                <button
+                  onClick={handleDirectWithAi}
+                  disabled={isDirectingPrompt}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-display font-semibold text-xs transition-all shadow-md disabled:opacity-50"
+                >
+                  {isDirectingPrompt ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Wand2 className="h-3.5 w-3.5" />
+                  )}
+                  <span>{isDirectingPrompt ? 'Directing with AI...' : 'Direct & Polish with AI'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* AI Director Feedback notification */}
+            {aiDirectorFeedback && (
+              <div
+                className={`p-2.5 rounded-lg border font-mono text-xs leading-relaxed flex items-start gap-2 ${
+                  aiDirectorFeedback.toLowerCase().includes('fail') || aiDirectorFeedback.toLowerCase().includes('error')
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                    : 'bg-blue-500/10 border-blue-500/30 text-blue-300'
+                }`}
+              >
+                <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
+                <div className="flex-1">{aiDirectorFeedback}</div>
+              </div>
+            )}
+
+            {/* Stage Temporal Beats & Timeline Choreography */}
+            {compiledPrompt.temporalBeats && compiledPrompt.temporalBeats.length > 0 && (
+              <div className="rounded-xl border border-white/10 bg-[#08090d] p-3 flex flex-col gap-2">
+                <button
+                  onClick={() => setShowTimelineDetails(!showTimelineDetails)}
+                  className="flex items-center justify-between text-left group"
+                >
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-3.5 w-3.5 text-amber-400" />
+                    <span className="font-display font-bold text-xs text-slate-200 group-hover:text-white transition-colors">
+                      Stage Timeline & Choreography Beats ({shot.durationSeconds}s Duration)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1 text-slate-400 font-mono text-[10px]">
+                    <span>{showTimelineDetails ? 'Hide Beats' : 'Show Beats'}</span>
+                    {showTimelineDetails ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                  </div>
+                </button>
+
+                {showTimelineDetails && (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-1 pt-2 border-t border-white/5">
+                    {compiledPrompt.temporalBeats.map((beat, idx) => (
+                      <div key={idx} className="rounded-lg bg-[#11131c] border border-white/5 p-2 flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            {beat.timeRange}
+                          </span>
+                          <span className="font-mono text-[9px] text-slate-500">
+                            Beat {idx === 0 ? 'I (Open)' : idx === 1 ? 'II (Progression)' : 'III (Resolve)'}
+                          </span>
+                        </div>
+                        <div className="font-mono text-[10px] text-slate-300 leading-snug">
+                          <span className="text-blue-400 font-semibold">Camera: </span>
+                          {beat.cameraAction}
+                        </div>
+                        <div className="font-mono text-[10px] text-slate-400 leading-snug">
+                          <span className="text-emerald-400 font-semibold">Stage & Actors: </span>
+                          {beat.actorAction}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Positive Prompt Section */}
             <div className="flex flex-col gap-2">
-              <label className="font-mono text-[11px] text-director-gold font-bold">Positive Directorial Prompt:</label>
-              <div className="rounded-lg border border-director-border bg-director-darkest p-3 font-mono text-xs text-slate-200 leading-relaxed max-h-48 overflow-y-auto">
+              <div className="flex items-center justify-between">
+                <label className="font-mono text-[11px] text-blue-400 font-bold">
+                  Positive Directorial Prompt:
+                </label>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(compiledPrompt.positivePrompt);
+                    setCopiedPrompt(true);
+                    setTimeout(() => setCopiedPrompt(false), 2000);
+                  }}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-blue-600/30 hover:bg-blue-600/50 text-blue-300 font-mono text-[10px] transition-all border border-blue-500/30"
+                >
+                  {copiedPrompt ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                  <span>{copiedPrompt ? 'Copied to Clipboard!' : 'Copy Prompt'}</span>
+                </button>
+              </div>
+              <div className="rounded-lg border border-white/10 bg-[#08090d] p-3 font-mono text-xs text-slate-200 leading-relaxed max-h-48 overflow-y-auto select-all">
                 {compiledPrompt.positivePrompt}
               </div>
             </div>
 
+            {/* Negative Prompt Section */}
             <div className="flex flex-col gap-2">
               <label className="font-mono text-[11px] text-slate-400 font-bold">Negative Prompt:</label>
-              <div className="rounded-lg border border-director-border bg-director-darkest p-3 font-mono text-xs text-slate-400 leading-relaxed">
+              <div className="rounded-lg border border-white/10 bg-[#08090d] p-3 font-mono text-xs text-slate-400 leading-relaxed">
                 {compiledPrompt.negativePrompt}
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 font-mono text-[10px] text-slate-400 bg-director-panel p-2.5 rounded-lg border border-director-border">
-              <div>Target: <span className="text-white font-bold">{shot.targetModel}</span></div>
-              <div>Duration: <span className="text-white font-bold">{shot.durationSeconds}s</span></div>
-              <div>Focal Length: <span className="text-white font-bold">{shot.camera.lens.focalLength}</span></div>
+            {/* Footer Metrics & Actions */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1 border-t border-white/10">
+              <div className="grid grid-cols-3 gap-2 font-mono text-[10px] text-slate-400 bg-[#131620] p-2.5 rounded-lg border border-white/10 flex-1">
+                <div>Target: <span className="text-white font-bold">{shot.targetModel}</span></div>
+                <div>Duration: <span className="text-white font-bold">{shot.durationSeconds}s</span></div>
+                <div>Lens: <span className="text-white font-bold">{shot.camera.lens.focalLength}</span></div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(JSON.stringify(compiledPrompt, null, 2));
+                    setCopiedJson(true);
+                    setTimeout(() => setCopiedJson(false), 2000);
+                  }}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 font-mono text-[10px] transition-all border border-white/10"
+                >
+                  {copiedJson ? <Check className="h-3 w-3 text-emerald-400" /> : <Code2 className="h-3 w-3" />}
+                  <span>{copiedJson ? 'Copied JSON!' : 'Copy Full Bundle'}</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setShowPromptModal(false);
+                    setWorkspaceMode('diffusion');
+                  }}
+                  className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-black font-display font-bold text-xs transition-all shadow-md"
+                >
+                  <Sparkles className="h-3.5 w-3.5 fill-current" />
+                  <span>Queue in ComfyUI ▶</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Docked In-App Debugger & Action Console */}
+      {/* Docked In-App Debugger */}
       <InAppDebugger />
 
       {/* ComfyUI Connection & Settings Modal */}
@@ -323,6 +593,9 @@ export default function App() {
         isOpen={showPresetsModal}
         onClose={() => setShowPresetsModal(false)}
       />
+
+      {/* 3D Asset Library & AI Generator Modal */}
+      <AssetLibraryModal />
     </div>
   );
 }

@@ -1,0 +1,444 @@
+{
+  "version": 1,
+  "name": "Espresso machine",
+  "route": "author",
+  "heightMeters": 1.2,
+  "identity": "Rectangular stainless steel body with group head, steam wand, drip tray and portafilter handle.",
+  "materials": [
+    {
+      "id": "stainless_steel",
+      "color": "#c0c0c0",
+      "roughness": 0.35,
+      "metalness": 0.9,
+      "emissive": false
+    },
+    {
+      "id": "black_plastic",
+      "color": "#1a1a1a",
+      "roughness": 0.6,
+      "metalness": 0,
+      "emissive": false
+    },
+    {
+      "id": "chrome",
+      "color": "#d4d4d4",
+      "roughness": 0.25,
+      "metalness": 0.85,
+      "emissive": false
+    },
+    {
+      "id": "glass",
+      "color": "#e0f0ff",
+      "roughness": 0.3,
+      "metalness": 0.1,
+      "emissive": false,
+      "opacity": 0.7
+    }
+  ],
+  "parts": [
+    {
+      "id": "base_plate",
+      "shape": "box",
+      "size": [
+        0.4,
+        0.02,
+        0.45
+      ],
+      "position": [
+        0,
+        0.01,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "stainless_steel",
+      "mirrorX": false
+    },
+    {
+      "id": "feet_left",
+      "shape": "cylinder",
+      "size": [
+        0.03,
+        0.08,
+        0.03
+      ],
+      "position": [
+        -0.2,
+        -0.01,
+        0.05
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "chrome",
+      "mirrorX": false
+    },
+    {
+      "id": "feet_right",
+      "shape": "cylinder",
+      "size": [
+        0.03,
+        0.08,
+        0.03
+      ],
+      "position": [
+        0.2,
+        -0.01,
+        0.05
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "chrome",
+      "mirrorX": false
+    },
+    {
+      "id": "main_body",
+      "shape": "box",
+      "size": [
+        0.36,
+        0.95,
+        0.42
+      ],
+      "position": [
+        0,
+        0.28,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "stainless_steel",
+      "mirrorX": false
+    },
+    {
+      "id": "control_panel",
+      "shape": "box",
+      "size": [
+        0.38,
+        0.12,
+        0.08
+      ],
+      "position": [
+        0,
+        0.65,
+        0.22
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "black_plastic",
+      "mirrorX": false
+    },
+    {
+      "id": "display_screen",
+      "shape": "box",
+      "size": [
+        0.18,
+        0.04,
+        0.06
+      ],
+      "position": [
+        0,
+        0.72,
+        0.23
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "glass",
+      "mirrorX": false
+    },
+    {
+      "id": "group_head_housing",
+      "shape": "box",
+      "size": [
+        0.14,
+        0.15,
+        0.18
+      ],
+      "position": [
+        0,
+        0.72,
+        -0.08
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "stainless_steel",
+      "mirrorX": false
+    },
+    {
+      "id": "brew_group",
+      "shape": "cylinder",
+      "size": [
+        0.09,
+        0.14,
+        0.09
+      ],
+      "position": [
+        0,
+        0.75,
+        -0.08
+      ],
+      "rotation": [
+        90,
+        0,
+        0
+      ],
+      "material": "chrome",
+      "mirrorX": false
+    },
+    {
+      "id": "steam_wand_base",
+      "shape": "box",
+      "size": [
+        0.06,
+        0.08,
+        0.06
+      ],
+      "position": [
+        -0.12,
+        0.45,
+        -0.15
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "stainless_steel",
+      "mirrorX": false
+    },
+    {
+      "id": "steam_wand_tube",
+      "shape": "cylinder",
+      "size": [
+        0.015,
+        0.35,
+        0.015
+      ],
+      "position": [
+        -0.12,
+        0.37,
+        -0.15
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "chrome",
+      "mirrorX": false
+    },
+    {
+      "id": "hot_water_tap_base",
+      "shape": "box",
+      "size": [
+        0.06,
+        0.08,
+        0.06
+      ],
+      "position": [
+        0.12,
+        0.45,
+        -0.15
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "stainless_steel",
+      "mirrorX": false
+    },
+    {
+      "id": "hot_water_tap_tube",
+      "shape": "cylinder",
+      "size": [
+        0.015,
+        0.35,
+        0.015
+      ],
+      "position": [
+        0.12,
+        0.37,
+        -0.15
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "chrome",
+      "mirrorX": false
+    },
+    {
+      "id": "drip_tray_front",
+      "shape": "box",
+      "size": [
+        0.38,
+        0.01,
+        0.42
+      ],
+      "position": [
+        0,
+        0.03,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "stainless_steel",
+      "mirrorX": false
+    },
+    {
+      "id": "drip_tray_back",
+      "shape": "box",
+      "size": [
+        0.38,
+        0.01,
+        0.42
+      ],
+      "position": [
+        0,
+        -0.01,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "stainless_steel",
+      "mirrorX": false
+    },
+    {
+      "id": "portafilter_body",
+      "shape": "cylinder",
+      "size": [
+        0.095,
+        0.08,
+        0.095
+      ],
+      "position": [
+        -0.06,
+        0.72,
+        -0.12
+      ],
+      "rotation": [
+        90,
+        0,
+        0
+      ],
+      "material": "chrome",
+      "mirrorX": false
+    },
+    {
+      "id": "portafilter_handle",
+      "shape": "capsule",
+      "size": [
+        0.03,
+        0.18,
+        0.04
+      ],
+      "position": [
+        -0.06,
+        0.75,
+        -0.12
+      ],
+      "rotation": [
+        90,
+        0,
+        0
+      ],
+      "material": "black_plastic",
+      "mirrorX": false
+    },
+    {
+      "id": "portafilter_latch",
+      "shape": "box",
+      "size": [
+        0.04,
+        0.02,
+        0.08
+      ],
+      "position": [
+        -0.06,
+        0.73,
+        -0.05
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "chrome",
+      "mirrorX": false
+    },
+    {
+      "id": "water_reservoir_cover",
+      "shape": "box",
+      "size": [
+        0.36,
+        0.06,
+        0.4
+      ],
+      "position": [
+        0,
+        1.02,
+        0.22
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "black_plastic",
+      "mirrorX": false
+    },
+    {
+      "id": "water_reservoir_glass",
+      "shape": "box",
+      "size": [
+        0.32,
+        0.15,
+        0.36
+      ],
+      "position": [
+        0,
+        0.98,
+        0.22
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ],
+      "material": "glass",
+      "mirrorX": false
+    }
+  ],
+  "source": {
+    "model": "qwen3.5:9b-q4_K_M",
+    "generatedAt": "2026-10-21T20:49:49.972Z",
+    "ms": 42450
+  }
+}

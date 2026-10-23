@@ -77,7 +77,31 @@ export class LTXVideoAdapter implements ModelCapabilityAdapter {
   }
 
   compilePrompt(shot: ShotSpec): CompiledPromptBundle {
-    return compilePromptForShot(shot, this.id);
+    const base = compilePromptForShot(shot, this.id);
+    if (shot.vfxReference?.enabled) {
+      const mode = shot.vfxReference.referenceMode;
+      let vfxDirectives = '';
+      if (mode === 'actor-motion') {
+        vfxDirectives = 'Preserving exact human choreography and physical motion dynamics from reference plate, photorealistic cinematic character re-skinning.';
+      } else if (mode === 'camera-only') {
+        vfxDirectives = 'Matching continuous optical flow camera trajectory from reference plate, generating brand-new scene and subjects.';
+      } else if (mode === 'full-scene') {
+        vfxDirectives = 'Preserving volumetric spatial depth rhythm and actor blocking, cinematic re-lighting and textural transformation.';
+      } else if (mode === 'object-motion') {
+        vfxDirectives = 'Preserving trajectory vector and physical velocity of moving elements, redesigned appearance.';
+      }
+
+      return {
+        ...base,
+        positivePrompt: `${base.positivePrompt}. ${vfxDirectives}`,
+        technicalMetadata: {
+          ...base.technicalMetadata,
+          vfxReferenceMode: mode,
+          depthGuidance: shot.vfxReference.depthGuidanceWeight,
+        },
+      };
+    }
+    return base;
   }
 
   buildWorkflow(shot: ShotSpec, uploadedImageFilename?: string): ComfyWorkflowGraph {
@@ -107,7 +131,7 @@ export class LTXVideoAdapter implements ModelCapabilityAdapter {
       '1': {
         class_type: 'UNETLoader',
         inputs: {
-          unet_name: 'LTX2.5\\ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
+          unet_name: 'LTX2.5/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors',
           weight_dtype: 'default',
         },
         _meta: { title: 'Load LTX-2.5 Transformer (INT8)' },
@@ -116,8 +140,8 @@ export class LTXVideoAdapter implements ModelCapabilityAdapter {
       '2': {
         class_type: 'DualCLIPLoader',
         inputs: {
-          clip_name1: 'LTX2.5\\gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
-          clip_name2: 'LTX2.5\\gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+          clip_name1: 'LTX2.5/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
+          clip_name2: 'LTX2.5/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors',
           type: 'ltxv',
         },
         _meta: { title: 'Load Gemma 12B CLIP' },
@@ -150,14 +174,17 @@ export class LTXVideoAdapter implements ModelCapabilityAdapter {
       },
     };
 
-    // If reference image provided, use Image-To-Video pipeline
-    if (uploadedImageFilename) {
+    // If reference image or VFX plate provided, use Video/Image Conditioning pipeline
+    const hasVisualReference = !!uploadedImageFilename || !!shot.vfxReference?.enabled;
+    const refFilename = uploadedImageFilename || shot.vfxReference?.fileName || 'vfx_plate_reference.png';
+
+    if (hasVisualReference) {
       workflow['6'] = {
         class_type: 'LoadImage',
         inputs: {
-          image: uploadedImageFilename,
+          image: refFilename,
         },
-        _meta: { title: 'Reference Start Frame' },
+        _meta: { title: shot.vfxReference?.enabled ? 'VFX Video Plate / Depth Map' : 'Reference Start Frame' },
       };
 
       workflow['7'] = {
@@ -184,6 +211,8 @@ export class LTXVideoAdapter implements ModelCapabilityAdapter {
         _meta: { title: 'Empty LTX Video Latent' },
       };
 
+      const denoiseVal = shot.vfxReference?.enabled ? shot.vfxReference.motionRetention : 1.0;
+
       workflow['9'] = {
         class_type: 'KSampler',
         inputs: {
@@ -196,9 +225,9 @@ export class LTXVideoAdapter implements ModelCapabilityAdapter {
           positive: ['7', 0],
           negative: ['7', 1],
           latent_image: ['8', 0],
-          denoise: 1.0,
+          denoise: denoiseVal,
         },
-        _meta: { title: 'LTX Sampler (25 steps)' },
+        _meta: { title: shot.vfxReference?.enabled ? 'LTX Sampler (VFX Video-to-Video)' : 'LTX Sampler (25 steps)' },
       };
     } else {
       // Text-To-Video pipeline
@@ -241,16 +270,20 @@ export class LTXVideoAdapter implements ModelCapabilityAdapter {
       _meta: { title: 'Decode Video Latents' },
     };
 
-    // 11. Save Video
+    // 11. Save Video via Video Helper Suite (VHS_VideoCombine)
     const sanitizedName = shot.name.replace(/[^a-zA-Z0-9_-]/g, '_');
     workflow['11'] = {
-      class_type: 'SaveVideo',
+      class_type: 'VHS_VideoCombine',
       inputs: {
         images: ['10', 0],
+        frame_rate: shot.frameRate,
+        loop_count: 0,
         filename_prefix: `AIDirector_${sanitizedName}_v${shot.version}`,
-        fps: shot.frameRate,
+        format: 'video/h264-mp4',
+        pingpong: false,
+        save_output: true,
       },
-      _meta: { title: 'Save Generated Video (MP4)' },
+      _meta: { title: 'Save Generated Video (MP4 via VHS)' },
     };
 
     return workflow;
