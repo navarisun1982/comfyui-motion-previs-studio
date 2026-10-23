@@ -7,6 +7,7 @@ import { interpolateTrajectoryPosition, interpolateCameraPosition } from '../eng
 import { createProceduralActorMesh } from '../engine/procedural3D';
 import { lookupCuratedPartGraph, buildPartGraph } from '../engine/procedural3D/partGraph';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { renderOfflinePrevisPasses } from '../engine/offlinePrevisRenderer';
 
 const gltfLoader = new GLTFLoader();
 const gltfCache = new Map<string, THREE.Group>();
@@ -1757,7 +1758,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     syncPositions(currentTime);
   }, [currentTime, shot, duration]);
 
-  // In-App 3D Previs Video Renderer (Client-side 24 FPS capture)
+  // In-App 3D Previs Video Renderer (Deterministic offline fixed-timestep MP4 capture)
   const handleRenderInAppPrevis = async (): Promise<{ url: string; blob: Blob } | null> => {
     if (!vfRendererRef.current || !stageSceneRef.current || !vfCameraRef.current) {
       console.warn('Cannot record previs: Three.js viewfinder not ready');
@@ -1769,71 +1770,27 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
     setPrevisRendering(true, 0);
 
-    let mimeType = 'video/webm';
-    const candidates = [
-      'video/mp4;codecs=avc1,mp4a.40.2',
-      'video/mp4',
-      'video/webm;codecs=vp9',
-      'video/webm;codecs=vp8',
-      'video/webm',
-    ];
-    if (typeof MediaRecorder !== 'undefined') {
-      for (const c of candidates) {
-        if (MediaRecorder.isTypeSupported(c)) {
-          mimeType = c;
-          break;
-        }
-      }
-    }
-
     try {
-      const stream = canvas.captureStream(24);
-      const recorder = new MediaRecorder(stream, {
-        mimeType,
-        videoBitsPerSecond: 8_000_000,
-      });
-
-      const chunks: Blob[] = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          chunks.push(e.data);
-        }
-      };
-
-      const recorderDone = new Promise<Blob>((resolve) => {
-        recorder.onstop = () => {
-          const blob = new Blob(chunks, { type: mimeType.split(';')[0] });
-          resolve(blob);
-        };
-      });
-
       // Temporarily hide helper gizmos that shouldn't appear in the viewfinder
       if (cameraGizmoGroupRef.current) cameraGizmoGroupRef.current.visible = false;
       if (trajectoryLineRef.current) trajectoryLineRef.current.visible = false;
       if (gridHelperRef.current) gridHelperRef.current.visible = false;
 
-      recorder.start(100);
-
-      const totalFrames = Math.max(24, Math.round(duration * 24));
-      const frameIntervalMs = 1000 / 24;
-
-      for (let f = 0; f < totalFrames; f++) {
-        const t = (f / Math.max(1, totalFrames - 1)) * duration;
-        syncPositions(t);
-        vfRendererRef.current.render(stageSceneRef.current, vfCameraRef.current);
-
-        const videoTrack = stream.getVideoTracks()[0];
-        if (videoTrack && 'requestFrame' in videoTrack) {
-          (videoTrack as any).requestFrame();
-        }
-
-        const pct = Math.round(((f + 1) / totalFrames) * 100);
-        setPrevisRendering(true, pct);
-
-        await new Promise((r) => setTimeout(r, frameIntervalMs));
-      }
-
-      await new Promise((r) => setTimeout(r, 80));
+      // Deterministic render (8n+1 frame snapping if target model is LTX-2.5)
+      const isLtx = shot.targetModel === 'ltx-2.5';
+      const result = await renderOfflinePrevisPasses({
+        scene: stageSceneRef.current,
+        camera: vfCameraRef.current,
+        renderer: vfRendererRef.current,
+        durationSeconds: duration,
+        fps: shot.frameRate || 24,
+        width: 1280,
+        height: 720,
+        renderPass: 'rgb',
+        snap8n1: isLtx,
+        syncPositions,
+        onProgress: (pct) => setPrevisRendering(true, pct),
+      });
 
       // Restore gizmos
       if (cameraGizmoGroupRef.current) cameraGizmoGroupRef.current.visible = true;
@@ -1843,15 +1800,21 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       // Restore positions to current time
       syncPositions(currentTime);
 
-      recorder.stop();
-      const blob = await recorderDone;
-      const url = URL.createObjectURL(blob);
+      if (result.rgbBlob && result.rgbUrl) {
+        setPrevisVideo(result.rgbUrl, result.rgbBlob);
+        setPrevisRendering(false, 100);
+        return { url: result.rgbUrl, blob: result.rgbBlob };
+      }
 
-      setPrevisVideo(url, blob);
-      setPrevisRendering(false, 100);
-      return { url, blob };
+      setPrevisRendering(false, 0);
+      return null;
     } catch (err) {
       console.error('In-app previs render failed:', err);
+      // Restore gizmos on error
+      if (cameraGizmoGroupRef.current) cameraGizmoGroupRef.current.visible = true;
+      if (trajectoryLineRef.current) trajectoryLineRef.current.visible = true;
+      if (gridHelperRef.current) gridHelperRef.current.visible = showGrid;
+      syncPositions(currentTime);
       setPrevisRendering(false, 0);
       return null;
     }

@@ -11,13 +11,28 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S1 Truthful pipeline | `stage/01-truthful-pipeline` | 🟡 ready for templates & live test | Pipeline built, tested & verified; awaiting user API templates & live generation |
 | S2 Desktop foundation | `stage/02-desktop-hygiene` | ✅ merged to master (`ccee65d`) | Offline self-hosted fonts, strict CSP, blob sanitization, safe storage service, electron window persistence & scoped ComfyUI CORS |
 | S3 Editing safety | `stage/03-editing-safety` | ✅ merged to master (`65978dd`) | One gesture = one undo step; first run is clear |
-| S4 Geometric conditioning | `stage/04-geometric-conditioning` | ⬜ | Directed dolly-in reproduced through IC-LoRA control template on the 3090 |
+| S4 Geometric conditioning | `stage/04-geometric-conditioning` | 🟡 ready for review | Directed camera move rendered via deterministic offline previs & conditioned via IC-LoRA |
 | S5 Performance | `stage/05-performance` | ⬜ | Smooth drag; main chunk well under 1.67 MB |
 | S6 UX overhaul | `stage/06-ux-overhaul` | ⬜ | Clean at 1280×720 / 1440×900 / 1920×1080 / 2560×1440 |
 | S7 Takes + queue | `stage/07-takes-queue` | ⬜ | (grill first) |
 | S8 Motion fidelity | `stage/08-motion-fidelity` | ⬜ | (grill first) |
 | S9 NL → ShotSpec | `stage/09-nl-shotspec` | ⬜ | (grill first) |
 | S10 Sequence | `stage/10-sequence` | ⬜ | (grill first) |
+
+## S4 checklist (Geometric Conditioning — "Direct the Shot, Not the Prompt")
+
+- [x] Runtime dependency: `mp4-muxer` (`^5.2.2`) installed as the only approved new runtime package
+- [x] Deterministic offline previs renderer (`src/engine/offlinePrevisRenderer.ts`): fixed timestep evaluation (no wall-clock `setTimeout` pacing), $8n+1$ frame count snapping, RGB viewfinder capture, inverted linear depth pass (near=white, far=dark for ControlNet/IC-LoRA standard), and real MP4 container muxing with resilient fallback
+- [x] Refactored `src/components/StagePrevis3D.tsx` to replace legacy `MediaRecorder` / `captureStream(24)` with `renderOfflinePrevisPasses`, eliminating stale closures and mislabeled `.webm` files
+- [x] Extended `GenerationMode` in `src/pipeline/templateTypes.ts` to include `'control'`, and `BINDABLE_FIELDS` to include `'controlVideo'`, `'icLora'`, `'icLoraStrength'`
+- [x] Versioned timeline patchers (`src/pipeline/timelinePatchers.ts`): registered `ltx.geometricControl@1` and updated `ltx.firstFrameSegment@1` to inject `reference_mode: 'VIDEO'` and `retakeVideo` for geometric camera conditioning
+- [x] Pure template binding updates (`src/pipeline/templateBinder.ts`): support for `mode === 'control'`, `controlVideoFile`, `icLora`, and `icLoraStrength`
+- [x] Updated template binding schema in `workflows/templates/ltx25_stubelius.binding.json` to declare `"control"` mode and bind node 5 (`StubeliusLTXModels`) inputs `ic_lora` and `ic_lora_strength`
+- [x] Job runner integration (`src/pipeline/jobRunner.ts`): content-addressed video upload for `controlVideoBlob`
+- [x] Package exporter integration (`src/pipeline/packageExporter.ts`): manifests include `controlVideo` uploads and support offline bundle exports in `control` mode
+- [x] ComfyUI Execution Panel UI overhaul (`src/components/ComfyExecutionPanel.tsx`): 3-mode selector (T2V, I2V, Control / 3D Previs LoRA), Geometric Camera Conditioning HUD with IC-LoRA strength slider (`0.0`–`2.0x`) and model checkpoint selector
+- [x] Unit test suites (`tests/geometricConditioning.test.ts`, `tests/offlinePrevisRenderer.test.ts`): 13 tests covering 8n+1 calculations, timeline patchers, binding validation, manifest generation, depth inversion, and MP4 muxing
+- [x] Full verification: 25 test files, 160/160 tests passing in 4.6s; production build green with 0 errors in 12.6s; in-browser UI verified via subagent
 
 ## S0 checklist
 

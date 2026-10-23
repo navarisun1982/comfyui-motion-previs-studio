@@ -24,6 +24,10 @@ export interface BindValues {
   height: number;
   /** ComfyUI input-folder filename of the uploaded first frame; required for i2v. */
   firstFrameFile?: string;
+  /** ComfyUI input-folder filename of the uploaded geometric control/previs video; required for control mode. */
+  controlVideoFile?: string;
+  icLora?: string;
+  icLoraStrength?: number;
   filenamePrefix: string;
   seedCount?: number;
   winner?: number;
@@ -61,6 +65,9 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
   if (values.mode === 'i2v' && !values.firstFrameFile) {
     throw new BindError('Image-to-video needs an uploaded first frame.');
   }
+  if (values.mode === 'control' && !values.controlVideoFile) {
+    throw new BindError('Control mode needs an uploaded previs/control video.');
+  }
   if (!Number.isInteger(values.seed) || values.seed < 0) {
     throw new BindError(`Seed must be a non-negative integer (got ${values.seed}).`);
   }
@@ -70,6 +77,7 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
   const patchCtx: TimelinePatchContext = {
     mode: values.mode,
     firstFrameFile: values.firstFrameFile,
+    controlVideoFile: values.controlVideoFile,
     durationSeconds: values.durationSeconds,
     frameRate: values.frameRate,
   };
@@ -147,6 +155,12 @@ function fieldValue(field: BindableField, v: BindValues): unknown {
       return v.filenamePrefix;
     case 'timeline':
       throw new BindError('The "timeline" field must use a patcher.');
+    case 'controlVideo':
+      return v.controlVideoFile;
+    case 'icLora':
+      return v.icLora ?? 'none';
+    case 'icLoraStrength':
+      return v.icLoraStrength ?? 0.6;
   }
 }
 

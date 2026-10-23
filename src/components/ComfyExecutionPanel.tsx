@@ -5,7 +5,7 @@ import { getAdapter } from '../adapters';
 import { defaultComfyClient } from '../services/comfyClient';
 import { defaultJobRunner, ActiveJobHandle } from '../pipeline/jobRunner';
 import { exportOfflinePackageForShot } from '../pipeline/packageExporter';
-import { QualityProfile } from '../pipeline/templateTypes';
+import { QualityProfile, GenerationMode } from '../pipeline/templateTypes';
 import {
   Play,
   Upload,
@@ -23,6 +23,9 @@ import {
   ArrowRight,
   ArrowLeft,
   XCircle,
+  Sliders,
+  Layers,
+  Video,
 } from 'lucide-react';
 
 interface ComfyExecutionPanelProps {
@@ -35,6 +38,7 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
     compiledPrompt,
     setReferenceImage,
     previsVideoUrl,
+    previsVideoBlob,
     isRenderingPrevis,
     previsProgress,
     renderPrevisVideo,
@@ -52,6 +56,14 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
   } = useComfyStore();
 
   const [profile, setProfile] = useState<QualityProfile>('final');
+  const [userSelectedMode, setUserSelectedMode] = useState<GenerationMode | null>(null);
+  const [icLoraStrength, setIcLoraStrength] = useState<number>(1.0);
+  const [icLoraModel, setIcLoraModel] = useState<string>('ltx-video-camera-lora.safetensors');
+
+  const effectiveMode: GenerationMode =
+    userSelectedMode ??
+    (previsVideoUrl || previsVideoBlob ? 'control' : shot.referenceImage?.filename ? 'i2v' : 't2v');
+
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [videoLoadError, setVideoLoadError] = useState<boolean>(false);
@@ -164,7 +176,29 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
     try {
       setVideoLoadError(false);
       const engine = shot.targetModel === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5';
-      const mode = shot.referenceImage?.filename ? 'i2v' : 't2v';
+      const mode = effectiveMode;
+
+      let controlBlob: Blob | undefined = undefined;
+      let controlFilename: string | undefined = undefined;
+
+      if (mode === 'control') {
+        if (previsVideoBlob) {
+          controlBlob = previsVideoBlob;
+        } else if (previsVideoUrl) {
+          try {
+            const res = await fetch(previsVideoUrl);
+            if (res.ok) controlBlob = await res.blob();
+          } catch (e) {
+            console.warn('Failed to fetch previs blob from url', e);
+          }
+        }
+
+        if (!controlBlob) {
+          alert('Geometric Control mode requires a 3D Previs video. Please click "RENDER 3D PREVIS" in Section 1 first, or switch to Text-to-Video mode.');
+          return;
+        }
+        controlFilename = `${shot.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_previs.mp4`;
+      }
 
       const handle = await defaultJobRunner.run({
         engine,
@@ -174,7 +208,11 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
         prompt: compiledPrompt.positivePrompt,
         negative: shot.negativePrompt,
         seed: shot.seed ?? Math.floor(Math.random() * 1000000),
-        firstFrameFilename: shot.referenceImage?.filename,
+        firstFrameFilename: mode === 'i2v' ? shot.referenceImage?.filename : undefined,
+        controlVideoBlob: controlBlob,
+        controlVideoFilename: controlFilename,
+        icLora: mode === 'control' ? icLoraModel : undefined,
+        icLoraStrength: mode === 'control' ? icLoraStrength : undefined,
         promptSource: 'compiled',
         onProgress: (pct, nodeTitle) => {
           updateJobProgress(pct, nodeTitle);
@@ -205,7 +243,19 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
 
   const handleExportPackage = () => {
     try {
-      exportOfflinePackageForShot({ shot, profile });
+      const mode = effectiveMode;
+      const controlVideoFilename =
+        mode === 'control'
+          ? `${shot.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_previs.mp4`
+          : undefined;
+      exportOfflinePackageForShot({
+        shot,
+        profile,
+        mode,
+        controlVideoFilename,
+        icLora: mode === 'control' ? icLoraModel : undefined,
+        icLoraStrength: mode === 'control' ? icLoraStrength : undefined,
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       alert(`Export failed: ${msg}`);
@@ -478,69 +528,202 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
           </div>
         )}
 
-        {/* Reference Image / Start Frame Upload */}
-        <div className="flex flex-col gap-1.5">
-          <label className="font-mono text-[10px] text-slate-400 flex items-center gap-1">
-            <Upload className="h-3 w-3 text-director-cyan" />
-            Optional Start Frame (Image-to-Video Anchor)
-          </label>
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="glass-card hover:border-director-cyan/60 transition-all cursor-pointer rounded-lg p-2.5 border border-dashed border-director-border text-center flex flex-col items-center justify-center gap-1.5"
-          >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={(e) => {
-                if (e.target.files && e.target.files[0]) {
-                  handleFileUpload(e.target.files[0]);
-                }
-              }}
-              accept="image/*"
-              className="hidden"
-            />
-
-            {shot.referenceImage ? (
-              <div className="flex items-center gap-3 w-full">
-                <img
-                  src={shot.referenceImage.previewUrl}
-                  alt="Reference preview"
-                  className="h-10 w-14 rounded object-cover border border-director-border"
-                />
-                <div className="flex flex-col text-left truncate flex-1">
-                  <span className="font-mono text-xs text-white truncate">{shot.referenceImage.filename}</span>
-                  <span className="font-mono text-[9px] text-emerald-400">Ready for Image-to-Video</span>
+        {/* Generation Mode Selector */}
+        {shot.targetModel !== 'seedance' && (
+          <div className="flex flex-col gap-1.5">
+            <label className="font-mono text-[10px] text-slate-400 flex items-center justify-between">
+              <span>Generation Mode</span>
+              <span className="text-[9px] text-slate-500 font-mono">
+                {effectiveMode === 'control'
+                  ? '3D Geometric Previs & IC-LoRA'
+                  : effectiveMode === 'i2v'
+                  ? 'First Frame Anchored'
+                  : 'Text Prompt Synthesis'}
+              </span>
+            </label>
+            <div className="grid grid-cols-3 gap-1.5">
+              <button
+                type="button"
+                onClick={() => setUserSelectedMode('t2v')}
+                className={`flex flex-col rounded-lg p-2 text-left transition-all cursor-pointer ${
+                  effectiveMode === 't2v'
+                    ? 'border-blue-500 bg-blue-500/20 text-white ring-1 ring-blue-500'
+                    : 'glass-control text-slate-400 hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-1 font-display font-bold text-xs">
+                  <Film className="h-3 w-3 text-blue-400" />
+                  <span>T2V</span>
                 </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setReferenceImage(undefined);
-                  }}
-                  className="text-[10px] text-rose-400 hover:underline font-mono"
-                >
-                  Remove
-                </button>
-              </div>
-            ) : (
-              <>
-                {isUploading ? (
-                  <div className="flex items-center gap-2 font-mono text-[10px] text-director-cyan">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Uploading start frame...
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 text-slate-400">
-                    <Upload className="h-4 w-4" />
-                    <span className="font-mono text-[10px] text-slate-300">
-                      Drop optional start frame image
-                    </span>
-                  </div>
-                )}
-              </>
-            )}
+                <span className="font-mono text-[8px] text-slate-400">Text to Video</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setUserSelectedMode('i2v')}
+                className={`flex flex-col rounded-lg p-2 text-left transition-all cursor-pointer ${
+                  effectiveMode === 'i2v'
+                    ? 'border-blue-500 bg-blue-500/20 text-white ring-1 ring-blue-500'
+                    : 'glass-control text-slate-400 hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-1 font-display font-bold text-xs">
+                  <Layers className="h-3 w-3 text-director-cyan" />
+                  <span>I2V</span>
+                </div>
+                <span className="font-mono text-[8px] text-slate-400">Image Start</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setUserSelectedMode('control')}
+                className={`flex flex-col rounded-lg p-2 text-left transition-all cursor-pointer relative ${
+                  effectiveMode === 'control'
+                    ? 'border-amber-500 bg-amber-500/20 text-white ring-1 ring-amber-500'
+                    : 'glass-control text-slate-400 hover:text-white'
+                }`}
+              >
+                <div className="flex items-center gap-1 font-display font-bold text-xs">
+                  <Video className="h-3 w-3 text-amber-400" />
+                  <span>Control</span>
+                </div>
+                <span className="font-mono text-[8px] text-amber-300/80">3D Previs LoRA</span>
+              </button>
+            </div>
           </div>
-          {uploadError && <span className="font-mono text-[10px] text-rose-400">{uploadError}</span>}
-        </div>
+        )}
+
+        {/* Mode-Specific Conditioning Controls */}
+        {effectiveMode === 'control' && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between border-b border-amber-500/20 pb-1.5">
+              <div className="flex items-center gap-1.5 font-mono text-[10px] font-bold text-amber-300">
+                <Sliders className="h-3.5 w-3.5 text-director-gold" />
+                <span>Geometric Camera Conditioning (IC-LoRA)</span>
+              </div>
+              {previsVideoUrl || previsVideoBlob ? (
+                <span className="flex items-center gap-1 rounded bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[8px] font-bold text-emerald-400 border border-emerald-500/40">
+                  <CheckCircle2 className="h-2.5 w-2.5" />
+                  3D PLATE READY
+                </span>
+              ) : (
+                <span className="rounded bg-rose-500/20 px-1.5 py-0.5 font-mono text-[8px] font-bold text-rose-300 border border-rose-500/40">
+                  RENDER REQUIRED
+                </span>
+              )}
+            </div>
+
+            {!(previsVideoUrl || previsVideoBlob) && (
+              <div className="text-[10px] text-amber-300/90 font-mono bg-black/40 p-2 rounded border border-amber-500/20">
+                ⚠️ Click <strong>&quot;RENDER 3D PREVIS&quot;</strong> in Section 1 above to record your viewport camera trajectory into an MP4 control plate.
+              </div>
+            )}
+
+            {/* IC-LoRA Strength Slider */}
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between font-mono text-[10px]">
+                <span className="text-slate-300">Conditioning Strength</span>
+                <span className="font-bold text-director-gold">{icLoraStrength.toFixed(2)}x</span>
+              </div>
+              <input
+                type="range"
+                min="0.0"
+                max="2.0"
+                step="0.05"
+                value={icLoraStrength}
+                onChange={(e) => setIcLoraStrength(parseFloat(e.target.value))}
+                className="w-full h-1.5 bg-black/60 rounded-lg appearance-none cursor-pointer accent-amber-400"
+              />
+              <span className="text-[9px] text-slate-400 font-mono">
+                Higher strength locks camera motion and perspective strictly to your 3D soundstage.
+              </span>
+            </div>
+
+            {/* IC-LoRA Checkpoint Model Input */}
+            <div className="flex flex-col gap-1">
+              <label className="font-mono text-[9px] text-slate-400">IC-LoRA Model Weights</label>
+              <input
+                type="text"
+                value={icLoraModel}
+                onChange={(e) => setIcLoraModel(e.target.value)}
+                className="w-full rounded bg-black/50 border border-amber-500/30 px-2 py-1 font-mono text-[10px] text-slate-200 focus:outline-none focus:border-amber-400"
+                placeholder="ltx-video-camera-lora.safetensors"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Reference Image / Start Frame Upload (for I2V or optional anchor) */}
+        {effectiveMode === 'i2v' && (
+          <div className="flex flex-col gap-1.5">
+            <label className="font-mono text-[10px] text-slate-400 flex items-center gap-1">
+              <Upload className="h-3 w-3 text-director-cyan" />
+              Start Frame Anchor (Image-to-Video)
+            </label>
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="glass-card hover:border-director-cyan/60 transition-all cursor-pointer rounded-lg p-2.5 border border-dashed border-director-border text-center flex flex-col items-center justify-center gap-1.5"
+            >
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handleFileUpload(e.target.files[0]);
+                  }
+                }}
+                accept="image/*"
+                className="hidden"
+              />
+
+              {shot.referenceImage ? (
+                <div className="flex items-center gap-3 w-full">
+                  <img
+                    src={shot.referenceImage.previewUrl}
+                    alt="Reference preview"
+                    className="h-10 w-14 rounded object-cover border border-director-border"
+                  />
+                  <div className="flex flex-col text-left truncate flex-1">
+                    <span className="font-mono text-xs text-white truncate">{shot.referenceImage.filename}</span>
+                    <span className="font-mono text-[9px] text-emerald-400">Ready for Image-to-Video</span>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setReferenceImage(undefined);
+                    }}
+                    className="text-[10px] text-rose-400 hover:underline font-mono"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {isUploading ? (
+                    <div className="flex items-center gap-2 font-mono text-[10px] text-director-cyan">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Uploading start frame...
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-slate-400">
+                      <Upload className="h-4 w-4" />
+                      <span className="font-mono text-[10px] text-slate-300">
+                        Drop initial start frame image
+                      </span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            {uploadError && <span className="font-mono text-[10px] text-rose-400">{uploadError}</span>}
+          </div>
+        )}
+
+        {effectiveMode === 't2v' && (
+          <div className="rounded-lg bg-black/30 border border-white/5 p-2 font-mono text-[9px] text-slate-400">
+            Direct prompt-guided generation without start frame or depth guidance.
+          </div>
+        )}
 
         {/* Primary Action Button */}
         <div className="flex flex-col gap-2 pt-1">

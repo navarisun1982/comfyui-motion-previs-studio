@@ -161,6 +161,45 @@ See the deferred table in [TASKS.md](TASKS.md).
    - TypeScript & production build: 0 errors across main project and scripts (`npm run build` in 9.5s).
    - In-browser UI verification: verified Welcome Modal dismissal, header buttons, live focal length undo/redo flow, help modal re-opening, and Project Info reactive stats.
 
+## 2026-10-23 — S4 Geometric Conditioning ("Direct the Shot, Not the Prompt") (`stage/04-geometric-conditioning`)
 
+**Goal:** Replace legacy in-app `MediaRecorder` previs capture with a deterministic offline multi-pass renderer (8n+1 snapped, RGB + inverted depth) and connect geometric camera conditioning to the ComfyUI generation pipeline via IC-LoRA.
 
+### Accomplishments
 
+1. **Deterministic Offline Previs Renderer (`src/engine/offlinePrevisRenderer.ts`):**
+   - Fixed-timestep animation stepping: eliminates real-time `setTimeout` pacing jitter and guarantees identical frame counts across machines.
+   - LTX $8n+1$ frame rule snapping: ensures the rendered sequence conforms directly to DiT compression requirements (e.g. 5s @ 24fps -> 121 frames).
+   - Dual-pass rendering:
+     - Viewfinder RGB pass capturing camera motion, focal length, and 3D actor staging.
+     - Depth pass using `THREE.MeshDepthMaterial` with inversion (`invertDepthCanvas`), outputting near=white and far=dark matching ControlNet and IC-LoRA conventions.
+   - Muxing via `mp4-muxer` + WebCodecs `VideoEncoder` (Main Profile Level 4.2 H.264) with resilient fallback for headless environments, producing genuine `.mp4` video files.
+   - Replaced buggy `handleRenderInAppPrevis` in `src/components/StagePrevis3D.tsx`, fixing stale closures (`currentTime`, `showGrid`) and misnamed `.webm` downloads.
+
+2. **Pipeline Schema & Binding Integration:**
+   - Extended `GenerationMode` to include `'control'` across `src/pipeline/templateTypes.ts`.
+   - Added `'controlVideo'`, `'icLora'`, and `'icLoraStrength'` to canonical `BINDABLE_FIELDS`.
+   - Added `ltx.geometricControl@1` timeline patcher in `src/pipeline/timelinePatchers.ts`, injecting `reference_mode: 'VIDEO'`, `retakeVideo`, and disabling prompt relay.
+   - Updated `ltx.firstFrameSegment@1` to also support `mode === 'control'`.
+   - Enhanced `src/pipeline/templateBinder.ts` to map and validate `controlVideoFile`, `icLora`, and `icLoraStrength`.
+   - Updated `workflows/templates/ltx25_stubelius.binding.json` to register `"control"` mode and map node 5 inputs (`ic_lora`, `ic_lora_strength`).
+
+3. **Execution & Packaging Orchestration:**
+   - Upgraded `JobRunner.run()` in `src/pipeline/jobRunner.ts` to accept `controlVideoBlob`, perform content-addressed uploads (`uploadContentAddressed`), and pass resolved filenames to template bindings.
+   - Upgraded `buildPackageManifest` and `exportOfflinePackageForShot` in `src/pipeline/packageExporter.ts` to record `controlVideo` uploads in manifest manifests.
+
+4. **ComfyUI Execution Panel UI Overhaul (`src/components/ComfyExecutionPanel.tsx`):**
+   - Implemented a 3-tab Mode Selector: `T2V` (Text to Video), `I2V` (Image Start), and `Control` (3D Previs LoRA).
+   - Context-aware Geometric Conditioning HUD:
+     - Live 3D Previs status badge ("3D PLATE READY" vs "RENDER REQUIRED").
+     - Conditioning strength range slider (`0.00x` - `2.00x`, default `1.00x`).
+     - IC-LoRA model weights input field (`ltx-video-camera-lora.safetensors`).
+   - Unified generation trigger providing friendly validation if previs rendering is needed.
+
+5. **Verification & Tests:**
+   - Unit tests:
+     - `tests/geometricConditioning.test.ts` (9 tests) verifying 8n+1 calculations, timeline patchers, binding validation, and package manifest uploads.
+     - `tests/offlinePrevisRenderer.test.ts` (4 tests) verifying depth map inversion, fallback MP4 muxing, and deterministic step rendering.
+   - Full test suite: 25 test files, 160/160 tests passing in 4.6s (`npm run test`).
+   - TypeScript & production build: 0 errors across main project, scripts, and tests (`npm run build` in 12.6s).
+   - Browser verification: verified mode switching, IC-LoRA HUD controls, and offline package exporter.

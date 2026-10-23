@@ -18,6 +18,10 @@ export interface ExecuteJobOptions {
   promptSource: 'compiled' | 'ai' | 'manual';
   firstFrameBlob?: Blob;
   firstFrameFilename?: string;
+  controlVideoBlob?: Blob;
+  controlVideoFilename?: string;
+  icLora?: string;
+  icLoraStrength?: number;
   client?: ComfyClient;
   onProgress?: (progress: number, currentNodeTitle: string) => void;
   onSuccess?: (revisionId: string, videoUrl: string, filename: string) => void;
@@ -61,7 +65,7 @@ export class JobRunner {
       throw err;
     }
 
-    // 3. Optional First-Frame Upload for I2V
+    // 3. Optional First-Frame Upload for I2V & Control Video Upload for Control Mode
     let uploadedFilename: string | undefined = options.firstFrameFilename || options.shot.referenceImage?.filename;
     if (options.mode === 'i2v' && options.firstFrameBlob) {
       logger.action('Uploading content-addressed first frame to ComfyUI...');
@@ -70,6 +74,16 @@ export class JobRunner {
         `${options.shot.name.replace(/\s+/g, '_')}_first_frame.png`
       );
       uploadedFilename = uploadRes.name;
+    }
+
+    let controlVideoFilename: string | undefined = options.controlVideoFilename;
+    if (options.mode === 'control' && options.controlVideoBlob) {
+      logger.action('Uploading content-addressed 3D previs control video to ComfyUI...');
+      const uploadRes = await client.uploadContentAddressed(
+        options.controlVideoBlob,
+        `${options.shot.name.replace(/\s+/g, '_')}_previs_control.mp4`
+      );
+      controlVideoFilename = uploadRes.name;
     }
 
     // 4. Bind Template
@@ -101,6 +115,9 @@ export class JobRunner {
       width,
       height,
       firstFrameFile: uploadedFilename,
+      controlVideoFile: controlVideoFilename,
+      icLora: options.icLora,
+      icLoraStrength: options.icLoraStrength,
       filenamePrefix: `cmpvs_${options.shot.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_v${options.shot.version}`,
     };
 

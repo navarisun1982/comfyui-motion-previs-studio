@@ -12,7 +12,7 @@ export interface ApiNode {
 export type ApiWorkflow = Record<string, ApiNode>;
 
 export type EngineId = 'ltx-2.5' | 'minimax-h3';
-export type GenerationMode = 't2v' | 'i2v';
+export type GenerationMode = 't2v' | 'i2v' | 'control';
 export type QualityProfile = 'draft' | 'final';
 
 /** Semantic fields a binding may map onto template inputs. */
@@ -29,6 +29,9 @@ export const BINDABLE_FIELDS = [
   'height',
   'timeline',
   'filenamePrefix',
+  'controlVideo',
+  'icLora',
+  'icLoraStrength',
 ] as const;
 export type BindableField = (typeof BINDABLE_FIELDS)[number];
 
@@ -66,7 +69,7 @@ export const BindingSchema = z
     engine: z.enum(['ltx-2.5', 'minimax-h3']),
     label: z.string().min(1),
     api: z.string().regex(/\.api\.json$/),
-    modes: z.array(z.enum(['t2v', 'i2v'])).min(1),
+    modes: z.array(z.enum(['t2v', 'i2v', 'control'])).min(1),
     /** Fingerprint: every node the binding relies on, with its expected class_type. */
     nodes: z.record(NodeIdSchema, z.string().min(1)),
     fields: z.record(z.enum(BINDABLE_FIELDS), FieldSpecSchema),

@@ -6,7 +6,8 @@
   "api": "ltx25_stubelius.api.json",
   "modes": [
     "t2v",
-    "i2v"
+    "i2v",
+    "control"
   ],
   "nodes": {
     "3": "StubeliusLTXSetup",
@@ -45,6 +46,14 @@
       "node": "7",
       "input": "timeline_data",
       "patch": "ltx.firstFrameSegment@1"
+    },
+    "icLora": {
+      "node": "5",
+      "input": "ic_lora"
+    },
+    "icLoraStrength": {
+      "node": "5",
+      "input": "ic_lora_strength"
     }
   },
   "profiles": {

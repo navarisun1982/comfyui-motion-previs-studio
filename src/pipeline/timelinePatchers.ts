@@ -15,6 +15,8 @@ export interface TimelinePatchContext {
   mode: GenerationMode;
   /** ComfyUI input-folder filename of the uploaded first frame (I2V). */
   firstFrameFile?: string;
+  /** ComfyUI input-folder filename of the uploaded geometric control/previs video (Control). */
+  controlVideoFile?: string;
   durationSeconds: number;
   frameRate: number;
 }
@@ -79,11 +81,20 @@ const ltxFirstFramePatcher: TimelinePatcher = {
       });
     }
 
-    return {
+    const result: Record<string, unknown> = {
       ...data,
       segments: filteredSegments,
       disable_prompt_relay: true, // Use global prompt exclusively (Q5)
     };
+
+    if (ctx.mode === 'control' && ctx.controlVideoFile) {
+      result.reference_mode = 'VIDEO';
+      result.retakeVideo = ctx.controlVideoFile;
+      result.retakeMode = true;
+      result.retakeStrength = 0.8;
+    }
+
+    return result;
   },
 };
 
@@ -129,7 +140,40 @@ const h3FirstFramePatcher: TimelinePatcher = {
   },
 };
 
+// Built-in Patcher 3: LTX Geometric Control & Previs Video Patcher
+const ltxGeometricControlPatcher: TimelinePatcher = {
+  id: 'ltx.geometricControl@1',
+  description: 'Patches LTXDirectorCS25 timeline_data to inject retakeVideo and reference_mode for geometric camera control.',
+  validate(timeline: unknown): string[] {
+    if (!isPlainObject(timeline)) return ['timeline_data must be a JSON object'];
+    return [];
+  },
+  apply(timeline: unknown, ctx: TimelinePatchContext): unknown {
+    const data = isPlainObject(timeline) ? structuredClone(timeline) : {};
+
+    if (ctx.mode === 'control' && ctx.controlVideoFile) {
+      return {
+        ...data,
+        reference_mode: 'VIDEO',
+        retakeVideo: ctx.controlVideoFile,
+        retakeMode: true,
+        retakeStrength: 0.8,
+        disable_prompt_relay: true,
+      };
+    }
+
+    return {
+      ...data,
+      reference_mode: 'OFF',
+      retakeVideo: null,
+      retakeMode: false,
+      disable_prompt_relay: true,
+    };
+  },
+};
+
 // Register built-in patchers automatically
 registerPatcher(ltxFirstFramePatcher);
 registerPatcher(h3FirstFramePatcher);
+registerPatcher(ltxGeometricControlPatcher);
 

@@ -39,7 +39,19 @@ export function buildPackageManifest(params: {
   negative: string;
   promptSource: 'compiled' | 'ai' | 'manual';
   firstFrameFilename?: string;
+  controlVideoFilename?: string;
 }): PackageManifest {
+  const requiredUploads: Array<{
+    filename: string;
+    sha256?: string;
+    type: string;
+  }> = [];
+  if (params.firstFrameFilename) {
+    requiredUploads.push({ filename: params.firstFrameFilename, type: 'firstFrame' });
+  }
+  if (params.controlVideoFilename) {
+    requiredUploads.push({ filename: params.controlVideoFilename, type: 'controlVideo' });
+  }
   return {
     studio: 'ComfyUI Motion Previs Studio',
     version: '1.0.0',
@@ -55,9 +67,7 @@ export function buildPackageManifest(params: {
     prompt: params.prompt,
     negative: params.negative,
     promptSource: params.promptSource,
-    requiredUploads: params.firstFrameFilename
-      ? [{ filename: params.firstFrameFilename, type: 'firstFrame' }]
-      : [],
+    requiredUploads,
   };
 }
 
@@ -86,10 +96,15 @@ export function exportPackageBundle(
 export function exportOfflinePackageForShot(params: {
   shot: ShotSpec;
   profile: QualityProfile;
+  mode?: GenerationMode;
+  controlVideoFilename?: string;
+  icLora?: string;
+  icLoraStrength?: number;
 }): { success: boolean; error?: string } {
   const { shot, profile } = params;
   const engine: EngineId = shot.targetModel === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5';
-  const mode: GenerationMode = shot.referenceImage?.filename ? 'i2v' : 't2v';
+  const mode: GenerationMode =
+    params.mode || (shot.referenceImage?.filename ? 'i2v' : 't2v');
 
   const reg = templateRegistry.find(engine, mode);
   const baseFilename = `package_${engine}_${shot.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_v${shot.version}`;
@@ -109,6 +124,9 @@ export function exportOfflinePackageForShot(params: {
       width: shot.aspectRatio === '9:16' ? 720 : 1280,
       height: shot.aspectRatio === '9:16' ? 1280 : 720,
       firstFrameFile: shot.referenceImage?.filename,
+      controlVideoFile: params.controlVideoFilename,
+      icLora: params.icLora,
+      icLoraStrength: params.icLoraStrength,
       filenamePrefix: baseFilename,
     };
     const bound = bindTemplate(reg.api, reg.binding, bindValues);
@@ -125,6 +143,7 @@ export function exportOfflinePackageForShot(params: {
       negative: bindValues.negative,
       promptSource: 'compiled',
       firstFrameFilename: shot.referenceImage?.filename,
+      controlVideoFilename: params.controlVideoFilename,
     });
     exportPackageBundle(bound.workflow, manifest, baseFilename);
     return { success: true };
@@ -143,6 +162,7 @@ export function exportOfflinePackageForShot(params: {
       negative: shot.negativePrompt || '',
       promptSource: 'compiled',
       firstFrameFilename: shot.referenceImage?.filename,
+      controlVideoFilename: params.controlVideoFilename,
     });
     downloadJsonFile(`${baseFilename}.manifest.json`, manifest);
     return { success: true };
