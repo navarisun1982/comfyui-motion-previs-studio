@@ -6,7 +6,8 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && tsc -p tsconfig.scripts.json && vite build",
+    "typecheck:scripts": "tsc -p tsconfig.scripts.json",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

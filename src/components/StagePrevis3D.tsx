@@ -782,6 +782,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       vfRenderer.domElement.style.width = '100%';
       vfRenderer.domElement.style.height = '100%';
       vfRenderer.domElement.style.zIndex = '5';
+      vfRenderer.domElement.dataset.role = 'viewfinder';
       vfRenderer.toneMapping = THREE.ACESFilmicToneMapping;
       vfRenderer.toneMappingExposure = 1.15;
       viewfinderMountRef.current.appendChild(vfRenderer.domElement);

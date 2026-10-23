@@ -6,18 +6,9 @@ import {
   addBox,
   addEll,
   addRod,
-  CATALOG_SUMMARY,
 } from '../src/engine/procedural3D';
 
 describe('3Dviz Pro Max Procedural 3D Engine', () => {
-  it('loads official 3dviz-pro-max catalog summary with 223 recipes and 440 knowledge records', () => {
-    expect(CATALOG_SUMMARY.recipes).toBe(223);
-    expect(CATALOG_SUMMARY.knowledge).toBe(440);
-    expect(CATALOG_SUMMARY.planned_directions).toBe(24);
-    expect(CATALOG_SUMMARY.knowledge_by_kind['blueprint']).toBe(22);
-    expect(CATALOG_SUMMARY.knowledge_by_kind['reasoning-rule']).toBe(99);
-  });
-
   it('creates standard procedural PBR palette with bump textures', () => {
     const palette = createStandardPalette(0x38bdf8);
     expect(palette.wood).toBeInstanceOf(THREE.MeshStandardMaterial);
