@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useShotStore } from '../stores/useShotStore';
+import { logger } from '../stores/useLogStore';
 import { ShotCreationMode, Actor, ShotSpec, createDefaultShotSpec, FocalLength } from '../types/shotspec';
 import { safeGetItem, safeSetItem, safeRemoveItem, STORAGE_KEYS } from '../services/storage';
 import {
@@ -587,7 +588,7 @@ const loadSavedScenes = (): SceneItem[] => {
 
 interface ShotBibleProps {
   activeShotId?: string;
-  onSelectShot?: (shotId: string, shotTitle?: string) => void;
+  onSelectShot?: (shotId: string, shotTitle?: string, sceneName?: string) => void;
 }
 
 export const ShotBible: React.FC<ShotBibleProps> = ({
@@ -603,6 +604,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
   const [targetSceneId, setTargetSceneId] = useState<string>('scene-1');
   const [openMenuShotId, setOpenMenuShotId] = useState<string | null>(null);
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
 
   // Computed project info
   const totalShots = scenes.reduce((acc, sc) => acc + sc.shots.length, 0);
@@ -655,7 +657,8 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
 
   const handleSelectShot = (shotItem: SceneItem['shots'][0]) => {
     const fullTitle = `${shotItem.code} ${shotItem.title}`;
-    if (onSelectShot) onSelectShot(shotItem.id, fullTitle);
+    const parentScene = scenes.find((s) => s.shots.some((sh) => sh.id === shotItem.id));
+    if (onSelectShot) onSelectShot(shotItem.id, fullTitle, parentScene?.name);
     switchShot(shotItem.id, () => buildDefaultShotSpec(shotItem));
   };
 
@@ -717,7 +720,8 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
     if (!targetScene) return;
 
     if (targetScene.shots.length <= 1 && scenes.length <= 1) {
-      alert('Cannot delete the last remaining shot in the project.');
+      logger.warn('Cannot delete the last remaining shot in the project.');
+      setNoticeMessage('Cannot delete the last remaining shot in the project.');
       return;
     }
 
@@ -752,7 +756,8 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
     e?.stopPropagation();
 
     if (scenes.length <= 1) {
-      alert('Project must have at least one scene.');
+      logger.warn('Project must have at least one scene.');
+      setNoticeMessage('Project must have at least one scene.');
       return;
     }
 
@@ -836,6 +841,18 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
       </div>
 
       {/* Search Input */}
+      {noticeMessage && (
+        <div className="mx-3 mt-2 p-2 rounded bg-amber-500/15 border border-amber-500/30 text-amber-200 text-[10px] font-mono flex items-center justify-between gap-1.5">
+          <span>{noticeMessage}</span>
+          <button
+            onClick={() => setNoticeMessage(null)}
+            className="text-amber-400 hover:text-white px-1 py-0.5 rounded hover:bg-amber-500/20"
+            title="Dismiss notice"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div className="px-3 pt-2.5 pb-2">
         <div className="flex items-center gap-2 rounded-md bg-[#13161f] px-2.5 py-1.5 border border-white/5">
           <Search className="h-3 w-3 text-slate-500 shrink-0" />

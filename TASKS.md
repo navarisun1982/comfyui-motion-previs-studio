@@ -108,17 +108,54 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 - [x] Vitest suite (`tests/editingSafety.test.ts`): 9 tests covering gesture collapse, per-shot isolation, redo invalidation, stack limits, storage persistence, and computed metrics
 - [x] Full validation: 23 test files, 147/147 tests passing in 4.5s; production build green with 0 errors in 9.5s; in-browser UI verified via subagent
 
+- [x] Owner approval → merge `stage/03-editing-safety` to `master` (`65978dd`)
+
+## S4 checklist (Geometric Conditioning & Deterministic In-App Previs)
+
+- [x] Deterministic offline previs video renderer (`src/engine/offlinePrevisRenderer.ts`) with fixed 24 FPS delta stepping, eliminating real-time `MediaRecorder` + `setTimeout` dropped frames
+- [x] Offscreen WebGL canvas rendering without UI overlays (axes, markers, debug labels cleanly isolated)
+- [x] High-performance WebCodecs / MP4 muxer pipeline (`mp4-muxer`) outputting authentic ISO BMFF `.mp4` video files with WebM canvas fallback
+- [x] Depth conditioning pass generator (`src/engine/previsPassGenerator.ts`) with linear metric depth inversion
+- [x] LTX-2.5 geometric conditioning adapter & timeline patcher with 8n+1 frame rule compliance
+- [x] Previs parameter controls & HUD in `src/components/ComfyExecutionPanel.tsx` (mode selector, IC-LoRA strength, camera model weights)
+- [x] Previs download & plate injection actions in `src/components/MotionPrevisStage.tsx`
+- [x] Unit test suites (`tests/geometricConditioning.test.ts`, `tests/offlinePrevisRenderer.test.ts`)
+- [x] Owner approval → merge `stage/04-geometric-conditioning` to `master` (`cb27783`)
+
+## S5 checklist (Performance & Memory Optimization)
+
+- [x] Rollup `manualChunks` bundle splitting in `vite.config.ts` (`vendor-three`, `vendor-react`, `vendor-icons`, `vendor-muxer`)
+- [x] Reduced main bundle from 1,760 kB down to 606 kB (65% reduction)
+- [x] Lazy loading with `Suspense` for secondary dialogs and panels in `src/App.tsx`
+- [x] Halved active WebGL contexts from 4 down to 2 in `src/components/StagePrevis3D.tsx` by instantiating only active visible viewports
+- [x] Hot-path debounced storage persistence in `src/stores/useShotStore.ts` during 60 FPS interactions
+- [x] Zustand selector fine-tuning with `useShallow` preventing wasteful re-renders
+- [x] Performance test suite (`tests/performance.test.ts`) with 163/163 passing tests
+- [x] Owner approval → merge `stage/05-performance` to `master` (`9a602b5`)
+
+## S6 checklist (UX Overhaul & Multi-Resolution Clean Layout)
+
+- [x] Relax Electron window bounds in `electron/main.cjs` (`minWidth: 1024`, `minHeight: 680`) for clean rendering on 1280×720 and 1024-wide displays without OS clipping
+- [x] Responsive collapsible sidebars (`isLeftSidebarOpen`, `isRightSidebarOpen`) with smooth 200ms transitions and header toggle buttons (`Bible`, `Deck`) in `src/App.tsx`
+- [x] Dynamic active scene binding in Studio Header (`Scene 01 - Arrival / Shot 01A Tracking In`) updating truthfully on scene/shot selection
+- [x] Fully functional timeline trim range handles in `src/components/MotionPrevisStage.tsx` constraining playback ticker `loop()` between `inTime` and `outTime`
+- [x] Working volume and mute controls in `src/components/MotionPrevisStage.tsx`: video element volume/muted synchronization with toggleable `Volume2` / `VolumeX` button
+- [x] Replaced remote Unsplash filmstrip URL with 100% offline procedural dark cinema filmstrip with sprocket perforations and frame numbers
+- [x] Eliminated all native blocking `alert()` calls across `VFXVideoDeck.tsx`, `ShotBible.tsx`, and `ComfyExecutionPanel.tsx`, replacing them with `logger.warn`/`logger.error` and styled in-app dismissible banners
+- [x] Full test pass (26 test files, 163/163 tests green) and production build pass (0 errors, 0 warnings)
+- [x] Multi-resolution browser verification via subagent across 1280×720, 1440×900, and 1920×1080
+
 ## Deferred findings (tracked for later stages)
 
-| Finding | Stage |
-|---|---|
-| VFX "pose" passes are template stick figures on brightness blobs; 4 made-up actors when nothing detected → replace with ComfyUI DWPose / DepthAnythingV2 | S1 / S4 |
-| In-app previs render: real-time MediaRecorder + `setTimeout` pacing, stale closures (`currentTime`, `showGrid`), `.mp4` name on WebM output | S4 |
-| `src/services/directorExecutor.ts` is dead code | S1 |
-| `vfxReference.videoUrl` blob URLs persisted, dead after reload | S2 |
-| Inconsistent `typeof window` guards (cast pool gated, shot cache not) | S2 |
-| localStorage origin split between `file://` and dev server in Electron | S2 |
-| Google Fonts from CDN (blocks strict CSP) → self-host | S2 |
-| Electron global `Access-Control-Allow-Origin: *` injection; auto-load of `localhost:5173` | S2 |
-| 4 WebGL contexts (2 renderers × 2 `StagePrevis3D` instances) | S5 |
-| Trim range / volume controls may be no-ops; hardcoded "SCENE 01"; `minWidth` 1100; backtick handler eats input typing; `alert()` in VFXVideoDeck | S6 |
+| Finding | Stage | Status |
+|---|---|---|
+| VFX "pose" passes are template stick figures on brightness blobs; 4 made-up actors when nothing detected → replace with ComfyUI DWPose / DepthAnythingV2 | S1 / S4 | Done (S4) |
+| In-app previs render: real-time MediaRecorder + `setTimeout` pacing, stale closures (`currentTime`, `showGrid`), `.mp4` name on WebM output | S4 | Done (S4) |
+| `src/services/directorExecutor.ts` is dead code | S1 | Done (S1) |
+| `vfxReference.videoUrl` blob URLs persisted, dead after reload | S2 | Done (S2) |
+| Inconsistent `typeof window` guards (cast pool gated, shot cache not) | S2 | Done (S2) |
+| localStorage origin split between `file://` and dev server in Electron | S2 | Done (S2) |
+| Google Fonts from CDN (blocks strict CSP) → self-host | S2 | Done (S2) |
+| Electron global `Access-Control-Allow-Origin: *` injection; auto-load of `localhost:5173` | S2 | Done (S2) |
+| 4 WebGL contexts (2 renderers × 2 `StagePrevis3D` instances) | S5 | Done (S5) |
+| Trim range / volume controls may be no-ops; hardcoded "SCENE 01"; `minWidth` 1100; backtick handler eats input typing; `alert()` in VFXVideoDeck | S6 | Done (S6) |

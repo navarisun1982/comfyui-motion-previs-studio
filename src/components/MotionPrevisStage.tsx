@@ -23,6 +23,7 @@ import {
   Maximize2,
   Minimize2,
   Volume2,
+  VolumeX,
   Scissors,
   Bookmark,
   Upload,
@@ -86,6 +87,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   const [viewMode, setViewMode] = useState<'reference' | 'viewfinder'>('reference');
   const [activeTool, setActiveTool] = useState<'trim' | 'markers' | null>('trim');
   const [volume, setVolume] = useState(80);
+  const [isMuted, setIsMuted] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [fps] = useState(24);
   const [isLooping, setIsLooping] = useState(true);
@@ -235,6 +237,10 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   playbackSpeedRef.current = playbackSpeed;
   const isLoopingRef = useRef(isLooping);
   isLoopingRef.current = isLooping;
+  const trimStartPctRef = useRef(trimStartPct);
+  trimStartPctRef.current = trimStartPct;
+  const trimEndPctRef = useRef(trimEndPct);
+  trimEndPctRef.current = trimEndPct;
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -247,14 +253,21 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
       lastTime = now;
 
       setCurrentTime((prev) => {
-        const next = prev + delta;
-        if (next >= durationRef.current) {
+        const dur = durationRef.current;
+        const inTime = (trimStartPctRef.current / 100) * dur;
+        const outTime = Math.max(inTime + 0.05, (trimEndPctRef.current / 100) * dur);
+
+        let next = prev + delta;
+        if (next >= outTime) {
           if (isLoopingRef.current) {
-            return 0; // seamless loop
+            return inTime; // seamless loop within trim region
           } else {
             setIsPlaying(false);
-            return durationRef.current;
+            return outTime;
           }
+        }
+        if (next < inTime) {
+          return inTime;
         }
         return next;
       });
@@ -277,10 +290,13 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     }
   }, [currentTime, isPlaying, isConstruct3D, updateAllPassCanvases]);
 
-  // Sync Video Element Play/Pause and Time
+  // Sync Video Element Play/Pause, Rate, Volume and Mute
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
+
+    video.volume = volume / 100;
+    video.muted = isMuted || volume === 0;
 
     if (isPlaying) {
       video.playbackRate = playbackSpeed;
@@ -288,7 +304,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     } else {
       video.pause();
     }
-  }, [isPlaying, playbackSpeed]);
+  }, [isPlaying, playbackSpeed, volume, isMuted]);
 
   // Keyboard Shortcut for Object Deletion (Delete / Backspace)
   useEffect(() => {
@@ -786,7 +802,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                 src={shot.vfxReference.videoUrl}
                 crossOrigin="anonymous"
                 loop
-                muted
+                muted={isMuted || volume === 0}
                 playsInline
                 onLoadedData={handlePlateLoadedData}
                 onSeeked={() => updateAllPassCanvases(true)}
@@ -1447,18 +1463,38 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
 
           {/* Volume */}
           <div className="flex items-center gap-1.5">
-            <Volume2 className="h-3.5 w-3.5" />
+            <button
+              type="button"
+              onClick={() => {
+                const nextMuted = !isMuted;
+                setIsMuted(nextMuted);
+                if (!nextMuted && volume === 0) setVolume(50);
+              }}
+              className="text-slate-400 hover:text-white transition-colors"
+              title={isMuted || volume === 0 ? 'Unmute Audio' : 'Mute Audio'}
+            >
+              {isMuted || volume === 0 ? (
+                <VolumeX className="h-3.5 w-3.5 text-rose-400" />
+              ) : (
+                <Volume2 className="h-3.5 w-3.5 text-slate-300" />
+              )}
+            </button>
             <input
               type="range"
               min={0}
               max={100}
-              value={volume}
+              value={isMuted ? 0 : volume}
               onChange={(e) => {
                 const v = Number(e.target.value);
                 setVolume(v);
-                if (videoRef.current) videoRef.current.volume = v / 100;
+                if (v > 0 && isMuted) setIsMuted(false);
+                if (videoRef.current) {
+                  videoRef.current.volume = v / 100;
+                  videoRef.current.muted = v === 0;
+                }
               }}
               className="w-16 h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-blue-500"
+              title={`Volume: ${isMuted ? 0 : volume}%`}
             />
           </div>
         </div>
@@ -1487,16 +1523,32 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
           onPointerCancel={handleTimelinePointerUp}
           className="relative h-14 w-full rounded-md bg-[#131620] border border-white/10 overflow-hidden cursor-crosshair select-none touch-none"
         >
-          {/* Filmstrip Frame Thumbnails */}
-          <div className="absolute inset-0 flex opacity-40 pointer-events-none">
+          {/* Filmstrip Frame Thumbnails - 100% Offline Procedural Cinema Strip */}
+          <div className="absolute inset-0 flex opacity-60 pointer-events-none select-none">
             {Array.from({ length: 14 }).map((_, i) => (
               <div
                 key={i}
-                className="flex-1 border-r border-black/50 bg-cover bg-center"
-                style={{
-                  backgroundImage: `url(https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=120&q=60)`,
-                }}
-              />
+                className="flex-1 border-r border-black/70 bg-gradient-to-b from-[#181c28] via-[#10131d] to-[#181c28] relative flex flex-col justify-between p-1 overflow-hidden"
+              >
+                {/* Top sprocket hole */}
+                <div className="flex justify-between items-center">
+                  <div className="w-1.5 h-1 rounded-[1px] bg-black/80 border border-white/10" />
+                  <span className="font-mono text-[7px] text-slate-600 font-bold select-none">
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <div className="w-1.5 h-1 rounded-[1px] bg-black/80 border border-white/10" />
+                </div>
+                {/* Center frame visual placeholder */}
+                <div className="h-4 rounded border border-white/5 bg-gradient-to-r from-blue-950/20 via-indigo-900/20 to-blue-950/20 flex items-center justify-center">
+                  <div className="w-6 h-0.5 rounded bg-white/10" />
+                </div>
+                {/* Bottom sprocket hole */}
+                <div className="flex justify-between items-center">
+                  <div className="w-1.5 h-1 rounded-[1px] bg-black/80 border border-white/10" />
+                  <div className="h-0.5 w-2 bg-white/5" />
+                  <div className="w-1.5 h-1 rounded-[1px] bg-black/80 border border-white/10" />
+                </div>
+              </div>
             ))}
           </div>
 

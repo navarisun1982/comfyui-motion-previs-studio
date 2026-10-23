@@ -253,3 +253,39 @@ See the deferred table in [TASKS.md](TASKS.md).
    - Vitest suite: 26 test files, 163/163 tests passing in 4.5s (`npm run test`).
    - Production build: `npm run build` succeeds with zero errors and zero warnings across main code, scripts, and tests.
    - In-browser UI verification: tested 3D Soundstage direct manipulation, fluid floor dragging, lazy chunk loading on navigation, shot switching, and modal interactions.
+
+
+## 2026-10-23 — S6 UX Overhaul (Multi-Resolution Clean Layout) (`stage/06-ux-overhaul`)
+
+**Goal:** Clean multi-resolution layout across 1280×720, 1440×900, 1920×1080, and 2560×1440, collapsible sidebars with smooth width transitions, truthful dynamic active scene binding, fully operational timeline trim and volume/mute controls, 100% offline cinema filmstrip, and total elimination of native blocking `alert()` dialogs.
+
+### Accomplishments
+
+1. **Multi-Resolution Responsive Layout & Window Bounds (`electron/main.cjs`, `src/App.tsx`):**
+   - Relaxed Electron minimum window dimensions from 1100×720 down to `minWidth: 1024`, `minHeight: 680`, preventing window clipping and scrollbar glitches on standard 1280×720 laptop screens.
+   - Implemented responsive collapsible sidebars (`isLeftSidebarOpen`, `isRightSidebarOpen`) with smooth 200ms ease-in-out CSS transitions.
+   - Added accessible sidebar toggle buttons in the Studio Header (`Bible` on the left, `Deck` on the right) allowing users to expand either or both sidebars or collapse them to grant maximum viewport space to the Directing Stage.
+
+2. **Truthful Dynamic Scene Binding (`src/App.tsx`, `src/components/ShotBible.tsx`):**
+   - Replaced the hardcoded `"SCENE 01"` text in the Studio Header with real, reactive scene binding (`activeSceneName`).
+   - Enhanced `onSelectShot` in `ShotBible` to propagate the resolved parent scene name (`Scene 01 - Arrival`, `Scene 02 - Rooftop Encounter`, etc.) and shot title whenever a shot is selected or scenes are edited.
+
+3. **Operational Timeline Trim & Volume Controls (`src/components/MotionPrevisStage.tsx`):**
+   - Wired `trimStartPct` and `trimEndPct` into the playback ticker `loop()` via refs: playback now loops seamlessly between `(trimStartPct / 100) * duration` and `(trimEndPct / 100) * duration`.
+   - Replaced hardcoded `muted` attribute on the `<video>` element with reactive synchronization (`muted={isMuted || volume === 0}`).
+   - Added interactive audio mute toggle button flipping between `Volume2` and `VolumeX` icons, with auto-unmute and volume restoration when moving the volume slider.
+
+4. **100% Offline Procedural Cinema Filmstrip (`src/components/MotionPrevisStage.tsx`):**
+   - Eliminated remote Unsplash background URL (`https://images.unsplash.com/...`), which violated offline CSP requirements and caused broken image tiles in air-gapped environments.
+   - Built an authentic procedural dark 35mm film cell strip with perforation sprocket holes and frame numbers (`01`, `02`, etc.) rendered purely in CSS and SVG.
+
+5. **Complete Elimination of Native Blocking `alert()` Calls:**
+   - Eliminated all 7 native blocking `window.alert()` calls across the repository:
+     - `src/components/VFXVideoDeck.tsx` (2 alerts replaced with `logger.error` and styled in-app dismissible error banner).
+     - `src/components/ShotBible.tsx` (2 alerts replaced with `logger.warn` and styled in-app dismissible notice banner).
+     - `src/components/ComfyExecutionPanel.tsx` (3 alerts replaced with `logger.warn`/`logger.error` and styled in-panel dismissible alert banners).
+
+6. **Verification & Tests:**
+   - Full test suite: 26 test files, 163/163 tests passing in 4.78s (`npm run test`).
+   - Production build: `npm run build` completed in 9.98s with 0 errors and 0 warnings.
+   - In-browser UI verification: tested multi-resolution layouts (1280×720, 1440×900, 1920×1080), sidebar collapse/expand animations, dynamic scene updates in the header, timeline trimming/volume, and in-app banner dismissal.

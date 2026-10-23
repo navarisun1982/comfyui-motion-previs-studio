@@ -3,6 +3,7 @@ import { useShotStore } from '../stores/useShotStore';
 import { useComfyStore } from '../stores/useComfyStore';
 import { getAdapter } from '../adapters';
 import { defaultComfyClient } from '../services/comfyClient';
+import { logger } from '../stores/useLogStore';
 import { defaultJobRunner, ActiveJobHandle } from '../pipeline/jobRunner';
 import { exportOfflinePackageForShot } from '../pipeline/packageExporter';
 import { QualityProfile, GenerationMode } from '../pipeline/templateTypes';
@@ -67,6 +68,7 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [videoLoadError, setVideoLoadError] = useState<boolean>(false);
+  const [panelNotice, setPanelNotice] = useState<{ type: 'warn' | 'error'; message: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const activeJobHandleRef = useRef<ActiveJobHandle | null>(null);
 
@@ -166,10 +168,10 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
     }
 
     if (connectionStatus !== 'connected') {
-      alert(
-        'Local ComfyUI server is offline or unreachable on http://127.0.0.1:8188.\n\n' +
-        'Please check that your ComfyUI server is running, or use "Export Offline Package" below to export a self-contained execution package.'
-      );
+      const msg =
+        'Local ComfyUI server is offline or unreachable on http://127.0.0.1:8188. Check that your ComfyUI server is running, or click "Export Offline Package" below.';
+      logger.warn(msg);
+      setPanelNotice({ type: 'warn', message: msg });
       return;
     }
 
@@ -194,7 +196,10 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
         }
 
         if (!controlBlob) {
-          alert('Geometric Control mode requires a 3D Previs video. Please click "RENDER 3D PREVIS" in Section 1 first, or switch to Text-to-Video mode.');
+          const msg =
+            'Geometric Control mode requires a 3D Previs video. Please click "RENDER 3D PREVIS" in Section 1 first, or switch to Text-to-Video mode.';
+          logger.warn(msg);
+          setPanelNotice({ type: 'warn', message: msg });
           return;
         }
         controlFilename = `${shot.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_previs.mp4`;
@@ -258,7 +263,8 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      alert(`Export failed: ${msg}`);
+      logger.error(`Export failed: ${msg}`);
+      setPanelNotice({ type: 'error', message: `Export failed: ${msg}` });
     }
   };
 
@@ -285,6 +291,29 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
           <ArrowLeft className="h-3.5 w-3.5" />
           <span>← Back to Directing Stage</span>
         </button>
+      )}
+
+      {/* In-Panel Dismissible Notice Banner */}
+      {panelNotice && (
+        <div
+          className={`p-3 rounded-lg border text-xs flex items-start justify-between gap-2 ${
+            panelNotice.type === 'warn'
+              ? 'bg-amber-500/15 border-amber-500/30 text-amber-200'
+              : 'bg-rose-500/15 border-rose-500/30 text-rose-200'
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-amber-400" />
+            <span className="leading-relaxed font-mono text-[11px]">{panelNotice.message}</span>
+          </div>
+          <button
+            onClick={() => setPanelNotice(null)}
+            className="text-slate-400 hover:text-white px-1 py-0.5 rounded hover:bg-white/10 text-xs"
+            title="Dismiss notice"
+          >
+            ✕
+          </button>
+        </div>
       )}
       {/* Step Pipeline Navigation Breadcrumb */}
       <div className="flex items-center justify-between rounded-lg bg-black/40 border border-director-border p-2 font-mono text-[10px]">

@@ -8,6 +8,7 @@ import {
   downloadBlob,
   exportTrackingData,
 } from '../engine/vfxAnalyzer';
+import { logger } from '../stores/useLogStore';
 import {
   Video,
   Layers,
@@ -72,6 +73,7 @@ export const VFXVideoDeck: React.FC = () => {
   // Export states
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportProgress, setExportProgress] = useState<string>('');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -160,8 +162,9 @@ export const VFXVideoDeck: React.FC = () => {
       // Default to 4-Way Quad View for instant complete oversight
       setActiveTab('quad');
     } catch (err: unknown) {
-      console.error('VFX Video Analysis Error:', err);
-      alert(err instanceof Error ? err.message : 'Analysis failed');
+      const msg = err instanceof Error ? err.message : 'Analysis failed';
+      logger.error(`VFX Video Analysis Error: ${msg}`);
+      setErrorMessage(msg);
     } finally {
       setIsAnalyzing(false);
     }
@@ -189,8 +192,9 @@ export const VFXVideoDeck: React.FC = () => {
       const baseName = vfx.fileName?.replace(/\.[^/.]+$/, '') || 'vfx_plate';
       downloadBlob(blob, `${baseName}_${passType}_pass.webm`);
     } catch (err: unknown) {
-      console.error('Export Pass Error:', err);
-      alert(err instanceof Error ? err.message : 'Export failed');
+      const msg = err instanceof Error ? err.message : 'Export failed';
+      logger.error(`Export Pass Error: ${msg}`);
+      setErrorMessage(msg);
     } finally {
       setIsExporting(false);
       setExportProgress('');
@@ -228,6 +232,18 @@ export const VFXVideoDeck: React.FC = () => {
       />
 
       {/* Header */}
+      {errorMessage && (
+        <div className="flex items-center justify-between gap-2 p-3 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-200 text-xs font-mono">
+          <span>{errorMessage}</span>
+          <button
+            onClick={() => setErrorMessage(null)}
+            className="text-rose-400 hover:text-white px-1.5 py-0.5 rounded hover:bg-rose-500/20"
+            title="Dismiss error"
+          >
+            ✕
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-between border-b border-director-border pb-3">
         <div className="flex items-center gap-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-director-cyan/20 border border-director-cyan/40 text-director-cyan">

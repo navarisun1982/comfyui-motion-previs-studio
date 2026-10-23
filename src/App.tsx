@@ -28,6 +28,8 @@ import {
   Wand2,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   Undo2,
   Redo2,
   HelpCircle,
@@ -98,6 +100,9 @@ export default function App() {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('previs');
   const [activeShotId, setActiveShotId] = useState('shot-01a');
   const [activeShotTitle, setActiveShotTitle] = useState('Shot 01A Tracking In');
+  const [activeSceneName, setActiveSceneName] = useState<string>('Scene 01 - Arrival');
+  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState<boolean>(true);
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState<boolean>(true);
   const [showPromptModal, setShowPromptModal] = useState<boolean>(false);
   const [copiedPrompt, setCopiedPrompt] = useState<boolean>(false);
   const [copiedJson, setCopiedJson] = useState<boolean>(false);
@@ -184,7 +189,20 @@ export default function App() {
       {/* Top Main Navigation Bar */}
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4 bg-[#0d0f17] z-20">
         {/* Left: Project & Scene Branding */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => setIsLeftSidebarOpen(!isLeftSidebarOpen)}
+            className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-mono border transition-all ${
+              isLeftSidebarOpen
+                ? 'bg-blue-600/20 text-blue-300 border-blue-500/40 hover:bg-blue-600/30'
+                : 'bg-white/5 text-slate-400 border-white/10 hover:text-white hover:bg-white/10'
+            }`}
+            title={isLeftSidebarOpen ? 'Hide Shot Bible (Collapse Left Sidebar)' : 'Show Shot Bible (Expand Left Sidebar)'}
+          >
+            {isLeftSidebarOpen ? <ChevronLeft className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            <span className="hidden md:inline font-semibold">Bible</span>
+          </button>
+
           <div className="flex items-center gap-2">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-black shadow-md">
               <Clapperboard className="h-4 w-4" />
@@ -197,10 +215,10 @@ export default function App() {
               </div>
             </div>
           </div>
-          <div className="hidden sm:flex items-center gap-1 rounded bg-black/40 border border-white/10 px-2 py-0.5 font-mono text-[10px] text-slate-400">
-            <span className="text-slate-300 font-bold">SCENE 01</span>
+          <div className="hidden sm:flex items-center gap-1.5 rounded bg-black/40 border border-white/10 px-2.5 py-0.5 font-mono text-[10px] text-slate-400">
+            <span className="text-slate-300 font-bold uppercase tracking-wider">{activeSceneName}</span>
             <span className="text-slate-600">/</span>
-            <span className="text-amber-400 font-semibold">{activeShotId.toUpperCase()}</span>
+            <span className="text-amber-400 font-semibold">{activeShotTitle || activeShotId.toUpperCase()}</span>
           </div>
         </div>
 
@@ -348,6 +366,22 @@ export default function App() {
           {/* In-App Debugger Toggle */}
           <DebuggerTogglePill />
 
+          {/* Deck Toggle Button */}
+          <button
+            onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
+            className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-mono border transition-all ${
+              isRightSidebarOpen
+                ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40 hover:bg-indigo-600/30'
+                : 'bg-white/5 text-slate-400 border-white/10 hover:text-white hover:bg-white/10'
+            }`}
+            title={isRightSidebarOpen ? 'Hide Parameters Deck (Collapse Right Sidebar)' : 'Show Parameters Deck (Expand Right Sidebar)'}
+          >
+            <span className="hidden lg:inline font-semibold">
+              {workspaceMode === 'diffusion' ? 'Comfy Deck' : 'Deck'}
+            </span>
+            {isRightSidebarOpen ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+          </button>
+
           {/* Unified Studio Settings button (ComfyUI connection + LLM reasoner) */}
           <button
             onClick={() => openSettings()}
@@ -390,30 +424,37 @@ export default function App() {
           </Suspense>
         </div>
       ) : (
-        <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
+        <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden relative">
           {/* Left Column: Permanent Shot Bible & Scene Project Hierarchy */}
-          <aside className="flex w-64 min-w-[256px] max-w-[256px] flex-col border-r border-white/10 bg-[#0b0d13] shrink-0 overflow-hidden">
-            <Suspense
-              fallback={
-                <div className="flex h-full w-full items-center justify-center text-slate-500 font-mono text-xs">
-                  Loading Shot Bible...
-                </div>
-              }
-            >
-              <ShotBible
-                activeShotId={activeShotId}
-                onSelectShot={(id, title) => {
-                  setActiveShotId(id);
-                  if (title) {
-                    setActiveShotTitle(title);
-                  } else if (id === 'shot-01a') setActiveShotTitle('Shot 01A Tracking In');
-                  else if (id === 'shot-01b') setActiveShotTitle('Shot 01B Pan Right');
-                  else if (id === 'shot-01c') setActiveShotTitle('Shot 01C Push In');
-                  else if (id === 'shot-01d') setActiveShotTitle('Shot 01D Low Angle');
-                  else if (id === 'shot-01e') setActiveShotTitle('Shot 01E Over Shoulder');
-                }}
-              />
-            </Suspense>
+          <aside
+            className={`flex flex-col border-r border-white/10 bg-[#0b0d13] shrink-0 overflow-hidden transition-all duration-200 ease-in-out ${
+              isLeftSidebarOpen ? 'w-64 min-w-[256px] max-w-[256px]' : 'w-0 min-w-0 max-w-0 border-r-0'
+            }`}
+          >
+            <div className="w-64 h-full flex flex-col min-w-[256px]">
+              <Suspense
+                fallback={
+                  <div className="flex h-full w-full items-center justify-center text-slate-500 font-mono text-xs">
+                    Loading Shot Bible...
+                  </div>
+                }
+              >
+                <ShotBible
+                  activeShotId={activeShotId}
+                  onSelectShot={(id, title, sceneName) => {
+                    setActiveShotId(id);
+                    if (sceneName) setActiveSceneName(sceneName);
+                    if (title) {
+                      setActiveShotTitle(title);
+                    } else if (id === 'shot-01a') setActiveShotTitle('Shot 01A Tracking In');
+                    else if (id === 'shot-01b') setActiveShotTitle('Shot 01B Pan Right');
+                    else if (id === 'shot-01c') setActiveShotTitle('Shot 01C Push In');
+                    else if (id === 'shot-01d') setActiveShotTitle('Shot 01D Low Angle');
+                    else if (id === 'shot-01e') setActiveShotTitle('Shot 01E Over Shoulder');
+                  }}
+                />
+              </Suspense>
+            </div>
           </aside>
 
           {/* Center Column: Stage Previs OR VFX Multi-Pass Analyzer depending on workspaceMode */}
@@ -440,53 +481,61 @@ export default function App() {
           </main>
 
           {/* Right Column: Previs Parameters Deck or Full Comfy Execution Panel */}
-          <aside className="flex w-80 min-w-[320px] max-w-[320px] flex-col border-l border-white/10 bg-[#0b0d13] shrink-0 overflow-y-auto overflow-x-hidden">
-            {workspaceMode === 'diffusion' ? (
-              <div className="flex flex-col h-full">
-                <Suspense
-                  fallback={
-                    <div className="flex h-full w-full items-center justify-center text-slate-500 font-mono text-xs">
-                      Loading ComfyUI Deck...
-                    </div>
-                  }
-                >
-                  <ComfyExecutionPanel onBackToPrevis={() => setWorkspaceMode('previs')} />
-                </Suspense>
-                {/* Directorial Capability Breakdown */}
-                <div className="p-4 pt-0 space-y-2 font-mono text-[10px]">
-                  <span className="text-slate-400 font-bold uppercase tracking-wider">
-                    Directorial Capability Mapping
-                  </span>
-                  <div className="space-y-1.5 rounded-lg border border-white/10 bg-[#131620] p-2.5">
-                    {validation.capabilityNotes.map((note, idx) => (
-                      <div key={idx} className="flex items-start gap-1.5 text-slate-300">
-                        <span
-                          className={`rounded px-1 text-[8px] font-bold uppercase shrink-0 mt-0.5 ${
-                            note.tier === 'native'
-                              ? 'bg-emerald-500/20 text-emerald-400'
-                              : note.tier === 'approximated'
-                              ? 'bg-amber-500/20 text-amber-400'
-                              : 'bg-rose-500/20 text-rose-400'
-                          }`}
-                        >
-                          {note.tier}
-                        </span>
-                        <div className="flex flex-col">
-                          <span className="font-bold text-white">{note.feature}</span>
-                          <span className="text-[9px] text-slate-400 font-sans">{note.explanation}</span>
-                        </div>
+          <aside
+            className={`flex flex-col border-l border-white/10 bg-[#0b0d13] shrink-0 transition-all duration-200 ease-in-out ${
+              isRightSidebarOpen
+                ? 'w-80 min-w-[320px] max-w-[320px] overflow-y-auto overflow-x-hidden'
+                : 'w-0 min-w-0 max-w-0 border-l-0 overflow-hidden'
+            }`}
+          >
+            <div className="w-80 h-full flex flex-col min-w-[320px] overflow-y-auto">
+              {workspaceMode === 'diffusion' ? (
+                <div className="flex flex-col h-full">
+                  <Suspense
+                    fallback={
+                      <div className="flex h-full w-full items-center justify-center text-slate-500 font-mono text-xs">
+                        Loading ComfyUI Deck...
                       </div>
-                    ))}
+                    }
+                  >
+                    <ComfyExecutionPanel onBackToPrevis={() => setWorkspaceMode('previs')} />
+                  </Suspense>
+                  {/* Directorial Capability Breakdown */}
+                  <div className="p-4 pt-0 space-y-2 font-mono text-[10px]">
+                    <span className="text-slate-400 font-bold uppercase tracking-wider">
+                      Directorial Capability Mapping
+                    </span>
+                    <div className="space-y-1.5 rounded-lg border border-white/10 bg-[#131620] p-2.5">
+                      {validation.capabilityNotes.map((note, idx) => (
+                        <div key={idx} className="flex items-start gap-1.5 text-slate-300">
+                          <span
+                            className={`rounded px-1 text-[8px] font-bold uppercase shrink-0 mt-0.5 ${
+                              note.tier === 'native'
+                                ? 'bg-emerald-500/20 text-emerald-400'
+                                : note.tier === 'approximated'
+                                ? 'bg-amber-500/20 text-amber-400'
+                                : 'bg-rose-500/20 text-rose-400'
+                            }`}
+                          >
+                            {note.tier}
+                          </span>
+                          <div className="flex flex-col">
+                            <span className="font-bold text-white">{note.feature}</span>
+                            <span className="text-[9px] text-slate-400 font-sans">{note.explanation}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <PrevisParametersDeck
-                onOpenPromptInspector={() => setShowPromptModal(true)}
-                onExportProductionPack={() => setWorkspaceMode('diffusion')}
-                onDirectShotWithComfy={() => setWorkspaceMode('diffusion')}
-              />
-            )}
+              ) : (
+                <PrevisParametersDeck
+                  onOpenPromptInspector={() => setShowPromptModal(true)}
+                  onExportProductionPack={() => setWorkspaceMode('diffusion')}
+                  onDirectShotWithComfy={() => setWorkspaceMode('diffusion')}
+                />
+              )}
+            </div>
           </aside>
         </div>
       )}

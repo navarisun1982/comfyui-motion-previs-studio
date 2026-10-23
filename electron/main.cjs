@@ -40,8 +40,8 @@ function loadWindowState() {
         }
 
         return {
-          width: Math.max(1100, data.width),
-          height: Math.max(720, data.height),
+          width: Math.max(1024, data.width),
+          height: Math.max(680, data.height),
           x: isValidPosition ? data.x : undefined,
           y: isValidPosition ? data.y : undefined,
           isMaximized: Boolean(data.isMaximized),
@@ -92,8 +92,8 @@ function createWindow() {
     height: windowState.height,
     x: windowState.x,
     y: windowState.y,
-    minWidth: 1100,
-    minHeight: 720,
+    minWidth: 1024,
+    minHeight: 680,
     title: APP_TITLE,
     backgroundColor: '#08090C',
     autoHideMenuBar: true,
