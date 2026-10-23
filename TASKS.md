@@ -14,7 +14,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S4 Geometric conditioning | `stage/04-geometric-conditioning` | ✅ merged to master (`cb27783`) | Directed camera move rendered via deterministic offline previs & conditioned via IC-LoRA |
 | S5 Performance | `stage/05-performance` | ✅ merged to master (`9a602b5`) | Smooth 60 FPS drag; main chunk 606 kB (down from 1.76 MB); 2 WebGL contexts |
 | S6 UX overhaul | `stage/06-ux-overhaul` | ✅ merged to master (`4094de4`, `eddcb9f`) | Clean at 1280×720 / 1440×900 / 1920×1080 / 2560×1440; responsive sidebars |
-| S7 Takes + queue | `stage/07-takes-queue` | 🟡 ready for review | Multi-seed take generator, queue runner, contact sheet, circling hero takes, and A/B comparison |
+| S7 Takes + queue | `stage/07-takes-queue` | ✅ merged to master (`b3d3faf`) | Multi-seed take generator, queue runner, contact sheet, circling hero takes, and A/B comparison |
 | S8 Motion fidelity | `stage/08-motion-fidelity` | ⬜ | (grill first) |
 | S9 NL → ShotSpec | `stage/09-nl-shotspec` | ⬜ | (grill first) |
 | S10 Sequence | `stage/10-sequence` | ⬜ | (grill first) |
