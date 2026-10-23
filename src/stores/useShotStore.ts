@@ -94,13 +94,41 @@ interface ShotState {
   clearHistory: (shotId?: string) => void;
 }
 
-const persistShotsMap = (shots: Record<string, ShotSpec>) => {
+let isGestureActive = false;
+let gestureStartShot: ShotSpec | null = null;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingShotsToPersist: Record<string, ShotSpec> | null = null;
+
+export const flushShotsPersistence = () => {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  if (!pendingShotsToPersist) return;
+  const shots = pendingShotsToPersist;
+  pendingShotsToPersist = null;
   const sanitized: Record<string, ShotSpec> = {};
   for (const [id, s] of Object.entries(shots)) {
     sanitized[id] = sanitizeShotForStorage(s);
   }
   safeSetItem(STORAGE_KEYS.SHOTS_CACHE, sanitized);
 };
+
+const persistShotsMap = (shots: Record<string, ShotSpec>, immediate = false) => {
+  pendingShotsToPersist = shots;
+  if (!immediate && isGestureActive) {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+    }
+    persistTimer = setTimeout(flushShotsPersistence, 300);
+    return;
+  }
+  flushShotsPersistence();
+};
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', flushShotsPersistence);
+}
 
 const loadCachedShots = (): Record<string, ShotSpec> => {
   const parsed = safeGetItem<Record<string, ShotSpec>>(STORAGE_KEYS.SHOTS_CACHE, {});
@@ -188,9 +216,6 @@ function getShotHistory(shotId: string): ShotHistory {
   return historyByShot[shotId];
 }
 
-let isGestureActive = false;
-let gestureStartShot: ShotSpec | null = null;
-
 export const useShotStore = create<ShotState>((set, get) => {
   const evaluate = (shot: ShotSpec) => {
     const adapter = getAdapter(shot.targetModel);
@@ -202,7 +227,7 @@ export const useShotStore = create<ShotState>((set, get) => {
   const commitShot = (
     updated: ShotSpec,
     extraState?: Partial<ShotState>,
-    options?: { skipHistory?: boolean }
+    options?: { skipHistory?: boolean; immediatePersist?: boolean }
   ) => {
     const currentShot = get().shot;
     const shotHistory = getShotHistory(updated.id);
@@ -224,7 +249,7 @@ export const useShotStore = create<ShotState>((set, get) => {
 
     const currentShots = get().shotsById;
     const nextShots = { ...currentShots, [updated.id]: updated };
-    persistShotsMap(nextShots);
+    persistShotsMap(nextShots, options?.immediatePersist || false);
     set({
       shot: updated,
       shotsById: nextShots,
@@ -314,7 +339,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         currentMap[shotId] = targetShot;
       }
 
-      persistShotsMap(currentMap);
+      persistShotsMap(currentMap, true);
       const targetHistory = getShotHistory(targetShot.id);
 
       logger.action(`Switched active shot to "${targetShot.name}" (${targetShot.id})`);
@@ -755,7 +780,7 @@ export const useShotStore = create<ShotState>((set, get) => {
       gestureStartShot = null;
       const currentShots = get().shotsById;
       const nextShots = { ...currentShots, [shot.id]: shot };
-      persistShotsMap(nextShots);
+      persistShotsMap(nextShots, true);
       const shotHistory = getShotHistory(shot.id);
       set({
         shot,
@@ -791,7 +816,7 @@ export const useShotStore = create<ShotState>((set, get) => {
           isRenderingPrevis: false,
           previsProgress: 0,
         },
-        { skipHistory: true }
+        { skipHistory: true, immediatePersist: true }
       );
     },
 
@@ -861,6 +886,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         });
       }
       gestureStartShot = null;
+      flushShotsPersistence();
     },
 
     clearHistory: (shotId?: string) => {

@@ -167,6 +167,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
   } = useShotStore();
 
   const [viewMode, setViewMode] = useState<ViewMode>(initialViewMode);
+  const viewModeRef = useRef<ViewMode>(initialViewMode);
+  const initStageRendererRef = useRef<(() => void) | null>(null);
+  const initVfRendererRef = useRef<(() => void) | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(externalTime ?? 0);
   const [showGrid, setShowGrid] = useState<boolean>(true);
@@ -197,6 +200,16 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       setViewMode(initialViewMode);
     }
   }, [initialViewMode]);
+
+  useEffect(() => {
+    viewModeRef.current = viewMode;
+    if (viewMode === 'stage' || viewMode === 'split') {
+      initStageRendererRef.current?.();
+    }
+    if (viewMode === 'viewfinder' || viewMode === 'split') {
+      initVfRendererRef.current?.();
+    }
+  }, [viewMode]);
 
   // Containers
   const stageMountRef = useRef<HTMLDivElement | null>(null);
@@ -742,8 +755,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     raycasterRef.current.layers.enable(0);
     raycasterRef.current.layers.enable(1);
 
-    // Renderers Setup
-    if (stageMountRef.current) {
+    // Renderers Setup with Lazy Viewport Context Allocation
+    const initStageRenderer = () => {
+      if (stageRendererRef.current || !stageMountRef.current || !stageCameraRef.current) return;
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       const w = stageMountRef.current.clientWidth || 600;
@@ -761,15 +775,16 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       stageMountRef.current.appendChild(renderer.domElement);
       stageRendererRef.current = renderer;
 
-      const controls = new OrbitControls(stageCamera, renderer.domElement);
+      const controls = new OrbitControls(stageCameraRef.current, renderer.domElement);
       controls.enableDamping = true;
       controls.dampingFactor = 0.05;
       controls.maxPolarAngle = Math.PI / 2 - 0.05; // don't go below floor
       controls.target.set(0, 5, 0);
       stageControlsRef.current = controls;
-    }
+    };
 
-    if (viewfinderMountRef.current) {
+    const initVfRenderer = () => {
+      if (vfRendererRef.current || !viewfinderMountRef.current) return;
       const vfRenderer = new THREE.WebGLRenderer({
         antialias: true,
         alpha: true,
@@ -790,6 +805,17 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       vfRenderer.toneMappingExposure = 1.15;
       viewfinderMountRef.current.appendChild(vfRenderer.domElement);
       vfRendererRef.current = vfRenderer;
+    };
+
+    initStageRendererRef.current = initStageRenderer;
+    initVfRendererRef.current = initVfRenderer;
+
+    // Lazily instantiate ONLY the renderer needed for initialViewMode
+    if (initialViewMode === 'stage' || initialViewMode === 'split') {
+      initStageRenderer();
+    }
+    if (initialViewMode === 'viewfinder' || initialViewMode === 'split') {
+      initVfRenderer();
     }
 
     // Precise Resize Observer with Parent Fallbacks for smooth expansion
@@ -917,14 +943,19 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         stageControlsRef.current.update();
       }
 
-      if (stageRendererRef.current && stageSceneRef.current && stageCameraRef.current) {
-        stageRendererRef.current.render(stageSceneRef.current, stageCameraRef.current);
+      const activeView = viewModeRef.current;
+      if (activeView === 'stage' || activeView === 'split') {
+        if (stageRendererRef.current && stageSceneRef.current && stageCameraRef.current) {
+          stageRendererRef.current.render(stageSceneRef.current, stageCameraRef.current);
+        }
       }
 
       // Do NOT interfere with vfRenderer while in-app previs is actively capturing frames
-      if (!useShotStore.getState().isRenderingPrevis) {
-        if (vfRendererRef.current && stageSceneRef.current && vfCameraRef.current) {
-          vfRendererRef.current.render(stageSceneRef.current, vfCameraRef.current);
+      if (activeView === 'viewfinder' || activeView === 'split') {
+        if (!useShotStore.getState().isRenderingPrevis) {
+          if (vfRendererRef.current && stageSceneRef.current && vfCameraRef.current) {
+            vfRendererRef.current.render(stageSceneRef.current, vfCameraRef.current);
+          }
         }
       }
     };
@@ -936,12 +967,24 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateSizes);
 
+      if (stageControlsRef.current) {
+        stageControlsRef.current.dispose();
+        stageControlsRef.current = null;
+      }
       if (stageRendererRef.current) {
+        try {
+          stageRendererRef.current.forceContextLoss();
+        } catch {}
         stageRendererRef.current.dispose();
+        stageRendererRef.current = null;
         stageMountRef.current?.replaceChildren();
       }
       if (vfRendererRef.current) {
+        try {
+          vfRendererRef.current.forceContextLoss();
+        } catch {}
         vfRendererRef.current.dispose();
+        vfRendererRef.current = null;
         viewfinderMountRef.current?.replaceChildren();
       }
     };
@@ -1760,6 +1803,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
   // In-App 3D Previs Video Renderer (Deterministic offline fixed-timestep MP4 capture)
   const handleRenderInAppPrevis = async (): Promise<{ url: string; blob: Blob } | null> => {
+    if (!vfRendererRef.current) {
+      initVfRendererRef.current?.();
+    }
     if (!vfRendererRef.current || !stageSceneRef.current || !vfCameraRef.current) {
       console.warn('Cannot record previs: Three.js viewfinder not ready');
       return null;

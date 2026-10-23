@@ -39,6 +39,8 @@ const CATEGORIES: { id: AssetCategory; label: string; labelAr: string; icon: str
   { id: 'scifi', label: 'Sci-Fi & Tech', labelAr: 'تقنية وخيال علمي', icon: '⚛️' },
 ];
 
+import { useShallow } from 'zustand/react/shallow';
+
 export const AssetLibraryModal: React.FC = () => {
   const {
     isOpen,
@@ -56,9 +58,27 @@ export const AssetLibraryModal: React.FC = () => {
     generationProgress,
     generationStage,
     generationError,
-  } = useAssetLibraryStore();
+  } = useAssetLibraryStore(
+    useShallow((s) => ({
+      isOpen: s.isOpen,
+      closeLibrary: s.closeLibrary,
+      selectedCategory: s.selectedCategory,
+      setSelectedCategory: s.setSelectedCategory,
+      searchQuery: s.searchQuery,
+      setSearchQuery: s.setSearchQuery,
+      customAssets: s.customAssets,
+      removeCustomAsset: s.removeCustomAsset,
+      uploadGlbFile: s.uploadGlbFile,
+      isUploading: s.isUploading,
+      generateAssetWithAi: s.generateAssetWithAi,
+      isGenerating: s.isGenerating,
+      generationProgress: s.generationProgress,
+      generationStage: s.generationStage,
+      generationError: s.generationError,
+    }))
+  );
 
-  const { addActor } = useShotStore();
+  const addActor = useShotStore((s) => s.addActor);
 
   // Generator Panel state
   const [showGenerator, setShowGenerator] = useState(false);

@@ -3,14 +3,25 @@ import { useHistoryStore, computeShotDiff } from '../stores/useHistoryStore';
 import { useShotStore } from '../stores/useShotStore';
 import { History, GitCompare, RotateCcw, CheckCircle2, ChevronRight, Video, ArrowLeft } from 'lucide-react';
 
+import { useShallow } from 'zustand/react/shallow';
+
 interface DirectorDiffInspectorProps {
   onClose?: () => void;
 }
 
 export const DirectorDiffInspector: React.FC<DirectorDiffInspectorProps> = ({ onClose }) => {
   const { revisions, activeRevisionId, comparisonRevisionId, setActiveRevision, setComparisonRevision, getRevision } =
-    useHistoryStore();
-  const { loadShot } = useShotStore();
+    useHistoryStore(
+      useShallow((s) => ({
+        revisions: s.revisions,
+        activeRevisionId: s.activeRevisionId,
+        comparisonRevisionId: s.comparisonRevisionId,
+        setActiveRevision: s.setActiveRevision,
+        setComparisonRevision: s.setComparisonRevision,
+        getRevision: s.getRevision,
+      }))
+    );
+  const loadShot = useShotStore((s) => s.loadShot);
 
   const revA = getRevision(activeRevisionId || '') || revisions[0];
   const revB = getRevision(comparisonRevisionId || '') || (revisions.length > 1 ? revisions[1] : undefined);
