@@ -16,7 +16,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S6 UX overhaul | `stage/06-ux-overhaul` | ✅ merged to master (`4094de4`, `eddcb9f`) | Clean at 1280×720 / 1440×900 / 1920×1080 / 2560×1440; responsive sidebars |
 | S7 Takes + queue | `stage/07-takes-queue` | ✅ merged to master (`b3d3faf`) | Multi-seed take generator, queue runner, contact sheet, circling hero takes, and A/B comparison |
 | S8 Motion fidelity | `stage/08-motion-fidelity` | ✅ merged to master (`f8e3781`) | Optical flow vector analyzer, directional & speed fidelity scoring, visual vector overlay HUD, A/B motion diffing |
-| S9 Closed-loop steering | `stage/09-closed-loop-steering` | 🟡 ready for review & merge | Optical-flow-driven compensatory patches, prompt auto-correction, IC-LoRA modulation, steering modal, lineage tracking |
+| S9 Closed-loop steering | `stage/09-closed-loop-steering` | ✅ merged to master (`fc9865c`) | Optical-flow-driven compensatory patches, prompt auto-correction, IC-LoRA modulation, steering modal, lineage tracking |
 | S10 Sequence / Assembly | `stage/10-sequence` | ⬜ | (grill first) |
 
 ## S4 checklist (Geometric Conditioning — "Direct the Shot, Not the Prompt")
@@ -203,6 +203,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
   - 29 test files, 194/194 tests passing in 4.89s (`npm run test`)
   - Production build: `npm run build` completed with zero TypeScript errors and bundle created cleanly
   - In-browser UI verified via subagent with recording `stage9_steering_verify_1792787404162.webp`
+- [x] Owner approval → merge `stage/09-closed-loop-steering` to `master` (`fc9865c`)
 
 ## Deferred findings (tracked for later stages)
 
