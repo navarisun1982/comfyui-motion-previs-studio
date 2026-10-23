@@ -94,7 +94,7 @@ export const DirectorDiffInspector: React.FC<DirectorDiffInspectorProps> = ({ on
               >
                 {revisions.map((r) => (
                   <option key={r.id} value={r.id} className="bg-director-panel text-white">
-                    v{r.version} — {r.note} ({new Date(r.timestamp).toLocaleTimeString()})
+                    v{r.version} — {r.note} ({new Date(r.timestamp ?? r.createdAt).toLocaleTimeString()})
                   </option>
                 ))}
               </select>
@@ -113,7 +113,7 @@ export const DirectorDiffInspector: React.FC<DirectorDiffInspectorProps> = ({ on
               >
                 {revisions.map((r) => (
                   <option key={r.id} value={r.id} className="bg-director-panel text-white">
-                    v{r.version} — {r.note} ({new Date(r.timestamp).toLocaleTimeString()})
+                    v{r.version} — {r.note} ({new Date(r.timestamp ?? r.createdAt).toLocaleTimeString()})
                   </option>
                 ))}
               </select>

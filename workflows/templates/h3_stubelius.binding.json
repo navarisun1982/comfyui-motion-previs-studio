@@ -1,0 +1,74 @@
+{
+  "schema": 1,
+  "templateId": "h3_stubelius",
+  "engine": "minimax-h3",
+  "label": "Stubelius Ultimate MiniMax H3 (Hybrid)",
+  "api": "h3_stubelius.api.json",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "nodes": {
+    "1": "StubeliusH3Setup",
+    "2": "StubeliusH3Models",
+    "3": "PrimitiveStringMultiline",
+    "4": "StubeliusH3DirectorV2",
+    "11": "StubeliusH3Finish",
+    "12": "VHS_VideoCombine",
+    "17": "StubeliusH3Output"
+  },
+  "fields": {
+    "prompt": {
+      "node": "3",
+      "input": "value"
+    },
+    "seed": {
+      "node": "4",
+      "input": "seed"
+    },
+    "seedCount": {
+      "node": "1",
+      "input": "seeds",
+      "fixed": 1
+    },
+    "winner": {
+      "node": "11",
+      "input": "winner",
+      "fixed": 1
+    },
+    "durationSeconds": {
+      "node": "4",
+      "input": "duration_seconds"
+    },
+    "timeline": {
+      "node": "4",
+      "input": "timeline_data",
+      "patch": "h3.firstFrameCharacter@1"
+    }
+  },
+  "profiles": {
+    "draft": [
+      {
+        "node": "17",
+        "input": "final_resolution",
+        "value": "native (no upscale)"
+      }
+    ],
+    "final": [
+      {
+        "node": "17",
+        "input": "final_resolution",
+        "value": "1080p"
+      }
+    ]
+  },
+  "output": {
+    "node": "12"
+  },
+  "frameRule": "any",
+  "notes": [
+    "MiniMax H3 Hybrid workflow on RTX 3090.",
+    "Prompt injected via PrimitiveStringMultiline into Director prompt_override.",
+    "Draft runs native 540p without polish; final runs 1080p RTX VSR."
+  ]
+}

@@ -1,0 +1,150 @@
+{
+  "1": {
+    "inputs": {
+      "mode": "Hybrid",
+      "seeds": 1,
+      "steps": 10,
+      "sampler": "euler",
+      "scheduler": "beta",
+      "megapixels": 0.5,
+      "speedup_lora_strength": 0.75
+    },
+    "class_type": "StubeliusH3Setup",
+    "_meta": {
+      "title": "SETUP — how the video is generated"
+    }
+  },
+  "2": {
+    "inputs": {
+      "setup": [
+        "1",
+        0
+      ],
+      "ref2va_model": "MiniMax H3\\minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "fl2va_model": "MiniMax H3\\minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "text_encoder": "MiniMax H3\\qwen3vl_32b_minimax_h3_text_encoder_bf16.safetensors",
+      "video_vae": "MiniMax H3\\minimax_h3_video_vae_bf16.safetensors",
+      "audio_vae": "MiniMax H3\\minimax_h3_audio_vae_bf16.safetensors",
+      "speedup_lora": "MiniMax H3\\Lightx2v_I2V_14B_4step_480p_lora.safetensors",
+      "pdmd_lora": "none",
+      "extra_lora_1": "none",
+      "extra_lora_1_strength": 1,
+      "extra_lora_2": "none",
+      "extra_lora_2_strength": 1,
+      "attention": "comfy kitchen attention",
+      "sage_attention": true,
+      "low_vram_attention": false,
+      "chunk_feed_forward": false,
+      "spectrum": false,
+      "h3_cache": false,
+      "live_preview": "off"
+    },
+    "class_type": "StubeliusH3Models",
+    "_meta": {
+      "title": "MODELS — checkpoints, LoRAs, speedups"
+    }
+  },
+  "3": {
+    "inputs": {
+      "value": ""
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "PROMPT OVERRIDE (any text here replaces the Director timeline)"
+    }
+  },
+  "4": {
+    "inputs": {
+      "mode": "First/Last Frame — zero, one, or two frame images",
+      "aspect_ratio": "16:9 (Widescreen)",
+      "duration_seconds": 5,
+      "chunk_duration_seconds": 10,
+      "seed": 43,
+      "timeline_data": "{\"characters\":[null,null,null],\"chunks\":[{\"segments\":[{\"prompt\":\"Cinematic shot\",\"start\":0,\"length\":5}]}]}",
+      "models": [
+        "2",
+        0
+      ],
+      "setup": [
+        "1",
+        0
+      ],
+      "prompt_override": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "StubeliusH3DirectorV2",
+    "_meta": {
+      "title": "DIRECTOR — what the video is"
+    }
+  },
+  "11": {
+    "inputs": {
+      "winner": 1,
+      "takes": [
+        "4",
+        0
+      ],
+      "models": [
+        "2",
+        0
+      ],
+      "output": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "StubeliusH3Finish",
+    "_meta": {
+      "title": "FINISH — pick the WINNER (0 = hold after the seeds)"
+    }
+  },
+  "12": {
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ],
+      "audio": [
+        "11",
+        1
+      ],
+      "frame_rate": [
+        "11",
+        2
+      ],
+      "loop_count": 0,
+      "filename_prefix": "UH3/final",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "FINAL VIDEO"
+    }
+  },
+  "17": {
+    "inputs": {
+      "mode": [
+        "1",
+        0
+      ],
+      "final_resolution": "1080p",
+      "final_fps": 24,
+      "upscaler": "RTX VSR",
+      "quality_polish_strength": 0.3,
+      "quality_polish_steps": 12,
+      "quality_polish_method": "learned model (2x)"
+    },
+    "class_type": "StubeliusH3Output",
+    "_meta": {
+      "title": "OUTPUT — final resolution, FPS, upscaler (changes re-run only Finish)"
+    }
+  }
+}

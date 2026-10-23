@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { ShotSpec } from '../types/shotspec';
 import { useShotStore } from '../stores/useShotStore';
 import { useComfyStore } from '../stores/useComfyStore';
-import { useHistoryStore } from '../stores/useHistoryStore';
-import { getAdapter, getAllAdapters } from '../adapters';
+import { getAdapter } from '../adapters';
 import { defaultComfyClient } from '../services/comfyClient';
+import { defaultJobRunner, ActiveJobHandle } from '../pipeline/jobRunner';
+import { exportOfflinePackageForShot } from '../pipeline/packageExporter';
+import { QualityProfile } from '../pipeline/templateTypes';
 import {
   Play,
   Upload,
@@ -21,6 +22,7 @@ import {
   Sparkles,
   ArrowRight,
   ArrowLeft,
+  XCircle,
 } from 'lucide-react';
 
 interface ComfyExecutionPanelProps {
@@ -30,11 +32,9 @@ interface ComfyExecutionPanelProps {
 export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBackToPrevis }) => {
   const {
     shot,
-    updateTargetModel,
-    setReferenceImage,
     compiledPrompt,
+    setReferenceImage,
     previsVideoUrl,
-    previsVideoBlob,
     isRenderingPrevis,
     previsProgress,
     renderPrevisVideo,
@@ -46,20 +46,19 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
     activeJob,
     setConnectionStatus,
     setSystemStats,
-    startJob,
     updateJobProgress,
     setJobCompleted,
     setJobFailed,
   } = useComfyStore();
-  const { saveRevision } = useHistoryStore();
 
+  const [profile, setProfile] = useState<QualityProfile>('final');
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [videoLoadError, setVideoLoadError] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const activeJobHandleRef = useRef<ActiveJobHandle | null>(null);
 
   const adapter = getAdapter(shot.targetModel);
-  const allAdapters = getAllAdapters();
 
   // Download In-App Previs Video directly to Disk
   const handleDownloadPrevisVideo = () => {
@@ -147,96 +146,73 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
     }
   };
 
-  // Execute Generation (Send In-App Previs Plate to ComfyUI)
+  // Execute Generation via verified JobRunner pipeline
   const handleExecuteGeneration = async () => {
+    if (shot.targetModel === 'seedance') {
+      handleExportPackage();
+      return;
+    }
+
     if (connectionStatus !== 'connected') {
-      alert('Local ComfyUI server is offline or unreachable on http://127.0.0.1:8188. Please connect ComfyUI in Studio Settings or check your ComfyUI terminal.');
+      alert(
+        'Local ComfyUI server is offline or unreachable on http://127.0.0.1:8188.\n\n' +
+        'Please check that your ComfyUI server is running, or use "Export Offline Package" below to export a self-contained execution package.'
+      );
       return;
     }
 
     try {
-      // Step 1 check: If previs has not been rendered in-app yet, render it first automatically
-      let currentBlob = previsVideoBlob;
-      if (!currentBlob && !previsVideoUrl) {
-        const renderRes = await renderPrevisVideo();
-        if (renderRes) {
-          currentBlob = renderRes.blob;
-        }
-      }
-
-      // Step 2: Upload Previs plate to ComfyUI if connected
-      let uploadedFilename = shot.referenceImage?.filename;
-
-      if (connectionStatus === 'connected' && currentBlob) {
-        const plateFilename = `${shot.name.replace(/\s+/g, '_')}_previs.${currentBlob.type.includes('mp4') ? 'mp4' : 'webm'}`;
-        const uploaded = await defaultComfyClient.uploadImage(currentBlob, plateFilename);
-        uploadedFilename = uploaded.name;
-      }
-
-      // 1. Build workflow from adapter
-      const graph = adapter.buildWorkflow(shot, uploadedFilename);
-
-      // 2. Real ComfyUI execution
-      const submitRes = await defaultComfyClient.submitPrompt(graph);
-      const promptId = submitRes.promptId;
-      startJob(promptId, shot.id, shot.name);
       setVideoLoadError(false);
+      const engine = shot.targetModel === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5';
+      const mode = shot.referenceImage?.filename ? 'i2v' : 't2v';
 
-      // 3. Connect WebSocket watcher
-      const cleanupWs = defaultComfyClient.connectWebSocket({
-        onProgress: (_nodeId, current, max) => {
-          const pct = Math.round((current / max) * 100);
-          updateJobProgress(pct, `Sampling video frames (${current}/${max})`);
+      const handle = await defaultJobRunner.run({
+        engine,
+        mode,
+        profile,
+        shot,
+        prompt: compiledPrompt.positivePrompt,
+        negative: shot.negativePrompt,
+        seed: shot.seed ?? Math.floor(Math.random() * 1000000),
+        firstFrameFilename: shot.referenceImage?.filename,
+        promptSource: 'compiled',
+        onProgress: (pct, nodeTitle) => {
+          updateJobProgress(pct, nodeTitle);
         },
-        onExecuting: (nodeId) => {
-          if (nodeId) {
-            const nodeMeta = graph[nodeId]?._meta?.title || `Node #${nodeId}`;
-            updateJobProgress(activeJob?.progress || 10, `Executing: ${nodeMeta}`);
-          }
-        },
-        onExecuted: async (_nodeId, output) => {
-          const v = defaultComfyClient.extractVideoOutput(output);
-          if (v) {
-            const videoUrl = defaultComfyClient.getViewUrl(v.filename, v.subfolder, v.type);
-            setJobCompleted(videoUrl, v.filename);
-            saveRevision(shot, compiledPrompt.positivePrompt, videoUrl, `LTX Run: ${shot.camera.movement.type}`);
-            cleanupWs();
-          }
+        onSuccess: (_revisionId, videoUrl, filename) => {
+          setJobCompleted(videoUrl, filename);
+          activeJobHandleRef.current = null;
         },
         onError: (err) => {
-          setJobFailed(err);
-          cleanupWs();
+          setJobFailed(err.message);
+          activeJobHandleRef.current = null;
         },
       });
-
-      // Poll history as safety net in case WS closes before executed packet
-      const pollHistory = setInterval(async () => {
-        const hist = await defaultComfyClient.getPromptHistory(promptId);
-        if (hist && hist.outputs) {
-          const outputs = hist.outputs as Record<string, Record<string, unknown>>;
-          for (const nId of Object.keys(outputs)) {
-            const v = defaultComfyClient.extractVideoOutput(outputs[nId]);
-            if (v) {
-              clearInterval(pollHistory);
-              const videoUrl = defaultComfyClient.getViewUrl(v.filename, v.subfolder, v.type);
-              setJobCompleted(videoUrl, v.filename);
-              saveRevision(shot, compiledPrompt.positivePrompt, videoUrl, `LTX Run: ${shot.camera.movement.type}`);
-              cleanupWs();
-              break;
-            }
-          }
-        }
-      }, 2500);
-
-      // Timeout safety net
-      setTimeout(() => clearInterval(pollHistory), 180000);
+      activeJobHandleRef.current = handle;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setJobFailed(msg);
+      activeJobHandleRef.current = null;
     }
   };
 
-  // Export Workflow JSON
+  const handleCancelGeneration = async () => {
+    if (activeJobHandleRef.current) {
+      await activeJobHandleRef.current.cancel();
+      activeJobHandleRef.current = null;
+    }
+  };
+
+  const handleExportPackage = () => {
+    try {
+      exportOfflinePackageForShot({ shot, profile });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Export failed: ${msg}`);
+    }
+  };
+
+  // Export Legacy Workflow JSON (fallback)
   const handleExportWorkflow = () => {
     const graph = adapter.buildWorkflow(shot, shot.referenceImage?.filename);
     const blob = new Blob([JSON.stringify(graph, null, 2)], { type: 'application/json' });
@@ -420,37 +396,87 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
           </div>
         )}
 
-        {/* Target Model Selection */}
-        <div className="flex flex-col gap-1.5">
-          <label className="font-mono text-[10px] text-slate-400 flex items-center justify-between">
-            <span>Target Diffusion Engine</span>
-            {adapter.capabilities.isOpenWeights && (
-              <span className="flex items-center gap-1 text-[9px] text-emerald-400 font-bold">
+        {/* Target Engine & Provenance */}
+        <div className="flex flex-col gap-2 rounded-lg bg-black/40 p-3 border border-white/5">
+          <div className="flex items-center justify-between">
+            <span className="font-mono text-[10px] text-slate-400 uppercase tracking-wider">
+              Target Engine (Directed in Previs)
+            </span>
+            {adapter.capabilities.isOpenWeights ? (
+              <span className="flex items-center gap-1 rounded bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold text-emerald-400 border border-emerald-500/30">
                 <ShieldCheck className="h-3 w-3" />
                 OPEN WEIGHTS
               </span>
+            ) : shot.targetModel === 'seedance' ? (
+              <span className="rounded bg-amber-500/10 px-2 py-0.5 text-[9px] font-bold text-amber-300 border border-amber-500/30">
+                PROMPT EXPORT ONLY
+              </span>
+            ) : (
+              <span className="rounded bg-blue-500/10 px-2 py-0.5 text-[9px] font-bold text-blue-400 border border-blue-500/30">
+                LOCAL RTX 3090
+              </span>
             )}
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            {allAdapters.map((a) => {
-              const isSelected = shot.targetModel === a.id;
-              return (
-                <button
-                  key={a.id}
-                  onClick={() => updateTargetModel(a.id as ShotSpec['targetModel'])}
-                  className={`flex flex-col rounded-lg p-2.5 text-left transition-all ${
-                    isSelected
-                      ? 'border-blue-500 bg-blue-500/20 text-white ring-1 ring-blue-500'
-                      : 'glass-control text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span className="font-display font-bold text-xs text-white">{a.name}</span>
-                  <span className="font-mono text-[9px] text-slate-400 mt-1 line-clamp-1">{a.description}</span>
-                </button>
-              );
-            })}
           </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="font-display font-bold text-sm text-white block">{adapter.name}</span>
+              <span className="font-mono text-[9px] text-slate-400">{adapter.description}</span>
+            </div>
+            {onBackToPrevis && (
+              <button
+                type="button"
+                onClick={onBackToPrevis}
+                className="text-director-cyan hover:underline font-mono text-[10px] shrink-0 ml-2"
+                title="Change engine in 3D Previs Soundstage"
+              >
+                Change Engine →
+              </button>
+            )}
+          </div>
+          {shot.targetModel === 'seedance' && (
+            <div className="text-[10px] text-amber-300/80 font-mono bg-amber-500/10 p-2 rounded border border-amber-500/20">
+              ByteDance Seedance has no local open weights. Generating will export the camera trajectory matrix and prompt package for Seaweed/Seedance.
+            </div>
+          )}
         </div>
+
+        {/* Quality Profile Selector */}
+        {shot.targetModel !== 'seedance' && (
+          <div className="flex flex-col gap-1.5">
+            <label className="font-mono text-[10px] text-slate-400 flex items-center justify-between">
+              <span>Quality Profile</span>
+              <span className="text-[9px] text-slate-500 font-mono">
+                {profile === 'draft' ? 'Fast native render' : 'Full upscale & refine'}
+              </span>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setProfile('draft')}
+                className={`flex flex-col rounded-lg p-2 text-left transition-all cursor-pointer ${
+                  profile === 'draft'
+                    ? 'border-blue-500 bg-blue-500/20 text-white ring-1 ring-blue-500'
+                    : 'glass-control text-slate-400 hover:text-white'
+                }`}
+              >
+                <span className="font-display font-bold text-xs">Draft</span>
+                <span className="font-mono text-[9px] text-slate-400">Native res, no refine</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setProfile('final')}
+                className={`flex flex-col rounded-lg p-2 text-left transition-all cursor-pointer ${
+                  profile === 'final'
+                    ? 'border-blue-500 bg-blue-500/20 text-white ring-1 ring-blue-500'
+                    : 'glass-control text-slate-400 hover:text-white'
+                }`}
+              >
+                <span className="font-display font-bold text-xs">Final</span>
+                <span className="font-mono text-[9px] text-slate-400">Production quality</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Reference Image / Start Frame Upload */}
         <div className="flex flex-col gap-1.5">
@@ -516,25 +542,48 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
           {uploadError && <span className="font-mono text-[10px] text-rose-400">{uploadError}</span>}
         </div>
 
-        {/* Primary Action Button: SEND PREVIS TO COMFYUI */}
+        {/* Primary Action Button */}
         <div className="flex flex-col gap-2 pt-1">
-          <button
-            onClick={handleExecuteGeneration}
-            disabled={activeJob?.status === 'executing' || activeJob?.status === 'queued'}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 font-display text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-blue-600/30 transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            {activeJob?.status === 'executing' || activeJob?.status === 'queued' ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                COMFYUI DIFFUSING ({activeJob.progress}%)...
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 fill-current" />
-                SEND PREVIS TO COMFYUI (GENERATE AI VIDEO)
-              </>
-            )}
-          </button>
+          {shot.targetModel === 'seedance' ? (
+            <button
+              onClick={handleExportPackage}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 font-display text-xs font-bold uppercase tracking-wider text-black shadow-lg shadow-amber-500/20 transition-all hover:brightness-110 active:scale-[0.98] cursor-pointer"
+            >
+              <Download className="h-4 w-4" />
+              EXPORT SEEDANCE DIRECTORIAL PACKAGE
+            </button>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                onClick={handleExecuteGeneration}
+                disabled={activeJob?.status === 'executing' || activeJob?.status === 'queued'}
+                className="flex-1 flex h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 font-display text-xs font-bold uppercase tracking-wider text-white shadow-lg shadow-blue-600/30 transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                {activeJob?.status === 'executing' || activeJob?.status === 'queued' ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    COMFYUI DIFFUSING ({activeJob.progress}%)...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 fill-current" />
+                    DIFFUSE SHOT IN COMFYUI
+                  </>
+                )}
+              </button>
+              {(activeJob?.status === 'executing' || activeJob?.status === 'queued') && (
+                <button
+                  type="button"
+                  onClick={handleCancelGeneration}
+                  className="px-4 rounded-xl border border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-mono text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                  title="Cancel active ComfyUI generation job"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                  Cancel
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Progress Bar when Active */}
           {activeJob && (activeJob.status === 'executing' || activeJob.status === 'queued') && (
@@ -604,11 +653,19 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
           {/* Secondary Workflow Export Buttons */}
           <div className="flex items-center justify-between pt-2 border-t border-director-border/50">
             <button
+              onClick={handleExportPackage}
+              className="flex items-center gap-1.5 text-slate-300 hover:text-director-cyan font-mono text-[10px] transition-colors"
+              title="Download API workflow and manifest for offline or remote execution"
+            >
+              <Download className="h-3 w-3" />
+              Export Generation Package (Offline Mode)
+            </button>
+            <button
               onClick={handleExportWorkflow}
               className="flex items-center gap-1 text-slate-400 hover:text-white font-mono text-[10px]"
             >
               <FileCode className="h-3 w-3" />
-              Export ComfyUI Workflow JSON
+              Workflow JSON
             </button>
           </div>
         </div>

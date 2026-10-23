@@ -1,0 +1,385 @@
+{
+  "1": {
+    "inputs": {
+      "theme": "Stuubzzz neon"
+    },
+    "class_type": "StubeliusLTXTheme",
+    "_meta": {
+      "title": "THEME (this workflow only)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "seeds": 1,
+      "seed": 42,
+      "steps": 8,
+      "cfg": 1,
+      "first_pass_scale": 1
+    },
+    "class_type": "StubeliusLTXSetup",
+    "_meta": {
+      "title": "SETUP — how the seeds are rendered"
+    }
+  },
+  "4": {
+    "inputs": {
+      "seed_1_sampler": "euler_ancestral",
+      "seed_1_scheduler": "linear_quadratic",
+      "seed_2_sampler": "euler_ancestral",
+      "seed_2_scheduler": "linear_quadratic",
+      "seed_3_sampler": "euler_ancestral",
+      "seed_3_scheduler": "linear_quadratic",
+      "seed_4_sampler": "euler_ancestral",
+      "seed_4_scheduler": "linear_quadratic",
+      "setup": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "StubeliusLTXSeedSamplers",
+    "_meta": {
+      "title": "SEED SAMPLERS — sampler and scheduler per seed"
+    }
+  },
+  "5": {
+    "inputs": {
+      "diffusion_model": "LTX2.5\\ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors",
+      "distill_lora": "none",
+      "distill_lora_strength": 1,
+      "extra_lora_1": "none",
+      "extra_lora_1_strength": 1,
+      "extra_lora_2": "none",
+      "extra_lora_2_strength": 1,
+      "ic_lora": "none",
+      "ic_lora_strength": 0.6,
+      "msr_lora": "none",
+      "msr_lora_strength": 1,
+      "text_encoder": "LTX2.5\\gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors",
+      "video_vae": "LTX2.5\\ltx-2.5-video-vae-bf16.safetensors",
+      "audio_vae": "LTX2.5\\ltx-2.5-audio-vae-bf16.safetensors",
+      "latent_upscaler": "LTX2.5\\ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+      "attention": "sage attention",
+      "memory_efficient_attention": false,
+      "chunk_feed_forward": false,
+      "decode_tile_size": 768,
+      "live_preview": "off"
+    },
+    "class_type": "StubeliusLTXModels",
+    "_meta": {
+      "title": "MODELS — checkpoint, LoRAs (MSR too), speedups"
+    }
+  },
+  "6": {
+    "inputs": {
+      "refine_strength": 0.35,
+      "refine_steps": 4,
+      "refine_sampler": "euler",
+      "refine_msr_lora_strength": 1,
+      "refine_msr_reference": 0.4,
+      "audio": "keep the seed's audio",
+      "final_resolution": "1080p",
+      "final_fps": 0,
+      "upscaler": "RTX VSR"
+    },
+    "class_type": "StubeliusLTXOutput",
+    "_meta": {
+      "title": "OUTPUT — refine (MSR pass 2), resolution, FPS, upscaler"
+    }
+  },
+  "7": {
+    "inputs": {
+      "start_second": 0,
+      "end_second": 5,
+      "duration_seconds": 5,
+      "start_frame": 0,
+      "end_frame": 125,
+      "duration_frames": 125,
+      "timeline_data": "{\"mainTrackEnabled\":true,\"audioTrackEnabled\":false,\"motionTrackEnabled\":false,\"propHeight\":90,\"globalPropHeight\":108,\"showFilenames\":false,\"showPromptZones\":true,\"overrideAudio\":false,\"inpaint_audio\":true,\"global_prompt\":\"\",\"retake_global_prompt\":\"\",\"retakeMode\":false,\"retakeStart\":24,\"retakeLength\":48,\"retakePrompt\":\"\",\"retakeStrength\":1,\"retakeVideo\":null,\"normalStartFrame\":0,\"normalDurationFrames\":125,\"reference_mode\":\"OFF\",\"disable_prompt_relay\":false,\"msr_prefix_frames\":41,\"analyzeProvider\":\"ollama\",\"analyzeBaseUrl\":\"\",\"analyzeModel\":\"\",\"characters\":[{\"images\":[],\"description\":\"\"},{\"images\":[],\"description\":\"\"},{\"images\":[],\"description\":\"\"},{\"images\":[],\"description\":\"\"},{\"images\":[],\"description\":\"\"}],\"segments\":[{\"id\":\"ultimateltx1\",\"start\":0,\"length\":125,\"prompt\":\"A glassblower turns a glowing orb of molten glass on the end of a long steel pipe in a dim workshop. Sparks drift through the warm light as the camera slowly pushes in on his hands. The furnace roars softly and the glass hisses as he rolls it across the steel table.\",\"type\":\"text\",\"isEndFrame\":false}],\"motionSegments\":[],\"audioSegments\":[]}",
+      "local_prompts": "A glassblower turns a glowing orb of molten glass on the end of a long steel pipe in a dim workshop. Sparks drift through the warm light as the camera slowly pushes in on his hands. The furnace roars softly and the glass hisses as he rolls it across the steel table.",
+      "segment_lengths": "125",
+      "epsilon": 0.001,
+      "guide_strength": "",
+      "use_custom_audio": false,
+      "use_custom_motion": false,
+      "inpaint_audio": true,
+      "frame_rate": 25,
+      "display_mode": "seconds",
+      "custom_width": 1280,
+      "custom_height": 704,
+      "resize_method": "maintain aspect ratio",
+      "divisible_by": 32,
+      "img_compression": 18,
+      "override_audio": false,
+      "reference_strength": 1,
+      "ltx_settings_ui": "",
+      "timeline_ui": "",
+      "model": [
+        "5",
+        0
+      ],
+      "clip": [
+        "5",
+        1
+      ],
+      "audio_vae": [
+        "5",
+        3
+      ],
+      "vae": [
+        "5",
+        2
+      ]
+    },
+    "class_type": "LTXDirectorCS25",
+    "_meta": {
+      "title": "DIRECTOR — what the video is"
+    }
+  },
+  "8": {
+    "inputs": {
+      "setup": [
+        "4",
+        0
+      ],
+      "models": [
+        "5",
+        4
+      ],
+      "model": [
+        "7",
+        0
+      ],
+      "positive": [
+        "7",
+        1
+      ],
+      "negative": [
+        "7",
+        2
+      ],
+      "video_latent": [
+        "7",
+        3
+      ],
+      "audio_latent": [
+        "7",
+        4
+      ],
+      "guide_data": [
+        "7",
+        5
+      ],
+      "frame_rate": [
+        "7",
+        7
+      ],
+      "motion_guide_data": [
+        "7",
+        6
+      ]
+    },
+    "class_type": "StubeliusLTXSeeds",
+    "_meta": {
+      "title": "SEEDS — render 1-4 full seeds"
+    }
+  },
+  "9": {
+    "inputs": {},
+    "class_type": "StubeliusLTXLivePreview",
+    "_meta": {
+      "title": "LIVE PREVIEW (Seeds while sampling, Finish while refining)"
+    }
+  },
+  "10": {
+    "inputs": {
+      "frame_rate": [
+        "7",
+        7
+      ],
+      "loop_count": 0,
+      "filename_prefix": "StubeliusLTX/seeds/seed1",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": false,
+      "images": [
+        "8",
+        0
+      ],
+      "audio": [
+        "8",
+        1
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Seed 1"
+    }
+  },
+  "11": {
+    "inputs": {
+      "frame_rate": [
+        "7",
+        7
+      ],
+      "loop_count": 0,
+      "filename_prefix": "StubeliusLTX/seeds/seed2",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": false,
+      "images": [
+        "8",
+        2
+      ],
+      "audio": [
+        "8",
+        3
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Seed 2"
+    }
+  },
+  "12": {
+    "inputs": {
+      "frame_rate": [
+        "7",
+        7
+      ],
+      "loop_count": 0,
+      "filename_prefix": "StubeliusLTX/seeds/seed3",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": false,
+      "images": [
+        "8",
+        4
+      ],
+      "audio": [
+        "8",
+        5
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Seed 3"
+    }
+  },
+  "13": {
+    "inputs": {
+      "frame_rate": [
+        "7",
+        7
+      ],
+      "loop_count": 0,
+      "filename_prefix": "StubeliusLTX/seeds/seed4",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": false,
+      "images": [
+        "8",
+        6
+      ],
+      "audio": [
+        "8",
+        7
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Seed 4"
+    }
+  },
+  "14": {
+    "inputs": {
+      "winner": 1,
+      "takes": [
+        "8",
+        8
+      ],
+      "models": [
+        "5",
+        4
+      ],
+      "output": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "StubeliusLTXFinish",
+    "_meta": {
+      "title": "FINISH — pick the WINNER (0 = hold after the seeds)"
+    }
+  },
+  "15": {
+    "inputs": {
+      "frame_rate": [
+        "14",
+        2
+      ],
+      "loop_count": 0,
+      "filename_prefix": "StubeliusLTX/final",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 19,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "14",
+        0
+      ],
+      "audio": [
+        "14",
+        1
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "FINAL VIDEO"
+    }
+  },
+  "16": {
+    "inputs": {
+      "batch_index": -1,
+      "length": 1,
+      "image": [
+        "14",
+        0
+      ]
+    },
+    "class_type": "ImageFromBatch",
+    "_meta": {
+      "title": "Last frame (for the next shot's first frame)"
+    }
+  },
+  "17": {
+    "inputs": {
+      "images": [
+        "16",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Last frame"
+    }
+  }
+}
