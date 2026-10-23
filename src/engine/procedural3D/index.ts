@@ -6,3 +6,4 @@ export * from './arabicResolver';
 export * from './archetypeResolver';
 export * from './morphometricReasoner';
 export * from './geometricDecomposer';
+export * from './sculptSpec';

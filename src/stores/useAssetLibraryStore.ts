@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { SubjectKind } from '../types/shotspec';
 import { reasonObject, ObjectReasonerError } from '../services/objectReasoner';
-import { PartGraph, registerPartGraph, removePartGraph } from '../engine/procedural3D/partGraph';
+import { SculptSpec, registerSculptSpec, removeSculptSpec } from '../engine/procedural3D/sculptSpec';
 import { safeGetItem, safeSetItem } from '../services/storage';
 import { registerModelFile, getModelBlobUrl } from '../services/modelStorage';
 
@@ -2719,7 +2719,7 @@ export const useAssetLibraryStore = create<AssetLibraryState>((set, get) => {
 
     removeCustomAsset: (id) => {
       const removed = get().customAssets.find((a) => a.id === id);
-      if (removed?.source === 'ai-generated') removePartGraph(removed.tokenPrompt);
+      if (removed?.source === 'ai-generated') removeSculptSpec(removed.tokenPrompt);
       const next = get().customAssets.filter((a) => a.id !== id);
       set({ customAssets: next });
       persistCustomAssets(next);
@@ -2770,7 +2770,7 @@ export const useAssetLibraryStore = create<AssetLibraryState>((set, get) => {
         generationStage: 'Connecting to object reasoner...',
       });
 
-      let graph: PartGraph;
+      let graph: SculptSpec;
       try {
         graph = await reasonObject(cleanPrompt, {
           onStage: (stage) => set({ generationStage: stage, generationProgress: 45 }),
@@ -2782,8 +2782,8 @@ export const useAssetLibraryStore = create<AssetLibraryState>((set, get) => {
         throw err;
       }
 
-      set({ generationProgress: 90, generationStage: 'Building geometry from reasoned part graph...' });
-      registerPartGraph(cleanPrompt, graph);
+      set({ generationProgress: 90, generationStage: 'Building geometry from reasoned sculpt spec...' });
+      registerSculptSpec(cleanPrompt, graph);
 
       // Category / kind follow the reasoner's routing decision, not keyword guesses.
       const routedCategory: AssetCategory =

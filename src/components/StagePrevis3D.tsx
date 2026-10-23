@@ -1693,7 +1693,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         mesh.userData.modelUrl !== actor.modelUrl ||
         mesh.userData.isSelected !== isSelected ||
         mesh.userData.isGhostMode !== isGhostMode ||
-        mesh.userData.partGraph !== actor.partGraph;
+        mesh.userData.partGraph !== (actor.sculpt || actor.partGraph);
 
       if (needsFullRebuild) {
         if (mesh) {
@@ -1710,7 +1710,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           actor.conceptImageUrl,
           actor.token,
           actor.modelUrl,
-          actor.partGraph
+          actor.sculpt || actor.partGraph
         );
         mesh.userData.actorId = actor.id;
         mesh.userData.kind = actorKind;
@@ -1720,7 +1720,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         mesh.userData.modelUrl = actor.modelUrl;
         mesh.userData.isSelected = isSelected;
         mesh.userData.isGhostMode = isGhostMode;
-        mesh.userData.partGraph = actor.partGraph;
+        mesh.userData.partGraph = actor.sculpt || actor.partGraph;
 
         const pos = getActorPositionAtTime(actor, currentTime);
         mesh.position.set(pos.x, pos.y, pos.z);

@@ -522,10 +522,49 @@ See the deferred table in [TASKS.md](TASKS.md).
    - Added `showLabels` state with dynamic Three.js scene sprite traversal.
    - Added a "Labels" button with `Tag` icon to the 3D Soundstage toolbar, allowing directors to toggle nametags on/off with a single click.
 
-3. **Verification & Tests:**
-   - Full test suite: 31 test files, 215/215 tests passing in 4.97s (`npm run test`).
-   - Production build: `npm run build` completed in 10.34s with 0 errors and 0 warnings.
-   - In-browser UI verification: Verified via subagent (recording `verify_compact_labels_1792791411798.webp`).
+
+## 2026-10-24 — S11 Parametric 3D Sculpt Engine & Image-to-3D Proxy (`stage/11-parametric-sculpt-engine`)
+
+**Goal:** Implement Phase 1 of the parametric 3D figure sculpting engine, reference image silhouette extraction, multimodal vision reasoning, and the interactive Concept-to-3D Studio.
+
+### Accomplishments
+
+1. **Parametric 3D Sculpt Representation (`src/engine/procedural3D/sculptSpec.ts`):**
+   - Clean-room `SculptSpec` schema supporting 8 parametric shape types: `blob` (smooth blend between box and ellipsoid via `roundness`), `lathe` (revolved 2D profiles), `extrude` (polygon with bevel depth), `cylinder`, `cone`, `torus`, `tube`, and `capsule`.
+   - Standard humanoid bone hierarchy tagging on `SculptPart` (`Head`, `Chest`, `Spine`, `Hips`, `LeftArm`, `RightArm`, `LeftForeArm`, `RightForeArm`, `LeftHand`, `RightHand`, `LeftUpLeg`, `RightUpLeg`, `LeftLeg`, `RightLeg`, `LeftFoot`, `RightFoot`) with mirror symmetry logic.
+   - Backward-compatible migrators from legacy `PartGraph` (`partGraphToSculptSpec`, `actorSculptSpec`, `migrateActorSculpt`, `migrateActorsInShot`).
+   - Untrusted schema validation and sanitization (`sanitizeSculptSpec`) ensuring robust execution against hallucinated LLM responses.
+
+2. **Deterministic 2D Silhouette Extraction & Truthful IoU (`src/engine/procedural3D/silhouette.ts`):**
+   - High-contrast pure mask extraction (`extractMaskFromRgba`, `extractMaskFromImageUrl`) with luminance thresholding and alpha protection.
+   - Geometric silhouette measurement (`measureSilhouette`): aspect ratio, center of mass, and 10-band horizontal normalized width profile.
+   - Offscreen Three.js orthographic rendering (`renderSculptSilhouette`) with pure geometric fallback for headless test environments.
+   - Real calculated 2D Intersection-over-Union (IoU) metric (`computeSilhouetteIoU`) comparing 3D render masks directly to reference silhouettes with zero fabricated scores.
+
+3. **Multimodal Vision Reasoning & VRAM Protection (`src/services/objectReasoner.ts`):**
+   - Upgraded reasoner providers (Ollama `/api/chat`, OpenAI `/v1/chat/completions`, and Google Gemini `/models/gemini-*:generateContent`) with multimodal image payload support (`imageBase64`).
+   - Zero VRAM clash invariant: sets `keep_alive: 0` on Ollama when vision inputs are processed, immediately releasing vision weights from GPU VRAM to ensure full 24GB availability for ComfyUI LTX-2.5 video generation.
+   - Injected geometric silhouette metrics (width profiles and aspect ratios) directly into reasoner prompts.
+   - Added iterative revision loop with differential patch application (`applySculptPatch`).
+
+4. **Concept-to-3D Studio (`src/components/AIGenerator3D.tsx`):**
+   - Dedicated studio component with reference image dropzone, auto-extracted silhouette preview, directorial prompt suggestions, and real-time interactive Three.js viewport (wireframe, solid, orbit controls).
+   - Real-time calculated silhouette match HUD badge (`🎯 XX% Silhouette Match`).
+   - Refinement controls and "Auto-Align Silhouette" optimization pass.
+   - "Add to Active Scene" and "Save to 3D Library" integration.
+
+5. **Stage & Parameter Deck Integration:**
+   - `src/components/AssetLibraryModal.tsx`: Added `✨ Concept-to-3D Studio` header button.
+   - `src/components/PrevisParametersDeck.tsx`: Added `✨ AI 3D Generator...` chip in Staging Deck and dual `⚡ LLM Reason` / `✨ 3D Studio...` triggers on actor cards.
+   - `src/components/StagePrevis3D.tsx`: Automatically renders `actor.sculpt` with immediate visual updates.
+   - `src/stores/useShotStore.ts` & `src/stores/useAssetLibraryStore.ts`: Updated actor schemas and asset store to register and persist `SculptSpec`.
+
+6. **Verification & Tests:**
+   - Unit test suites (`tests/sculptSpec.test.ts`, `tests/silhouette.test.ts`, `tests/objectReasonerProviders.test.ts`): 34 tests covering parametric geometry, bone tagging, silhouette analysis, and multimodal API payloads.
+   - Full test suite: 32 test files, 229/229 tests passing in 5.31s (`npm run test`).
+   - Production build: `npm run build` completed in 10.40s with zero errors and zero warnings.
+   - In-browser UI verification: Verified via browser subagent.
+
 
 
 

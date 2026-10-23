@@ -133,6 +133,7 @@ export const ActorSchema = z.object({
   modelUrl: z.string().optional(),
   scale: z.number().min(0.05).max(30).default(1.0).optional(),
   partGraph: z.any().optional(),
+  sculpt: z.any().optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 

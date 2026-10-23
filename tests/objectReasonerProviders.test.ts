@@ -101,6 +101,54 @@ describe('request builders', () => {
     expect(gc.responseJsonSchema).toBe(PART_GRAPH_JSON_SCHEMA);
     expect((buildGeminiRequest(cfg('gemini', { apiKey: 'k' }), 'x', 'object').body.generationConfig as any).responseJsonSchema).toBeUndefined();
   });
+
+  it('supports vision inputs across Ollama, OpenAI, and Gemini', () => {
+    const rawB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const dataUri = `data:image/png;base64,${rawB64}`;
+
+    // Ollama: images array & keep_alive: 0 to free VRAM immediately
+    const ollamaReq = buildOllamaRequest(
+      cfg('ollama', { url: 'http://127.0.0.1:11434' }),
+      'chair',
+      undefined,
+      undefined,
+      undefined,
+      dataUri
+    );
+    expect(ollamaReq.body.keep_alive).toBe(0);
+    const ollamaMsg = (ollamaReq.body.messages as any[])[1];
+    expect(ollamaMsg.images).toEqual([rawB64]);
+
+    // OpenAI: image_url in content array
+    const openAiReq = buildOpenAiRequest(
+      cfg('openai', { apiKey: 'sk' }),
+      'chair',
+      'schema',
+      undefined,
+      undefined,
+      undefined,
+      dataUri
+    );
+    const openAiMsg = (openAiReq.body.messages as any[])[1];
+    expect(Array.isArray(openAiMsg.content)).toBe(true);
+    expect(openAiMsg.content[1].image_url.url).toBe(dataUri);
+
+    // Gemini: inlineData in parts array
+    const geminiReq = buildGeminiRequest(
+      cfg('gemini', { apiKey: 'AIza' }),
+      'chair',
+      'schema',
+      undefined,
+      undefined,
+      undefined,
+      dataUri
+    );
+    const geminiParts = (geminiReq.body.contents as any[])[0].parts;
+    expect(geminiParts[1].inlineData).toEqual({
+      mimeType: 'image/png',
+      data: rawB64,
+    });
+  });
 });
 
 describe('response parsing', () => {
@@ -172,5 +220,42 @@ describe('reasonObject transport', () => {
       )
     );
     expect(await listReasonerModels(cfg('gemini', { apiKey: 'k' }))).toEqual(['gemini-2.5-flash']);
+  });
+
+  it('applies a revision patch when reviseSpec is provided and model outputs a patch', async () => {
+    const existing = {
+      name: 'Original Chair',
+      route: 'author' as const,
+      rig: 'none' as const,
+      heightMeters: 1.0,
+      materials: [{ id: 'wood', color: '#885522', roughness: 0.5, metalness: 0 }],
+      parts: [
+        { id: 'seat', shape: 'blob' as const, size: [0.5, 0.1, 0.5] as [number, number, number], position: [0, 0.5, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number], material: 'wood' },
+      ],
+    };
+
+    const patchResponse = {
+      set: [
+        { id: 'seat', size: [0.6, 0.1, 0.6] },
+      ],
+      add: [
+        { id: 'back', shape: 'blob', size: [0.6, 0.6, 0.08], position: [0, 0.8, -0.25], rotation: [0, 0, 0], material: 'wood' },
+        { id: 'leg1', shape: 'capsule', size: [0.05, 0.5, 0.05], position: [0.25, 0.25, 0.25], rotation: [0, 0, 0], material: 'wood' },
+      ],
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ message: { content: JSON.stringify(patchResponse) } }), { status: 200 })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const revised = await reasonObject('make seat wider and add backrest', {
+      config: cfg('ollama', { url: 'http://127.0.0.1:11434' }),
+      reviseSpec: existing as any,
+    });
+
+    expect(revised.parts.length).toBe(3);
+    const seat = revised.parts.find((p) => p.id === 'seat');
+    expect(seat?.size[0]).toBe(0.6);
   });
 });

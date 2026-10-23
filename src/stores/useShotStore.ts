@@ -40,7 +40,14 @@ interface ShotState {
     name?: string,
     kind?: SubjectKind,
     token?: string,
-    options?: { modelUrl?: string; scale?: number; conceptImageUrl?: string; actionDescription?: string }
+    options?: {
+      modelUrl?: string;
+      scale?: number;
+      conceptImageUrl?: string;
+      actionDescription?: string;
+      sculpt?: any;
+      partGraph?: any;
+    }
   ) => void;
   removeActor: (actorId: string) => void;
   clearAllActors: () => void;
@@ -663,6 +670,8 @@ export const useShotStore = create<ShotState>((set, get) => {
         modelUrl: options?.modelUrl,
         scale: options?.scale,
         conceptImageUrl: options?.conceptImageUrl,
+        sculpt: options?.sculpt,
+        partGraph: options?.partGraph || options?.sculpt,
       };
       logger.action(`Added ${kind} to stage: "${defaultName}"`, newActor);
       const updated: ShotSpec = { ...shot, actors: [...shot.actors, newActor] };

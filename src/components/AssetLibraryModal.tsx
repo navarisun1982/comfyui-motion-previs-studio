@@ -24,6 +24,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { lookupPartGraph } from '../engine/procedural3D/partGraph';
+import { AIGenerator3D } from './AIGenerator3D';
 
 const CATEGORIES: { id: AssetCategory; label: string; icon: string }[] = [
   { id: 'all', label: 'All Catalog', icon: '🌐' },
@@ -82,6 +83,8 @@ export const AssetLibraryModal: React.FC = () => {
 
   // Generator Panel state
   const [showGenerator, setShowGenerator] = useState(false);
+  const [showAiStudio, setShowAiStudio] = useState(false);
+  const [studioInitialPrompt, setStudioInitialPrompt] = useState<string>('');
   const openSettings = useComfyStore((s) => s.openSettings);
   // Subscribing re-renders this modal when settings close, so the label reflects a new provider.
   useComfyStore((s) => s.isSettingsOpen);
@@ -291,17 +294,29 @@ export const AssetLibraryModal: React.FC = () => {
               <span>Upload GLB / GLTF</span>
             </button>
 
-            {/* Generate with AI Button */}
+            {/* AI 3D Generator Studio Button */}
+            <button
+              onClick={() => {
+                setStudioInitialPrompt('');
+                setShowAiStudio(true);
+              }}
+              className="flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold bg-gradient-to-r from-amber-500 via-indigo-600 to-cyan-500 text-white hover:brightness-110 shadow-md shadow-indigo-600/30 transition-all font-mono"
+              title="Open Concept-to-3D Studio with Reference Image Silhouette Alignment"
+            >
+              <Sparkles className="h-4 w-4 text-amber-300" />
+              <span>✨ Concept-to-3D Studio</span>
+            </button>
+
+            {/* Quick Generator Toggle Button */}
             <button
               onClick={() => setShowGenerator(!showGenerator)}
               className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all ${
                 showGenerator
                   ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/30'
-                  : 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white hover:brightness-110 shadow-md shadow-purple-600/30'
+                  : 'bg-white/10 text-white hover:bg-white/15 border border-white/10'
               }`}
             >
-              <Sparkles className="h-4 w-4" />
-              <span>✨ AI 3D Generator</span>
+              <span>Quick Prompt</span>
             </button>
 
             {/* Multi-Select Toggle Button */}
@@ -820,6 +835,13 @@ export const AssetLibraryModal: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Full AI Concept-to-3D Generator Modal */}
+      <AIGenerator3D
+        isOpen={showAiStudio}
+        onClose={() => setShowAiStudio(false)}
+        initialPrompt={studioInitialPrompt}
+      />
     </div>
   );
 };

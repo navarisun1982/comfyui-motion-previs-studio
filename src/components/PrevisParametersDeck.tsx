@@ -36,6 +36,7 @@ import { reasonEnvironment, reasonObject } from '../services/objectReasoner';
 import { registerModelFile } from '../services/modelStorage';
 import { preloadGltfModels } from '../engine/gltfModelLoader';
 import { decomposeDirectorialScene } from '../engine/directorialSceneDecomposer';
+import { AIGenerator3D } from './AIGenerator3D';
 import {
   generateBlenderCameraScript,
   generateRunwayCameraJson,
@@ -214,6 +215,10 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
   const [selectedExportPreset, setSelectedExportPreset] = useState<'ComfyUI' | 'Seedance' | 'Blender' | 'Runway' | 'Kling'>('ComfyUI');
   const [isExporting, setIsExporting] = useState(false);
   const [customObjectName, setCustomObjectName] = useState('');
+  const [showAiGeneratorModal, setShowAiGeneratorModal] = useState(false);
+  const [aiGeneratorInitialPrompt, setAiGeneratorInitialPrompt] = useState('');
+  const [aiGeneratorInitialImage, setAiGeneratorInitialImage] = useState<string | undefined>(undefined);
+  const [targetActorIdForGenerator, setTargetActorIdForGenerator] = useState<string | null>(null);
 
   const toggleLayer = (layerKey: keyof typeof layers) => {
     setLayers((prev) => ({ ...prev, [layerKey]: !prev[layerKey] }));
@@ -739,6 +744,19 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                     <span>📦</span>
                     <span>3D Library (200+)...</span>
                   </button>
+                  <button
+                    onClick={() => {
+                      setAiGeneratorInitialPrompt(customObjectName || '');
+                      setAiGeneratorInitialImage(undefined);
+                      setTargetActorIdForGenerator(null);
+                      setShowAiGeneratorModal(true);
+                    }}
+                    className="px-2 py-0.5 rounded text-[10px] bg-gradient-to-r from-amber-500 via-indigo-600 to-cyan-500 border border-cyan-400/50 text-white font-semibold transition-all shadow-sm flex items-center gap-1 font-mono"
+                    title="Open AI 3D Generator (Concept-to-3D with Silhouette Alignment)"
+                  >
+                    <span>✨</span>
+                    <span>AI 3D Generator...</span>
+                  </button>
                   {[
                     { label: '🚀 Spaceship', val: 'spaceship' },
                     { label: '🏔️ Mountain', val: 'mountain' },
@@ -1037,9 +1055,9 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                             <Zap className="h-3 w-3 text-cyan-400" />
                             3D Procedural Mesh
                           </span>
-                          {actor.partGraph ? (
+                          {(actor.sculpt || actor.partGraph) ? (
                             <span className="text-[8px] font-mono text-emerald-300 bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-500/40">
-                              ⚡ AI-Reasoned ({actor.partGraph.parts?.length || 0} parts)
+                              ⚡ AI-Reasoned ({(actor.sculpt || actor.partGraph).parts?.length || 0} parts)
                             </span>
                           ) : (
                             <span className="text-[8px] font-mono text-slate-400">
@@ -1048,36 +1066,54 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                           )}
                         </div>
 
-                        <button
-                          type="button"
-                          disabled={refiningActorId === actor.id}
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            try {
-                              setRefiningActorId(actor.id);
-                              const promptToReason = actor.token || actor.name;
-                              const graph = await reasonObject(promptToReason);
-                              updateActor(actor.id, { partGraph: graph });
-                            } catch (err) {
-                              console.error('Failed to reason object:', err);
-                            } finally {
-                              setRefiningActorId(null);
-                            }
-                          }}
-                          className="w-full py-1.5 px-2 rounded bg-gradient-to-r from-amber-600/70 via-indigo-600/70 to-cyan-600/70 hover:from-amber-500 hover:via-indigo-500 hover:to-cyan-500 text-white font-mono text-[9px] font-bold flex items-center justify-center gap-1.5 shadow transition-all border border-amber-400/30 disabled:opacity-50"
-                          title="Generate bespoke multi-part 3D structure using LLM Object Reasoner"
-                        >
-                          {refiningActorId === actor.id ? (
-                            <>
-                              <Loader2 className="h-3 w-3 animate-spin text-amber-300" />
-                              <span>Reasoning 3D Geometry with LLM...</span>
-                            </>
-                          ) : (
-                            <>
-                              <span>⚡ Reason bespoke 3D model with LLM</span>
-                            </>
-                          )}
-                        </button>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            disabled={refiningActorId === actor.id}
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                setRefiningActorId(actor.id);
+                                const promptToReason = actor.token || actor.name;
+                                const graph = await reasonObject(promptToReason, {
+                                  imageBase64: actor.conceptImageUrl,
+                                });
+                                updateActor(actor.id, { sculpt: graph, partGraph: graph });
+                              } catch (err) {
+                                console.error('Failed to reason object:', err);
+                              } finally {
+                                setRefiningActorId(null);
+                              }
+                            }}
+                            className="py-1.5 px-2 rounded bg-gradient-to-r from-amber-600/70 via-indigo-600/70 to-cyan-600/70 hover:from-amber-500 hover:via-indigo-500 hover:to-cyan-500 text-white font-mono text-[9px] font-bold flex items-center justify-center gap-1 shadow transition-all border border-amber-400/30 disabled:opacity-50"
+                            title="Generate bespoke 3D structure using LLM Object Reasoner (supports reference photo)"
+                          >
+                            {refiningActorId === actor.id ? (
+                              <>
+                                <Loader2 className="h-3 w-3 animate-spin text-amber-300" />
+                                <span>Reasoning...</span>
+                              </>
+                            ) : (
+                              <span>⚡ LLM Reason</span>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setAiGeneratorInitialPrompt(actor.token || actor.name);
+                              setAiGeneratorInitialImage(actor.conceptImageUrl);
+                              setTargetActorIdForGenerator(actor.id);
+                              setShowAiGeneratorModal(true);
+                            }}
+                            className="py-1.5 px-2 rounded bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-500/40 text-indigo-200 hover:text-white font-mono text-[9px] font-bold flex items-center justify-center gap-1 transition-all shadow"
+                            title="Open in AI 3D Studio for interactive 3D preview & silhouette alignment"
+                          >
+                            <Sparkles className="h-3 w-3 text-cyan-400" />
+                            <span>✨ 3D Studio...</span>
+                          </button>
+                        </div>
                       </div>
 
                       {/* 3D Model File (.GLB / .GLTF) */}
@@ -2229,6 +2265,24 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
           </div>
         )}
       </div>
+
+      {/* AI Concept-to-3D Studio Modal */}
+      <AIGenerator3D
+        isOpen={showAiGeneratorModal}
+        onClose={() => {
+          setShowAiGeneratorModal(false);
+          setTargetActorIdForGenerator(null);
+        }}
+        initialPrompt={aiGeneratorInitialPrompt}
+        initialImageUrl={aiGeneratorInitialImage}
+        onApplyToScene={() => {
+          if (targetActorIdForGenerator) {
+            removeActor(targetActorIdForGenerator);
+          }
+          setShowAiGeneratorModal(false);
+          setTargetActorIdForGenerator(null);
+        }}
+      />
     </div>
   );
 };

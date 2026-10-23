@@ -18,8 +18,43 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S8 Motion fidelity | `stage/08-motion-fidelity` | ✅ merged to master (`f8e3781`) | Optical flow vector analyzer, directional & speed fidelity scoring, visual vector overlay HUD, A/B motion diffing |
 | S9 Closed-loop steering | `stage/09-closed-loop-steering` | ✅ merged to master (`fc9865c`) | Optical-flow-driven compensatory patches, prompt auto-correction, IC-LoRA modulation, steering modal, lineage tracking |
 | S10 Sequence / Assembly | `stage/10-sequence` | ✅ merged to master (`16d714f`) | Multi-shot timeline, sequential playback, continuity & 180° rule checking, OTIO/EDL/FCPXML NLE exporters |
+| S11 Parametric 3D Sculpt Engine | `stage/11-parametric-sculpt-engine` | 🟢 Phase 1 verified | Parametric 3D primitives, reference silhouette matching, multimodal LLM/VLM reasoning, Concept-to-3D Studio |
 
-## S4 checklist (Geometric Conditioning — "Direct the Shot, Not the Prompt")
+## S11 checklist (Parametric 3D Sculpt Engine & Image-to-3D Proxy — Phase 1)
+
+- [x] Parametric 3D sculpt schema (`src/engine/procedural3D/sculptSpec.ts`):
+  - Parametric primitive types: `blob` (box $\leftrightarrow$ ellipsoid via `roundness`), `lathe` (revolved 2D profiles), `extrude` (polygon with bevel), `cylinder`, `cone`, `torus`, `tube`, `capsule`
+  - Humanoid skeletal bone tags on `SculptPart` (`Head`, `Chest`, `Spine`, `Hips`, `LeftArm`, `RightArm`, `LeftForeArm`, `RightForeArm`, `LeftHand`, `RightHand`, `LeftUpLeg`, `RightUpLeg`, `LeftLeg`, `RightLeg`, `LeftFoot`, `RightFoot`) with symmetric Left $\leftrightarrow$ Right mirror swapping
+  - Untrusted input sanitization (`sanitizeSculptSpec`), revision patch application (`applySculptPatch`), backward migration from legacy v1 (`partGraphToSculptSpec`), registry storage (`registerSculptSpec`, `lookupSculptSpec`, `removeSculptSpec`), and actor migration (`actorSculptSpec`, `migrateActorSculpt`, `migrateActorsInShot`)
+- [x] Deterministic 2D silhouette extraction & measurement (`src/engine/procedural3D/silhouette.ts`):
+  - Pure mask extraction (`extractMaskFromRgba`), image URL mask loading (`extractMaskFromImageUrl`), HUD mask visualizer (`generateMaskDataUrl`)
+  - Geometric silhouette measurement (`measureSilhouette`): aspect ratio, center of mass, 10-band normalized width profile
+  - Offscreen Three.js orthographic rendering (`renderSculptSilhouette`) with headless rasterizer fallback
+  - Real 2D Intersection-over-Union calculation (`computeSilhouetteIoU`) with zero fabricated scores
+- [x] Multimodal LLM/VLM vision reasoning (`src/services/objectReasoner.ts`):
+  - Enhanced Ollama, OpenAI-compatible, and Gemini providers with multimodal vision payload support (`imageBase64`)
+  - Zero VRAM clash invariant: sets `keep_alive: 0` on Ollama when vision inputs are present, immediately unloading vision weights from GPU to protect RTX 3090 24GB VRAM pool for ComfyUI LTX-2.5
+  - Geometric silhouette measurement injection (`measureSilhouette` width profile and aspect ratio into reasoner prompt)
+  - Iterative revision loop (`opts.reviseSpec` applying `applySculptPatch` to refine models against silhouette)
+- [x] Concept-to-3D Studio UI (`src/components/AIGenerator3D.tsx`):
+  - Reference Image upload dropzone with auto-silhouette preview and toggle
+  - Prompt text box with quick directorial suggestion chips
+  - Live Three.js interactive canvas preview (orbit rotation, zoom, wireframe/solid toggle)
+  - Real calculated 2D silhouette match HUD badge (`🎯 XX% Silhouette Match`)
+  - Refine & Revise controls + "Auto-Align Silhouette" button (runs optimization pass keeping best IoU)
+  - "Add to Active Scene" and "Save to 3D Library" action buttons
+- [x] Soundstage & Parameter Deck Integration:
+  - `src/components/AssetLibraryModal.tsx`: Integrated `AIGenerator3D` under prominent `✨ Concept-to-3D Studio` header button
+  - `src/components/PrevisParametersDeck.tsx`: Added `✨ AI 3D Generator...` button in quick suggestion chips row; updated actor card procedural mesh deck to dual buttons: `⚡ LLM Reason` (passing `conceptImageUrl` if present) and `✨ 3D Studio...` (pre-seeding `AIGenerator3D` with actor token and reference image)
+  - `src/components/StagePrevis3D.tsx`: Updated to check `actor.sculpt || actor.partGraph`, rebuilding the 3D figure on stage immediately when `sculpt` is assigned
+  - `src/stores/useShotStore.ts` & `src/stores/useAssetLibraryStore.ts`: `addActor` supports `sculpt` in options; `useAssetLibraryStore` uses `SculptSpec`
+- [x] Unit test suites (`tests/sculptSpec.test.ts`, `tests/silhouette.test.ts`, `tests/objectReasonerProviders.test.ts`):
+  - 34 tests covering parametric shapes, humanoid bone tagging, silhouette mask extraction, IoU calculation, Ollama keep_alive VRAM safety, and multimodal payloads
+- [x] Full Verification:
+  - 32 test files, 229/229 tests passing (`npm run test`)
+  - Production build: `npm run build` completed with zero TypeScript errors and bundle generated cleanly
+  - In-browser UI verified via subagent
+
 
 - [x] Runtime dependency: `mp4-muxer` (`^5.2.2`) installed as the only approved new runtime package
 - [x] Deterministic offline previs renderer (`src/engine/offlinePrevisRenderer.ts`): fixed timestep evaluation (no wall-clock `setTimeout` pacing), $8n+1$ frame count snapping, RGB viewfinder capture, inverted linear depth pass (near=white, far=dark for ControlNet/IC-LoRA standard), and real MP4 container muxing with resilient fallback
