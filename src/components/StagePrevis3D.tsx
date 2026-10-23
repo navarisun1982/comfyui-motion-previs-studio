@@ -132,6 +132,34 @@ const ASPECT_RATIOS: Record<AspectRatio, number> = {
 
 type ViewMode = 'split' | 'stage' | 'viewfinder';
 
+function disposeObject3D(obj: THREE.Object3D) {
+  obj.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh) {
+      const mesh = child as THREE.Mesh;
+      mesh.geometry?.dispose();
+      if (Array.isArray(mesh.material)) {
+        mesh.material.forEach((m) => {
+          Object.keys(m).forEach((prop) => {
+            const val = (m as any)[prop];
+            if (val && typeof val === 'object' && typeof val.dispose === 'function') {
+              val.dispose();
+            }
+          });
+          m.dispose();
+        });
+      } else if (mesh.material) {
+        Object.keys(mesh.material).forEach((prop) => {
+          const val = (mesh.material as any)[prop];
+          if (val && typeof val === 'object' && typeof val.dispose === 'function') {
+            val.dispose();
+          }
+        });
+        mesh.material.dispose();
+      }
+    }
+  });
+}
+
 export interface StagePrevis3DProps {
   externalTime?: number;
   isExternalPlaying?: boolean;
@@ -987,6 +1015,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         vfRendererRef.current = null;
         viewfinderMountRef.current?.replaceChildren();
       }
+      actorMeshesRef.current.forEach((m) => {
+        disposeObject3D(m);
+      });
+      actorMeshesRef.current.clear();
+      if (environmentGroupRef.current) {
+        disposeObject3D(environmentGroupRef.current);
+      }
     };
   }, []);
 
@@ -1601,6 +1636,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     actorMeshesRef.current.forEach((mesh, id) => {
       if (!currentActorIds.has(id)) {
         scene.remove(mesh);
+        disposeObject3D(mesh);
         actorMeshesRef.current.delete(id);
       }
     });
@@ -1636,7 +1672,10 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         mesh.userData.partGraph !== actor.partGraph;
 
       if (needsFullRebuild) {
-        if (mesh) scene.remove(mesh);
+        if (mesh) {
+          scene.remove(mesh);
+          disposeObject3D(mesh);
+        }
         mesh = createSubjectMesh(
           actor.name,
           actor.kind || 'human',

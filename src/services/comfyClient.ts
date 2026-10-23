@@ -32,7 +32,10 @@ export class ComfyClient {
 
   constructor(serverUrl: string = 'http://127.0.0.1:8188') {
     const isBrowser = typeof window !== 'undefined';
-    const isDevServer = isBrowser && window.location.port === '5173';
+    const isDevServer =
+      isBrowser &&
+      (Boolean(import.meta.env.DEV) || window.location.port === '5173') &&
+      !window.location.protocol.startsWith('file:');
 
     // In Vite dev mode, use proxy '/api/comfy' to avoid CORS issues.
     // In Electron or production desktop builds, connect directly to ComfyUI.

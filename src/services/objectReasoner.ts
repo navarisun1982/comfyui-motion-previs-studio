@@ -564,7 +564,8 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
   const timeoutMs = opts.timeoutMs ?? 240_000;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  opts.signal?.addEventListener('abort', () => ctrl.abort());
+  const onAbort = () => ctrl.abort();
+  opts.signal?.addEventListener('abort', onAbort);
   const t0 = Date.now();
   const protocol = cfg.info.protocol;
 
@@ -612,6 +613,7 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
     }
   } finally {
     clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', onAbort);
   }
 
   const raw = parseModelJson(text);
@@ -637,7 +639,8 @@ export async function reasonEnvironment(
   const timeoutMs = opts.timeoutMs ?? 180_000;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-  opts.signal?.addEventListener('abort', () => ctrl.abort());
+  const onAbort = () => ctrl.abort();
+  opts.signal?.addEventListener('abort', onAbort);
   const protocol = cfg.info.protocol;
 
   opts.onStage?.(`Reasoning filming environment with ${describeReasoner(cfg)}...`);
@@ -706,6 +709,7 @@ export async function reasonEnvironment(
     }
   } finally {
     clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', onAbort);
   }
 
   const raw = parseModelJson(text) as any;
