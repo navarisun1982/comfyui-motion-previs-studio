@@ -11,7 +11,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S1 Truthful pipeline | `stage/01-truthful-pipeline` | 🟡 ready for templates & live test | Pipeline built, tested & verified; awaiting user API templates & live generation |
 | S2 Desktop foundation | `stage/02-desktop-hygiene` | ✅ merged to master (`ccee65d`) | Offline self-hosted fonts, strict CSP, blob sanitization, safe storage service, electron window persistence & scoped ComfyUI CORS |
 | S3 Editing safety | `stage/03-editing-safety` | ✅ merged to master (`65978dd`) | One gesture = one undo step; first run is clear |
-| S4 Geometric conditioning | `stage/04-geometric-conditioning` | 🟡 ready for review | Directed camera move rendered via deterministic offline previs & conditioned via IC-LoRA |
+| S4 Geometric conditioning | `stage/04-geometric-conditioning` | ✅ merged to master (`cb27783`) | Directed camera move rendered via deterministic offline previs & conditioned via IC-LoRA |
 | S5 Performance | `stage/05-performance` | ⬜ | Smooth drag; main chunk well under 1.67 MB |
 | S6 UX overhaul | `stage/06-ux-overhaul` | ⬜ | Clean at 1280×720 / 1440×900 / 1920×1080 / 2560×1440 |
 | S7 Takes + queue | `stage/07-takes-queue` | ⬜ | (grill first) |
