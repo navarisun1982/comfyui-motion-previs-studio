@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { ShotRevisionV2 } from '../pipeline/revisionTypes';
 import { useHistoryStore } from '../stores/useHistoryStore';
 import { useShotStore } from '../stores/useShotStore';
@@ -16,7 +16,10 @@ import {
   Plus,
   Loader2,
   XCircle,
+  Compass,
 } from 'lucide-react';
+import { MotionFidelityOverlay } from './MotionFidelityOverlay';
+import { analyzeVideoMotionFidelity } from '../engine/motionFidelityAnalyzer';
 
 interface TakesGridProps {
   currentProfile?: QualityProfile;
@@ -34,13 +37,18 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
   onNotice,
 }) => {
   const { shot, compiledPrompt, previsVideoBlob, previsVideoUrl, setTakeAsActivePlate } = useShotStore();
-  const { revisions, toggleCircledTake, deleteRevision } = useHistoryStore();
+  const { revisions, toggleCircledTake, deleteRevision, setTakeMotionFidelity } = useHistoryStore();
   const { connectionStatus } = useComfyStore();
   const { items: queueItems, enqueueBatch, cancelItem, clearQueue } = useQueueStore();
 
   const [batchCount, setBatchCount] = useState<number>(3);
   const [seedStrategy, setSeedStrategy] = useState<'random' | 'sequential'>('random');
   const [filterMode, setFilterMode] = useState<'current-shot' | 'all'>('current-shot');
+
+  // Video element references for client-side optical flow analysis
+  const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+  const [analyzingTakeId, setAnalyzingTakeId] = useState<string | null>(null);
+  const [analysisProgress, setAnalysisProgress] = useState<number>(0);
 
   // A/B comparison selection state
   const [selectedForCompareId, setSelectedForCompareId] = useState<string | null>(null);
@@ -137,6 +145,36 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
       take.outputVideoUrl,
       take.outputFilename || `Take_${take.takeNumber ?? take.version}.mp4`
     );
+  };
+
+  const handleAnalyzeMotion = async (take: ShotRevisionV2) => {
+    const videoEl = videoRefs.current[take.id];
+    if (!videoEl || !take.outputVideoUrl) {
+      onNotice?.({
+        type: 'warn',
+        message: 'Video element not ready for optical flow motion analysis. Ensure video is loaded.',
+      });
+      return;
+    }
+
+    try {
+      setAnalyzingTakeId(take.id);
+      setAnalysisProgress(10);
+      const analysis = await analyzeVideoMotionFidelity(
+        videoEl,
+        take.shotSpec || shot,
+        (progress) => setAnalysisProgress(progress)
+      );
+      setTakeMotionFidelity(take.id, analysis);
+    } catch (err: any) {
+      onNotice?.({
+        type: 'error',
+        message: `Motion analysis failed: ${err?.message || 'Optical flow error'}`,
+      });
+    } finally {
+      setAnalyzingTakeId(null);
+      setAnalysisProgress(0);
+    }
   };
 
   return (
@@ -381,13 +419,22 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
                 {/* Video Preview */}
                 <div className="relative aspect-video w-full bg-black flex items-center justify-center group overflow-hidden">
                   {take.outputVideoUrl ? (
-                    <video
-                      src={take.outputVideoUrl}
-                      controls
-                      playsInline
-                      preload="metadata"
-                      className="h-full w-full object-contain"
-                    />
+                    <>
+                      <video
+                        ref={(el) => {
+                          videoRefs.current[take.id] = el;
+                        }}
+                        src={take.outputVideoUrl}
+                        controls
+                        playsInline
+                        crossOrigin="anonymous"
+                        preload="auto"
+                        className="h-full w-full object-contain"
+                      />
+                      {take.motionFidelity && (
+                        <MotionFidelityOverlay analysis={take.motionFidelity} />
+                      )}
+                    </>
                   ) : (
                     <div className="text-slate-500 font-mono text-[10px]">No video output</div>
                   )}
@@ -408,6 +455,55 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
                     <span className="rounded bg-black/60 px-1.5 py-0.5 border border-white/5 capitalize">
                       {take.profile}
                     </span>
+                  </div>
+
+                  {/* Motion Fidelity Status & Trigger */}
+                  <div className="flex items-center justify-between font-mono text-[9px] pt-1 border-t border-white/5">
+                    <span className="text-slate-400">Motion Fidelity:</span>
+                    {take.motionFidelity ? (
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`px-1.5 py-0.5 rounded font-bold ${
+                            take.motionFidelity.overallScore >= 85
+                              ? 'text-emerald-400 bg-emerald-500/20'
+                              : take.motionFidelity.overallScore >= 70
+                              ? 'text-blue-400 bg-blue-500/20'
+                              : take.motionFidelity.overallScore >= 50
+                              ? 'text-amber-400 bg-amber-500/20'
+                              : 'text-rose-400 bg-rose-500/20'
+                          }`}
+                        >
+                          {take.motionFidelity.overallScore}% ({take.motionFidelity.classification.toUpperCase()})
+                        </span>
+                        <button
+                          onClick={() => handleAnalyzeMotion(take)}
+                          disabled={analyzingTakeId === take.id}
+                          className="text-[9px] text-slate-400 hover:text-white underline cursor-pointer disabled:opacity-50"
+                          title="Re-run optical flow analysis"
+                        >
+                          {analyzingTakeId === take.id ? `${analysisProgress}%` : 'Re-score'}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleAnalyzeMotion(take)}
+                        disabled={analyzingTakeId === take.id || !take.outputVideoUrl}
+                        className="flex items-center gap-1 rounded bg-director-gold/15 hover:bg-director-gold/25 text-director-gold border border-director-gold/30 px-2 py-0.5 font-bold transition-all cursor-pointer disabled:opacity-50"
+                        title="Run optical flow analysis against directed 3D camera trajectory"
+                      >
+                        {analyzingTakeId === take.id ? (
+                          <>
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <span>Scoring ({analysisProgress}%)...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Compass className="h-3 w-3" />
+                            <span>Score Motion Fidelity</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
 
                   {/* Actions Bar */}

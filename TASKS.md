@@ -149,8 +149,32 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
   - Staging & camera parameter deviation traceability table
   - Direct "Circle Take" and "Set as Active Plate" actions for both Take A and Take B
 - [x] Unit test suite (`tests/takesAndQueue.test.ts`): 10 tests covering batch enqueueing, seed strategies, cancellation, queue clearing, retries, take numbering, circling, rating, plate assignment, and parameter diffing
-- [x] Full test suite pass (27 test files, 173/173 tests passing in 4.7s) and production build pass (`npm run build` in 10.5s, 0 errors, 0 warnings)
 - [x] In-browser UI verification via subagent with screenshots (`takes_contact_sheet_1792784795432.png`)
+
+## S8 checklist (Motion Fidelity Scoring & Optical Flow Analysis)
+
+- [x] Grounded optical flow motion vector analyzer (`src/engine/motionFidelityAnalyzer.ts`):
+  - Block-matching optical flow with contrast/variance gating and textureless patch handling
+  - Radial divergence calculation for forward/backward dolly moves (`dolly-in` expansion vs `dolly-out` contraction)
+  - Directional alignment scoring comparing achieved pixel flow against 3D camera trajectory (accounting for camera move to background flow inversion)
+  - Speed & magnitude fidelity scoring against camera speed profiles (`slow-cinematic`, `moderate`, `rapid-dynamic`) with static movement penalties
+  - Stability scoring measuring directional and velocity variance across sampled frames
+  - 0–100% weighted composite fidelity score and classification (`excellent`, `good`, `fair`, `drift`)
+  - Directorial guidance engine generating concrete prompt adjustments and IC-LoRA conditioning recommendations
+- [x] Visual vector field HUD & overlay (`src/components/MotionFidelityOverlay.tsx`):
+  - SVG optical flow motion arrow overlay displaying direction and magnitude per grid point
+  - "Directed vs. Achieved" trajectory radar bar (`DIRECTED: DOLLY-IN` → `ACHIEVED: DOLLY-IN`)
+  - Color-coded score badge with classification and vector toggle button
+  - Expandable directorial details popover with metric breakdown and targeted advice
+- [x] Takes Grid integration (`src/components/TakesGrid.tsx`):
+  - Real-time client-side video frame sampling via offscreen Canvas 2D
+  - Per-take "Score Motion Fidelity" / status badge with live progress reporting (`Scoring (XX%)...`)
+  - Vector overlay embedded over take video previews
+- [x] A/B comparison modal integration (`src/components/TakeComparisonModal.tsx`):
+  - Side-by-side vector overlay rendering with master `Vectors: ON/OFF` toggle in header
+  - Motion Fidelity Comparison block in parameter diff drawer comparing overall score, detected movement, directional match, and speed match
+- [x] Unit test suite (`tests/motionFidelity.test.ts`): 13 tests covering expected vector mapping, speed scaling, motion classification, block matching, scoring, drift detection, static shot penalties, and store persistence
+- [x] Full validation: 28 test files, 186/186 tests passing in 4.8s; production build green with 0 errors in 10.2s; in-browser UI verified via subagent
 
 ## Deferred findings (tracked for later stages)
 

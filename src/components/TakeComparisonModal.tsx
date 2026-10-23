@@ -16,7 +16,9 @@ import {
   VolumeX,
   Sparkles,
   GitCompare,
+  Compass,
 } from 'lucide-react';
+import { MotionFidelityOverlay } from './MotionFidelityOverlay';
 
 interface TakeComparisonModalProps {
   takeA: ShotRevisionV2;
@@ -45,6 +47,7 @@ export const TakeComparisonModal: React.FC<TakeComparisonModalProps> = ({
   const [splitPos, setSplitPos] = useState<number>(50); // 0 to 100%
   const [isDraggingSplit, setIsDraggingSplit] = useState<boolean>(false);
   const [activePlateNotice, setActivePlateNotice] = useState<string | null>(null);
+  const [showVectorsInCompare, setShowVectorsInCompare] = useState<boolean>(true);
 
   const videoARef = useRef<HTMLVideoElement | null>(null);
   const videoBRef = useRef<HTMLVideoElement | null>(null);
@@ -235,6 +238,19 @@ export const TakeComparisonModal: React.FC<TakeComparisonModalProps> = ({
             </div>
 
             <button
+              onClick={() => setShowVectorsInCompare(!showVectorsInCompare)}
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-mono text-[10px] font-semibold border transition-all ${
+                showVectorsInCompare
+                  ? 'bg-director-gold/20 text-director-gold border-director-gold/40'
+                  : 'text-slate-400 hover:text-white border-white/10'
+              }`}
+              title="Toggle optical flow motion vectors on comparison viewports"
+            >
+              <Compass className="h-3.5 w-3.5" />
+              <span>Vectors: {showVectorsInCompare ? 'ON' : 'OFF'}</span>
+            </button>
+
+            <button
               onClick={onClose}
               className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white transition-colors ml-2"
               title="Close Comparison (Esc)"
@@ -304,17 +320,25 @@ export const TakeComparisonModal: React.FC<TakeComparisonModalProps> = ({
                 {/* Video A */}
                 <div className="relative aspect-video rounded-lg overflow-hidden bg-black border border-white/10">
                   {currentTakeA.outputVideoUrl ? (
-                    <video
-                      ref={videoARef}
-                      src={currentTakeA.outputVideoUrl}
-                      onTimeUpdate={handleTimeUpdate}
-                      onLoadedMetadata={handleLoadedMetadata}
-                      onEnded={() => setIsPlaying(false)}
-                      muted={isMuted}
-                      loop
-                      playsInline
-                      className="h-full w-full object-contain"
-                    />
+                    <>
+                      <video
+                        ref={videoARef}
+                        src={currentTakeA.outputVideoUrl}
+                        onTimeUpdate={handleTimeUpdate}
+                        onLoadedMetadata={handleLoadedMetadata}
+                        onEnded={() => setIsPlaying(false)}
+                        muted={isMuted}
+                        loop
+                        playsInline
+                        className="h-full w-full object-contain"
+                      />
+                      {currentTakeA.motionFidelity && (
+                        <MotionFidelityOverlay
+                          analysis={currentTakeA.motionFidelity}
+                          showVectorsDefault={showVectorsInCompare}
+                        />
+                      )}
+                    </>
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-slate-500 font-mono text-xs">
                       No video output for Take A
@@ -386,15 +410,23 @@ export const TakeComparisonModal: React.FC<TakeComparisonModalProps> = ({
                 {/* Video B */}
                 <div className="relative aspect-video rounded-lg overflow-hidden bg-black border border-white/10">
                   {currentTakeB.outputVideoUrl ? (
-                    <video
-                      ref={videoBRef}
-                      src={currentTakeB.outputVideoUrl}
-                      onLoadedMetadata={handleLoadedMetadata}
-                      muted={isMuted}
-                      loop
-                      playsInline
-                      className="h-full w-full object-contain"
-                    />
+                    <>
+                      <video
+                        ref={videoBRef}
+                        src={currentTakeB.outputVideoUrl}
+                        onLoadedMetadata={handleLoadedMetadata}
+                        muted={isMuted}
+                        loop
+                        playsInline
+                        className="h-full w-full object-contain"
+                      />
+                      {currentTakeB.motionFidelity && (
+                        <MotionFidelityOverlay
+                          analysis={currentTakeB.motionFidelity}
+                          showVectorsDefault={showVectorsInCompare}
+                        />
+                      )}
+                    </>
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-slate-500 font-mono text-xs">
                       No video output for Take B
@@ -544,6 +576,75 @@ export const TakeComparisonModal: React.FC<TakeComparisonModalProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Motion Fidelity Comparison Block */}
+            {(currentTakeA.motionFidelity || currentTakeB.motionFidelity) && (
+              <div className="rounded-lg border border-white/10 bg-white/5 p-3 flex flex-col gap-2 mt-1">
+                <div className="flex items-center justify-between font-mono text-[10px]">
+                  <div className="flex items-center gap-1.5 text-director-cyan font-bold">
+                    <Compass className="h-3.5 w-3.5" />
+                    <span>Motion Fidelity Analysis Comparison</span>
+                  </div>
+                  <span className="text-slate-400 text-[9px]">
+                    Directed: <strong className="text-white uppercase">{currentTakeA.motionFidelity?.directedMovement || currentTakeB.motionFidelity?.directedMovement || 'N/A'}</strong>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 font-mono text-[10px]">
+                  <div className="p-2 rounded bg-black/40 border border-white/5 flex flex-col gap-1">
+                    <span className="text-slate-400 text-[9px]">Overall Fidelity Score</span>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-blue-300">
+                        {currentTakeA.motionFidelity ? `${currentTakeA.motionFidelity.overallScore}%` : 'Not Scored'}
+                      </span>
+                      <span className="text-slate-500">vs</span>
+                      <span className="font-bold text-indigo-300">
+                        {currentTakeB.motionFidelity ? `${currentTakeB.motionFidelity.overallScore}%` : 'Not Scored'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-2 rounded bg-black/40 border border-white/5 flex flex-col gap-1">
+                    <span className="text-slate-400 text-[9px]">Achieved Camera Move</span>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-blue-300 uppercase">
+                        {currentTakeA.motionFidelity?.detectedMovement || '—'}
+                      </span>
+                      <span className="text-slate-500">vs</span>
+                      <span className="font-bold text-indigo-300 uppercase">
+                        {currentTakeB.motionFidelity?.detectedMovement || '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-2 rounded bg-black/40 border border-white/5 flex flex-col gap-1">
+                    <span className="text-slate-400 text-[9px]">Directional Match</span>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-blue-300">
+                        {currentTakeA.motionFidelity ? `${currentTakeA.motionFidelity.directionalScore}%` : '—'}
+                      </span>
+                      <span className="text-slate-500">vs</span>
+                      <span className="font-bold text-indigo-300">
+                        {currentTakeB.motionFidelity ? `${currentTakeB.motionFidelity.directionalScore}%` : '—'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-2 rounded bg-black/40 border border-white/5 flex flex-col gap-1">
+                    <span className="text-slate-400 text-[9px]">Velocity Match</span>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-blue-300">
+                        {currentTakeA.motionFidelity ? `${currentTakeA.motionFidelity.speedScore}%` : '—'}
+                      </span>
+                      <span className="text-slate-500">vs</span>
+                      <span className="font-bold text-indigo-300">
+                        {currentTakeB.motionFidelity ? `${currentTakeB.motionFidelity.speedScore}%` : '—'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Any Changed ShotSpec Diff Parameters */}
             {diffItems.filter((d) => d.changed).length > 0 && (
