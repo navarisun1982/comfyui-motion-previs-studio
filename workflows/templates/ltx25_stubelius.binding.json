@@ -1,0 +1,75 @@
+{
+  "schema": 1,
+  "templateId": "ltx25_stubelius",
+  "engine": "ltx-2.5",
+  "label": "Stubelius Ultimate LTX 2.5 (Distilled INT8)",
+  "api": "ltx25_stubelius.api.json",
+  "modes": [
+    "t2v",
+    "i2v"
+  ],
+  "nodes": {
+    "3": "StubeliusLTXSetup",
+    "4": "StubeliusLTXSeedSamplers",
+    "5": "StubeliusLTXModels",
+    "6": "StubeliusLTXOutput",
+    "7": "LTXDirectorCS25",
+    "8": "StubeliusLTXSeeds",
+    "14": "StubeliusLTXFinish",
+    "15": "VHS_VideoCombine"
+  },
+  "fields": {
+    "prompt": {
+      "node": "7",
+      "input": "local_prompts"
+    },
+    "seed": {
+      "node": "3",
+      "input": "seed"
+    },
+    "seedCount": {
+      "node": "3",
+      "input": "seeds",
+      "fixed": 1
+    },
+    "winner": {
+      "node": "14",
+      "input": "winner",
+      "fixed": 1
+    },
+    "durationSeconds": {
+      "node": "7",
+      "input": "duration_seconds"
+    },
+    "timeline": {
+      "node": "7",
+      "input": "timeline_data",
+      "patch": "ltx.firstFrameSegment@1"
+    }
+  },
+  "profiles": {
+    "draft": [
+      {
+        "node": "6",
+        "input": "final_resolution",
+        "value": "native (no upscale)"
+      }
+    ],
+    "final": [
+      {
+        "node": "6",
+        "input": "final_resolution",
+        "value": "1080p"
+      }
+    ]
+  },
+  "output": {
+    "node": "15"
+  },
+  "frameRule": "8n+1",
+  "notes": [
+    "Distilled 22B INT8 LTX 2.5 workflow on RTX 3090.",
+    "Draft runs native resolution directly from single-pass seed.",
+    "Final runs 1080p upscaled finish pass."
+  ]
+}

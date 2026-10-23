@@ -77,8 +77,15 @@ See the deferred table in [TASKS.md](TASKS.md).
    - "Export Generation Package (Offline Mode)" button for offline or remote execution.
    - Backward-compatible revision diff inspection in `DirectorDiffInspector.tsx`.
 
-4. **Verification:**
-   - Test suite: 21 test files, 126 tests passing in 4.4s (`npm run test`).
+4. **Template Ingestion (`workflows/templates/`):**
+   - Ingested authentic, executable API templates:
+     - `ltx25_stubelius.api.json` + `ltx25_stubelius.binding.json`: Distilled 22B INT8 LTX 2.5 workflow extracted directly from live execution, fingerprinted with nodes 3, 4, 5, 6, 7, 8, 14, 15, and 8n+1 frame rule.
+     - `h3_stubelius.api.json` + `h3_stubelius.binding.json`: MiniMax H3 Hybrid workflow fingerprinted with nodes 1, 2, 3, 4, 11, 12, 17, and PrimitiveStringMultiline prompt override wiring.
+   - Both templates discovered, validated against live ComfyUI schemas, and registered automatically on app startup.
+
+5. **Verification:**
+   - Test suite: 21 test files, 128 tests passing in 4.4s (`npm run test`).
    - TypeScript & build: 0 errors across main project and scripts (`npm run build`).
-   - In-browser UI: verified and screenshotted at `http://127.0.0.1:5173`.
+   - In-browser UI: verified and screenshotted at `http://127.0.0.1:5173` with templates confirmed registered in debugger console.
+
 

@@ -279,3 +279,125 @@ describe('promptOverrideStore', () => {
     expect(store.getOverride('shot-1', 'ltx-2.5')).toBeUndefined();
   });
 });
+
+describe('bundled production templates', () => {
+  it('loads, verifies, and binds ltx25_stubelius without errors', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    const apiRaw = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../workflows/templates/ltx25_stubelius.api.json'), 'utf8'));
+    const bindingRaw = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../workflows/templates/ltx25_stubelius.binding.json'), 'utf8'));
+
+    const parsed = parseBinding(bindingRaw, 'ltx25_stubelius.binding.json');
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.binding).toBeDefined();
+
+    const verification = verifyBinding(apiRaw, parsed.binding!);
+    expect(verification.errors).toEqual([]);
+    expect(verification.ok).toBe(true);
+
+    // Bind T2V draft
+    const draftRes = bindTemplate(apiRaw, parsed.binding!, {
+      mode: 't2v',
+      profile: 'draft',
+      prompt: 'A glassblower crafting glowing glass art',
+      negative: '',
+      seed: 9999,
+      durationSeconds: 4,
+      frameRate: 25,
+      aspectRatio: '16:9',
+      width: 1280,
+      height: 704,
+      filenamePrefix: 'test_shot',
+    });
+
+    expect(draftRes.workflow['3'].inputs.seed).toBe(9999);
+    expect(draftRes.workflow['3'].inputs.seeds).toBe(1);
+    expect(draftRes.workflow['14'].inputs.winner).toBe(1);
+    expect(draftRes.workflow['7'].inputs.local_prompts).toBe('A glassblower crafting glowing glass art');
+    expect(draftRes.workflow['6'].inputs.final_resolution).toBe('native (no upscale)');
+
+    // Bind I2V final
+    const finalRes = bindTemplate(apiRaw, parsed.binding!, {
+      mode: 'i2v',
+      profile: 'final',
+      prompt: 'A glassblower crafting glowing glass art',
+      negative: '',
+      seed: 8888,
+      durationSeconds: 5,
+      frameRate: 25,
+      aspectRatio: '16:9',
+      width: 1280,
+      height: 704,
+      filenamePrefix: 'test_shot',
+      firstFrameFile: 'first_frame_upload.png',
+    });
+
+    expect(finalRes.workflow['3'].inputs.seed).toBe(8888);
+    expect(finalRes.workflow['6'].inputs.final_resolution).toBe('1080p');
+    // Verify timeline patcher applied first frame segment
+    const timelineData = JSON.parse(finalRes.workflow['7'].inputs.timeline_data as string);
+    expect(timelineData.disable_prompt_relay).toBe(true);
+    expect(timelineData.segments[0].type).toBe('image');
+    expect(timelineData.segments[0].imageFile).toBe('first_frame_upload.png');
+  });
+
+  it('loads, verifies, and binds h3_stubelius without errors', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    const apiRaw = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../workflows/templates/h3_stubelius.api.json'), 'utf8'));
+    const bindingRaw = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../workflows/templates/h3_stubelius.binding.json'), 'utf8'));
+
+    const parsed = parseBinding(bindingRaw, 'h3_stubelius.binding.json');
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.binding).toBeDefined();
+
+    const verification = verifyBinding(apiRaw, parsed.binding!);
+    expect(verification.errors).toEqual([]);
+    expect(verification.ok).toBe(true);
+
+    // Bind T2V draft
+    const draftRes = bindTemplate(apiRaw, parsed.binding!, {
+      mode: 't2v',
+      profile: 'draft',
+      prompt: 'Cyberpunk rainy street with neon signs',
+      negative: '',
+      seed: 54321,
+      durationSeconds: 4,
+      frameRate: 24,
+      aspectRatio: '16:9',
+      width: 1280,
+      height: 720,
+      filenamePrefix: 'test_shot',
+    });
+
+    expect(draftRes.workflow['4'].inputs.seed).toBe(54321);
+    expect(draftRes.workflow['1'].inputs.seeds).toBe(1);
+    expect(draftRes.workflow['11'].inputs.winner).toBe(1);
+    expect(draftRes.workflow['3'].inputs.value).toBe('Cyberpunk rainy street with neon signs');
+    expect(draftRes.workflow['17'].inputs.final_resolution).toBe('native (no upscale)');
+
+    // Bind I2V final
+    const finalRes = bindTemplate(apiRaw, parsed.binding!, {
+      mode: 'i2v',
+      profile: 'final',
+      prompt: 'Cyberpunk rainy street with neon signs',
+      negative: '',
+      seed: 7777,
+      durationSeconds: 6,
+      frameRate: 24,
+      aspectRatio: '16:9',
+      width: 1280,
+      height: 720,
+      filenamePrefix: 'test_shot',
+      firstFrameFile: 'cyberpunk_first.png',
+    });
+
+    expect(finalRes.workflow['4'].inputs.seed).toBe(7777);
+    expect(finalRes.workflow['17'].inputs.final_resolution).toBe('1080p');
+    const timelineData = JSON.parse(finalRes.workflow['4'].inputs.timeline_data as string);
+    expect(timelineData.characters[0].file).toBe('cyberpunk_first.png');
+  });
+});
+
