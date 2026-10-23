@@ -1258,7 +1258,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                 <div className="flex items-center gap-1 pt-1.5 border-t border-white/10">
                   <input
                     type="text"
-                    placeholder="Custom: Zodiac, Car, زودياك, سيارة..."
+                    placeholder="Custom: Zodiac, Sports Car, Drone, Crate..."
                     value={customBottomObjName}
                     onChange={(e) => setCustomBottomObjName(e.target.value)}
                     onKeyDown={(e) => {

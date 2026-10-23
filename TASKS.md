@@ -254,6 +254,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | 4 WebGL contexts (2 renderers × 2 `StagePrevis3D` instances) | S5 | Done (S5) |
 | Trim range / volume controls may be no-ops; hardcoded "SCENE 01"; `minWidth` 1100; backtick handler eats input typing; `alert()` in VFXVideoDeck | S6 | Done (S6) |
 | Importing GLB/GLTF models produces generic box or distorted shape ("weird shape") | Fix | Done (`fix/glb-gltf-import-rendering`) |
+| Remove Arabic words from interface elements | Fix | Done (`fix/remove-arabic-interface-text`) |
 
 ## GLB/GLTF 3D Model Import & Rendering Checklist
 

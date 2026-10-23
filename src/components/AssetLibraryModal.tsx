@@ -25,18 +25,18 @@ import {
 } from 'lucide-react';
 import { lookupPartGraph } from '../engine/procedural3D/partGraph';
 
-const CATEGORIES: { id: AssetCategory; label: string; labelAr: string; icon: string }[] = [
-  { id: 'all', label: 'All Catalog', labelAr: 'الكل', icon: '🌐' },
-  { id: 'custom', label: 'My Uploads & AI', labelAr: 'مجسماتي والتوليد', icon: '⭐' },
-  { id: 'architecture', label: 'Architecture', labelAr: 'مباني وعمارة', icon: '🏛️' },
-  { id: 'vehicle', label: 'Vehicles', labelAr: 'مركبات', icon: '🚗' },
-  { id: 'character', label: 'Characters', labelAr: 'شخصيات', icon: '👤' },
-  { id: 'creature', label: 'Creatures', labelAr: 'كائنات وحيوانات', icon: '🦌' },
-  { id: 'furniture', label: 'Furniture', labelAr: 'أثاث وديكور', icon: '🪑' },
-  { id: 'props', label: 'Props & Audio', labelAr: 'دعائم وأدوات', icon: '📦' },
-  { id: 'nature', label: 'Nature', labelAr: 'طبيعة وتضاريس', icon: '🌲' },
-  { id: 'weapons', label: 'Weapons', labelAr: 'أسلحة ودروع', icon: '⚔️' },
-  { id: 'scifi', label: 'Sci-Fi & Tech', labelAr: 'تقنية وخيال علمي', icon: '⚛️' },
+const CATEGORIES: { id: AssetCategory; label: string; icon: string }[] = [
+  { id: 'all', label: 'All Catalog', icon: '🌐' },
+  { id: 'custom', label: 'My Uploads & AI', icon: '⭐' },
+  { id: 'architecture', label: 'Architecture', icon: '🏛️' },
+  { id: 'vehicle', label: 'Vehicles', icon: '🚗' },
+  { id: 'character', label: 'Characters', icon: '👤' },
+  { id: 'creature', label: 'Creatures', icon: '🦌' },
+  { id: 'furniture', label: 'Furniture', icon: '🪑' },
+  { id: 'props', label: 'Props & Audio', icon: '📦' },
+  { id: 'nature', label: 'Nature', icon: '🌲' },
+  { id: 'weapons', label: 'Weapons', icon: '⚔️' },
+  { id: 'scifi', label: 'Sci-Fi & Tech', icon: '⚛️' },
 ];
 
 import { useShallow } from 'zustand/react/shallow';
@@ -260,7 +260,7 @@ export const AssetLibraryModal: React.FC = () => {
                 </span>
               </div>
               <p className="text-xs text-slate-400 font-sans">
-                مكتبة المجسمات ثلاثية الأبعاد المعتمدة • دعم كامل لرفع ملفات GLB والتوليد بالذكاء الاصطناعي
+                Curated 3D Asset Catalog • Full support for GLB/GLTF imports & procedural generation
               </p>
             </div>
           </div>
@@ -344,7 +344,7 @@ export const AssetLibraryModal: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <span className="text-amber-400 font-bold text-sm flex items-center gap-1.5 font-display">
                     <Sparkles className="h-4 w-4 text-amber-400" />
-                    AI 3D Model Generation Pipeline (مسار التوليد بالذكاء الاصطناعي)
+                    AI 3D Model Generation Pipeline
                   </span>
                 </div>
                 <button
@@ -364,7 +364,7 @@ export const AssetLibraryModal: React.FC = () => {
                   type="text"
                   value={genPrompt}
                   onChange={(e) => setGenPrompt(e.target.value)}
-                  placeholder="Describe any 3D asset in English or Arabic (e.g. طاولة بلياردو خضراء مع كرات / Victorian grandfather clock)"
+                  placeholder="Describe any 3D asset (e.g. green billiard table with pool balls / Victorian grandfather clock)..."
                   disabled={isGenerating}
                   className="flex-1 rounded-xl bg-black/50 border border-white/20 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition-all font-mono"
                 />
@@ -453,7 +453,7 @@ export const AssetLibraryModal: React.FC = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search 200+ assets (English or Arabic e.g. سيارة, piano, tower, sword)..."
+              placeholder="Search 200+ assets (e.g. car, piano, tower, sword)..."
               className="w-full rounded-xl bg-black/40 border border-white/10 pl-9 pr-8 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 font-mono"
             />
             {searchQuery && (
@@ -636,9 +636,11 @@ export const AssetLibraryModal: React.FC = () => {
                       >
                         {asset.name}
                       </h3>
-                      <p className="text-[10px] text-amber-300/80 font-sans line-clamp-1" dir="rtl">
-                        {asset.nameAr}
-                      </p>
+                      {asset.tokenPrompt ? (
+                        <p className="text-[10px] text-slate-400 font-mono line-clamp-1">
+                          {asset.tokenPrompt}
+                        </p>
+                      ) : null}
                       {reasonedGraph ? (
                         <p className="text-[9px] font-mono text-cyan-400/80 line-clamp-1">
                           {reasonedGraph.heightMeters.toFixed(1)}m • {reasonedGraph.materials.length} mats • {reasonedGraph.route}

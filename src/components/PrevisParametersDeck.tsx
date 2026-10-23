@@ -1314,9 +1314,6 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                   <div>
                     <div className="font-bold text-white text-xs flex items-center gap-1.5">
                       <span>{shot.environment?.name || 'Soundstage Studio'}</span>
-                      <span className="text-emerald-400 font-arabic text-[11px] font-normal">
-                        ({shot.environment?.nameAr || 'بلاتوه استوديو تصوير'})
-                      </span>
                     </div>
                     <div className="text-[9px] font-mono text-emerald-400 uppercase tracking-wider">
                       Category: {shot.environment?.category || 'studio'}
@@ -1438,9 +1435,6 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                       <div>
                         <div className="font-bold text-white text-[11px] leading-tight">
                           {preset.spec.name}
-                        </div>
-                        <div className="font-arabic text-[9px] text-emerald-400/90 leading-tight">
-                          {preset.spec.nameAr}
                         </div>
                       </div>
                       <div className="text-[8px] font-mono text-slate-400 flex items-center gap-1.5 pt-0.5">
@@ -1779,7 +1773,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-semibold shadow transition-all"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>🧠 Direct 3D Stage from Narrative (تفكيك وإخراج المشهد بالكامل)</span>
+                <span>🧠 Direct 3D Stage from Narrative</span>
               </button>
             </div>
           </div>
