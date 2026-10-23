@@ -1,20 +1,17 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+// @vitest-environment jsdom
+// (useShotStore gates persistence on `typeof window`; S2 replaces that layer.)
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useShotStore } from '../src/stores/useShotStore';
+import { installMemoryStorage } from './helpers/memoryStorage';
 
 describe('Proposal 3: Multi-Actor Scene Cast Pool', () => {
   beforeEach(() => {
-    // Set up mock localStorage in node test environment
-    const storage: Record<string, string> = {};
-    globalThis.localStorage = {
-      getItem: (k: string) => storage[k] ?? null,
-      setItem: (k: string, v: string) => { storage[k] = v; },
-      removeItem: (k: string) => { delete storage[k]; },
-      clear: () => { Object.keys(storage).forEach((k) => delete storage[k]); },
-      key: (i: number) => Object.keys(storage)[i] ?? null,
-      length: Object.keys(storage).length,
-    } as Storage;
-
+    installMemoryStorage();
     useShotStore.getState().resetToDefault();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('initializes with default cast pool members', () => {
@@ -43,7 +40,7 @@ describe('Proposal 3: Multi-Actor Scene Cast Pool', () => {
 
     // Verify localStorage persistence
     const saved = localStorage.getItem('comfy_ai_director_cast_pool_v1');
-    expect(saved).toBeDefined();
+    expect(saved).not.toBeNull();
     expect(saved).toContain('Cyber Ninja');
   });
 

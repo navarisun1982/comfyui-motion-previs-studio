@@ -226,7 +226,7 @@ export function exportCameraExtrinsicsJson(shot: ShotSpec): string {
 export function exportBlenderCameraScript(shot: ShotSpec): string {
   const bundle = exportCameraPoseBundle(shot);
   return `"""
-Comfy AI Director Studio - Blender Camera Animation Exporter
+ComfyUI Motion Previs Studio - Blender Camera Animation Exporter
 Shot: ${shot.name} (${shot.id})
 Duration: ${bundle.durationSeconds}s @ ${bundle.fps} FPS
 """
@@ -258,6 +258,6 @@ for frame_idx, mat in enumerate(c2w_poses, start=1):
     cam_obj.keyframe_insert(data_path="location", index=-1)
     cam_obj.keyframe_insert(data_path="rotation_euler", index=-1)
 
-print("[AI Director Studio] Camera trajectory imported successfully with ${bundle.frameCount} frames.")
+print("[ComfyUI Motion Previs Studio] Camera trajectory imported successfully with ${bundle.frameCount} frames.")
 `;
 }

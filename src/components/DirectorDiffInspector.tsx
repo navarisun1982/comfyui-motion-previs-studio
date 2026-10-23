@@ -65,7 +65,7 @@ export const DirectorDiffInspector: React.FC<DirectorDiffInspectorProps> = ({ on
           <History className="h-10 w-10 stroke-1 mb-3 text-slate-600" />
           <p className="font-display font-semibold text-slate-300">No Shot Revisions Recorded Yet</p>
           <p className="text-xs max-w-sm mt-1">
-            Whenever you direct a shot or execute a generation, AI Director Studio records an immutable revision slate.
+            Whenever you direct a shot or execute a generation, ComfyUI Motion Previs Studio records an immutable revision slate.
           </p>
           {onClose && (
             <button

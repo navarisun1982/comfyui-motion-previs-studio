@@ -794,7 +794,7 @@ export const AssetLibraryModal: React.FC = () => {
             <span>Drag-and-Drop or Click to Place</span>
           </div>
           <div>
-            <span>AI Director Studio • 3D Asset Ecosystem</span>
+            <span>ComfyUI Motion Previs Studio • 3D Asset Ecosystem</span>
           </div>
         </div>
       </div>

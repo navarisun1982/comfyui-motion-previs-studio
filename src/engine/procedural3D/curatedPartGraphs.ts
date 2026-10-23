@@ -1,5 +1,5 @@
 /**
- * Curated High-Fidelity PartGraph Catalog for AI Director Studio.
+ * Curated High-Fidelity PartGraph Catalog for ComfyUI Motion Previs Studio.
  * Reviewed and generated using the 3Dviz Pro Max Object Reasoning specification.
  * Each entry replaces heuristic fallback boxes with an authentic, multi-part assembly
  * featuring real-world proportions (heightMeters), PBR materials, hierarchical rigging,

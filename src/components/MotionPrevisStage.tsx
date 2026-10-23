@@ -11,6 +11,7 @@ import {
   generatePoseAllCanvas,
   analyzeVideoPlate,
 } from '../engine/vfxAnalyzer';
+import { logger } from '../stores/useLogStore';
 import {
   Play,
   Pause,
@@ -24,7 +25,6 @@ import {
   Volume2,
   Scissors,
   Bookmark,
-  Filter,
   Upload,
   Film,
   Box,
@@ -35,8 +35,6 @@ import {
   Download,
   Loader2,
 } from 'lucide-react';
-
-export type CinematicFilter = 'standard' | 'teal-orange' | 'noir' | 'cyberpunk' | 'bleach';
 
 export interface TimelineMarker {
   id: string;
@@ -52,20 +50,8 @@ interface MotionPrevisStageProps {
   onDirectWithComfy?: () => void;
 }
 
-const SAMPLE_PLATES = [
-  {
-    name: 'Arrival: City Night (35mm)',
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-  },
-  {
-    name: 'Sci-Fi Corridor Dolly (24mm)',
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
-  },
-  {
-    name: 'Atmospheric Tracking (50mm)',
-    url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/WeAreGoingOnBullrun.mp4',
-  },
-];
+const PASS_TILE_W = 320;
+const PASS_TILE_H = 180;
 
 export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   shotTitle = 'Shot 01A Tracking In',
@@ -98,12 +84,11 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0.0);
   const [viewMode, setViewMode] = useState<'reference' | 'viewfinder'>('reference');
-  const [activeTool, setActiveTool] = useState<'trim' | 'markers' | 'filters' | null>('trim');
+  const [activeTool, setActiveTool] = useState<'trim' | 'markers' | null>('trim');
   const [volume, setVolume] = useState(80);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
   const [fps] = useState(24);
   const [isLooping, setIsLooping] = useState(true);
-  const [colorFilter, setColorFilter] = useState<CinematicFilter>('standard');
   const [customBottomObjName, setCustomBottomObjName] = useState('');
   const [isAddSubjectOpen, setIsAddSubjectOpen] = useState(false);
 
@@ -132,11 +117,8 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     }
   };
 
-  // Interactive timeline markers
-  const [markers, setMarkers] = useState<TimelineMarker[]>([
-    { id: 'm1', time: 1.5, label: 'Camera Dolly In', color: '#3b82f6' },
-    { id: 'm2', time: 4.8, label: 'Subject Action Cue', color: '#10b981' },
-  ]);
+  // Interactive timeline markers (start empty — no fabricated cues)
+  const [markers, setMarkers] = useState<TimelineMarker[]>([]);
 
   // Trim range state (percentage 0..100)
   const [trimStartPct, setTrimStartPct] = useState(0);
@@ -147,8 +129,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
 
   const duration = shot.durationSeconds || 10;
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const onscreenCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const proceduralCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const leftViewportRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
 
@@ -159,95 +140,20 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   const masksCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const poseAllCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // 1. Procedural animated cinematic frame fallback generator
-  const drawProceduralCinematicFrame = useCallback(
-    (t: number, targetCtx: CanvasRenderingContext2D, w: number, h: number) => {
-      targetCtx.save();
-
-      // Atmospheric dark street background
-      const grad = targetCtx.createLinearGradient(0, 0, 0, h);
-      grad.addColorStop(0, '#090b14');
-      grad.addColorStop(0.4, '#171d2b');
-      grad.addColorStop(0.65, '#0b0d12');
-      grad.addColorStop(1, '#050608');
-      targetCtx.fillStyle = grad;
-      targetCtx.fillRect(0, 0, w, h);
-
-      // Distant wet street reflections
-      const roadY = h * 0.62;
-      targetCtx.fillStyle = '#0f121a';
-      targetCtx.fillRect(0, roadY, w, h - roadY);
-
-      // Rain streaks
-      targetCtx.strokeStyle = 'rgba(148, 163, 184, 0.15)';
-      targetCtx.lineWidth = 1;
-      const seed = Math.floor(t * 24);
-      for (let i = 0; i < 40; i++) {
-        const rx = ((i * 37 + seed * 23) % w);
-        const ry = ((i * 19 + seed * 47) % (h * 0.8));
-        targetCtx.beginPath();
-        targetCtx.moveTo(rx, ry);
-        targetCtx.lineTo(rx - 2, ry + 12);
-        targetCtx.stroke();
-      }
-
-      // Streetlights and warm bokeh
-      const lightX = [w * 0.25, w * 0.75, w * 0.5];
-      const lightY = [h * 0.45, h * 0.45, h * 0.35];
-      lightX.forEach((lx, idx) => {
-        const radGrad = targetCtx.createRadialGradient(lx, lightY[idx], 2, lx, lightY[idx], 40);
-        radGrad.addColorStop(0, 'rgba(245, 158, 11, 0.7)');
-        radGrad.addColorStop(0.5, 'rgba(245, 158, 11, 0.15)');
-        radGrad.addColorStop(1, 'rgba(245, 158, 11, 0)');
-        targetCtx.fillStyle = radGrad;
-        targetCtx.beginPath();
-        targetCtx.arc(lx, lightY[idx], 40, 0, Math.PI * 2);
-        targetCtx.fill();
-      });
-
-      // Animated character walking / moving along depth
-      const charProgress = duration > 0 ? (t / duration) : 0;
-      const charScale = 0.5 + charProgress * 0.5; // perspective dolly-in
-      const cx = w * 0.5 + Math.sin(t * 2) * 8;
-      const cy = roadY + (charProgress * (h * 0.15));
-      const charH = 70 * charScale;
-      const charW = 24 * charScale;
-
-      // Silhouette Trenchcoat & Hat
-      targetCtx.fillStyle = '#06080d';
-      targetCtx.beginPath();
-      // Head
-      targetCtx.arc(cx, cy - charH + charH * 0.15, charW * 0.35, 0, Math.PI * 2);
-      targetCtx.fill();
-      // Shoulders / Torso
-      targetCtx.fillRect(cx - charW * 0.6, cy - charH * 0.75, charW * 1.2, charH * 0.75);
-      // Legs
-      const stride = Math.sin(t * 8) * (10 * charScale);
-      targetCtx.fillRect(cx - charW * 0.4, cy, charW * 0.3, charH * 0.3 + stride);
-      targetCtx.fillRect(cx + charW * 0.1, cy, charW * 0.3, charH * 0.3 - stride);
-
-      // Apply selected cinematic LUT tint
-      if (colorFilter === 'teal-orange') {
-        targetCtx.fillStyle = 'rgba(14, 165, 233, 0.12)';
-        targetCtx.fillRect(0, 0, w, h);
-      } else if (colorFilter === 'noir') {
-        targetCtx.fillStyle = 'rgba(0, 0, 0, 0.2)';
-        targetCtx.fillRect(0, 0, w, h);
-      } else if (colorFilter === 'cyberpunk') {
-        targetCtx.fillStyle = 'rgba(217, 70, 239, 0.12)';
-        targetCtx.fillRect(0, 0, w, h);
-      } else if (colorFilter === 'bleach') {
-        targetCtx.fillStyle = 'rgba(255, 255, 255, 0.08)';
-        targetCtx.fillRect(0, 0, w, h);
-      }
-
-      targetCtx.restore();
-    },
-    [duration, colorFilter]
-  );
-
-  // 2. Real-time Multi-pass Render Loop (Pose, Depth, Edges, Masks, Pose All)
+  // Real-time CV pass previews (Pose, Depth, Edges, Masks, Pose All).
+  // These are derived ONLY from a real, loaded video plate. With no plate the
+  // tiles are cleared and an explicit empty state is rendered on top.
   const lastPassRenderRef = useRef<number>(0);
+  const taintWarnedUrlRef = useRef<string | null>(null);
+  const hasVideoPlate = !!shot.vfxReference?.videoUrl;
+  const clearPassCanvases = useCallback(() => {
+    [poseActorCanvasRef, depthCanvasRef, edgesCanvasRef, masksCanvasRef, poseAllCanvasRef].forEach((ref) => {
+      const c = ref.current;
+      const ctx = c?.getContext('2d');
+      if (c && ctx) ctx.clearRect(0, 0, c.width, c.height);
+    });
+  }, []);
+
   const updateAllPassCanvases = useCallback(
     (force: boolean = false) => {
       // In 3D Construct mode, CV passes are not mounted; skip heavy Sobel filter
@@ -259,43 +165,38 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
       }
       lastPassRenderRef.current = now;
 
-      const w = 320;
-      const h = 180;
-
-      let sourceElement: HTMLVideoElement | HTMLCanvasElement;
-      if (videoRef.current && !videoRef.current.paused && videoRef.current.readyState >= 2) {
-        sourceElement = videoRef.current;
-      } else {
-        if (!proceduralCanvasRef.current) {
-          proceduralCanvasRef.current = document.createElement('canvas');
-          proceduralCanvasRef.current.width = w;
-          proceduralCanvasRef.current.height = h;
-        }
-        const pCtx = proceduralCanvasRef.current.getContext('2d');
-        if (pCtx) {
-          drawProceduralCinematicFrame(currentTime, pCtx, w, h);
-        }
-        sourceElement = proceduralCanvasRef.current;
-
-        if (onscreenCanvasRef.current) {
-          const onCtx = onscreenCanvasRef.current.getContext('2d');
-          if (onCtx) {
-            drawProceduralCinematicFrame(currentTime, onCtx, onscreenCanvasRef.current.width, onscreenCanvasRef.current.height);
-          }
-        }
+      const video = videoRef.current;
+      // readyState >= 2 (HAVE_CURRENT_DATA) means a decoded frame is available,
+      // whether the plate is playing or paused/scrubbed.
+      if (!hasVideoPlate || !video || video.readyState < 2) {
+        clearPassCanvases();
+        return;
       }
 
+      const w = PASS_TILE_W;
+      const h = PASS_TILE_H;
       const offCanvas = document.createElement('canvas');
       offCanvas.width = w;
       offCanvas.height = h;
       const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
       if (!offCtx) return;
 
-      offCtx.drawImage(sourceElement, 0, 0, w, h);
-      const frameData = offCtx.getImageData(0, 0, w, h);
+      let frameData: ImageData;
+      try {
+        offCtx.drawImage(video, 0, 0, w, h);
+        frameData = offCtx.getImageData(0, 0, w, h);
+      } catch (err) {
+        // Cross-origin plates taint the canvas; pixel analysis is impossible.
+        clearPassCanvases();
+        if (taintWarnedUrlRef.current !== video.currentSrc) {
+          taintWarnedUrlRef.current = video.currentSrc;
+          logger.warn('CV pass preview unavailable: the plate cannot be read (cross-origin source).', err);
+        }
+        return;
+      }
 
       if (poseActorCanvasRef.current) {
-        const pCanvas = generatePoseOverlayCanvas(sourceElement, w, h);
+        const pCanvas = generatePoseOverlayCanvas(video, w, h);
         const ctx = poseActorCanvasRef.current.getContext('2d');
         if (ctx) ctx.drawImage(pCanvas, 0, 0, w, h);
       }
@@ -324,7 +225,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
         if (ctx) ctx.drawImage(paCanvas, 0, 0, w, h);
       }
     },
-    [isConstruct3D, currentTime, drawProceduralCinematicFrame]
+    [isConstruct3D, hasVideoPlate, clearPassCanvases]
   );
 
   // 3. Active 24fps Continuous Playback Animation Loop
@@ -435,43 +336,76 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [duration]);
 
-  // Handle Video File Upload
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // ── Plate loading ────────────────────────────────────────────────────────
+  // A freshly uploaded plate gets one automatic camera solve. Remounts, view
+  // switches, and reloads must NOT re-solve (that would overwrite the user's
+  // camera edits), so the pending URL is tracked explicitly.
+  const pendingAutoSolveUrlRef = useRef<string | null>(null);
 
-    const url = URL.createObjectURL(file);
-    updateVfxReference({
-      enabled: true,
-      videoUrl: url,
-      fileName: file.name,
-    });
-
-    if (videoRef.current) {
-      videoRef.current.src = url;
-      videoRef.current.load();
-      videoRef.current.onloadeddata = async () => {
-        updateAllPassCanvases(true);
-        try {
-          const result = await analyzeVideoPlate(videoRef.current!);
-          setCameraMovement(result.detectedCameraMovement, result.detectedSpeed);
-        } catch (err) {
-          console.error('Auto analysis error:', err);
-        }
-      };
+  /** Revoke a plate blob URL only if it isn't the store-owned previs render. */
+  const releaseOwnedPlateUrl = (url: string | undefined) => {
+    if (url && url.startsWith('blob:') && url !== previsVideoUrl) {
+      URL.revokeObjectURL(url);
     }
   };
 
-  // Switch to Sample Plate
-  const handleSelectSample = (sample: (typeof SAMPLE_PLATES)[0]) => {
+  const loadPlate = (url: string, fileName: string, autoSolve: boolean) => {
+    releaseOwnedPlateUrl(shot.vfxReference?.videoUrl);
+    pendingAutoSolveUrlRef.current = autoSolve ? url : null;
+    updateVfxReference({ enabled: true, videoUrl: url, fileName });
+    setViewMode('reference');
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset so re-selecting the same file still fires onChange.
+    e.target.value = '';
+    if (!file) return;
+    loadPlate(URL.createObjectURL(file), file.name, true);
+  };
+
+  const handleUsePrevisAsPlate = () => {
+    if (!previsVideoUrl) return;
+    // No auto-solve: the previs camera already IS the shot camera.
+    loadPlate(previsVideoUrl, `${shot.name.replace(/\s+/g, '_')}_3D_Previs`, false);
+  };
+
+  const clearVideoPlate = () => {
+    releaseOwnedPlateUrl(shot.vfxReference?.videoUrl);
+    pendingAutoSolveUrlRef.current = null;
     updateVfxReference({
-      enabled: true,
-      videoUrl: sample.url,
-      fileName: sample.name,
+      videoUrl: undefined,
+      fileName: undefined,
+      enabled: false,
+      depthPreviewUrl: undefined,
+      edgePreviewUrl: undefined,
+      solvedCameraMove: undefined,
     });
-    if (videoRef.current) {
-      videoRef.current.src = sample.url;
-      videoRef.current.load();
+  };
+
+  const handlePlateLoadedData = async () => {
+    updateAllPassCanvases(true);
+    const url = shot.vfxReference?.videoUrl;
+    if (!url || pendingAutoSolveUrlRef.current !== url) return;
+    pendingAutoSolveUrlRef.current = null;
+
+    try {
+      // Analyse on a detached element so the visible plate isn't seeked around.
+      const probe = document.createElement('video');
+      probe.muted = true;
+      probe.crossOrigin = 'anonymous';
+      probe.src = url;
+      await new Promise<void>((resolve, reject) => {
+        probe.onloadedmetadata = () => resolve();
+        probe.onerror = () => reject(new Error('Failed to load plate for camera solve.'));
+      });
+      const result = await analyzeVideoPlate(probe);
+      setCameraMovement(result.detectedCameraMovement, result.detectedSpeed);
+      logger.success(
+        `Camera solve from "${shot.vfxReference?.fileName ?? 'plate'}": ${result.detectedCameraMovement} (${result.detectedSpeed}).`
+      );
+    } catch (err) {
+      logger.error('Automatic camera solve failed.', err);
     }
   };
 
@@ -612,22 +546,66 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     });
   }, [duration, formatTimecode]);
 
-  // Capture Snapshot
+  // Capture Snapshot — grabs exactly what the left viewport is showing.
   const handleTakeSnapshot = () => {
+    const container = leftViewportRef.current;
+    if (!container) return;
+
+    let source: CanvasImageSource | null = null;
+    let w = 0;
+    let h = 0;
+    const showingPlate = !isConstruct3D && viewMode === 'reference';
+
+    if (showingPlate) {
+      const video = videoRef.current;
+      const img = container.querySelector('img');
+      if (shot.vfxReference?.videoUrl && video && video.readyState >= 2) {
+        source = video;
+        w = video.videoWidth;
+        h = video.videoHeight;
+      } else if (img && img.complete && img.naturalWidth > 0) {
+        source = img;
+        w = img.naturalWidth;
+        h = img.naturalHeight;
+      }
+    } else {
+      // The viewfinder renderer uses preserveDrawingBuffer, so its canvas is readable.
+      const vf = container.querySelector<HTMLCanvasElement>('canvas[data-role="viewfinder"]');
+      if (vf && vf.width > 0 && vf.height > 0) {
+        source = vf;
+        w = vf.width;
+        h = vf.height;
+      }
+    }
+
+    if (!source || !w || !h) {
+      logger.warn('Snapshot unavailable: nothing is rendered in the viewport yet.');
+      return;
+    }
+
     const canvas = document.createElement('canvas');
-    canvas.width = 1920;
-    canvas.height = 1080;
+    canvas.width = w;
+    canvas.height = h;
     const ctx = canvas.getContext('2d');
-    if (ctx) {
-      drawProceduralCinematicFrame(currentTime, ctx, 1920, 1080);
+    if (!ctx) return;
+
+    try {
+      ctx.drawImage(source, 0, 0, w, h);
       canvas.toBlob((blob) => {
-        if (blob) {
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = `directors_snapshot_${shotTitle.replace(/\s+/g, '_')}_${currentTime.toFixed(2)}s.jpg`;
-          a.click();
+        if (!blob) {
+          logger.error('Snapshot failed: the frame could not be encoded.');
+          return;
         }
-      }, 'image/jpeg', 0.95);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `snapshot_${shotTitle.replace(/\s+/g, '_')}_${currentTime.toFixed(2)}s.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }, 'image/png');
+    } catch (err) {
+      // toBlob throws SecurityError on a tainted (cross-origin) canvas.
+      logger.error('Snapshot failed: the source cannot be read (cross-origin).', err);
     }
   };
 
@@ -741,8 +719,10 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
       {/* 2. Upper Dual Viewport (Side-by-Side: Viewfinder/Reference | 3D Soundstage) */}
       <div className="grid grid-cols-2 gap-1.5 p-1.5 bg-[#090b10] flex-1 min-h-0">
         {/* Left Viewport: Through-the-Lens Viewfinder (Construct mode) OR Reference Video (Video Plate mode) */}
-        <div className="relative flex flex-col h-full w-full rounded-lg bg-[#000000] border border-white/10 overflow-hidden min-h-0 min-w-0 group">
-          {/* Badge */}
+        <div
+          ref={leftViewportRef}
+          className="relative flex flex-col h-full w-full rounded-lg bg-[#000000] border border-white/10 overflow-hidden min-h-0 min-w-0 group"
+        >
           <div className="absolute top-2.5 left-2.5 z-20 flex items-center gap-2">
             <span className="rounded bg-black/70 backdrop-blur-md px-2 py-0.5 font-mono text-[9px] font-semibold text-slate-200 border border-white/10">
               {isConstruct3D ? 'Viewfinder (POV Camera)' : viewMode === 'reference' ? 'Reference Plate' : 'Viewfinder (POV)'}
@@ -763,23 +743,26 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
           </div>
 
           {/* Video Plate controls if in video-plate mode */}
-          {!isConstruct3D && (
+          {!isConstruct3D && hasVideoPlate && (
             <div className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5 opacity-80 hover:opacity-100 transition-opacity">
-              <select
-                onChange={(e) => {
-                  const sample = SAMPLE_PLATES.find((s) => s.name === e.target.value);
-                  if (sample) handleSelectSample(sample);
-                }}
-                defaultValue=""
-                className="rounded bg-black/70 border border-white/15 px-2 py-0.5 font-mono text-[9px] text-slate-300 cursor-pointer"
+              {previsVideoUrl && shot.vfxReference?.videoUrl !== previsVideoUrl && (
+                <button
+                  onClick={handleUsePrevisAsPlate}
+                  className="flex items-center gap-1 rounded bg-black/70 border border-white/15 px-2 py-0.5 font-mono text-[9px] text-slate-300 hover:text-white"
+                  title="Replace the plate with the 3D previs rendered in this session"
+                >
+                  <Film className="h-3 w-3" />
+                  Use Rendered Previs
+                </button>
+              )}
+              <button
+                onClick={clearVideoPlate}
+                className="flex items-center gap-1 rounded bg-black/70 border border-white/15 px-2 py-0.5 font-mono text-[9px] text-slate-300 hover:text-rose-300"
+                title="Remove the video plate from this shot"
               >
-                <option value="" disabled>Load Demo Plate...</option>
-                {SAMPLE_PLATES.map((s) => (
-                  <option key={s.name} value={s.name}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
+                <Trash2 className="h-3 w-3" />
+                Clear Plate
+              </button>
             </div>
           )}
 
@@ -805,7 +788,14 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                 loop
                 muted
                 playsInline
-                className="h-full w-full object-cover"
+                onLoadedData={handlePlateLoadedData}
+                onSeeked={() => updateAllPassCanvases(true)}
+                onError={() =>
+                  logger.error(
+                    `Video plate "${shot.vfxReference?.fileName ?? ''}" could not be loaded. If the app was reloaded, re-upload the file (plates are not yet stored with the project).`
+                  )
+                }
+                className="h-full w-full object-contain"
               />
             ) : shot.referenceImage?.previewUrl ? (
               <div className="relative h-full w-full flex items-center justify-center bg-black">
@@ -828,27 +818,36 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                 </div>
               </div>
             ) : (
-              <div className="relative h-full w-full flex items-center justify-center">
-                <canvas
-                  ref={onscreenCanvasRef}
-                  width={640}
-                  height={360}
-                  className="h-full w-full object-cover"
-                />
-                <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2">
-                  <button
-                    onClick={() => handleSelectSample(SAMPLE_PLATES[0])}
-                    className="flex items-center gap-1 rounded bg-teal-600/90 hover:bg-teal-600 px-2.5 py-1 font-mono text-[9px] font-bold text-white shadow-md transition-all"
-                  >
-                    <Film className="h-3 w-3" />
-                    Load Demo Film Plate
-                  </button>
+              <div className="relative h-full w-full flex flex-col items-center justify-center gap-3 p-6 text-center">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-teal-500/10 border border-teal-500/30 text-teal-300">
+                  <Film className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-display text-xs font-bold text-white">No video plate loaded</p>
+                  <p className="mt-1 max-w-xs font-mono text-[10px] text-slate-400">
+                    Upload a reference clip to solve its camera move and preview CV passes, or use the 3D previs you rendered.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-2">
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-1 rounded bg-white/10 hover:bg-white/20 px-2.5 py-1 font-mono text-[9px] text-slate-300 transition-all"
+                    className="flex items-center gap-1 rounded bg-teal-600/90 hover:bg-teal-600 px-2.5 py-1 font-mono text-[10px] font-bold text-white shadow-md transition-all"
                   >
                     <Upload className="h-3 w-3" />
-                    Upload MP4
+                    Upload Video
+                  </button>
+                  <button
+                    onClick={handleUsePrevisAsPlate}
+                    disabled={!previsVideoUrl}
+                    className="flex items-center gap-1 rounded bg-white/10 hover:bg-white/20 px-2.5 py-1 font-mono text-[10px] text-slate-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white/10"
+                    title={
+                      previsVideoUrl
+                        ? 'Use the 3D previs rendered in this session as the plate'
+                        : 'Render the 3D previs first (timeline → "Render 3D Previs")'
+                    }
+                  >
+                    <Film className="h-3 w-3" />
+                    Use Rendered Previs
                   </button>
                 </div>
               </div>
@@ -897,7 +896,12 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
 
       {/* 3. Lower Section: 5 CV Video Passes (in video-plate mode) OR Staged Objects Status Deck (in construct-3d mode) */}
       {!isConstruct3D ? (
-        <div className="h-28 shrink-0 border-t border-b border-white/10 bg-[#06070a] p-1">
+        <div className="relative h-28 shrink-0 border-t border-b border-white/10 bg-[#06070a] p-1">
+          {!hasVideoPlate && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-[#06070a]/80 font-mono text-[10px] text-slate-400 pointer-events-none">
+              CV pass previews appear here once a video plate is loaded.
+            </div>
+          )}
           <div className="grid grid-cols-5 gap-1 h-full">
             {/* Tile 1: Pose (Actor) */}
             <div className="relative flex flex-col rounded bg-black border border-white/10 overflow-hidden group">
@@ -1676,33 +1680,6 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
           </div>
         )}
 
-        {activeTool === 'filters' && (
-          <div className="flex items-center justify-between bg-[#111420] border border-blue-500/30 rounded-md px-3 py-1.5 font-mono text-[10px]">
-            <span className="text-blue-400 font-bold">Cinematic Color Grade LUT:</span>
-            <div className="flex items-center gap-1.5">
-              {[
-                { id: 'standard', name: 'Rec.709 Standard' },
-                { id: 'teal-orange', name: 'Teal & Orange' },
-                { id: 'noir', name: 'Film Noir 1940s' },
-                { id: 'cyberpunk', name: 'Cyberpunk Neon' },
-                { id: 'bleach', name: 'Bleach Bypass' },
-              ].map((f) => (
-                <button
-                  key={f.id}
-                  onClick={() => setColorFilter(f.id as CinematicFilter)}
-                  className={`rounded px-2.5 py-1 transition-all ${
-                    colorFilter === f.id
-                      ? 'bg-blue-600 text-white font-bold shadow-sm'
-                      : 'bg-white/5 text-slate-300 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  {f.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
         {activeTool === 'trim' && (
           <div className="flex items-center justify-between bg-[#111420] border border-blue-500/30 rounded-md px-3 py-1.5 font-mono text-[10px]">
             <div className="flex items-center gap-3">
@@ -1730,7 +1707,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
           </div>
         )}
 
-        {/* Tool Action Buttons (Trim, Markers, Filters) */}
+        {/* Tool Action Buttons (Trim, Markers) */}
         <div className="flex items-center justify-center gap-2 pt-0.5 font-mono text-[10px]">
           <button
             onClick={() => setActiveTool(activeTool === 'trim' ? null : 'trim')}
@@ -1751,16 +1728,6 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
           >
             <Bookmark className="h-3 w-3" />
             <span>Keyframe Cues ({markers.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTool(activeTool === 'filters' ? null : 'filters')}
-            className={`flex items-center gap-1.5 rounded px-3 py-1 font-semibold transition-all ${
-              activeTool === 'filters' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white/5 hover:bg-white/10 text-slate-300'
-            }`}
-            title="Toggle Cinematic Color Grade LUT"
-          >
-            <Filter className="h-3 w-3" />
-            <span>Color LUT</span>
           </button>
         </div>
       </div>

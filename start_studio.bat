@@ -1,10 +1,10 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title AI Director Studio
+title ComfyUI Motion Previs Studio
 
 echo =====================================================================
-echo                 AI DIRECTOR STUDIO - LAUNCHER
+echo              COMFYUI MOTION PREVIS STUDIO - LAUNCHER
 echo               "Direct the Shot, Not the Prompt"
 echo =====================================================================
 echo.
@@ -38,20 +38,21 @@ if not exist "node_modules\" (
 curl -s --connect-timeout 2 http://127.0.0.1:8188/system_stats >nul 2>nul
 if errorlevel 1 (
     echo [NOTICE] ComfyUI server is offline on port 8188.
-    echo          Studio will operate in Mock Engine mode.
+    echo          You can still block shots and render previs; start ComfyUI
+    echo          before generating video.
 ) else (
     echo [OK] Local ComfyUI server detected online on http://127.0.0.1:8188
 )
 
 echo.
 echo =====================================================================
-echo Launching AI Director Studio at http://localhost:5173
+echo Launching ComfyUI Motion Previs Studio at http://127.0.0.1:5173
 echo Press Ctrl+C in this terminal window to stop the studio.
 echo =====================================================================
 echo.
 
 :: 4. Automatically open browser after 2 seconds in background
-start "" cmd /c "timeout /t 2 /nobreak >nul && start http://localhost:5173"
+start "" cmd /c "timeout /t 2 /nobreak >nul && start http://127.0.0.1:5173"
 
 :: 5. Start the Vite dev server
 call npm run dev

@@ -21,7 +21,6 @@ import {
   Download,
   FileText,
   LayoutGrid,
-  Film,
 } from 'lucide-react';
 
 type PreviewTab = 'plate' | 'depth' | 'edge' | 'camera' | 'quad';
@@ -76,24 +75,23 @@ export const VFXVideoDeck: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const handleLoadDemoPlate = () => {
-    updateVfxReference({
-      videoUrl: '/mock_preview.mp4',
-      fileName: 'Cinematic_Action_Plate_1080p.mp4',
-      enabled: true,
-      referenceMode: 'full-scene',
-      depthGuidanceWeight: 0.75,
-      edgeFidelity: 0.6,
-      motionRetention: 0.7,
-    });
-    setAnalysisResult(null);
+  /**
+   * Release a plate URL only if this deck owns it. The rendered previs blob
+   * belongs to the shot store (and is shared with the Stage), so revoking it
+   * here would break the previs video everywhere else in the app.
+   */
+  const releaseOwnedPlateUrl = (url: string | undefined) => {
+    if (url && url.startsWith('blob:') && url !== previsVideoUrl) {
+      URL.revokeObjectURL(url);
+    }
   };
 
   const handleLoadPrevisVideo = () => {
     if (!previsVideoUrl) return;
+    releaseOwnedPlateUrl(vfx?.videoUrl);
     updateVfxReference({
       videoUrl: previsVideoUrl,
-      fileName: `${shot.name.replace(/\s+/g, '_')}_3D_Previs.mp4`,
+      fileName: `${shot.name.replace(/\s+/g, '_')}_3D_Previs`,
       enabled: true,
       referenceMode: 'full-scene',
       depthGuidanceWeight: 0.8,
@@ -105,8 +103,11 @@ export const VFXVideoDeck: React.FC = () => {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset so selecting the same file again still fires onChange.
+    e.target.value = '';
     if (!file) return;
 
+    releaseOwnedPlateUrl(vfx?.videoUrl);
     const url = URL.createObjectURL(file);
     updateVfxReference({
       videoUrl: url,
@@ -203,9 +204,7 @@ export const VFXVideoDeck: React.FC = () => {
   };
 
   const clearPlate = () => {
-    if (vfx?.videoUrl) {
-      URL.revokeObjectURL(vfx.videoUrl);
-    }
+    releaseOwnedPlateUrl(vfx?.videoUrl);
     updateVfxReference({
       videoUrl: undefined,
       fileName: undefined,
@@ -276,22 +275,18 @@ export const VFXVideoDeck: React.FC = () => {
           <div className="flex flex-wrap items-center justify-center gap-2 z-10" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
-              onClick={handleLoadDemoPlate}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-600/80 hover:bg-teal-600 text-white font-mono text-[10px] font-bold shadow-md transition-all hover:scale-105"
+              onClick={handleLoadPrevisVideo}
+              disabled={!previsVideoUrl}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/80 hover:bg-blue-600 text-white font-mono text-[10px] font-bold shadow-md transition-all hover:scale-105 disabled:opacity-40 disabled:hover:scale-100 disabled:hover:bg-blue-600/80 disabled:cursor-not-allowed"
+              title={
+                previsVideoUrl
+                  ? 'Use the 3D previs you rendered in this session as the plate'
+                  : 'Render the 3D previs first (Stage timeline → "Render 3D Previs")'
+              }
             >
-              <Film className="h-3 w-3" />
-              <span>Load Demo Film Plate</span>
+              <Sparkles className="h-3 w-3 text-cyan-300" />
+              <span>Use Rendered 3D Previs</span>
             </button>
-            {previsVideoUrl && (
-              <button
-                type="button"
-                onClick={handleLoadPrevisVideo}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/80 hover:bg-blue-600 text-white font-mono text-[10px] font-bold shadow-md transition-all hover:scale-105"
-              >
-                <Sparkles className="h-3 w-3 text-cyan-300" />
-                <span>Analyze Rendered 3D Previs Video</span>
-              </button>
-            )}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}

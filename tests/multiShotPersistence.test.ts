@@ -1,31 +1,16 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useShotStore } from '../src/stores/useShotStore';
 import { buildDefaultShotSpec, ShotBibleItem } from '../src/components/ShotBible';
-
-const createLocalStorageMock = () => {
-  let store: Record<string, string> = {};
-  return {
-    getItem: (key: string) => store[key] || null,
-    setItem: (key: string, value: string) => {
-      store[key] = value.toString();
-    },
-    removeItem: (key: string) => {
-      delete store[key];
-    },
-    clear: () => {
-      store = {};
-    },
-  };
-};
-
-if (!globalThis.localStorage || typeof globalThis.localStorage.clear !== 'function') {
-  globalThis.localStorage = createLocalStorageMock() as any;
-}
+import { installMemoryStorage } from './helpers/memoryStorage';
 
 describe('Multi-Shot State Persistence & Shot Bible Switching', () => {
   beforeEach(() => {
-    globalThis.localStorage.clear();
+    installMemoryStorage();
     useShotStore.getState().resetToDefault();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('preserves custom actor changes and camera position when switching between shots', () => {

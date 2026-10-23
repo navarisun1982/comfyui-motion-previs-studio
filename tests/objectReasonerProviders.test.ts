@@ -16,20 +16,7 @@ import {
   setReasonerConfig,
   ObjectReasonerError,
 } from '../src/services/objectReasoner';
-
-const memoryStorage = () => {
-  const m = new Map<string, string>();
-  return {
-    getItem: (k: string) => m.get(k) ?? null,
-    setItem: (k: string, v: string) => void m.set(k, String(v)),
-    removeItem: (k: string) => void m.delete(k),
-    clear: () => m.clear(),
-    key: (i: number) => [...m.keys()][i] ?? null,
-    get length() {
-      return m.size;
-    },
-  };
-};
+import { installMemoryStorage } from './helpers/memoryStorage';
 
 const cfg = (provider: keyof typeof PROVIDERS, over: Partial<ReasonerConfig> = {}): ReasonerConfig => ({
   provider,
@@ -55,7 +42,7 @@ const chairGraph = {
 };
 
 beforeEach(() => {
-  vi.stubGlobal('localStorage', memoryStorage());
+  installMemoryStorage();
 });
 afterEach(() => {
   vi.unstubAllGlobals();

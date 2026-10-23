@@ -19,3 +19,10 @@ dist-ssr
 # OS
 .DS_Store
 Thumbs.db
+
+# Build / tooling artifacts
+*.tsbuildinfo
+coverage/
+
+# Dev probe outputs (scripts/dev/probe_reasoner.ts)
+scripts/**/out_*.json

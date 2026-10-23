@@ -2,6 +2,14 @@ const { app, BrowserWindow, Menu, nativeTheme, shell, session } = require('elect
 const path = require('path');
 const http = require('http');
 
+const APP_TITLE = 'ComfyUI Motion Previs Studio';
+
+// Pin the userData directory to the pre-rename folder. Electron derives it from
+// package.json productName/name, so renaming the package would otherwise start
+// with an empty profile and silently orphan every saved shot in localStorage.
+// S2 (project files) migrates this data out; until then, keep this pin.
+app.setPath('userData', path.join(app.getPath('appData'), 'comfy-ai-director-studio'));
+
 let mainWindow = null;
 
 nativeTheme.themeSource = 'dark';
@@ -12,7 +20,7 @@ function createWindow() {
     height: 940,
     minWidth: 1100,
     minHeight: 720,
-    title: 'AI Director Studio · Direct the Shot, Not the Prompt',
+    title: APP_TITLE,
     backgroundColor: '#08090C',
     autoHideMenuBar: true,
     show: false,
@@ -91,7 +99,7 @@ function createWindow() {
     } else {
       mainWindow.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`
         <body style="background:#08090C;color:#f3f4f6;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;">
-          <h2 style="color:#60a5fa;margin-bottom:8px;">AI Director Studio</h2>
+          <h2 style="color:#60a5fa;margin-bottom:8px;">${APP_TITLE}</h2>
           <p style="color:#9ca3af;margin-bottom:16px;">Production build not found. Please run <code>npm run build</code> first.</p>
         </body>
       `));

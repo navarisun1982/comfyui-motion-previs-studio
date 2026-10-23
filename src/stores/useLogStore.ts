@@ -37,8 +37,12 @@ export const useLogStore = create<LogState>((set, get) => ({
       timeStr: new Date().toLocaleTimeString() + '.' + String(Date.now() % 1000).padStart(3, '0'),
       category: 'SYSTEM',
       level: 'info',
-      message: 'AI Director Studio engine initialized in desktop environment.',
-      details: { version: '1.0.0', platform: 'win32', renderer: 'React 19 / Vite' },
+      message: `ComfyUI Motion Previs Studio started (${
+        typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent) ? 'desktop' : 'browser'
+      }).`,
+      details: {
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'n/a',
+      },
     },
   ],
   isOpen: false,
