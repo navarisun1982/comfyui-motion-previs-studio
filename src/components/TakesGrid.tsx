@@ -1,11 +1,13 @@
 import React, { useState, useRef } from 'react';
-import { ShotRevisionV2 } from '../pipeline/revisionTypes';
+import { ShotRevisionV2, DirectorialSteeringPatch } from '../pipeline/revisionTypes';
 import { useHistoryStore } from '../stores/useHistoryStore';
 import { useShotStore } from '../stores/useShotStore';
 import { useQueueStore } from '../stores/useQueueStore';
 import { useComfyStore } from '../stores/useComfyStore';
 import { QualityProfile, GenerationMode } from '../pipeline/templateTypes';
 import { TakeComparisonModal } from './TakeComparisonModal';
+import { DirectorialSteeringModal } from './DirectorialSteeringModal';
+import { generateDirectorialSteeringPatch } from '../engine/directorialSteeringEngine';
 import {
   Film,
   Star,
@@ -17,6 +19,7 @@ import {
   Loader2,
   XCircle,
   Compass,
+  Wand2,
 } from 'lucide-react';
 import { MotionFidelityOverlay } from './MotionFidelityOverlay';
 import { analyzeVideoMotionFidelity } from '../engine/motionFidelityAnalyzer';
@@ -49,6 +52,10 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const [analyzingTakeId, setAnalyzingTakeId] = useState<string | null>(null);
   const [analysisProgress, setAnalysisProgress] = useState<number>(0);
+  const [steeringModalTarget, setSteeringModalTarget] = useState<{
+    take: ShotRevisionV2;
+    patch: DirectorialSteeringPatch;
+  } | null>(null);
 
   // A/B comparison selection state
   const [selectedForCompareId, setSelectedForCompareId] = useState<string | null>(null);
@@ -175,6 +182,13 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
       setAnalyzingTakeId(null);
       setAnalysisProgress(0);
     }
+  };
+
+  const handleAutoSteer = (take: ShotRevisionV2) => {
+    const { patch } = generateDirectorialSteeringPatch(take, {
+      currentIcLoraStrength: icLoraStrength,
+    });
+    setSteeringModalTarget({ take, patch });
   };
 
   return (
@@ -382,7 +396,7 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
               >
                 {/* Take Card Header */}
                 <div className="flex items-center justify-between px-3 py-2 bg-black/60 border-b border-white/5 font-mono text-[10px]">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-display font-bold text-xs text-white">
                       Take {take.takeNumber ?? take.version}
                     </span>
@@ -392,6 +406,19 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
                         CIRCLED HERO
                       </span>
                     )}
+                    {take.steeredFromTakeId && (() => {
+                      const src = revisions.find((r) => r.id === take.steeredFromTakeId);
+                      const delta = (take.motionFidelity?.overallScore ?? 0) - (src?.motionFidelity?.overallScore ?? 0);
+                      return (
+                        <span
+                          className="flex items-center gap-1 rounded bg-indigo-500/20 px-1.5 py-0.5 font-mono text-[8px] font-bold text-indigo-300 border border-indigo-500/30"
+                          title={`Steered from Take ${src?.takeNumber ?? src?.version ?? '?'}`}
+                        >
+                          <Wand2 className="h-2.5 w-2.5" />
+                          <span>STEERED {take.motionFidelity && src?.motionFidelity && delta > 0 ? `(+${delta}%)` : ''}</span>
+                        </span>
+                      );
+                    })()}
                   </div>
 
                   <div className="flex items-center gap-1">
@@ -432,7 +459,10 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
                         className="h-full w-full object-contain"
                       />
                       {take.motionFidelity && (
-                        <MotionFidelityOverlay analysis={take.motionFidelity} />
+                        <MotionFidelityOverlay
+                          analysis={take.motionFidelity}
+                          onAutoSteer={() => handleAutoSteer(take)}
+                        />
                       )}
                     </>
                   ) : (
@@ -457,8 +487,8 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
                     </span>
                   </div>
 
-                  {/* Motion Fidelity Status & Trigger */}
-                  <div className="flex items-center justify-between font-mono text-[9px] pt-1 border-t border-white/5">
+                  {/* Motion Fidelity Status & Auto-Steering Trigger */}
+                  <div className="flex items-center justify-between font-mono text-[9px] pt-1 border-t border-white/5 flex-wrap gap-1">
                     <span className="text-slate-400">Motion Fidelity:</span>
                     {take.motionFidelity ? (
                       <div className="flex items-center gap-1.5">
@@ -483,26 +513,44 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
                         >
                           {analyzingTakeId === take.id ? `${analysisProgress}%` : 'Re-score'}
                         </button>
+                        <button
+                          onClick={() => handleAutoSteer(take)}
+                          className="flex items-center gap-1 rounded bg-director-gold/20 hover:bg-director-gold/30 text-director-gold border border-director-gold/40 px-2 py-0.5 text-[9px] font-bold transition-all cursor-pointer shadow-sm active:scale-95 ml-1"
+                          title="Open Closed-Loop Auto-Steering to correct drift"
+                        >
+                          <Wand2 className="h-3 w-3" />
+                          <span>Auto-Steer</span>
+                        </button>
                       </div>
                     ) : (
-                      <button
-                        onClick={() => handleAnalyzeMotion(take)}
-                        disabled={analyzingTakeId === take.id || !take.outputVideoUrl}
-                        className="flex items-center gap-1 rounded bg-director-gold/15 hover:bg-director-gold/25 text-director-gold border border-director-gold/30 px-2 py-0.5 font-bold transition-all cursor-pointer disabled:opacity-50"
-                        title="Run optical flow analysis against directed 3D camera trajectory"
-                      >
-                        {analyzingTakeId === take.id ? (
-                          <>
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            <span>Scoring ({analysisProgress}%)...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Compass className="h-3 w-3" />
-                            <span>Score Motion Fidelity</span>
-                          </>
-                        )}
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => handleAnalyzeMotion(take)}
+                          disabled={analyzingTakeId === take.id || !take.outputVideoUrl}
+                          className="flex items-center gap-1 rounded bg-director-gold/15 hover:bg-director-gold/25 text-director-gold border border-director-gold/30 px-2 py-0.5 font-bold transition-all cursor-pointer disabled:opacity-50"
+                          title="Run optical flow analysis against directed 3D camera trajectory"
+                        >
+                          {analyzingTakeId === take.id ? (
+                            <>
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              <span>Scoring ({analysisProgress}%)...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Compass className="h-3 w-3" />
+                              <span>Score Motion</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => handleAutoSteer(take)}
+                          className="flex items-center gap-1 rounded bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 px-2 py-0.5 text-[9px] font-semibold transition-all cursor-pointer"
+                          title="Open Closed-Loop Steering"
+                        >
+                          <Wand2 className="h-3 w-3" />
+                          <span>Steer</span>
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -553,6 +601,18 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
           takeA={compareModalPair.takeA}
           takeB={compareModalPair.takeB}
           onClose={() => setCompareModalPair(null)}
+        />
+      )}
+
+      {/* CLOSED-LOOP DIRECTORIAL AUTO-STEERING MODAL */}
+      {steeringModalTarget && (
+        <DirectorialSteeringModal
+          sourceTake={steeringModalTarget.take}
+          patch={steeringModalTarget.patch}
+          currentProfile={currentProfile}
+          currentMode={currentMode}
+          onClose={() => setSteeringModalTarget(null)}
+          onNotice={onNotice}
         />
       )}
     </div>

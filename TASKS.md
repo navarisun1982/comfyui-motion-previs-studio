@@ -15,9 +15,9 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S5 Performance | `stage/05-performance` | ✅ merged to master (`9a602b5`) | Smooth 60 FPS drag; main chunk 606 kB (down from 1.76 MB); 2 WebGL contexts |
 | S6 UX overhaul | `stage/06-ux-overhaul` | ✅ merged to master (`4094de4`, `eddcb9f`) | Clean at 1280×720 / 1440×900 / 1920×1080 / 2560×1440; responsive sidebars |
 | S7 Takes + queue | `stage/07-takes-queue` | ✅ merged to master (`b3d3faf`) | Multi-seed take generator, queue runner, contact sheet, circling hero takes, and A/B comparison |
-| S8 Motion fidelity | `stage/08-motion-fidelity` | ⬜ | (grill first) |
-| S9 NL → ShotSpec | `stage/09-nl-shotspec` | ⬜ | (grill first) |
-| S10 Sequence | `stage/10-sequence` | ⬜ | (grill first) |
+| S8 Motion fidelity | `stage/08-motion-fidelity` | ✅ merged to master (`f8e3781`) | Optical flow vector analyzer, directional & speed fidelity scoring, visual vector overlay HUD, A/B motion diffing |
+| S9 Closed-loop steering | `stage/09-closed-loop-steering` | 🟡 ready for review & merge | Optical-flow-driven compensatory patches, prompt auto-correction, IC-LoRA modulation, steering modal, lineage tracking |
+| S10 Sequence / Assembly | `stage/10-sequence` | ⬜ | (grill first) |
 
 ## S4 checklist (Geometric Conditioning — "Direct the Shot, Not the Prompt")
 
@@ -176,6 +176,33 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 - [x] Unit test suite (`tests/motionFidelity.test.ts`): 13 tests covering expected vector mapping, speed scaling, motion classification, block matching, scoring, drift detection, static shot penalties, and store persistence
 - [x] Full validation: 28 test files, 186/186 tests passing in 4.8s; production build green with 0 errors in 10.2s; in-browser UI verified via subagent
 - [x] Owner approval → merge `stage/08-motion-fidelity` to `master` (`f8e3781`)
+
+## S9 checklist (Closed-Loop Directorial Auto-Steering & Prompt Auto-Correction)
+
+- [x] Closed-Loop Directorial Steering Engine (`src/engine/directorialSteeringEngine.ts`):
+  - Inferred root-cause diagnosis from optical flow classification and vector divergence (`drift`, `static_drift`, `velocity_mismatch`, `subtle_drift`)
+  - Compensatory positive prompt verb reinforcements with cinematic action clauses and weighted emphasis (e.g. `(deliberate camera pan-left, steady pan-left tracking shot:1.35)`)
+  - Counter-steering negative prompt anti-motion token suppression (e.g. suppressing opposite drift vectors like `camera pan right` or static frames)
+  - Geometric IC-LoRA conditioning modulation (+0.20–0.25x boost to lock background geometry to 3D previs)
+  - Deterministic RNG seed offsetting to escape drift attractor basins
+  - Pure helper functions `applySteeringPatchToShot` and `calculateFidelityImprovement`
+- [x] Directorial Closed-Loop Auto-Steering Modal (`src/components/DirectorialSteeringModal.tsx`):
+  - Diagnostic context card displaying source take fidelity score, root cause analysis, and applied directives list
+  - Visual side-by-side diff comparing original vs steered positive and negative prompts
+  - IC-LoRA conditioning modulation and target RNG seed indicators
+  - Dual action buttons: "Apply to Active Shot" and "Apply & Queue Steered Re-Take"
+- [x] Queue & Lineage Integration:
+  - Extended `ShotRevisionV2` (`src/pipeline/revisionTypes.ts`) with `steeredFromTakeId` and `steeringPatch`
+  - Integrated `defaultGenerationQueue` (`src/pipeline/generationQueue.ts`) to forward steering provenance into created take revisions
+  - Added "STEERED (+XX%)" lineage badges on take cards in Takes Grid (`src/components/TakesGrid.tsx`)
+  - Interactive "Auto-Steer" button directly on take cards and optical flow overlay popover (`src/components/MotionFidelityOverlay.tsx`)
+  - Closed-loop steering comparison banner in A/B comparison modal (`src/components/TakeComparisonModal.tsx`)
+- [x] Unit test suite (`tests/directorialSteering.test.ts`):
+  - 8 comprehensive tests covering directional drift counter-steering, static camera locking, dolly push-in radial reinforcement, velocity amplification, seed offsetting, ShotSpec application, fidelity delta calculation, and queue lineage persistence
+- [x] Full validation:
+  - 29 test files, 194/194 tests passing in 4.89s (`npm run test`)
+  - Production build: `npm run build` completed with zero TypeScript errors and bundle created cleanly
+  - In-browser UI verified via subagent with recording `stage9_steering_verify_1792787404162.webp`
 
 ## Deferred findings (tracked for later stages)
 

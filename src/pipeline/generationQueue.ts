@@ -1,6 +1,7 @@
 import { ShotSpec, createDefaultShotSpec } from '../types/shotspec';
 import { EngineId, GenerationMode, QualityProfile } from './templateTypes';
 import { defaultJobRunner, ActiveJobHandle, ExecuteJobOptions } from './jobRunner';
+import { DirectorialSteeringPatch } from './revisionTypes';
 import { useHistoryStore } from '../stores/useHistoryStore';
 import { useComfyStore } from '../stores/useComfyStore';
 import { logger } from '../stores/useLogStore';
@@ -30,6 +31,8 @@ export interface QueueItem {
   outputVideoUrl?: string;
   outputFilename?: string;
   revisionId?: string;
+  steeredFromTakeId?: string;
+  steeringPatch?: DirectorialSteeringPatch;
   createdAt: number;
   completedAt?: number;
 }
@@ -50,6 +53,8 @@ export interface EnqueueBatchParams {
   controlVideoFilename?: string;
   icLora?: string;
   icLoraStrength?: number;
+  steeredFromTakeId?: string;
+  steeringPatch?: DirectorialSteeringPatch;
 }
 
 export type QueueListener = (items: QueueItem[], activeItem: QueueItem | null) => void;
@@ -136,6 +141,8 @@ export class GenerationQueueManager {
         controlVideoFilename: params.controlVideoFilename,
         icLora: params.icLora,
         icLoraStrength: params.icLoraStrength,
+        steeredFromTakeId: params.steeredFromTakeId,
+        steeringPatch: params.steeringPatch,
         status: 'queued',
         progress: 0,
         createdAt: Date.now() + i,
@@ -294,6 +301,23 @@ export class GenerationQueueManager {
           nextItem.outputFilename = filename;
           nextItem.completedAt = Date.now();
           comfyStore.setJobCompleted(videoUrl, filename);
+
+          // If this take was steered from a previous take, record lineage on the created revision
+          if (nextItem.steeredFromTakeId || nextItem.steeringPatch) {
+            const hStore = useHistoryStore.getState();
+            const updatedRevs = hStore.revisions.map((r) => {
+              if (r.id === revisionId) {
+                return {
+                  ...r,
+                  steeredFromTakeId: nextItem.steeredFromTakeId,
+                  steeringPatch: nextItem.steeringPatch,
+                };
+              }
+              return r;
+            });
+            useHistoryStore.setState({ revisions: updatedRevs });
+          }
+
           this.activeHandle = null;
           this.isProcessing = false;
           this.notify();
