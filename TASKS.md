@@ -17,7 +17,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S7 Takes + queue | `stage/07-takes-queue` | ✅ merged to master (`b3d3faf`) | Multi-seed take generator, queue runner, contact sheet, circling hero takes, and A/B comparison |
 | S8 Motion fidelity | `stage/08-motion-fidelity` | ✅ merged to master (`f8e3781`) | Optical flow vector analyzer, directional & speed fidelity scoring, visual vector overlay HUD, A/B motion diffing |
 | S9 Closed-loop steering | `stage/09-closed-loop-steering` | ✅ merged to master (`fc9865c`) | Optical-flow-driven compensatory patches, prompt auto-correction, IC-LoRA modulation, steering modal, lineage tracking |
-| S10 Sequence / Assembly | `stage/10-sequence` | 🟡 ready for review & merge | Multi-shot timeline, sequential playback, continuity & 180° rule checking, OTIO/EDL/FCPXML NLE exporters |
+| S10 Sequence / Assembly | `stage/10-sequence` | ✅ merged to master (`16d714f`) | Multi-shot timeline, sequential playback, continuity & 180° rule checking, OTIO/EDL/FCPXML NLE exporters |
 
 ## S4 checklist (Geometric Conditioning — "Direct the Shot, Not the Prompt")
 
@@ -237,6 +237,7 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
   - 30 test files, 209/209 tests passing in 5.00s (`npm run test`)
   - Production build: `npm run build` succeeded with 0 errors in 10.36s (SequenceTimelineDeck chunk emitted at 34.14 kB)
   - Browser verification verified via subagent with recording `stage10_sequence_assembly_1792788543682.webp`
+- [x] Owner approval → merge `stage/10-sequence` to `master` (`16d714f`)
 
 ## Deferred findings (tracked for later stages)
 
