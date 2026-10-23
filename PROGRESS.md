@@ -480,6 +480,34 @@ See the deferred table in [TASKS.md](TASKS.md).
    - Production build: `npm run build` completed in 10.65s with 0 errors and 0 warnings.
    - In-browser UI verification: verified via subagent with recording `verify_gltf_import_1792789985216.webp`.
 
+## 2026-10-24 — Removal of Arabic Words Across Interface (`fix/remove-arabic-interface-text`)
+
+**Goal:** Eliminate all Arabic text strings, labels, subtitles, and placeholders from user-facing interface elements to ensure a clean, professional English interface.
+
+### Accomplishments
+
+1. **3D Asset Library Modal (`src/components/AssetLibraryModal.tsx`):**
+   - Removed `labelAr` from category filter definitions.
+   - Replaced Arabic modal subtitle with clean English description: *"Curated 3D Asset Catalog • Full support for GLB/GLTF imports & procedural generation"*.
+   - Streamlined AI generation pipeline title to *"AI 3D Model Generation Pipeline"*.
+   - Replaced mixed-language input placeholder with English: *"Describe any 3D asset (e.g. green billiard table with pool balls / Victorian grandfather clock)..."*.
+   - Updated search input placeholder to English: *"Search 200+ assets (e.g. car, piano, tower, sword)..."*.
+   - Removed Arabic `nameAr` subtitles and `dir="rtl"` styling from all 231 asset cards, cleanly displaying the asset's token prompt or archetype details instead.
+
+2. **Previs Parameters Deck (`src/components/PrevisParametersDeck.tsx`):**
+   - Removed Arabic subtitle `({shot.environment?.nameAr || 'بلاتوه استوديو تصوير'})` from the Active Scene Setting header in the Environment tab.
+   - Removed Arabic `nameAr` label div from all 9 cinematic environment preset buttons.
+   - Removed Arabic translation `(تفكيك وإخراج المشهد بالكامل)` from the "Direct 3D Stage from Narrative" action button.
+
+3. **Motion Previs Stage (`src/components/MotionPrevisStage.tsx`):**
+   - Removed Arabic keywords from the custom bottom object input placeholder, updating it to *"Custom: Zodiac, Sports Car, Drone, Crate..."*.
+
+4. **Verification & Tests:**
+   - Full test suite: 31 test files, 215/215 tests passing in 5.07s (`npm run test`).
+   - Production build: `npm run build` completed in 10.43s with 0 errors and 0 warnings.
+   - In-browser UI verification: Verified via subagent (recording `verify_no_arabic_1792790821778.webp`, screenshot `3d_asset_library_clean_1792790859491.png`) confirming zero Arabic characters on the soundstage, environment controls, or asset cards.
+
+
 
 
 
