@@ -3,6 +3,7 @@ import { SubjectKind } from '../types/shotspec';
 import { reasonObject, ObjectReasonerError } from '../services/objectReasoner';
 import { PartGraph, registerPartGraph, removePartGraph } from '../engine/procedural3D/partGraph';
 import { safeGetItem, safeSetItem } from '../services/storage';
+import { registerModelFile, getModelBlobUrl } from '../services/modelStorage';
 
 export type AssetCategory =
   | 'all'
@@ -26,6 +27,7 @@ export interface Asset3DItem {
   tokenPrompt: string;
   kind: SubjectKind;
   modelUrl?: string; // Optional GLB/GLTF file URL or Data URI
+  modelId?: string; // Persistent model ID in IndexedDB / modelStorage
   isCustom?: boolean;
   scale?: number;
   source: 'curated' | 'uploaded' | 'ai-generated';
@@ -2617,11 +2619,41 @@ export const CURATED_3D_ASSETS: Asset3DItem[] = [
 const STORAGE_KEY = 'comfy_director_custom_3d_assets_v1';
 
 const getSafeCustomAssets = (): Asset3DItem[] => {
-  return safeGetItem<Asset3DItem[]>(STORAGE_KEY, []);
+  const loaded = safeGetItem<Asset3DItem[]>(STORAGE_KEY, []);
+  // Asynchronously rehydrate blob URLs for persisted models
+  if (typeof window !== 'undefined') {
+    setTimeout(async () => {
+      let changed = false;
+      const rehydrated = await Promise.all(
+        loaded.map(async (a) => {
+          if (a.modelId || (a.modelUrl && a.modelUrl.startsWith('model://'))) {
+            const key = a.modelId || a.modelUrl!;
+            const activeUrl = await getModelBlobUrl(key);
+            if (activeUrl && activeUrl !== a.modelUrl) {
+              changed = true;
+              return { ...a, modelUrl: activeUrl };
+            }
+          }
+          return a;
+        })
+      );
+      if (changed) {
+        useAssetLibraryStore.setState({ customAssets: rehydrated });
+      }
+    }, 100);
+  }
+  return loaded;
 };
 
 const persistCustomAssets = (assets: Asset3DItem[]) => {
-  safeSetItem(STORAGE_KEY, assets);
+  // Sanitize assets so we don't store megabytes of base64 in localStorage
+  const sanitized = assets.map((a) => {
+    if (a.modelUrl?.startsWith('blob:') && a.modelId) {
+      return { ...a, modelUrl: `model://${a.modelId}` };
+    }
+    return a;
+  });
+  safeSetItem(STORAGE_KEY, sanitized);
 };
 
 export interface AssetLibraryState {
@@ -2696,40 +2728,23 @@ export const useAssetLibraryStore = create<AssetLibraryState>((set, get) => {
     uploadGlbFile: async (file: File): Promise<Asset3DItem> => {
       set({ isUploading: true });
       try {
-        const fileBytes = file.size;
-        const fileSizeMB = (fileBytes / (1024 * 1024)).toFixed(1);
-        const fileNameClean = file.name.replace(/\.(glb|gltf)$/i, '');
-
-        // Convert File to Object URL / Data URI
-        const blobUrl = URL.createObjectURL(file);
-
-        // Attempt to create persistent Base64 Data URI if file <= 8MB for cross-session storage
-        let persistentUrl = blobUrl;
-        if (fileBytes <= 8 * 1024 * 1024) {
-          const buffer = await file.arrayBuffer();
-          let binary = '';
-          const bytes = new Uint8Array(buffer);
-          const len = bytes.byteLength;
-          for (let i = 0; i < len; i++) {
-            binary += String.fromCharCode(bytes[i]);
-          }
-          persistentUrl = `data:model/gltf-binary;base64,${btoa(binary)}`;
-        }
+        const registered = await registerModelFile(file);
 
         const newAsset: Asset3DItem = {
           id: `custom-glb-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          name: fileNameClean.charAt(0).toUpperCase() + fileNameClean.slice(1),
-          nameAr: fileNameClean,
+          name: registered.name,
+          nameAr: registered.name,
           category: 'custom',
-          kind: 'custom',
+          kind: 'prop',
           icon: '📦',
-          tokenPrompt: `an authentic 3D model of ${fileNameClean}`,
-          modelUrl: persistentUrl,
+          tokenPrompt: `an authentic 3D model of ${registered.name}`,
+          modelUrl: registered.blobUrl,
+          modelId: registered.modelId,
           isCustom: true,
           scale: 1.0,
           source: 'uploaded',
           createdAt: new Date().toLocaleDateString(),
-          fileSize: `${fileSizeMB} MB`,
+          fileSize: `${registered.sizeMB} MB`,
         };
 
         const next = [newAsset, ...get().customAssets];

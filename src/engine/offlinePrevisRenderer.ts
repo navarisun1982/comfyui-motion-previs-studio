@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { snapFrames } from '../pipeline/templateBinder';
+import { preloadGltfModels } from './gltfModelLoader';
 
 export interface PrevisRenderOptions {
   scene: THREE.Scene;
@@ -15,6 +16,7 @@ export interface PrevisRenderOptions {
   syncPositions: (time: number) => void;
   onProgress?: (progressPercent: number) => void;
   onFrame?: (frameIndex: number, totalFrames: number) => void;
+  modelUrls?: string[];
 }
 
 export interface PrevisRenderResult {
@@ -193,6 +195,7 @@ export async function renderOfflinePrevisPasses(
     syncPositions,
     onProgress,
     onFrame,
+    modelUrls,
   } = options;
 
   // 1. Calculate deterministic frame count
@@ -218,6 +221,11 @@ export async function renderOfflinePrevisPasses(
   renderer.getSize(prevSize);
 
   try {
+    // Ensure all 3D actor models are preloaded before recording frame canvases
+    if (modelUrls && modelUrls.length > 0) {
+      await preloadGltfModels(modelUrls);
+    }
+
     renderer.setSize(width, height, false);
 
     for (let f = 0; f < totalFrames; f++) {

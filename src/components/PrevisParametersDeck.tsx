@@ -33,6 +33,8 @@ import { generateConceptPrevisPlate } from '../engine/conceptPrevisGenerator';
 import { useAssetLibraryStore } from '../stores/useAssetLibraryStore';
 import { CINEMATIC_ENVIRONMENT_PRESETS } from '../types/environment';
 import { reasonEnvironment, reasonObject } from '../services/objectReasoner';
+import { registerModelFile } from '../services/modelStorage';
+import { preloadGltfModels } from '../engine/gltfModelLoader';
 import { decomposeDirectorialScene } from '../engine/directorialSceneDecomposer';
 import {
   generateBlenderCameraScript,
@@ -1076,6 +1078,63 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                             </>
                           )}
                         </button>
+                      </div>
+
+                      {/* 3D Model File (.GLB / .GLTF) */}
+                      <div className="pt-1.5 border-t border-white/5 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[9px] font-mono text-indigo-300 font-semibold flex items-center gap-1">
+                            <Box className="h-3 w-3 text-indigo-400" />
+                            3D Model File (.glb / .gltf)
+                          </span>
+                          {actor.modelUrl ? (
+                            <span className="text-[8px] font-mono text-emerald-300 bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-500/40">
+                              ✓ Model Loaded
+                            </span>
+                          ) : (
+                            <span className="text-[8px] font-mono text-slate-500">
+                              None (Procedural)
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <label className="flex-1 cursor-pointer">
+                            <input
+                              type="file"
+                              accept=".glb,.gltf"
+                              className="hidden"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                try {
+                                  const registered = await registerModelFile(file);
+                                  await preloadGltfModels([registered.blobUrl]);
+                                  updateActor(actor.id, {
+                                    modelUrl: registered.blobUrl,
+                                  });
+                                } catch (err) {
+                                  console.error('Failed to attach model:', err);
+                                }
+                              }}
+                            />
+                            <div className="py-1 px-2 rounded bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/40 text-indigo-200 hover:text-white font-mono text-[9px] font-medium flex items-center justify-center gap-1 transition-all">
+                              <Upload className="h-3 w-3 text-indigo-400" />
+                              <span>{actor.modelUrl ? 'Replace 3D Model' : 'Attach .GLB / .GLTF'}</span>
+                            </div>
+                          </label>
+
+                          {actor.modelUrl && (
+                            <button
+                              type="button"
+                              onClick={() => updateActor(actor.id, { modelUrl: undefined })}
+                              className="py-1 px-2 rounded bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 font-mono text-[9px] transition-all"
+                              title="Clear 3D model (revert to procedural)"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {/* Stage Coordinates & Presets */}

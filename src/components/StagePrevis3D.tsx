@@ -6,11 +6,9 @@ import { FocalLength, AspectRatio, SubjectKind, Point2D } from '../types/shotspe
 import { interpolateTrajectoryPosition, interpolateCameraPosition } from '../engine/trajectoryMath';
 import { createProceduralActorMesh } from '../engine/procedural3D';
 import { lookupCuratedPartGraph, buildPartGraph } from '../engine/procedural3D/partGraph';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { loadGltfModel, getCachedGltfModel, preloadGltfModels } from '../engine/gltfModelLoader';
+import { registerModelFile } from '../services/modelStorage';
 import { renderOfflinePrevisPasses } from '../engine/offlinePrevisRenderer';
-
-const gltfLoader = new GLTFLoader();
-const gltfCache = new Map<string, THREE.Group>();
 
 /**
  * Procedural PBR Brick Coursing Texture
@@ -107,6 +105,7 @@ import {
   Target,
   Film,
   Download,
+  Upload,
   Loader2,
   Maximize2,
   ChevronDown,
@@ -179,6 +178,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     shot,
     selectedActorId,
     setSelectedActorId,
+    addActor,
     updateActor,
     updateActorPositionAtTime,
     updateCameraPositionAtTime,
@@ -198,6 +198,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
   const viewModeRef = useRef<ViewMode>(initialViewMode);
   const initStageRendererRef = useRef<(() => void) | null>(null);
   const initVfRendererRef = useRef<(() => void) | null>(null);
+  const glbFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isDraggingGlb, setIsDraggingGlb] = useState(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(externalTime ?? 0);
   const [showGrid, setShowGrid] = useState<boolean>(true);
@@ -499,12 +501,10 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
     // 1. If explicit GLB/GLTF modelUrl is provided, load or clone from cache
     if (modelUrl) {
-      const cached = gltfCache.get(modelUrl);
+      const cached = getCachedGltfModel(modelUrl);
       if (cached) {
-        const cloned = cached.clone(true);
-        group.add(cloned);
-        const bbox = new THREE.Box3().setFromObject(cloned);
-        const size = bbox.getSize(new THREE.Vector3());
+        group.add(cached.scene);
+        const size = cached.size;
         const baseRadius = Math.max(2.4, Math.max(size.x, size.z) * 0.55);
         group.add(createBaseRing(baseRadius, colorHex, isGhostWireframe, isSelected));
         const banner = createSpriteBanner(
@@ -530,51 +530,42 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       procMesh.name = '__gltf_placeholder__';
       group.add(procMesh);
 
-      // Async load GLTF
-      gltfLoader.load(
-        modelUrl,
-        (gltf) => {
-          const loadedRoot = gltf.scene;
-          const bbox = new THREE.Box3().setFromObject(loadedRoot);
-          const size = bbox.getSize(new THREE.Vector3());
-          const maxDim = Math.max(size.x, size.y, size.z, 0.001);
-          const targetHeight = 2.2;
-          const scaleFactor = targetHeight / maxDim;
-          loadedRoot.scale.setScalar(scaleFactor);
-
-          // Center vertically so bottom rests on ground ring
-          const newBbox = new THREE.Box3().setFromObject(loadedRoot);
-          loadedRoot.position.y = -newBbox.min.y;
-
-          loadedRoot.traverse((child) => {
-            if ((child as THREE.Mesh).isMesh) {
-              child.castShadow = true;
-              child.receiveShadow = true;
-            }
-          });
-
-          gltfCache.set(modelUrl, loadedRoot.clone(true));
-
+      // Async load GLTF via universal robust parser
+      loadGltfModel(modelUrl)
+        .then((result) => {
           const pl = group.getObjectByName('__gltf_placeholder__');
           if (pl) {
             group.remove(pl);
+            disposeObject3D(pl);
           }
-          group.add(loadedRoot);
-        },
-        undefined,
-        (err) => {
-          console.warn('Failed to load GLTF 3D model:', err);
-        }
-      );
+          group.add(result.scene);
 
-      // Base ring & banner
+          // Dynamically adjust banner position to match real model height
+          group.children.forEach((child) => {
+            if (child instanceof THREE.Sprite) {
+              child.position.y = Math.max(4.5, result.size.y + 1.8);
+            }
+          });
+        })
+        .catch((err) => {
+          console.error(`Failed to load GLTF 3D model [${modelUrl}]:`, err);
+          const errBanner = createSpriteBanner(
+            name || '3D MODEL',
+            'GLB LOAD ERROR',
+            false
+          );
+          errBanner.position.y = 4.5;
+          group.add(errBanner);
+        });
+
+      // Base ring & banner for loading state
       const bbox = new THREE.Box3().setFromObject(procMesh);
       const size = bbox.getSize(new THREE.Vector3());
       const baseRadius = Math.max(2.4, Math.max(size.x, size.z) * 0.55);
       group.add(createBaseRing(baseRadius, colorHex, isGhostWireframe, isSelected));
       const banner = createSpriteBanner(
         name || kind.toUpperCase() || '3D MODEL',
-        subtitleBadge || 'GLB 3D MODEL',
+        subtitleBadge || 'LOADING 3D MODEL...',
         isGhostWireframe
       );
       banner.position.y = Math.max(4.5, size.y + 1.8);
@@ -1856,6 +1847,12 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     setPrevisRendering(true, 0);
 
     try {
+      // Preload all 3D actor models so they are fully parsed and rendered
+      const actorModelUrls = shot.actors.map((a) => a.modelUrl).filter((u): u is string => !!u);
+      if (actorModelUrls.length > 0) {
+        await preloadGltfModels(actorModelUrls);
+      }
+
       // Temporarily hide helper gizmos that shouldn't appear in the viewfinder
       if (cameraGizmoGroupRef.current) cameraGizmoGroupRef.current.visible = false;
       if (trajectoryLineRef.current) trajectoryLineRef.current.visible = false;
@@ -1874,6 +1871,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         renderPass: 'rgb',
         snap8n1: isLtx,
         syncPositions,
+        modelUrls: actorModelUrls,
         onProgress: (pct) => setPrevisRendering(true, pct),
       });
 
@@ -2042,6 +2040,32 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     }
   };
 
+  const handleGlbFileUpload = async (file: File) => {
+    if (!file.name.match(/\.(glb|gltf)$/i)) {
+      alert('Please select a valid .glb or .gltf 3D file.');
+      return;
+    }
+    try {
+      const registered = await registerModelFile(file);
+      await preloadGltfModels([registered.blobUrl]);
+
+      if (selectedActorId && selectedActorId !== '__camera__') {
+        updateActor(selectedActorId, {
+          modelUrl: registered.blobUrl,
+          name: registered.name,
+        });
+      } else {
+        addActor(registered.name, 'prop', `an authentic 3D model of ${registered.name}`, {
+          modelUrl: registered.blobUrl,
+          scale: 1.0,
+          actionDescription: `placed 3D model on stage: ${registered.name}`,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to import GLB model:', err);
+    }
+  };
+
   const activeActor = shot.actors.find((a) => a.id === selectedActorId);
   const isCameraSelected = selectedActorId === '__camera__';
 
@@ -2165,8 +2189,31 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
             </button>
           )}
         </div>
+
+        {/* Import GLB / GLTF 3D Model Button */}
+        <div className="flex items-center gap-1.5 pl-2 border-l border-director-border">
+          <input
+            type="file"
+            ref={glbFileInputRef}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleGlbFileUpload(file);
+              if (glbFileInputRef.current) glbFileInputRef.current.value = '';
+            }}
+            accept=".glb,.gltf"
+            className="hidden"
+          />
+          <button
+            onClick={() => glbFileInputRef.current?.click()}
+            className="flex items-center gap-1 rounded px-2 py-1 border border-indigo-500/40 bg-indigo-950/40 text-indigo-300 hover:bg-indigo-900/60 hover:text-white transition-all text-[10px]"
+            title="Import .glb or .gltf 3D Model file onto stage"
+          >
+            <Upload className="h-3 w-3 text-indigo-400" />
+            <span>Import 3D Model</span>
+          </button>
         </div>
-      )}
+      </div>
+    )}
 
       {/* Main Viewports Area */}
       <div className="flex flex-1 h-full w-full min-w-0 min-h-0 overflow-hidden relative">
@@ -2177,12 +2224,35 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           onPointerMove={handleStagePointerMove}
           onPointerUp={handleStagePointerUp}
           onPointerLeave={handleStagePointerUp}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setIsDraggingGlb(true);
+          }}
+          onDragLeave={() => setIsDraggingGlb(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setIsDraggingGlb(false);
+            const file = e.dataTransfer.files?.[0];
+            if (file) handleGlbFileUpload(file);
+          }}
           className={`relative h-full min-w-0 min-h-0 overflow-hidden transition-all ${
             isFloorDragging ? 'cursor-grabbing' : 'cursor-grab'
           } ${
             viewMode === 'split' ? 'w-[58%] border-r border-director-border' : viewMode === 'stage' ? 'w-full' : 'hidden'
           }`}
         >
+          {/* Drag & Drop Visual Overlay */}
+          {isDraggingGlb && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-indigo-950/85 backdrop-blur-sm border-2 border-dashed border-indigo-400 pointer-events-none animate-in fade-in duration-150">
+              <Upload className="h-12 w-12 text-indigo-300 animate-bounce mb-2" />
+              <div className="text-sm font-bold text-white font-mono">DROP .GLB / .GLTF 3D MODEL HERE</div>
+              <div className="text-xs text-indigo-300 font-mono mt-1">
+                {selectedActorId && selectedActorId !== '__camera__'
+                  ? `Attach to selected subject: "${activeActor?.name}"`
+                  : 'Place as new 3D model on stage'}
+              </div>
+            </div>
+          )}
           {/* Watermark Label */}
           <div className="absolute top-3 left-3 z-10 flex items-center gap-2 rounded-lg bg-black/60 backdrop-blur px-2.5 py-1 border border-white/10 font-mono text-[10px] text-slate-300">
             <span className="h-2 w-2 rounded-full bg-director-gold animate-pulse" />

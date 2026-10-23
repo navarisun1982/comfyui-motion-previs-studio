@@ -253,3 +253,34 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | Electron global `Access-Control-Allow-Origin: *` injection; auto-load of `localhost:5173` | S2 | Done (S2) |
 | 4 WebGL contexts (2 renderers × 2 `StagePrevis3D` instances) | S5 | Done (S5) |
 | Trim range / volume controls may be no-ops; hardcoded "SCENE 01"; `minWidth` 1100; backtick handler eats input typing; `alert()` in VFXVideoDeck | S6 | Done (S6) |
+| Importing GLB/GLTF models produces generic box or distorted shape ("weird shape") | Fix | Done (`fix/glb-gltf-import-rendering`) |
+
+## GLB/GLTF 3D Model Import & Rendering Checklist
+
+- [x] IndexedDB + Memory Storage Service (`src/services/modelStorage.ts`):
+  - In-memory `ArrayBuffer` & active Blob URL cache for zero-latency loading
+  - IndexedDB storage (`comfy_director_3d_models_v1`) to evade browser `localStorage` 5MB quota errors
+  - Resilient `base64ToArrayBuffer` and `registerModelFile` utilities
+- [x] Universal In-Memory GLTF/GLB Loader & Normalization (`src/engine/gltfModelLoader.ts`):
+  - In-memory `ArrayBuffer` parsing using `GLTFLoader.parse` (bypasses browser `fetch()` errors on `data:model/gltf-binary` URIs and 2MB Chromium limits)
+  - True bounding box normalization (`normalizeGltfScene`): scales first, centers horizontal $(x, z)$ at $(0, 0)$, grounds base at $y=0$, enables shadows and `THREE.DoubleSide`
+  - Skeleton-safe cloning via `three/examples/jsm/utils/SkeletonUtils.js`
+- [x] Asset Library Store Integration (`src/stores/useAssetLibraryStore.ts`):
+  - Updated `uploadGlbFile` to register models through `registerModelFile`
+  - Sanitized `persistCustomAssets` to store compact `model://${modelId}` references without `QuotaExceededError`
+- [x] Viewport & 3D Stage Direct Rendering (`src/components/StagePrevis3D.tsx`):
+  - Replaces `__gltf_placeholder__` geometry with normalized 3D mesh cleanly upon load
+  - Drag-and-drop viewport upload zone with glowing visual feedback
+  - Direct "Import 3D Model" button in soundstage toolbar
+- [x] Parameter Decks & Actor Staging Controls (`src/components/PrevisParametersDeck.tsx`, `src/components/ActorBlocking.tsx`):
+  - Added dedicated "3D Model File (.GLB / .GLTF)" card to Staging Deck
+  - Added direct 3D model attachment trigger on Actor Blocking cards
+- [x] Deterministic Offline Previs Renderer Preloading (`src/engine/offlinePrevisRenderer.ts`):
+  - Added `modelUrls` to `PrevisRenderOptions` and preloads GLTF models before frame capture loop
+- [x] Comprehensive Unit Test Suite (`tests/gltfImport.test.ts`):
+  - 6 unit tests covering Base64 decoding, memory buffer storage, file registration, normalization geometry math, and asset store integration
+- [x] Full Verification:
+  - 31 test files, 215/215 tests passing (`npm run test`)
+  - Production build: `npm run build` completed with zero TypeScript errors and bundle generated cleanly
+  - In-browser UI verified via subagent with recording `verify_gltf_import_1792789985216.webp`
+

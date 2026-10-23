@@ -1,6 +1,8 @@
 import React from 'react';
 import { useShotStore } from '../stores/useShotStore';
-import { Users, Trash2, Clock, UserCheck, Bookmark, BookmarkPlus } from 'lucide-react';
+import { Users, Trash2, Clock, UserCheck, Bookmark, BookmarkPlus, Box } from 'lucide-react';
+import { registerModelFile } from '../services/modelStorage';
+import { preloadGltfModels } from '../engine/gltfModelLoader';
 
 export const ActorBlocking: React.FC = () => {
   const {
@@ -112,6 +114,28 @@ export const ActorBlocking: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-1">
+                <label
+                  className="text-slate-400 hover:text-indigo-400 transition-colors p-1 cursor-pointer"
+                  title={actor.modelUrl ? 'Replace attached .glb/.gltf 3D model' : 'Attach .glb/.gltf 3D model file'}
+                >
+                  <input
+                    type="file"
+                    accept=".glb,.gltf"
+                    className="hidden"
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      try {
+                        const registered = await registerModelFile(file);
+                        await preloadGltfModels([registered.blobUrl]);
+                        updateActor(actor.id, { modelUrl: registered.blobUrl });
+                      } catch (err) {
+                        console.error('Failed to attach 3D model:', err);
+                      }
+                    }}
+                  />
+                  <Box className={`h-3.5 w-3.5 ${actor.modelUrl ? 'text-indigo-400 fill-indigo-400/20' : ''}`} />
+                </label>
                 <button
                   type="button"
                   onClick={() => addToCastPool(actor)}
