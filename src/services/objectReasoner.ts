@@ -452,9 +452,12 @@ export interface ReasonOptions {
 /** Parses data URL or raw base64 into clean base64 string and mimeType */
 export function parseBase64Image(dataOrBase64: string, defaultMime = 'image/png'): { base64: string; mimeType: string } {
   if (dataOrBase64.startsWith('data:')) {
-    const match = dataOrBase64.match(/^data:([^;]+);base64,(.+)$/);
-    if (match) {
-      return { mimeType: match[1], base64: match[2] };
+    const commaIdx = dataOrBase64.indexOf(',');
+    if (commaIdx !== -1) {
+      const header = dataOrBase64.slice(5, commaIdx);
+      const mime = header.split(';')[0] || defaultMime;
+      const base64 = dataOrBase64.slice(commaIdx + 1);
+      return { mimeType: mime, base64 };
     }
   }
   return { base64: dataOrBase64.replace(/^data:[^;]+;base64,/, ''), mimeType: defaultMime };
@@ -661,23 +664,18 @@ function providerError(cfg: ReasonerConfig, status: number, body: any): ObjectRe
 /* ------------------------------------------------------------------------------------------ */
 
 /**
- * In Vite dev server mode, browser fetch calls directly to local services like Ollama (port 11434)
- * or llama.cpp (port 8080) get blocked by browser CORS unless proxied through Vite.
+ * In browser environment, calls to local services like Ollama (port 11434)
+ * or llama.cpp (port 8080) are rewritten to relative dev-server proxy paths to prevent CORS preflight blocks.
  */
 export function resolveWireUrl(url: string, provider: ReasonerProvider): string {
   const isBrowser = typeof window !== 'undefined';
-  const isDevServer =
-    isBrowser &&
-    (Boolean((import.meta as any).env?.DEV) || window.location.port === '5173') &&
-    !window.location.protocol.startsWith('file:');
-
-  if (!isDevServer) return url;
+  if (!isBrowser) return url;
 
   if (provider === 'ollama') {
-    return url.replace(/^https?:\/\/(?:127\.0\.0\.1|localhost):11434/, '/api/ollama');
+    return url.replace(/^(?:https?:\/\/)?(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]):11434/i, '/api/ollama');
   }
   if (provider === 'llamacpp') {
-    return url.replace(/^https?:\/\/(?:127\.0\.0\.1|localhost):8080/, '/api/llamacpp');
+    return url.replace(/^(?:https?:\/\/)?(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]):8080/i, '/api/llamacpp');
   }
   return url;
 }
@@ -767,12 +765,13 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
           headers: req.headers,
           body: JSON.stringify(req.body),
         });
-      } catch {
+      } catch (err: any) {
         if (ctrl.signal.aborted) {
           throw new ObjectReasonerError(`${cfg.info.label} did not answer within ${Math.round(timeoutMs / 1000)} s.`, 'timeout');
         }
+        const detail = err?.message ? ` (${err.message})` : '';
         throw new ObjectReasonerError(
-          `Cannot reach ${cfg.info.label} at ${cfg.url}. ${cfg.info.hint}` +
+          `Cannot reach ${cfg.info.label} at ${cfg.url}${detail}. ${cfg.info.hint}` +
             (cfg.info.local ? '' : ' (If the server is reachable, it may be blocking browser CORS requests.)'),
           'offline'
         );
@@ -870,15 +869,16 @@ export async function reasonEnvironment(
           headers: req.headers,
           body: JSON.stringify(req.body),
         });
-      } catch {
+      } catch (err: any) {
         if (ctrl.signal.aborted) {
           throw new ObjectReasonerError(
             `${cfg.info.label} did not answer within ${Math.round(timeoutMs / 1000)} s.`,
             'timeout'
           );
         }
+        const detail = err?.message ? ` (${err.message})` : '';
         throw new ObjectReasonerError(
-          `Cannot reach ${cfg.info.label} at ${cfg.url}. ${cfg.info.hint}` +
+          `Cannot reach ${cfg.info.label} at ${cfg.url}${detail}. ${cfg.info.hint}` +
             (cfg.info.local ? '' : ' (If the server is reachable, it may be blocking browser CORS requests.)'),
           'offline'
         );
