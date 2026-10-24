@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { useShotStore } from '../stores/useShotStore';
@@ -243,6 +243,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     actorId: string;
   } | null>(null);
   const ikDragPlaneRef = useRef<THREE.Plane>(new THREE.Plane());
+  const centerStageCameraRef = useRef<((targetActorId?: string) => void) | null>(null);
 
   // Sync external props
   useEffect(() => {
@@ -426,6 +427,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedActorId) {
         removeActor(selectedActorId);
         setSelectedActorId(undefined);
+      }
+      if (e.key === 'f' || e.key === 'F' || e.key === 'Home') {
+        centerStageCameraRef.current?.(selectedActorId);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -986,9 +990,23 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       const controls = new OrbitControls(stageCameraRef.current, renderer.domElement);
       controls.enableDamping = true;
       controls.dampingFactor = 0.05;
+      controls.enablePan = true;
+      controls.screenSpacePanning = true;
+      controls.panSpeed = 1.0;
+      controls.mouseButtons = {
+        LEFT: THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.PAN,
+      };
       controls.maxPolarAngle = Math.PI / 2 - 0.05; // don't go below floor
-      controls.target.set(0, 5, 0);
+      controls.target.set(0, 3, 0);
       stageControlsRef.current = controls;
+
+      // Prevent native context menu from interrupting right-drag panning
+      renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      // Center stage camera on scene/actors
+      centerStageCameraRef.current?.();
     };
 
     const initVfRenderer = () => {
@@ -2250,6 +2268,73 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     stageControlsRef.current.target.set(0, 5, 0);
   };
 
+  // Recenter and frame 3D Stage Camera onto subjects / actors
+  const centerStageCamera = useCallback((targetActorId?: string) => {
+    if (!stageCameraRef.current || !stageControlsRef.current) return;
+
+    let targetX = 0;
+    let targetY = 2.2;
+    let targetZ = 0;
+    let span = 20;
+
+    const actors = shot.actors;
+    if (targetActorId && targetActorId !== '__camera__') {
+      const actor = actors.find((a) => a.id === targetActorId);
+      if (actor) {
+        const pos = getActorPositionAtTime(actor, currentTime);
+        targetX = pos.x;
+        targetY = pos.y + 2.2;
+        targetZ = pos.z;
+        span = 14;
+      }
+    } else if (actors.length > 0) {
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      let avgY = 0;
+
+      for (const actor of actors) {
+        const pos = getActorPositionAtTime(actor, currentTime);
+        minX = Math.min(minX, pos.x);
+        maxX = Math.max(maxX, pos.x);
+        minZ = Math.min(minZ, pos.z);
+        maxZ = Math.max(maxZ, pos.z);
+        avgY += pos.y;
+      }
+      targetX = (minX + maxX) / 2;
+      targetZ = (minZ + maxZ) / 2;
+      targetY = avgY / actors.length + 2.2;
+      span = Math.max(16, Math.max(maxX - minX, maxZ - minZ) * 1.5);
+    } else {
+      const camPos = getCameraPositionAtTime(currentTime);
+      targetX = (camPos.x - 50) * 0.4;
+      targetZ = (camPos.y - 50) * 0.4;
+      targetY = 2.2;
+      span = 25;
+    }
+
+    const dist = Math.max(30, Math.min(95, span * 1.8));
+    stageControlsRef.current.target.set(targetX, targetY, targetZ);
+    stageCameraRef.current.position.set(targetX, targetY + dist * 0.55, targetZ + dist * 0.85);
+    stageControlsRef.current.enabled = true;
+    stageControlsRef.current.update();
+  }, [shot.actors, shot.camera.movement, currentTime, duration]);
+
+  centerStageCameraRef.current = centerStageCamera;
+
+  // Automatically recenter and frame stage camera when switching shots or opening a scene
+  useEffect(() => {
+    centerStageCamera();
+  }, [shot.id, centerStageCamera]);
+
+  // Listen to global recenter event from toolbar or shortcut
+  useEffect(() => {
+    const handleRecenterEvent = () => centerStageCamera(selectedActorId);
+    window.addEventListener('cmpvs:recenter-stage', handleRecenterEvent);
+    return () => window.removeEventListener('cmpvs:recenter-stage', handleRecenterEvent);
+  }, [centerStageCamera, selectedActorId]);
+
   // Handle Stage Pointer Interactions (Raycasting selection & floor dragging)
   const isPointerDownRef = useRef(false);
   const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -2423,6 +2508,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
   const handleStagePointerUp = () => {
     isPointerDownRef.current = false;
+    if (stageControlsRef.current) stageControlsRef.current.enabled = true;
+
     if (activeIKHandleRef.current) {
       const actorMesh = actorMeshesRef.current.get(activeIKHandleRef.current.actorId);
       const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
@@ -2432,15 +2519,37 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       }
       activeIKHandleRef.current = null;
       endGesture();
-      if (stageControlsRef.current) stageControlsRef.current.enabled = true;
       return;
     }
     if (isFloorDragging) {
       setIsFloorDragging(false);
       endGesture();
-      if (stageControlsRef.current) stageControlsRef.current.enabled = true;
     }
   };
+
+  // Global safety net: guarantee Orbit/Pan controls are never stuck disabled
+  useEffect(() => {
+    const handleGlobalPointerRelease = () => {
+      isPointerDownRef.current = false;
+      if (isFloorDragging) {
+        setIsFloorDragging(false);
+        endGesture();
+      }
+      if (activeIKHandleRef.current) {
+        activeIKHandleRef.current = null;
+        endGesture();
+      }
+      if (stageControlsRef.current) {
+        stageControlsRef.current.enabled = true;
+      }
+    };
+    window.addEventListener('pointerup', handleGlobalPointerRelease);
+    window.addEventListener('pointercancel', handleGlobalPointerRelease);
+    return () => {
+      window.removeEventListener('pointerup', handleGlobalPointerRelease);
+      window.removeEventListener('pointercancel', handleGlobalPointerRelease);
+    };
+  }, [isFloorDragging, endGesture]);
 
   const handleApplyPresetToSelectedActor = (presetId: string) => {
     if (!selectedActorId || selectedActorId === '__camera__') return;
@@ -2556,6 +2665,14 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
         {/* Orbit Angle Quick-Buttons */}
         <div className="flex items-center gap-1.5 text-[10px]">
+          <button
+            onClick={() => centerStageCamera(selectedActorId)}
+            className="flex items-center gap-1 rounded px-2 py-0.5 border border-amber-500/50 bg-amber-500/15 text-amber-300 hover:text-white hover:bg-amber-500/30 transition-all font-semibold"
+            title="Recenter camera on subjects (Hotkey: F)"
+          >
+            <Target className="h-3 w-3 text-amber-400" />
+            <span>Center (F)</span>
+          </button>
           <button
             onClick={() => setOrbitView('iso')}
             className="rounded px-2 py-0.5 glass-control text-slate-300 hover:text-white"
@@ -2698,6 +2815,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         {/* Viewport 1: 3D Soundstage Orbit */}
         <div
           ref={stageMountRef}
+          onContextMenu={(e) => e.preventDefault()}
           onPointerDown={handleStagePointerDown}
           onPointerMove={handleStagePointerMove}
           onPointerUp={handleStagePointerUp}

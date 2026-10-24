@@ -35,6 +35,7 @@ import {
   Trash2,
   Download,
   Loader2,
+  Target,
 } from 'lucide-react';
 
 export interface TimelineMarker {
@@ -891,9 +892,19 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
             <span className="text-slate-400">PROCEDURAL 3D PREVIS</span>
           </div>
 
-          <div className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5 font-mono text-[9px] text-slate-400">
-            <span className="rounded bg-black/70 backdrop-blur-md px-2 py-0.5 border border-white/10">
-              Orbit: Left-Drag • Pan: Right-Drag
+          <div className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1.5 font-mono text-[9px]">
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('cmpvs:recenter-stage'));
+              }}
+              className="flex items-center gap-1 rounded bg-black/80 hover:bg-white/20 backdrop-blur-md px-2 py-0.5 border border-white/20 text-amber-300 hover:text-white transition-all shadow-md active:scale-95"
+              title="Recenter camera on subjects (Hotkey: F)"
+            >
+              <Target className="h-3 w-3 text-amber-400" />
+              <span>Center View (F)</span>
+            </button>
+            <span className="rounded bg-black/70 backdrop-blur-md px-2 py-0.5 border border-white/10 text-slate-400">
+              Orbit: Left • Pan: Right
             </span>
           </div>
 
