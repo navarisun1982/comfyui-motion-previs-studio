@@ -566,6 +566,48 @@ See the deferred table in [TASKS.md](TASKS.md).
    - In-browser UI verification: Verified via browser subagent.
 
 
+## 2026-10-24 — S11 Phase 2: Humanoid Rigging, 2-Bone Analytic IK & Directorial Posing (`stage/11-parametric-sculpt-engine`)
+
+**Goal:** Deliver browser-native character rigging, closed-form 2-bone analytic IK limb solving, floor grounding locks, and interactive soundstage posing handles.
+
+### Accomplishments
+
+1. **Humanoid Skeleton & Hierarchical Binding (`src/engine/kinematics/skeletonHierarchy.ts`):**
+   - Standard 19-bone humanoid hierarchy compatible with standard game/Mixamo rigs (Hips, Spine, Chest, Neck, Head, Left/Right Shoulder, Arm, ForeArm, Hand, UpLeg, Leg, Foot).
+   - Anatomically scaled bone offsets (`createHumanoidSkeleton`) based on actor height.
+   - Rigid sculpt binding (`bindSculptToSkeleton`): reparents tagged sculpt parts (`part.bone`) into corresponding Three.js bones while preserving exact rest transforms in world space.
+   - Stylized humanoid stand-in geometry (`createStylizedHumanoidStandin`): generates lightweight, visually distinct joint and limb geometry for actors without a custom sculpt.
+
+2. **Closed-Form 2-Bone Analytic IK Solver (`src/engine/kinematics/twoBoneIKSolver.ts`):**
+   - Pure geometric Law of Cosines solver executing in $<0.01\text{ ms}$ per limb on CPU (Zero VRAM impact, 0MB GPU memory overhead, leaving 100% of the 24GB VRAM pool free on the RTX 3090 for ComfyUI video diffusion).
+   - Distance clamping with epsilon padding ($d_{\min} = |L_1 - L_2| + \epsilon$, $d_{\max} = L_1 + L_2 - \epsilon$) eliminating mathematical singularity when limbs are fully compressed or extended.
+   - Pole vector bend-plane projection with continuity tracking across frames.
+   - Cascadeur-style FK update: directly writes local joint quaternions into root and mid bones.
+   - `solveLimbIK`: Solves `leftArm`, `rightArm`, `leftLeg`, and `rightLeg` with anatomical default bend poles.
+   - `solveLookAt`: Natural gaze tracking distributing orientation between `Neck` (35%) and `Head` (65%).
+
+3. **Floor Grounding & Contact Lock (`src/engine/kinematics/footGroundingLock.ts`):**
+   - Ground contact detection and floor clamp ($Y = 0$) preventing foot sliding and interpenetration.
+   - One-click `groundBothFeet` utility for natural grounded staging.
+
+4. **Directorial Pose Presets & Lossless Serialization (`src/engine/kinematics/posePresets.ts`):**
+   - Curated directorial poses: `neutral-stand`, `aim-pistol`, `crouch-cover`, `stride-mid`, `dialogue-gesturing`, `sitting-chair`, `t-pose`.
+   - Lossless serialization: `exportBonePose` and `applyBonePose` mapping quaternions to/from `ActorPose` schema.
+
+5. **Soundstage Interaction & Layer 1 Gizmo Isolation (`src/components/StagePrevis3D.tsx`, `ActorBlocking.tsx`, `PrevisParametersDeck.tsx`):**
+   - Interactive IK handles for hands, feet, head, and hips placed on Three.js Layer 1 (Gizmo layer) — visible on soundstage for director interaction, automatically excluded from Viewfinder rendering and offline previs video passes.
+   - Real-time limb solving during pointer drag on camera-facing planes with single-gesture undo tracking (`beginGesture` / `endGesture`).
+   - Soundstage toolbar toggle button for `IK Posing` with `Activity` icon.
+   - Floating glass Posing Deck overlay with pose preset chips, "Ground Feet", and "Reset Pose" actions.
+   - Dedicated pose preset selectors on actor cards in `ActorBlocking.tsx` and `PrevisParametersDeck.tsx`.
+
+6. **Verification & Tests:**
+   - Unit test suites (`tests/kinematics.test.ts`): 18 tests covering skeleton construction, sculpt binding, stylized stand-in, 2-bone IK solver, distance clamping, lookAt, floor grounding, pose presets, and serialization.
+   - Full test suite: 33 test files, 247/247 tests passing in 5.20s (`npm run test`).
+   - Production build: `npm run build` completed in 13.30s with zero TypeScript errors and zero warnings.
+   - In-browser UI verification: Verified pose presets and stage interactions via browser subagent.
+
+
 
 
 

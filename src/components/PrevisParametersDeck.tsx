@@ -26,6 +26,7 @@ import {
   ArrowRight,
   Maximize2,
   Globe,
+  Activity,
 } from 'lucide-react';
 
 import { downloadBlob } from '../engine/vfxAnalyzer';
@@ -37,6 +38,7 @@ import { registerModelFile } from '../services/modelStorage';
 import { preloadGltfModels } from '../engine/gltfModelLoader';
 import { decomposeDirectorialScene } from '../engine/directorialSceneDecomposer';
 import { AIGenerator3D } from './AIGenerator3D';
+import { POSE_PRESETS } from '../engine/kinematics';
 import {
   generateBlenderCameraScript,
   generateRunwayCameraJson,
@@ -938,6 +940,32 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                           className="w-full rounded bg-[#161a25] border border-white/10 px-2 py-1 text-slate-200 text-[10px] focus:outline-none focus:border-blue-500 font-mono"
                         />
                       </div>
+
+                      {/* Character Pose Preset (Kinematics) */}
+                      {kind === 'human' && (
+                        <div className="space-y-0.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9px] font-mono text-director-gold flex items-center gap-1">
+                              <Activity className="h-3 w-3" />
+                              Pose Preset (IK Rig)
+                            </span>
+                            <span className="text-[8px] text-slate-400 font-mono">
+                              {actor.posePreset || 'neutral-stand'}
+                            </span>
+                          </div>
+                          <select
+                            value={actor.posePreset || 'neutral-stand'}
+                            onChange={(e) => updateActor(actor.id, { posePreset: e.target.value })}
+                            className="w-full rounded bg-[#161a25] border border-white/10 px-2 py-1 text-slate-200 text-[10px] focus:outline-none focus:border-director-gold font-mono"
+                          >
+                            {Object.values(POSE_PRESETS).map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
 
                       {/* Previs Visual Reference & 3D Billboard */}
                       <div className="pt-1.5 border-t border-white/5 space-y-1.5">

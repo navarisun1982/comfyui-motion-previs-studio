@@ -1,0 +1,312 @@
+/**
+ * Standard Humanoid Skeletal Hierarchy & Binding Engine
+ * Grounded in industry-standard Mixamo humanoid bone conventions.
+ * 
+ * Provides:
+ * 1. Standard Three.js Skeleton and Bone hierarchy construction
+ * 2. Anatomically grounded proportional joint placement
+ * 3. Rigid binding of SculptSpec parts tagged with `part.bone`
+ * 4. Stylized humanoid stand-in geometry for actors without a custom sculpt
+ */
+
+import * as THREE from 'three';
+import { HumanoidBone } from '../procedural3D/sculptSpec';
+
+export interface BoneDefinition {
+  name: HumanoidBone;
+  parent?: HumanoidBone;
+  /** Relative offset from parent joint in rest T-pose (scaled by character height) */
+  relativeOffset: [number, number, number];
+  /** Approximate joint rotation in rest T-pose [roll, pitch, yaw] in radians */
+  restRotation?: [number, number, number];
+}
+
+/**
+ * Standard Mixamo-compatible humanoid bone hierarchy.
+ * Offsets are normalized to a 1.0m character height, scaled up during rig instantiation.
+ */
+export const HUMANOID_BONE_TREE: BoneDefinition[] = [
+  // Core Spine & Head
+  { name: 'Hips', relativeOffset: [0, 0.53, 0] },
+  { name: 'Spine', parent: 'Hips', relativeOffset: [0, 0.09, 0] },
+  { name: 'Chest', parent: 'Spine', relativeOffset: [0, 0.12, 0] },
+  { name: 'Neck', parent: 'Chest', relativeOffset: [0, 0.11, 0] },
+  { name: 'Head', parent: 'Neck', relativeOffset: [0, 0.08, 0] },
+
+  // Left Arm (T-pose extending along +X)
+  { name: 'LeftShoulder', parent: 'Chest', relativeOffset: [0.08, 0.05, 0] },
+  { name: 'LeftArm', parent: 'LeftShoulder', relativeOffset: [0.08, 0, 0] },
+  { name: 'LeftForeArm', parent: 'LeftArm', relativeOffset: [0.15, 0, 0] },
+  { name: 'LeftHand', parent: 'LeftForeArm', relativeOffset: [0.14, 0, 0] },
+
+  // Right Arm (T-pose extending along -X)
+  { name: 'RightShoulder', parent: 'Chest', relativeOffset: [-0.08, 0.05, 0] },
+  { name: 'RightArm', parent: 'RightShoulder', relativeOffset: [-0.08, 0, 0] },
+  { name: 'RightForeArm', parent: 'RightArm', relativeOffset: [-0.15, 0, 0] },
+  { name: 'RightHand', parent: 'RightForeArm', relativeOffset: [-0.14, 0, 0] },
+
+  // Left Leg (-Y downwards)
+  { name: 'LeftUpLeg', parent: 'Hips', relativeOffset: [0.09, -0.05, 0] },
+  { name: 'LeftLeg', parent: 'LeftUpLeg', relativeOffset: [0, -0.24, 0] },
+  { name: 'LeftFoot', parent: 'LeftLeg', relativeOffset: [0, -0.24, 0.04] },
+
+  // Right Leg (-Y downwards)
+  { name: 'RightUpLeg', parent: 'Hips', relativeOffset: [-0.09, -0.05, 0] },
+  { name: 'RightLeg', parent: 'RightUpLeg', relativeOffset: [0, -0.24, 0] },
+  { name: 'RightFoot', parent: 'RightLeg', relativeOffset: [0, -0.24, 0.04] },
+];
+
+export interface HumanoidRig {
+  /** Root container containing the bone hierarchy and bound meshes */
+  root: THREE.Group;
+  /** Three.js Skeleton wrapping all bones in canonical order */
+  skeleton: THREE.Skeleton;
+  /** Quick lookup map by bone name */
+  bones: Map<HumanoidBone, THREE.Bone>;
+  /** Rest local positions in rest T-pose */
+  restPositions: Map<HumanoidBone, THREE.Vector3>;
+  /** Rest local rotations in rest T-pose */
+  restRotations: Map<HumanoidBone, THREE.Quaternion>;
+  /** Total height in stage units */
+  height: number;
+}
+
+/**
+ * Creates a standard Mixamo-compatible Three.js Humanoid Skeleton.
+ * @param height Character height in stage units (default ~5.06 for 1.75m human).
+ */
+export function createHumanoidSkeleton(height = 5.06): HumanoidRig {
+  const root = new THREE.Group();
+  root.name = 'HumanoidRigRoot';
+
+  const bonesMap = new Map<HumanoidBone, THREE.Bone>();
+  const restPositions = new Map<HumanoidBone, THREE.Vector3>();
+  const restRotations = new Map<HumanoidBone, THREE.Quaternion>();
+  const bonesList: THREE.Bone[] = [];
+
+  // 1. Instantiate all bones
+  for (const def of HUMANOID_BONE_TREE) {
+    const bone = new THREE.Bone();
+    bone.name = def.name;
+    const scaledOffset = new THREE.Vector3(
+      def.relativeOffset[0] * height,
+      def.relativeOffset[1] * height,
+      def.relativeOffset[2] * height,
+    );
+    bone.position.copy(scaledOffset);
+    if (def.restRotation) {
+      bone.rotation.set(...def.restRotation);
+    }
+    bonesMap.set(def.name, bone);
+    restPositions.set(def.name, scaledOffset.clone());
+    restRotations.set(def.name, bone.quaternion.clone());
+    bonesList.push(bone);
+  }
+
+  // 2. Assemble parent-child bone hierarchy
+  for (const def of HUMANOID_BONE_TREE) {
+    const bone = bonesMap.get(def.name)!;
+    if (def.parent) {
+      const parentBone = bonesMap.get(def.parent);
+      if (parentBone) {
+        parentBone.add(bone);
+      }
+    } else {
+      root.add(bone);
+    }
+  }
+
+  root.updateMatrixWorld(true);
+  const skeleton = new THREE.Skeleton(bonesList);
+
+  return {
+    root,
+    skeleton,
+    bones: bonesMap,
+    restPositions,
+    restRotations,
+    height,
+  };
+}
+
+/**
+ * Binds a procedural sculpt group to the skeleton.
+ * Inspects all children for `userData.bone` tags (generated by `buildSculpt`).
+ * Detaches them from static group and reparents under the corresponding `THREE.Bone`.
+ */
+export function bindSculptToSkeleton(rig: HumanoidRig, sculptGroup: THREE.Group): void {
+  rig.root.updateMatrixWorld(true);
+  sculptGroup.updateMatrixWorld(true);
+
+  const taggedObjects: { obj: THREE.Object3D; boneName: HumanoidBone }[] = [];
+
+  sculptGroup.traverse((child) => {
+    const boneName = child.userData?.bone as HumanoidBone | undefined;
+    if (boneName && rig.bones.has(boneName)) {
+      taggedObjects.push({ obj: child, boneName });
+    }
+  });
+
+  // If no parts are tagged with bones, fall back to parenting under Hips/Chest
+  if (taggedObjects.length === 0) {
+    const chestBone = rig.bones.get('Chest') || rig.bones.get('Hips')!;
+    sculptGroup.position.set(0, -rig.height * 0.5, 0);
+    chestBone.add(sculptGroup);
+    return;
+  }
+
+  // Reparent each tagged object to its corresponding bone, preserving world transform
+  for (const { obj, boneName } of taggedObjects) {
+    const targetBone = rig.bones.get(boneName)!;
+    const worldPos = new THREE.Vector3();
+    const worldQuat = new THREE.Quaternion();
+    const worldScale = new THREE.Vector3();
+
+    obj.getWorldPosition(worldPos);
+    obj.getWorldQuaternion(worldQuat);
+    obj.getWorldScale(worldScale);
+
+    if (obj.parent) {
+      obj.parent.remove(obj);
+    }
+
+    targetBone.add(obj);
+
+    // Compute transform in bone's local space
+    const invBoneMat = new THREE.Matrix4().copy(targetBone.matrixWorld).invert();
+    const localMat = new THREE.Matrix4()
+      .compose(worldPos, worldQuat, worldScale)
+      .premultiply(invBoneMat);
+
+    localMat.decompose(obj.position, obj.quaternion, obj.scale);
+    obj.updateMatrixWorld(true);
+  }
+
+  // Remove empty sculptGroup and add rig.root to scene
+  if (sculptGroup.children.length === 0 && sculptGroup.parent) {
+    sculptGroup.parent.add(rig.root);
+    sculptGroup.parent.remove(sculptGroup);
+  }
+}
+
+/**
+ * Generates a stylized, high-aesthetic humanoid stand-in figure attached to the skeleton.
+ * Used when an actor does not have a custom sculpt recipe or imported model.
+ */
+export function createStylizedHumanoidStandin(rig: HumanoidRig, colorHex = 0x38bdf8): THREE.Group {
+  const material = new THREE.MeshStandardMaterial({
+    color: colorHex,
+    roughness: 0.35,
+    metalness: 0.15,
+  });
+
+  const jointMat = new THREE.MeshStandardMaterial({
+    color: 0x0f172a,
+    roughness: 0.2,
+    metalness: 0.8,
+  });
+
+  const h = rig.height;
+
+  // Head
+  const headMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(h * 0.055, 24, 20),
+    material,
+  );
+  headMesh.scale.set(1.0, 1.15, 1.05);
+  headMesh.position.set(0, h * 0.04, 0);
+  headMesh.castShadow = true;
+  rig.bones.get('Head')?.add(headMesh);
+
+  // Chest / Torso
+  const chestMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(h * 0.07, h * 0.055, h * 0.11, 16),
+    material,
+  );
+  chestMesh.position.set(0, h * 0.05, 0);
+  chestMesh.castShadow = true;
+  rig.bones.get('Chest')?.add(chestMesh);
+
+  // Spine
+  const spineMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(h * 0.055, h * 0.05, h * 0.08, 16),
+    material,
+  );
+  spineMesh.position.set(0, h * 0.04, 0);
+  spineMesh.castShadow = true;
+  rig.bones.get('Spine')?.add(spineMesh);
+
+  // Hips
+  const hipsMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(h * 0.065, 16, 12),
+    material,
+  );
+  hipsMesh.scale.set(1.1, 0.7, 0.9);
+  hipsMesh.castShadow = true;
+  rig.bones.get('Hips')?.add(hipsMesh);
+
+  // Limbs helper
+  const addSegment = (
+    boneName: HumanoidBone,
+    radiusTop: number,
+    radiusBottom: number,
+    length: number,
+    dir: 'x' | '-x' | '-y',
+  ) => {
+    const bone = rig.bones.get(boneName);
+    if (!bone) return;
+
+    // Joint ball
+    const joint = new THREE.Mesh(new THREE.SphereGeometry(radiusTop * 1.1, 12, 10), jointMat);
+    bone.add(joint);
+
+    // Segment cylinder
+    const geo = new THREE.CylinderGeometry(radiusTop, radiusBottom, length, 12);
+    const seg = new THREE.Mesh(geo, material);
+    seg.castShadow = true;
+
+    if (dir === 'x') {
+      geo.rotateZ(-Math.PI / 2);
+      seg.position.set(length * 0.5, 0, 0);
+    } else if (dir === '-x') {
+      geo.rotateZ(Math.PI / 2);
+      seg.position.set(-length * 0.5, 0, 0);
+    } else {
+      seg.position.set(0, -length * 0.5, 0);
+    }
+    bone.add(seg);
+  };
+
+  // Arms
+  addSegment('LeftArm', h * 0.024, h * 0.02, h * 0.14, 'x');
+  addSegment('LeftForeArm', h * 0.02, h * 0.016, h * 0.13, 'x');
+  addSegment('RightArm', h * 0.024, h * 0.02, h * 0.14, '-x');
+  addSegment('RightForeArm', h * 0.02, h * 0.016, h * 0.13, '-x');
+
+  // Hands
+  const leftHand = new THREE.Mesh(new THREE.BoxGeometry(h * 0.04, h * 0.02, h * 0.035), material);
+  leftHand.position.set(h * 0.02, 0, 0);
+  rig.bones.get('LeftHand')?.add(leftHand);
+
+  const rightHand = new THREE.Mesh(new THREE.BoxGeometry(h * 0.04, h * 0.02, h * 0.035), material);
+  rightHand.position.set(-h * 0.02, 0, 0);
+  rig.bones.get('RightHand')?.add(rightHand);
+
+  // Legs
+  addSegment('LeftUpLeg', h * 0.038, h * 0.03, h * 0.23, '-y');
+  addSegment('LeftLeg', h * 0.03, h * 0.022, h * 0.23, '-y');
+  addSegment('RightUpLeg', h * 0.038, h * 0.03, h * 0.23, '-y');
+  addSegment('RightLeg', h * 0.03, h * 0.022, h * 0.23, '-y');
+
+  // Feet
+  const leftFoot = new THREE.Mesh(new THREE.BoxGeometry(h * 0.04, h * 0.02, h * 0.08), material);
+  leftFoot.position.set(0, -h * 0.01, h * 0.03);
+  rig.bones.get('LeftFoot')?.add(leftFoot);
+
+  const rightFoot = new THREE.Mesh(new THREE.BoxGeometry(h * 0.04, h * 0.02, h * 0.08), material);
+  rightFoot.position.set(0, -h * 0.01, h * 0.03);
+  rig.bones.get('RightFoot')?.add(rightFoot);
+
+  rig.root.updateMatrixWorld(true);
+  return rig.root;
+}

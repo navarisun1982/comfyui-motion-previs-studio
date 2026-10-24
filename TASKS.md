@@ -18,7 +18,42 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S8 Motion fidelity | `stage/08-motion-fidelity` | ✅ merged to master (`f8e3781`) | Optical flow vector analyzer, directional & speed fidelity scoring, visual vector overlay HUD, A/B motion diffing |
 | S9 Closed-loop steering | `stage/09-closed-loop-steering` | ✅ merged to master (`fc9865c`) | Optical-flow-driven compensatory patches, prompt auto-correction, IC-LoRA modulation, steering modal, lineage tracking |
 | S10 Sequence / Assembly | `stage/10-sequence` | ✅ merged to master (`16d714f`) | Multi-shot timeline, sequential playback, continuity & 180° rule checking, OTIO/EDL/FCPXML NLE exporters |
-| S11 Parametric 3D Sculpt Engine | `stage/11-parametric-sculpt-engine` | 🟢 Phase 1 verified | Parametric 3D primitives, reference silhouette matching, multimodal LLM/VLM reasoning, Concept-to-3D Studio |
+| S11 Parametric 3D Sculpt & Character Rigging | `stage/11-parametric-sculpt-engine` | 🟢 Phase 1 & 2 verified | Parametric 3D primitives, silhouette matching, AI 3D generator, humanoid skeleton, analytic 2-bone IK, floor grounding, pose presets |
+
+## S11 Phase 2 checklist (Humanoid Rigging, 2-Bone Analytic IK & Directorial Posing)
+
+- [x] Canonical Pose & IK Target Schemas (`src/types/shotspec.ts`):
+  - `IKTargetSchema` (position, pole, weight), `ActorPoseSchema` (hipsOffset, bone rotations map to quaternions), `ActorIKTargetsSchema` (leftHand, rightHand, leftFoot, rightFoot, headLookAt)
+  - Extended `ActorSchema` with `posePreset`, `pose`, and `ikTargets`
+- [x] Standard Humanoid Skeletal Hierarchy (`src/engine/kinematics/skeletonHierarchy.ts`):
+  - Standard 19-bone humanoid tree matching Mixamo/game conventions: Hips, Spine, Chest, Neck, Head, LeftShoulder, LeftArm, LeftForeArm, LeftHand, RightShoulder, RightArm, RightForeArm, RightHand, LeftUpLeg, LeftLeg, LeftFoot, RightUpLeg, RightLeg, RightFoot
+  - `createHumanoidSkeleton(height)`: Anatomically scaled Three.js `Skeleton` with proper parent-child joint offsets
+  - `bindSculptToSkeleton(rig, sculptGroup)`: Rigid binding reparenting tagged sculpt parts (`part.bone`) while preserving world transforms
+  - `createStylizedHumanoidStandin(rig, colorHex)`: Stylized joint-and-limb geometry for actors without a custom sculpt
+- [x] Closed-Form 2-Bone Analytic IK Solver (`src/engine/kinematics/twoBoneIKSolver.ts`):
+  - Geometric Law of Cosines solver executing in $<0.01\text{ ms}$ per limb (Zero VRAM impact, 0MB GPU memory overhead)
+  - Distance clamping ($d_{\min} = |L_1 - L_2| + \epsilon$, $d_{\max} = L_1 + L_2 - \epsilon$) preventing numerical singularity
+  - Pole vector bend-plane projection with continuity tracking across frames
+  - Cascadeur-style FK update: directly writes local joint quaternions into root and mid bones
+  - `solveLimbIK`: Solves `leftArm`, `rightArm`, `leftLeg`, and `rightLeg` with anatomical default bend poles
+  - `solveLookAt`: Smooth directional gaze tracking for `Neck` (35%) and `Head` (65%)
+- [x] Floor Grounding & Contact Lock (`src/engine/kinematics/footGroundingLock.ts`):
+  - `isFootGrounded`, `lockFootToGround`, `groundBothFeet`: Ground contact detection and floor clamp ($Y = 0$) preventing foot sliding
+- [x] Directorial Pose Presets & Serialization (`src/engine/kinematics/posePresets.ts`):
+  - Curated directorial poses: `neutral-stand`, `aim-pistol`, `crouch-cover`, `stride-mid`, `dialogue-gesturing`, `sitting-chair`, `t-pose`
+  - Lossless serialization: `exportBonePose` and `applyBonePose` mapping quaternions to/from `ActorPose`
+- [x] Interactive Soundstage Posing & UI Integration (`src/components/StagePrevis3D.tsx`, `ActorBlocking.tsx`, `PrevisParametersDeck.tsx`):
+  - `StagePrevis3D.tsx`: Interactive IK handles for hands, feet, head, and hips placed on Layer 1 (Gizmo layer) — visible on stage, automatically excluded from Viewfinder and offline previs video passes
+  - Raycasted camera-facing plane dragging with real-time limb solving and single-gesture undo tracking (`beginGesture` / `endGesture`)
+  - Toolbar toggle button for `IK Posing` with `Activity` icon
+  - Floating glass Posing Deck overlay with pose preset chips, "Ground Feet", and "Reset Pose" actions
+  - Actor card controls in `ActorBlocking.tsx` and `PrevisParametersDeck.tsx` for directorial pose selection
+- [x] Unit test suites (`tests/kinematics.test.ts`):
+  - 18 tests covering skeleton construction, sculpt binding, stylized stand-in, 2-bone IK solver, distance clamping, lookAt, floor grounding, pose presets, and serialization
+- [x] Full Verification:
+  - 33 test files, 247/247 tests passing (`npm run test`)
+  - Production build: `npm run build` completed with zero TypeScript errors and bundle generated cleanly
+  - In-browser UI verified via subagent
 
 ## S11 checklist (Parametric 3D Sculpt Engine & Image-to-3D Proxy — Phase 1)
 

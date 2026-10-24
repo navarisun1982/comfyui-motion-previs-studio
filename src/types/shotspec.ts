@@ -117,6 +117,28 @@ export const CameraKeyframeSchema = z.object({
 });
 export type CameraKeyframe = z.infer<typeof CameraKeyframeSchema>;
 
+export const IKTargetSchema = z.object({
+  position: z.tuple([z.number(), z.number(), z.number()]),
+  pole: z.tuple([z.number(), z.number(), z.number()]).optional(),
+  weight: z.number().min(0).max(1).default(1),
+});
+export type IKTarget = z.infer<typeof IKTargetSchema>;
+
+export const ActorPoseSchema = z.object({
+  hipsOffset: z.tuple([z.number(), z.number(), z.number()]).optional(),
+  rotations: z.record(z.string(), z.tuple([z.number(), z.number(), z.number(), z.number()])), // boneName -> [x, y, z, w] quaternion
+});
+export type ActorPose = z.infer<typeof ActorPoseSchema>;
+
+export const ActorIKTargetsSchema = z.object({
+  leftHand: IKTargetSchema.optional(),
+  rightHand: IKTargetSchema.optional(),
+  leftFoot: IKTargetSchema.optional(),
+  rightFoot: IKTargetSchema.optional(),
+  headLookAt: z.tuple([z.number(), z.number(), z.number()]).optional(),
+});
+export type ActorIKTargets = z.infer<typeof ActorIKTargetsSchema>;
+
 export const ActorSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
@@ -134,6 +156,9 @@ export const ActorSchema = z.object({
   scale: z.number().min(0.05).max(30).default(1.0).optional(),
   partGraph: z.any().optional(),
   sculpt: z.any().optional(),
+  posePreset: z.string().optional(),
+  pose: ActorPoseSchema.optional(),
+  ikTargets: ActorIKTargetsSchema.optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 
