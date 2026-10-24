@@ -9,6 +9,22 @@ import { lookupCuratedPartGraph, buildPartGraph } from '../engine/procedural3D/p
 import { loadGltfModel, getCachedGltfModel, preloadGltfModels } from '../engine/gltfModelLoader';
 import { registerModelFile } from '../services/modelStorage';
 import { renderOfflinePrevisPasses } from '../engine/offlinePrevisRenderer';
+import {
+  createHumanoidSkeleton,
+  bindSculptToSkeleton,
+  createStylizedHumanoidStandin,
+  solveLimbIK,
+  solveLookAt,
+  groundBothFeet,
+  resetToRestPose,
+  applyPosePreset,
+  exportBonePose,
+  applyBonePose,
+  HumanoidRig,
+  POSE_PRESETS,
+  evaluateGait,
+} from '../engine/kinematics';
+import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
 
 /**
  * Procedural PBR Brick Coursing Texture
@@ -111,6 +127,7 @@ import {
   ChevronDown,
   ChevronUp,
   Tag,
+  Activity,
 } from 'lucide-react';
 
 const FOV_MAP: Record<FocalLength, number> = {
@@ -186,10 +203,12 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     removeActorKeyframe,
     removeActor,
     previsVideoUrl,
+    previsOpenPoseUrl,
     isRenderingPrevis,
     previsProgress,
     registerPrevisRenderer,
     setPrevisVideo,
+    setPrevisOpenPose,
     setPrevisRendering,
     beginGesture,
     endGesture,
@@ -215,6 +234,15 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
   const mouseVecRef = useRef(new THREE.Vector2());
   const floorPlaneRef = useRef(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0));
   const [isFloorDragging, setIsFloorDragging] = useState(false);
+  const [showPosingHandles, setShowPosingHandles] = useState<boolean>(true);
+  const showPosingHandlesRef = useRef<boolean>(true);
+  showPosingHandlesRef.current = showPosingHandles;
+  const ikHandlesGroupRef = useRef<THREE.Group | null>(null);
+  const activeIKHandleRef = useRef<{
+    handleType: 'leftArm' | 'rightArm' | 'leftLeg' | 'rightLeg' | 'hips' | 'head';
+    actorId: string;
+  } | null>(null);
+  const ikDragPlaneRef = useRef<THREE.Plane>(new THREE.Plane());
 
   // Sync external props
   useEffect(() => {
@@ -517,7 +545,73 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
 
 
-  // Helper: Universal Semantic Procedural 3D Subject/Prop Mesh Generator (powered by 3dviz-pro-max + GLTF Loader)
+  // Helper: Create 3D Draggable IK Handle Gizmo for Limb/Head manipulation
+  const createIKHandleGizmo = (
+    handleType: 'leftArm' | 'rightArm' | 'leftLeg' | 'rightLeg' | 'hips' | 'head',
+    colorHex: number,
+    label: string,
+    actorId: string
+  ): THREE.Group => {
+    const handleGroup = new THREE.Group();
+    handleGroup.name = `IKHandle_${handleType}_${actorId}`;
+    handleGroup.userData = { isIKHandle: true, handleType, actorId };
+
+    // Core sphere
+    const coreMat = new THREE.MeshStandardMaterial({
+      color: colorHex,
+      roughness: 0.15,
+      metalness: 0.85,
+      emissive: colorHex,
+      emissiveIntensity: 0.5,
+    });
+    const coreMesh = new THREE.Mesh(new THREE.SphereGeometry(0.32, 16, 12), coreMat);
+    coreMesh.userData = { isIKHandle: true, handleType, actorId };
+    handleGroup.add(coreMesh);
+
+    // Halo wireframe
+    const haloMat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.75,
+    });
+    const haloMesh = new THREE.Mesh(new THREE.SphereGeometry(0.48, 12, 8), haloMat);
+    haloMesh.userData = { isIKHandle: true, handleType, actorId };
+    handleGroup.add(haloMesh);
+
+    // Label banner
+    const canvas = document.createElement('canvas');
+    canvas.width = 192;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+      ctx.strokeStyle = `#${colorHex.toString(16).padStart(6, '0')}`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.roundRect(8, 8, 176, 48, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 24px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, 96, 32);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.scale.set(1.2, 0.4, 1.0);
+    sprite.position.set(0, 0.65, 0);
+    sprite.userData = { isIKHandle: true, handleType, actorId };
+    handleGroup.add(sprite);
+
+    setLayerRecursively(handleGroup, 1);
+    return handleGroup;
+  };
+
+  // Helper: Universal Semantic Procedural 3D Subject/Prop Mesh Generator (powered by 3dviz-pro-max + Kinematics Rig)
   const createSubjectMesh = (
     name: string,
     kind: SubjectKind = 'human',
@@ -528,7 +622,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     _conceptImageUrl?: string,
     tokenPrompt?: string,
     modelUrl?: string,
-    partGraph?: any
+    partGraph?: any,
+    actorPosePreset?: string,
+    actorPose?: any
   ): THREE.Group => {
     const group = new THREE.Group();
 
@@ -606,7 +702,60 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       return group;
     }
 
-    // High-Fidelity Procedural 3D Model from 3dviz-pro-max Engine
+    // 2. Check if actor is a humanoid subject (character with Mixamo bone rig)
+    const isHumanoid =
+      kind === 'human' ||
+      kind === 'character' ||
+      !kind ||
+      partGraph?.rig === 'humanoid' ||
+      partGraph?.parts?.some?.((p: any) => !!p.bone);
+
+    if (isHumanoid) {
+      const rig = createHumanoidSkeleton(5.06);
+
+      if (partGraph) {
+        const procMesh = createProceduralActorMesh({
+          category: kind || 'character',
+          name,
+          tokenPrompt,
+          colorHex,
+          isSelected,
+          isGhostWireframe,
+          partGraph,
+        });
+        bindSculptToSkeleton(rig, procMesh);
+      } else {
+        createStylizedHumanoidStandin(rig, isSelected ? 0xf59e0b : colorHex);
+      }
+
+      if (actorPose) {
+        applyBonePose(rig, actorPose);
+      } else if (actorPosePreset) {
+        applyPosePreset(rig, actorPosePreset);
+      } else {
+        applyPosePreset(rig, 'neutral-stand');
+      }
+
+      group.add(rig.root);
+      group.userData.rig = rig;
+
+      const bbox = new THREE.Box3().setFromObject(rig.root);
+      const size = bbox.getSize(new THREE.Vector3());
+      const baseRadius = Math.max(2.4, Math.max(size.x, size.z) * 0.55);
+
+      group.add(createBaseRing(baseRadius, colorHex, isGhostWireframe, isSelected));
+      const banner = createSpriteBanner(
+        name || kind.toUpperCase() || 'SUBJECT',
+        subtitleBadge || (actorPosePreset ? actorPosePreset.toUpperCase() : 'HUMANOID'),
+        isGhostWireframe
+      );
+      banner.position.y = Math.max(1.8, size.y + 0.25);
+      group.add(banner);
+
+      return group;
+    }
+
+    // High-Fidelity Procedural 3D Model from 3dviz-pro-max Engine (for non-humanoid objects)
     const procMesh = createProceduralActorMesh({
       category: kind || 'custom',
       name,
@@ -789,6 +938,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     stageScene.add(trajLine);
     trajectoryLineRef.current = trajLine;
 
+    // 3D Character IK Posing Handles Group (Layer 1 Gizmo Only)
+    const ikHandlesGroup = new THREE.Group();
+    ikHandlesGroup.name = 'IKHandlesGroup';
+    setLayerRecursively(ikHandlesGroup, 1);
+    stageScene.add(ikHandlesGroup);
+    ikHandlesGroupRef.current = ikHandlesGroup;
+
     // Viewfinder Camera (Through the lens) - STRICTLY Layer 0 (World objects only, NEVER gizmos)
     const vfCamera = new THREE.PerspectiveCamera(fov, aspect, 0.1, 500);
     vfCamera.layers.set(0);
@@ -920,6 +1076,77 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     setTimeout(updateSizes, 50);
     setTimeout(updateSizes, 200);
 
+    const syncIKHandles = () => {
+      const handlesGroup = ikHandlesGroupRef.current;
+      if (!handlesGroup) return;
+
+      const selId = useShotStore.getState().selectedActorId;
+      if (!showPosingHandlesRef.current || !selId || selId === '__camera__') {
+        handlesGroup.visible = false;
+        return;
+      }
+
+      const actorMesh = actorMeshesRef.current.get(selId);
+      const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
+      if (!rig) {
+        handlesGroup.visible = false;
+        return;
+      }
+
+      handlesGroup.visible = true;
+
+      // Rebuild handles if actor changed
+      if (handlesGroup.userData.actorId !== selId || handlesGroup.children.length === 0) {
+        handlesGroup.clear();
+        handlesGroup.userData.actorId = selId;
+
+        const handleDefs: Array<{
+          type: 'leftArm' | 'rightArm' | 'leftLeg' | 'rightLeg' | 'hips' | 'head';
+          color: number;
+          label: string;
+        }> = [
+          { type: 'leftArm', color: 0x06b6d4, label: 'L-Hand' },
+          { type: 'rightArm', color: 0x06b6d4, label: 'R-Hand' },
+          { type: 'leftLeg', color: 0xf59e0b, label: 'L-Foot' },
+          { type: 'rightLeg', color: 0xf59e0b, label: 'R-Foot' },
+          { type: 'hips', color: 0xec4899, label: 'Hips' },
+          { type: 'head', color: 0xeab308, label: 'LookAt' },
+        ];
+
+        handleDefs.forEach((def) => {
+          const handle = createIKHandleGizmo(def.type, def.color, def.label, selId);
+          handlesGroup.add(handle);
+        });
+      }
+
+      // Update positions matching world positions of joints
+      rig.root.updateMatrixWorld(true);
+
+      const getBoneWorldPos = (boneName: HumanoidBone): THREE.Vector3 => {
+        const bone = rig.bones.get(boneName);
+        const pos = new THREE.Vector3();
+        if (bone) bone.getWorldPosition(pos);
+        return pos;
+      };
+
+      const positions: Record<string, THREE.Vector3> = {
+        leftArm: getBoneWorldPos('LeftHand'),
+        rightArm: getBoneWorldPos('RightHand'),
+        leftLeg: getBoneWorldPos('LeftFoot'),
+        rightLeg: getBoneWorldPos('RightFoot'),
+        hips: getBoneWorldPos('Hips'),
+        head: getBoneWorldPos('Head').add(new THREE.Vector3(0, 0, 1.2)),
+      };
+
+      handlesGroup.children.forEach((child) => {
+        const handleType = child.userData?.handleType;
+        if (handleType && positions[handleType]) {
+          if (activeIKHandleRef.current?.handleType === handleType) return;
+          child.position.copy(positions[handleType]);
+        }
+      });
+    };
+
     // Continuous Animation & Render Loop
     let mainLoopId: number;
     let lastTime = performance.now();
@@ -991,6 +1218,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         });
       }
 
+      // 4. Synchronize IK Handles with selected actor's humanoid skeleton
+      syncIKHandles();
+
       if (stageControlsRef.current) {
         stageControlsRef.current.update();
       }
@@ -1045,6 +1275,10 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       actorMeshesRef.current.clear();
       if (environmentGroupRef.current) {
         disposeObject3D(environmentGroupRef.current);
+      }
+      if (ikHandlesGroupRef.current) {
+        disposeObject3D(ikHandlesGroupRef.current);
+        ikHandlesGroupRef.current = null;
       }
     };
   }, []);
@@ -1693,7 +1927,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         mesh.userData.modelUrl !== actor.modelUrl ||
         mesh.userData.isSelected !== isSelected ||
         mesh.userData.isGhostMode !== isGhostMode ||
-        mesh.userData.partGraph !== actor.partGraph;
+        mesh.userData.partGraph !== (actor.sculpt || actor.partGraph);
 
       if (needsFullRebuild) {
         if (mesh) {
@@ -1710,7 +1944,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           actor.conceptImageUrl,
           actor.token,
           actor.modelUrl,
-          actor.partGraph
+          actor.sculpt || actor.partGraph,
+          actor.posePreset,
+          actor.pose
         );
         mesh.userData.actorId = actor.id;
         mesh.userData.kind = actorKind;
@@ -1720,13 +1956,28 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         mesh.userData.modelUrl = actor.modelUrl;
         mesh.userData.isSelected = isSelected;
         mesh.userData.isGhostMode = isGhostMode;
-        mesh.userData.partGraph = actor.partGraph;
+        mesh.userData.partGraph = actor.sculpt || actor.partGraph;
+        mesh.userData.posePreset = actor.posePreset;
+        mesh.userData.pose = actor.pose;
 
         const pos = getActorPositionAtTime(actor, currentTime);
         mesh.position.set(pos.x, pos.y, pos.z);
         mesh.lookAt(pos.x, pos.y, pos.z + 10);
         scene.add(mesh);
         actorMeshesRef.current.set(actor.id, mesh);
+      } else if (mesh && mesh.userData.rig) {
+        // In-place fast update for rigged characters when only pose/preset changed
+        if (mesh.userData.posePreset !== actor.posePreset || mesh.userData.pose !== actor.pose) {
+          if (actor.pose) {
+            applyBonePose(mesh.userData.rig, actor.pose);
+          } else if (actor.posePreset) {
+            applyPosePreset(mesh.userData.rig, actor.posePreset);
+          } else {
+            applyPosePreset(mesh.userData.rig, 'neutral-stand');
+          }
+          mesh.userData.posePreset = actor.posePreset;
+          mesh.userData.pose = actor.pose;
+        }
       }
 
       // Always apply scale instantaneously
@@ -1845,7 +2096,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         const end = actor.trajectory.endPosition;
         const dx = end.x - start.x;
         const dz = end.y - start.y;
-        const isMoving = Math.sqrt(dx * dx + dz * dz) > 1.0;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const speed = duration > 0 ? (dist / duration) * 0.15 : 0;
+        const isMoving = dist > 1.0;
 
         if (isMoving) {
           mesh.lookAt(actorPos.x + dx, actorPos.y, actorPos.z + dz);
@@ -1854,6 +2107,17 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           if (!otherActor.kind || otherActor.kind === 'human') {
             const otherPos = getActorPositionAtTime(otherActor, t);
             mesh.lookAt(otherPos.x, actorPos.y, otherPos.z);
+          }
+        }
+
+        // Procedural Locomotion / Gait Cycle for rigged humanoids
+        if (mesh.userData.rig && isHuman) {
+          const reqGait = actor.gait || 'auto';
+          if (reqGait !== 'none') {
+            evaluateGait(mesh.userData.rig, t, {
+              gait: reqGait,
+              speed: isMoving ? Math.max(speed, 1.2) : 0,
+            });
           }
         }
       }
@@ -1893,6 +2157,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
       // Deterministic render (8n+1 frame snapping if target model is LTX-2.5)
       const isLtx = shot.targetModel === 'ltx-2.5';
+      const hasHumanActor = shot.actors.some((a) => !a.kind || a.kind === 'human');
+      const renderPassMode = hasHumanActor ? 'all' : 'rgb';
+
       const result = await renderOfflinePrevisPasses({
         scene: stageSceneRef.current,
         camera: vfCameraRef.current,
@@ -1901,7 +2168,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         fps: shot.frameRate || 24,
         width: 1280,
         height: 720,
-        renderPass: 'rgb',
+        renderPass: renderPassMode,
         snap8n1: isLtx,
         syncPositions,
         modelUrls: actorModelUrls,
@@ -1915,6 +2182,10 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
       // Restore positions to current time
       syncPositions(currentTime);
+
+      if (result.openposeBlob && result.openposeUrl) {
+        setPrevisOpenPose(result.openposeUrl, result.openposeBlob);
+      }
 
       if (result.rgbBlob && result.rgbUrl) {
         setPrevisVideo(result.rgbUrl, result.rgbBlob);
@@ -1951,6 +2222,16 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     const a = document.createElement('a');
     a.href = previsVideoUrl;
     a.download = `${shot.name.replace(/\s+/g, '_')}_3D_Previs.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleDownloadOpenPose = () => {
+    if (!previsOpenPoseUrl) return;
+    const a = document.createElement('a');
+    a.href = previsOpenPoseUrl;
+    a.download = `${shot.name.replace(/\s+/g, '_')}_OpenPose_Previs.mp4`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1993,12 +2274,17 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     // Raycast against scene objects
     const intersects = raycasterRef.current.intersectObjects(stageSceneRef.current.children, true);
 
+    let clickedIKHandle: THREE.Object3D | null = null;
     let clickedActorId: string | null = null;
     let clickedCamera = false;
 
     for (const hit of intersects) {
       let cur: THREE.Object3D | null = hit.object;
       while (cur) {
+        if (cur.userData?.isIKHandle) {
+          clickedIKHandle = cur;
+          break;
+        }
         if (cur.userData?.actorId) {
           clickedActorId = cur.userData.actorId;
           break;
@@ -2009,7 +2295,24 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         }
         cur = cur.parent;
       }
-      if (clickedActorId || clickedCamera) break;
+      if (clickedIKHandle || clickedActorId || clickedCamera) break;
+    }
+
+    if (clickedIKHandle) {
+      const hType = clickedIKHandle.userData.handleType;
+      const aId = clickedIKHandle.userData.actorId;
+      activeIKHandleRef.current = { handleType: hType, actorId: aId };
+      beginGesture();
+      if (stageControlsRef.current) stageControlsRef.current.enabled = false;
+
+      const handleWorldPos = new THREE.Vector3();
+      clickedIKHandle.getWorldPosition(handleWorldPos);
+      if (stageCameraRef.current) {
+        const camDir = new THREE.Vector3();
+        stageCameraRef.current.getWorldDirection(camDir);
+        ikDragPlaneRef.current.setFromNormalAndCoplanarPoint(camDir.negate(), handleWorldPos);
+      }
+      return;
     }
 
     if (clickedActorId) {
@@ -2032,6 +2335,60 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     const dy = Math.abs(e.clientY - dragStartPosRef.current.y);
     if (dx > 4 || dy > 4) {
       hasDraggedRef.current = true;
+    }
+
+    if (activeIKHandleRef.current) {
+      const rect = stageMountRef.current?.getBoundingClientRect();
+      if (!rect || !stageCameraRef.current) return;
+
+      const mouseX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const mouseY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      mouseVecRef.current.set(mouseX, mouseY);
+      raycasterRef.current.setFromCamera(mouseVecRef.current, stageCameraRef.current);
+
+      const hitPoint = new THREE.Vector3();
+      const hit = raycasterRef.current.ray.intersectPlane(ikDragPlaneRef.current, hitPoint);
+      if (!hit) return;
+
+      const actorMesh = actorMeshesRef.current.get(activeIKHandleRef.current.actorId);
+      const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
+      if (!rig) return;
+
+      const hType = activeIKHandleRef.current.handleType;
+
+      if (hType === 'leftArm') {
+        solveLimbIK(rig, 'leftArm', hitPoint);
+      } else if (hType === 'rightArm') {
+        solveLimbIK(rig, 'rightArm', hitPoint);
+      } else if (hType === 'leftLeg') {
+        solveLimbIK(rig, 'leftLeg', hitPoint);
+      } else if (hType === 'rightLeg') {
+        solveLimbIK(rig, 'rightLeg', hitPoint);
+      } else if (hType === 'hips') {
+        const hips = rig.bones.get('Hips');
+        if (hips) {
+          const localHit = hitPoint.clone();
+          if (rig.root) {
+            rig.root.updateMatrixWorld(true);
+            const invRoot = new THREE.Matrix4().copy(rig.root.matrixWorld).invert();
+            localHit.applyMatrix4(invRoot);
+          }
+          hips.position.copy(localHit);
+        }
+      } else if (hType === 'head') {
+        solveLookAt(rig, hitPoint);
+      }
+
+      rig.root.updateMatrixWorld(true);
+
+      const handlesGroup = ikHandlesGroupRef.current;
+      if (handlesGroup) {
+        const handleObj = handlesGroup.children.find((c) => c.userData?.handleType === hType);
+        if (handleObj) {
+          handleObj.position.copy(hitPoint);
+        }
+      }
+      return;
     }
 
     if (!isFloorDragging) return;
@@ -2066,10 +2423,61 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
   const handleStagePointerUp = () => {
     isPointerDownRef.current = false;
+    if (activeIKHandleRef.current) {
+      const actorMesh = actorMeshesRef.current.get(activeIKHandleRef.current.actorId);
+      const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
+      if (rig) {
+        const newPose = exportBonePose(rig);
+        updateActor(activeIKHandleRef.current.actorId, { pose: newPose, posePreset: undefined });
+      }
+      activeIKHandleRef.current = null;
+      endGesture();
+      if (stageControlsRef.current) stageControlsRef.current.enabled = true;
+      return;
+    }
     if (isFloorDragging) {
       setIsFloorDragging(false);
       endGesture();
       if (stageControlsRef.current) stageControlsRef.current.enabled = true;
+    }
+  };
+
+  const handleApplyPresetToSelectedActor = (presetId: string) => {
+    if (!selectedActorId || selectedActorId === '__camera__') return;
+    const actorMesh = actorMeshesRef.current.get(selectedActorId);
+    const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
+    if (rig) {
+      beginGesture();
+      applyPosePreset(rig, presetId);
+      const newPose = exportBonePose(rig);
+      updateActor(selectedActorId, { pose: newPose, posePreset: presetId });
+      endGesture();
+    }
+  };
+
+  const handleGroundSelectedActorFeet = () => {
+    if (!selectedActorId || selectedActorId === '__camera__') return;
+    const actorMesh = actorMeshesRef.current.get(selectedActorId);
+    const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
+    if (rig) {
+      beginGesture();
+      groundBothFeet(rig);
+      const newPose = exportBonePose(rig);
+      updateActor(selectedActorId, { pose: newPose });
+      endGesture();
+    }
+  };
+
+  const handleResetSelectedActorPose = () => {
+    if (!selectedActorId || selectedActorId === '__camera__') return;
+    const actorMesh = actorMeshesRef.current.get(selectedActorId);
+    const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
+    if (rig) {
+      beginGesture();
+      resetToRestPose(rig);
+      const newPose = exportBonePose(rig);
+      updateActor(selectedActorId, { pose: newPose, posePreset: 't-pose' });
+      endGesture();
     }
   };
 
@@ -2194,6 +2602,19 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           </button>
 
           <button
+            onClick={() => setShowPosingHandles(!showPosingHandles)}
+            className={`flex items-center gap-1 rounded px-2 py-0.5 border ${
+              showPosingHandles
+                ? 'border-director-gold text-director-gold bg-director-gold/10'
+                : 'border-director-border text-slate-500'
+            }`}
+            title="Toggle Character IK Posing Handles (Hands, Feet, Head, Hips)"
+          >
+            <Activity className="h-3 w-3" />
+            IK Posing
+          </button>
+
+          <button
             onClick={() => setShowRuleOfThirds(!showRuleOfThirds)}
             className={`rounded px-2 py-0.5 border ${
               showRuleOfThirds
@@ -2232,6 +2653,17 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
             >
               <Download className="h-3 w-3" />
               <span>Download MP4</span>
+            </button>
+          )}
+
+          {previsOpenPoseUrl && !isRenderingPrevis && (
+            <button
+              onClick={handleDownloadOpenPose}
+              className="flex items-center gap-1 rounded px-2 py-1 bg-purple-500/20 border border-purple-500/40 text-purple-300 hover:bg-purple-500/30 font-mono text-[10px] transition-all"
+              title="Download rendered ControlNet OpenPose Previs MP4 to your computer"
+            >
+              <Download className="h-3 w-3" />
+              <span>Download OpenPose</span>
             </button>
           )}
         </div>
@@ -2304,6 +2736,93 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
             <span className="h-2 w-2 rounded-full bg-director-gold animate-pulse" />
             3D VIRTUAL SOUNDSTAGE (ORBIT VIEW)
           </div>
+
+          {/* Character IK Posing Deck (when a humanoid actor is selected and posing handles are active) */}
+          {activeActor && (activeActor.kind === 'human' || !activeActor.kind) && showPosingHandles && (
+            <div
+              data-hud="true"
+              className="absolute top-11 left-3 z-20 flex flex-col gap-1.5 rounded-xl bg-director-darkest/95 backdrop-blur-md p-2.5 border border-director-gold/40 shadow-xl text-xs font-mono select-none max-w-xs animate-in fade-in duration-150"
+            >
+              <div className="flex items-center justify-between border-b border-director-border pb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Activity className="h-3.5 w-3.5 text-director-gold" />
+                  <span className="font-bold text-white text-[11px] uppercase">IK Character Posing</span>
+                </div>
+                <span className="text-[9px] text-director-gold px-1.5 py-0.5 rounded bg-director-gold/10 border border-director-gold/30">
+                  Analytic IK
+                </span>
+              </div>
+
+              {/* Presets Chips */}
+              <div className="flex flex-col gap-1">
+                <div className="text-[9px] text-slate-400">Cinematic Pose Presets:</div>
+                <div className="flex flex-wrap gap-1">
+                  {Object.values(POSE_PRESETS).map((p) => {
+                    const isCurrent = (activeActor.posePreset || 'neutral-stand') === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => handleApplyPresetToSelectedActor(p.id)}
+                        title={p.description}
+                        className={`px-2 py-0.5 rounded text-[10px] transition-all font-mono ${
+                          isCurrent
+                            ? 'bg-director-gold text-director-darkest font-bold shadow-sm'
+                            : 'bg-white/5 hover:bg-white/10 text-slate-300 border border-white/5'
+                        }`}
+                      >
+                        {p.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Procedural Locomotion Gait */}
+              <div className="flex flex-col gap-1 pt-1 border-t border-director-border/60">
+                <div className="flex items-center justify-between text-[9px] text-slate-400">
+                  <span>Locomotion Gait:</span>
+                  <span className="text-director-cyan uppercase font-bold">{activeActor.gait || 'auto'}</span>
+                </div>
+                <div className="flex gap-1">
+                  {(['auto', 'walk', 'run', 'sneak', 'idle', 'none'] as const).map((g) => (
+                    <button
+                      key={g}
+                      onClick={() => updateActor(activeActor.id, { gait: g })}
+                      className={`flex-1 py-0.5 text-[8px] rounded font-mono uppercase transition-all ${
+                        (activeActor.gait || 'auto') === g
+                          ? 'bg-director-cyan text-director-darkest font-bold'
+                          : 'bg-white/5 hover:bg-white/10 text-slate-400'
+                      }`}
+                    >
+                      {g}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quick Kinematic Actions: Ground Feet & Reset */}
+              <div className="flex items-center gap-1.5 pt-1.5 border-t border-director-border/60">
+                <button
+                  onClick={handleGroundSelectedActorFeet}
+                  className="flex-1 py-1 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold text-center transition-all"
+                  title="Lock both feet to ground plane (Y=0) preventing slipping"
+                >
+                  Ground Feet
+                </button>
+                <button
+                  onClick={handleResetSelectedActorPose}
+                  className="flex-1 py-1 rounded bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 text-[10px] text-center transition-all"
+                  title="Reset skeleton back to rest T-pose"
+                >
+                  Reset Pose
+                </button>
+              </div>
+
+              <div className="text-[8px] text-slate-500 italic leading-tight">
+                💡 Drag 3D IK handles (Hands, Feet, Head, Hips) on stage to pose limbs.
+              </div>
+            </div>
+          )}
 
           {/* Solved VFX Camera Motion Sync Indicator */}
           {shot.vfxReference?.enabled && shot.vfxReference?.solvedCameraMove && (
@@ -2690,6 +3209,51 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
                               {p.label}
                             </button>
                           ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Character Posing Section in HUD if humanoid */}
+                    {activeActor && (activeActor.kind === 'human' || !activeActor.kind) && (
+                      <div className="flex flex-col gap-1.5 pt-1.5 border-t border-director-border/60">
+                        <div className="flex justify-between items-center text-[10px]">
+                          <span className="text-slate-300 font-semibold flex items-center gap-1">
+                            <Activity className="h-3 w-3 text-director-gold" />
+                            Pose Preset:
+                          </span>
+                          <span className="text-director-gold font-bold font-mono uppercase text-[9px]">
+                            {activeActor.posePreset || 'neutral-stand'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1">
+                          {Object.values(POSE_PRESETS).slice(0, 6).map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => handleApplyPresetToSelectedActor(p.id)}
+                              className={`py-0.5 text-[8px] rounded font-mono truncate px-1 transition-all ${
+                                (activeActor.posePreset || 'neutral-stand') === p.id
+                                  ? 'bg-director-gold text-director-darkest font-bold'
+                                  : 'bg-white/5 hover:bg-white/10 text-slate-300 border border-white/5'
+                              }`}
+                              title={p.description}
+                            >
+                              {p.name}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={handleGroundSelectedActorFeet}
+                            className="flex-1 py-0.5 text-[9px] rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30"
+                          >
+                            Ground Feet
+                          </button>
+                          <button
+                            onClick={handleResetSelectedActorPose}
+                            className="flex-1 py-0.5 text-[9px] rounded bg-white/5 text-slate-400 border border-white/5 hover:bg-white/10"
+                          >
+                            Reset Pose
+                          </button>
                         </div>
                       </div>
                     )}

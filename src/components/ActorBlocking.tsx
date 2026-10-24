@@ -1,8 +1,9 @@
 import React from 'react';
 import { useShotStore } from '../stores/useShotStore';
-import { Users, Trash2, Clock, UserCheck, Bookmark, BookmarkPlus, Box } from 'lucide-react';
+import { Users, Trash2, Clock, UserCheck, Bookmark, BookmarkPlus, Box, Activity } from 'lucide-react';
 import { registerModelFile } from '../services/modelStorage';
 import { preloadGltfModels } from '../engine/gltfModelLoader';
+import { POSE_PRESETS } from '../engine/kinematics';
 
 export const ActorBlocking: React.FC = () => {
   const {
@@ -169,6 +170,48 @@ export const ActorBlocking: React.FC = () => {
                 className="glass-control rounded px-2 py-1 text-slate-200 text-xs"
               />
             </div>
+
+            {/* Directorial Character Pose Preset (Kinematics) */}
+            {(!actor.kind || actor.kind === 'human') && (
+              <div className="flex flex-col gap-1">
+                <label className="font-mono text-[10px] text-slate-400 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <Activity className="h-3 w-3 text-director-gold" />
+                    Pose Preset (IK Rig)
+                  </span>
+                  <span className="text-[9px] text-director-gold font-mono uppercase">
+                    {actor.posePreset || 'neutral-stand'}
+                  </span>
+                </label>
+                <select
+                  value={actor.posePreset || 'neutral-stand'}
+                  onChange={(e) => updateActor(actor.id, { posePreset: e.target.value })}
+                  className="bg-slate-800 text-[11px] text-slate-200 rounded px-2 py-1 border border-slate-700 font-mono focus:border-director-gold focus:outline-none"
+                >
+                  {Object.values(POSE_PRESETS).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.category})
+                    </option>
+                  ))}
+                </select>
+
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="font-mono text-[9px] text-slate-400">Gait / Locomotion:</span>
+                  <select
+                    value={actor.gait || 'auto'}
+                    onChange={(e) => updateActor(actor.id, { gait: e.target.value as any })}
+                    className="flex-1 bg-slate-800 text-[10px] text-slate-200 rounded px-1.5 py-0.5 border border-slate-700 font-mono focus:border-director-cyan focus:outline-none"
+                  >
+                    <option value="auto">Auto (Walk on Move / Idle)</option>
+                    <option value="walk">Walk</option>
+                    <option value="run">Run</option>
+                    <option value="sneak">Sneak</option>
+                    <option value="idle">Idle Stance</option>
+                    <option value="none">None (Frozen Pose)</option>
+                  </select>
+                </div>
+              </div>
+            )}
 
             {/* Action / Movement Prompt */}
             <div className="flex flex-col gap-1">

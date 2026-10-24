@@ -40,7 +40,14 @@ interface ShotState {
     name?: string,
     kind?: SubjectKind,
     token?: string,
-    options?: { modelUrl?: string; scale?: number; conceptImageUrl?: string; actionDescription?: string }
+    options?: {
+      modelUrl?: string;
+      scale?: number;
+      conceptImageUrl?: string;
+      actionDescription?: string;
+      sculpt?: any;
+      partGraph?: any;
+    }
   ) => void;
   removeActor: (actorId: string) => void;
   clearAllActors: () => void;
@@ -70,12 +77,15 @@ interface ShotState {
   // In-App 3D Previs Video
   previsVideoUrl?: string;
   previsVideoBlob?: Blob;
+  previsOpenPoseUrl?: string;
+  previsOpenPoseBlob?: Blob;
   isRenderingPrevis: boolean;
   previsProgress: number;
   previsRendererFn: (() => Promise<{ url: string; blob: Blob } | null>) | null;
   registerPrevisRenderer: (fn: (() => Promise<{ url: string; blob: Blob } | null>) | null) => void;
   renderPrevisVideo: () => Promise<{ url: string; blob: Blob } | null>;
   setPrevisVideo: (url?: string, blob?: Blob) => void;
+  setPrevisOpenPose: (url?: string, blob?: Blob) => void;
   setPrevisRendering: (rendering: boolean, progress?: number) => void;
 
   // Prompt Management
@@ -275,6 +285,8 @@ export const useShotStore = create<ShotState>((set, get) => {
     selectedActorId: initialShot.actors[0]?.id,
     previsVideoUrl: undefined,
     previsVideoBlob: undefined,
+    previsOpenPoseUrl: undefined,
+    previsOpenPoseBlob: undefined,
     isRenderingPrevis: false,
     previsProgress: 0,
     previsRendererFn: null,
@@ -310,6 +322,13 @@ export const useShotStore = create<ShotState>((set, get) => {
       commitShot(newShot, {
         previsVideoUrl: url,
         previsVideoBlob: blob,
+      });
+    },
+
+    setPrevisOpenPose: (url?: string, blob?: Blob) => {
+      set({
+        previsOpenPoseUrl: url,
+        previsOpenPoseBlob: blob,
       });
     },
 
@@ -663,6 +682,8 @@ export const useShotStore = create<ShotState>((set, get) => {
         modelUrl: options?.modelUrl,
         scale: options?.scale,
         conceptImageUrl: options?.conceptImageUrl,
+        sculpt: options?.sculpt,
+        partGraph: options?.partGraph || options?.sculpt,
       };
       logger.action(`Added ${kind} to stage: "${defaultName}"`, newActor);
       const updated: ShotSpec = { ...shot, actors: [...shot.actors, newActor] };

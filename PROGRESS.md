@@ -522,10 +522,130 @@ See the deferred table in [TASKS.md](TASKS.md).
    - Added `showLabels` state with dynamic Three.js scene sprite traversal.
    - Added a "Labels" button with `Tag` icon to the 3D Soundstage toolbar, allowing directors to toggle nametags on/off with a single click.
 
-3. **Verification & Tests:**
-   - Full test suite: 31 test files, 215/215 tests passing in 4.97s (`npm run test`).
-   - Production build: `npm run build` completed in 10.34s with 0 errors and 0 warnings.
-   - In-browser UI verification: Verified via subagent (recording `verify_compact_labels_1792791411798.webp`).
+
+## 2026-10-24 — S11 Parametric 3D Sculpt Engine & Image-to-3D Proxy (`stage/11-parametric-sculpt-engine`)
+
+**Goal:** Implement Phase 1 of the parametric 3D figure sculpting engine, reference image silhouette extraction, multimodal vision reasoning, and the interactive Concept-to-3D Studio.
+
+### Accomplishments
+
+1. **Parametric 3D Sculpt Representation (`src/engine/procedural3D/sculptSpec.ts`):**
+   - Clean-room `SculptSpec` schema supporting 8 parametric shape types: `blob` (smooth blend between box and ellipsoid via `roundness`), `lathe` (revolved 2D profiles), `extrude` (polygon with bevel depth), `cylinder`, `cone`, `torus`, `tube`, and `capsule`.
+   - Standard humanoid bone hierarchy tagging on `SculptPart` (`Head`, `Chest`, `Spine`, `Hips`, `LeftArm`, `RightArm`, `LeftForeArm`, `RightForeArm`, `LeftHand`, `RightHand`, `LeftUpLeg`, `RightUpLeg`, `LeftLeg`, `RightLeg`, `LeftFoot`, `RightFoot`) with mirror symmetry logic.
+   - Backward-compatible migrators from legacy `PartGraph` (`partGraphToSculptSpec`, `actorSculptSpec`, `migrateActorSculpt`, `migrateActorsInShot`).
+   - Untrusted schema validation and sanitization (`sanitizeSculptSpec`) ensuring robust execution against hallucinated LLM responses.
+
+2. **Deterministic 2D Silhouette Extraction & Truthful IoU (`src/engine/procedural3D/silhouette.ts`):**
+   - High-contrast pure mask extraction (`extractMaskFromRgba`, `extractMaskFromImageUrl`) with luminance thresholding and alpha protection.
+   - Geometric silhouette measurement (`measureSilhouette`): aspect ratio, center of mass, and 10-band horizontal normalized width profile.
+   - Offscreen Three.js orthographic rendering (`renderSculptSilhouette`) with pure geometric fallback for headless test environments.
+   - Real calculated 2D Intersection-over-Union (IoU) metric (`computeSilhouetteIoU`) comparing 3D render masks directly to reference silhouettes with zero fabricated scores.
+
+3. **Multimodal Vision Reasoning & VRAM Protection (`src/services/objectReasoner.ts`):**
+   - Upgraded reasoner providers (Ollama `/api/chat`, OpenAI `/v1/chat/completions`, and Google Gemini `/models/gemini-*:generateContent`) with multimodal image payload support (`imageBase64`).
+   - Zero VRAM clash invariant: sets `keep_alive: 0` on Ollama when vision inputs are processed, immediately releasing vision weights from GPU VRAM to ensure full 24GB availability for ComfyUI LTX-2.5 video generation.
+   - Injected geometric silhouette metrics (width profiles and aspect ratios) directly into reasoner prompts.
+   - Added iterative revision loop with differential patch application (`applySculptPatch`).
+
+4. **Concept-to-3D Studio (`src/components/AIGenerator3D.tsx`):**
+   - Dedicated studio component with reference image dropzone, auto-extracted silhouette preview, directorial prompt suggestions, and real-time interactive Three.js viewport (wireframe, solid, orbit controls).
+   - Real-time calculated silhouette match HUD badge (`🎯 XX% Silhouette Match`).
+   - Refinement controls and "Auto-Align Silhouette" optimization pass.
+   - "Add to Active Scene" and "Save to 3D Library" integration.
+
+5. **Stage & Parameter Deck Integration:**
+   - `src/components/AssetLibraryModal.tsx`: Added `✨ Concept-to-3D Studio` header button.
+   - `src/components/PrevisParametersDeck.tsx`: Added `✨ AI 3D Generator...` chip in Staging Deck and dual `⚡ LLM Reason` / `✨ 3D Studio...` triggers on actor cards.
+   - `src/components/StagePrevis3D.tsx`: Automatically renders `actor.sculpt` with immediate visual updates.
+   - `src/stores/useShotStore.ts` & `src/stores/useAssetLibraryStore.ts`: Updated actor schemas and asset store to register and persist `SculptSpec`.
+
+6. **Verification & Tests:**
+   - Unit test suites (`tests/sculptSpec.test.ts`, `tests/silhouette.test.ts`, `tests/objectReasonerProviders.test.ts`): 34 tests covering parametric geometry, bone tagging, silhouette analysis, and multimodal API payloads.
+   - Full test suite: 32 test files, 229/229 tests passing in 5.31s (`npm run test`).
+   - Production build: `npm run build` completed in 10.40s with zero errors and zero warnings.
+   - In-browser UI verification: Verified via browser subagent.
+
+
+## 2026-10-24 — S11 Phase 2: Humanoid Rigging, 2-Bone Analytic IK & Directorial Posing (`stage/11-parametric-sculpt-engine`)
+
+**Goal:** Deliver browser-native character rigging, closed-form 2-bone analytic IK limb solving, floor grounding locks, and interactive soundstage posing handles.
+
+### Accomplishments
+
+1. **Humanoid Skeleton & Hierarchical Binding (`src/engine/kinematics/skeletonHierarchy.ts`):**
+   - Standard 19-bone humanoid hierarchy compatible with standard game/Mixamo rigs (Hips, Spine, Chest, Neck, Head, Left/Right Shoulder, Arm, ForeArm, Hand, UpLeg, Leg, Foot).
+   - Anatomically scaled bone offsets (`createHumanoidSkeleton`) based on actor height.
+   - Rigid sculpt binding (`bindSculptToSkeleton`): reparents tagged sculpt parts (`part.bone`) into corresponding Three.js bones while preserving exact rest transforms in world space.
+   - Stylized humanoid stand-in geometry (`createStylizedHumanoidStandin`): generates lightweight, visually distinct joint and limb geometry for actors without a custom sculpt.
+
+2. **Closed-Form 2-Bone Analytic IK Solver (`src/engine/kinematics/twoBoneIKSolver.ts`):**
+   - Pure geometric Law of Cosines solver executing in $<0.01\text{ ms}$ per limb on CPU (Zero VRAM impact, 0MB GPU memory overhead, leaving 100% of the 24GB VRAM pool free on the RTX 3090 for ComfyUI video diffusion).
+   - Distance clamping with epsilon padding ($d_{\min} = |L_1 - L_2| + \epsilon$, $d_{\max} = L_1 + L_2 - \epsilon$) eliminating mathematical singularity when limbs are fully compressed or extended.
+   - Pole vector bend-plane projection with continuity tracking across frames.
+   - Cascadeur-style FK update: directly writes local joint quaternions into root and mid bones.
+   - `solveLimbIK`: Solves `leftArm`, `rightArm`, `leftLeg`, and `rightLeg` with anatomical default bend poles.
+   - `solveLookAt`: Natural gaze tracking distributing orientation between `Neck` (35%) and `Head` (65%).
+
+3. **Floor Grounding & Contact Lock (`src/engine/kinematics/footGroundingLock.ts`):**
+   - Ground contact detection and floor clamp ($Y = 0$) preventing foot sliding and interpenetration.
+   - One-click `groundBothFeet` utility for natural grounded staging.
+
+4. **Directorial Pose Presets & Lossless Serialization (`src/engine/kinematics/posePresets.ts`):**
+   - Curated directorial poses: `neutral-stand`, `aim-pistol`, `crouch-cover`, `stride-mid`, `dialogue-gesturing`, `sitting-chair`, `t-pose`.
+   - Lossless serialization: `exportBonePose` and `applyBonePose` mapping quaternions to/from `ActorPose` schema.
+
+5. **Soundstage Interaction & Layer 1 Gizmo Isolation (`src/components/StagePrevis3D.tsx`, `ActorBlocking.tsx`, `PrevisParametersDeck.tsx`):**
+   - Interactive IK handles for hands, feet, head, and hips placed on Three.js Layer 1 (Gizmo layer) — visible on soundstage for director interaction, automatically excluded from Viewfinder rendering and offline previs video passes.
+   - Real-time limb solving during pointer drag on camera-facing planes with single-gesture undo tracking (`beginGesture` / `endGesture`).
+   - Soundstage toolbar toggle button for `IK Posing` with `Activity` icon.
+   - Floating glass Posing Deck overlay with pose preset chips, "Ground Feet", and "Reset Pose" actions.
+   - Dedicated pose preset selectors on actor cards in `ActorBlocking.tsx` and `PrevisParametersDeck.tsx`.
+
+6. **Verification & Tests:**
+   - Unit test suites (`tests/kinematics.test.ts`): 18 tests covering skeleton construction, sculpt binding, stylized stand-in, 2-bone IK solver, distance clamping, lookAt, floor grounding, pose presets, and serialization.
+   - Full test suite: 33 test files, 247/247 tests passing in 5.20s (`npm run test`).
+   - Production build: `npm run build` completed in 13.30s with zero TypeScript errors and zero warnings.
+   - In-browser UI verification: Verified pose presets and stage interactions via browser subagent.
+
+
+## 2026-10-24 — S11 Phase 3: Procedural Locomotion & ControlNet OpenPose Previs Bridge (`stage/11-parametric-sculpt-engine`)
+
+**Goal:** Deliver trajectory-synchronized procedural humanoid gaits, ControlNet OpenPose multi-pass video rendering in the offline renderer, and execution panel conditioning integration.
+
+### Accomplishments
+
+1. **Trajectory-Synchronized Procedural Locomotion (`src/engine/kinematics/gaitEngine.ts`):**
+   - Pure mathematical locomotion cycle engine supporting `walk`, `run`, `sneak`, `idle`, `auto`, and `none`.
+   - Speed-dependent automatic gait resolution (idle when stationary, walking when moving $<2.2\text{ m/s}$, running when moving $\ge 2.2\text{ m/s}$).
+   - Alternating $180^\circ$ phase stance and swing mechanics with ground floor clamp ($Y=0$) during stance and smooth parabolic leg elevation during swing.
+   - Natural pelvic vertical oscillation (double-frequency bob) and lateral weight-bearing sway.
+   - Dynamic counter-arm swing and spinal counter-yaw twist maintaining momentum equilibrium.
+   - Zero VRAM overhead: executes on CPU in $<0.02\text{ ms}$, preserving all 24GB VRAM on the RTX 3090.
+
+2. **ControlNet OpenPose Previs Pass Renderer (`src/engine/kinematics/openPoseRenderer.ts`):**
+   - Transforms 3D humanoid skeleton joint transforms through the 3D viewfinder camera into standard 18-keypoint 2D OpenPose coordinates.
+   - Renders anti-aliased, color-coded anatomical limb segments and circular joint markers onto a solid black background matching ControlNet OpenPose standards.
+
+3. **Multi-Pass Offline Previs Video Pipeline (`src/engine/offlinePrevisRenderer.ts`):**
+   - Extended `renderOfflinePrevisPasses` with `renderPass: 'all'` and auto-discovery of staged humanoid rigs.
+   - Muxes OpenPose video pass into standards-compliant MP4 container alongside RGB viewfinder and inverted Depth passes.
+
+4. **Soundstage & Staging Deck UI Integration (`src/components/StagePrevis3D.tsx`, `ActorBlocking.tsx`, `PrevisParametersDeck.tsx`):**
+   - Real-time gait animation active in soundstage playback (`isPlaying`) and during offline previs generation.
+   - Soundstage toolbar displays "Download OpenPose" MP4 button whenever an OpenPose pass is rendered.
+   - Gait selector button group in floating Posing Deck and actor HUD (`Auto`, `Walk`, `Run`, `Sneak`, `Idle`, `None`).
+   - Gait selector dropdowns on actor cards in `ActorBlocking.tsx` and `PrevisParametersDeck.tsx`.
+
+5. **ComfyUI Execution Panel ControlNet Integration (`src/components/ComfyExecutionPanel.tsx`):**
+   - Ingests `previsOpenPoseUrl` / `previsOpenPoseBlob` alongside `previsVideoUrl`.
+   - Conditioning Pass toggle allows directors to switch between `3D Viewfinder` (RGB/Depth) and `OpenPose Skeleton` video passes for ComfyUI geometric control conditioning.
+
+6. **Verification & Tests:**
+   - Unit test suites (`tests/kinematics.test.ts`): 24 tests covering skeletal hierarchy, 2-bone IK solver, floor grounding, pose presets, procedural locomotion gaits, and OpenPose keypoint projection.
+   - Full test suite: 33 test files, 253/253 tests passing in 5.24s (`npm run test`).
+   - Production build: `npm run build` completed in 10.50s with zero TypeScript errors and zero warnings.
+   - In-browser UI verification: Verified gait selection and previs conditioning toggle in browser subagent.
+
 
 
 

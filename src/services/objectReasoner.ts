@@ -9,14 +9,21 @@
  * There is no keyword catalog in this path; the model's reasoning decides what gets built.
  */
 import {
-  GRAPH_ROUTES,
-  MOTION_TYPES,
-  PART_SHAPES,
-  PartGraph,
-  sanitizePartGraph,
-} from '../engine/procedural3D/partGraph';
+  HUMANOID_BONES,
+  RIG_TYPES,
+  SCULPT_ROUTES,
+  SCULPT_SHAPES,
+  SculptSpec,
+  sanitizeSculptSpec,
+  applySculptPatch,
+} from '../engine/procedural3D/sculptSpec';
+import { SilhouetteMetrics } from '../engine/procedural3D/silhouette';
 import { EnvironmentSpec, CINEMATIC_ENVIRONMENT_PRESETS } from '../types/environment';
 import { getRawStorage } from './storage';
+
+// Legacy compatibility aliases
+export type PartGraph = SculptSpec;
+export const sanitizePartGraph = sanitizeSculptSpec;
 
 /* ------------------------------------------------------------------------------------------ */
 /* Provider settings                                                                           */
@@ -185,19 +192,20 @@ export class ObjectReasonerError extends Error {
 }
 
 const vec3 = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 };
+const vec2 = { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 };
 
-/** JSON schema handed to Ollama's structured-output mode (constrains decoding). */
-export const PART_GRAPH_JSON_SCHEMA = {
+/** JSON schema handed to reasoners for structured output. */
+export const SCULPT_SPEC_JSON_SCHEMA = {
   type: 'object',
-  required: ['name', 'identity', 'route', 'heightMeters', 'walker', 'materials', 'parts'],
+  required: ['name', 'identity', 'route', 'rig', 'heightMeters', 'walker', 'materials', 'parts'],
   properties: {
     name: { type: 'string' },
     identity: { type: 'string' },
-    route: { type: 'string', enum: [...GRAPH_ROUTES] },
+    route: { type: 'string', enum: [...SCULPT_ROUTES] },
+    rig: { type: 'string', enum: [...RIG_TYPES] },
     heightMeters: { type: 'number' },
     walker: {
       type: 'object',
-      required: ['coat', 'belly', 'female', 'morphology'],
       properties: {
         coat: { type: 'string' },
         belly: { type: 'string' },
@@ -226,7 +234,7 @@ export const PART_GRAPH_JSON_SCHEMA = {
     },
     materials: {
       type: 'array',
-      maxItems: 12,
+      maxItems: 16,
       items: {
         type: 'object',
         required: ['id', 'color', 'roughness', 'metalness'],
@@ -249,18 +257,23 @@ export const PART_GRAPH_JSON_SCHEMA = {
         properties: {
           id: { type: 'string', minLength: 1 },
           parent: { type: 'string' },
-          shape: { type: 'string', enum: [...PART_SHAPES] },
+          shape: { type: 'string', enum: [...SCULPT_SHAPES] },
           size: vec3,
           position: vec3,
           rotation: vec3,
           material: { type: 'string', minLength: 1 },
+          roundness: { type: 'number' },
           taper: { type: 'number' },
           points: { type: 'array', items: vec3 },
+          profile: { type: 'array', items: vec2 },
+          outline: { type: 'array', items: vec2 },
+          bevel: { type: 'number' },
           mirrorX: { type: 'boolean' },
+          bone: { type: 'string', enum: [...HUMANOID_BONES] },
           motion: {
             type: 'object',
             properties: {
-              type: { type: 'string', enum: [...MOTION_TYPES] },
+              type: { type: 'string', enum: ['spin', 'swing', 'bob'] },
               axis: { type: 'string', enum: ['x', 'y', 'z'] },
               speed: { type: 'number' },
               amplitude: { type: 'number' },
@@ -272,40 +285,89 @@ export const PART_GRAPH_JSON_SCHEMA = {
   },
 };
 
-/** Condensed from .agents/skills/3dviz-pro-max/references/object-reasoning.md and object-craft.md. */
-export const OBJECT_REASONER_SYSTEM_PROMPT = `You are the object-reasoning stage of a 3D previs tool. The user names ANY object, creature, vehicle, building or prop, in any language. You decide how to build it from primitives so it is instantly recognisable on a film stage.
+/** Backward-compatibility alias */
+export const PART_GRAPH_JSON_SCHEMA = SCULPT_SPEC_JSON_SCHEMA;
+
+/** Revision patch schema */
+export const SCULPT_PATCH_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    heightMeters: { type: 'number' },
+    set: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['id'],
+        properties: {
+          id: { type: 'string' },
+          shape: { type: 'string', enum: [...SCULPT_SHAPES] },
+          size: vec3,
+          position: vec3,
+          rotation: vec3,
+          material: { type: 'string' },
+          roundness: { type: 'number' },
+          taper: { type: 'number' },
+          profile: { type: 'array', items: vec2 },
+          outline: { type: 'array', items: vec2 },
+          bevel: { type: 'number' },
+          mirrorX: { type: 'boolean' },
+          bone: { type: 'string', enum: [...HUMANOID_BONES] },
+        },
+      },
+    },
+    add: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['id', 'shape', 'size', 'position', 'rotation', 'material'],
+        properties: {
+          id: { type: 'string' },
+          parent: { type: 'string' },
+          shape: { type: 'string', enum: [...SCULPT_SHAPES] },
+          size: vec3,
+          position: vec3,
+          rotation: vec3,
+          material: { type: 'string' },
+          roundness: { type: 'number' },
+          taper: { type: 'number' },
+          profile: { type: 'array', items: vec2 },
+          outline: { type: 'array', items: vec2 },
+          bevel: { type: 'number' },
+          mirrorX: { type: 'boolean' },
+          bone: { type: 'string', enum: [...HUMANOID_BONES] },
+        },
+      },
+    },
+    remove: { type: 'array', items: { type: 'string' } },
+  },
+};
+
+export const OBJECT_REASONER_SYSTEM_PROMPT = `You are the 3D procedural reasoning stage of an AI film previs workstation. The user gives you a description, a reference image, or silhouette measurements. You decide how to construct the 3D figure using parametric shapes so it is instantly recognisable on set.
 
 Reason before building:
 1. Identity: what silhouette, proportions and parts make this object recognisable? Write them in "identity" (one or two sentences).
 2. Structure: identity-bearing masses first, then secondary parts. Every part must touch or overlap the part it attaches to - no floating gaps. Supports reach the ground.
-3. Surface: realistic colours (#hex), roughness and metalness per material. Glass/screens may use opacity; lights may be emissive.
-4. Behaviour: add motion only where the real object moves (wheels/rotors spin, pendulums swing, flags bob).
+3. Shapes to use:
+   - "blob": box to ellipsoid via roundness (0 = sharp box, 0.3 = smooth box, 1 = ellipsoid/sphere). Use for organic torsos, heads, limbs, cushions, rocks.
+   - "lathe": revolved 2D profile curves for bottles, hats, vases, wheels, glasses, helmets. Profile is an array of [radius, height] pairs from 0 to 1.
+   - "extrude": 2D polygon outline (points between -0.5 and 0.5) extruded along depth with bevel. For shields, signage, armor plates, badges.
+   - "cylinder": with optional taper (1 = straight, 0.5 = narrower top).
+   - "cone", "torus", "tube", "capsule".
+4. Rigging: For humanoids or characters, tag parts with "bone" (Head, Chest, Spine, Hips, LeftArm, RightArm, LeftForeArm, RightForeArm, LeftHand, RightHand, LeftUpLeg, RightUpLeg, LeftLeg, RightLeg, LeftFoot, RightFoot) and set rig: "humanoid".
+5. Surface: realistic colours (#hex), roughness and metalness per material. Glass/screens may use opacity; lights may be emissive.
+6. Behaviour: add motion only where the real object moves (wheels spin, pendulums swing, flags bob).
 
 Routing:
-- route "quadruped-walker": ANY real four-legged animal (cow, camel, dog, horse, goat, lion, elephant...). Fill "walker" with the animal's real coat/belly/hoof/horn/nose colours, patches colour if spotted, and morphology (build, neckLength 0.6-2.5, horns, ears, tail, hasDewlap, hasUdder, hasMane, snoutLength). "parts" must be an empty array.
-- route "biped-walker": an ordinary human person. Set walker.female when appropriate. "parts" must be an empty array.
-- route "author": everything else (objects, machines, vehicles, buildings, furniture, food, plants, birds, fish, insects, fantasy creatures, robots...). Describe 10-60 parts. Still output "walker" with neutral values; it is ignored.
+- route "quadruped-walker": ANY real four-legged animal (cow, camel, dog, horse, goat, lion, elephant...). Fill "walker" and leave "parts" empty.
+- route "biped-walker": a generic human person. Set walker.female when appropriate. "parts" empty.
+- route "author": everything else (characters, creatures, robots, vehicles, buildings, props). Describe 10-60 parts. Still output "walker" with neutral values.
 
-Coordinates for "author" parts: metres, Y up, ground at y=0, the object's front faces +Z, centred on x=0.
-- position = centre of the part in object space (NOT relative to the parent). rotation = degrees [x,y,z].
-- size: box/ellipsoid/cylinder/cone/capsule = [width(x), height(y), depth(z)] before rotation; cylinder, cone and capsule run along Y before rotation (rotate [0,0,90] to lay one along X, [90,0,0] along Z).
-- cylinder "taper" = top diameter / bottom diameter (1 = straight, 0.5 = narrower top).
-- torus: size = [outer diameter, tube thickness, 0]; the ring lies in the XY plane before rotation (rotate [90,0,0] to lie flat).
-- tube: size = [thickness, 0, 0] and "points" = 2-8 object-space points along a curved path (handles, cables, pipes, tails, branches).
-- mirrorX = true duplicates a part (and its children) at -x: give only the +x side for legs, wheels, wings, arms, ears, eyes.
-- parent = id of the part it is attached to (used to carry motion, e.g. blades attached to a rotor hub).
-- heightMeters = real total height of the object.
-Use real-world dimensions. Every part has a unique descriptive id. Never repeat the same part over and over: use mirrorX for pairs and stop when the object is recognisable (typically 12-40 parts).
-
-Worked example (a standing desk fan, abbreviated):
-{"name":"Desk fan","identity":"Round caged head with spinning blades on a slim stem over a heavy disc base.","route":"author","heightMeters":0.55,
-"materials":[{"id":"plastic","color":"#e8e8e4","roughness":0.45,"metalness":0},{"id":"chrome","color":"#c9ced6","roughness":0.2,"metalness":0.9}],
-"parts":[{"id":"base","shape":"cylinder","size":[0.24,0.04,0.24],"position":[0,0.02,0],"rotation":[0,0,0],"material":"plastic"},
-{"id":"stem","shape":"cylinder","size":[0.025,0.3,0.025],"position":[0,0.19,0],"rotation":[0,0,0],"material":"chrome"},
-{"id":"motor","shape":"capsule","size":[0.09,0.14,0.09],"position":[0,0.38,-0.04],"rotation":[90,0,0],"material":"plastic"},
-{"id":"hub","shape":"cylinder","size":[0.05,0.03,0.05],"position":[0,0.38,0.05],"rotation":[90,0,0],"material":"plastic","motion":{"type":"spin","axis":"z","speed":12,"amplitude":0}},
-{"id":"blade_a","parent":"hub","shape":"ellipsoid","size":[0.08,0.12,0.01],"position":[0,0.45,0.05],"rotation":[0,0,0],"material":"plastic"},
-{"id":"cage_ring","shape":"torus","size":[0.3,0.006,0],"position":[0,0.38,0.06],"rotation":[0,0,0],"material":"chrome"}]}`;
+Coordinates for "author" parts: metres, Y up, ground at y=0, front faces +Z, centred on x=0.
+- position = centre in object space. rotation = degrees [x,y,z].
+- mirrorX = true duplicates a part (and its children) at -x. Give only the +x side for limbs, wings, ears, eyes.
+- parent = id of part it attaches to.
+- heightMeters = real total height of the object.`;
 
 export const ENVIRONMENT_JSON_SCHEMA = {
   type: 'object',
@@ -376,6 +438,26 @@ export interface ReasonOptions {
   onStage?: (stage: string) => void;
   /** Override the stored settings (used by the settings panel's "Test" button). */
   config?: ReasonerConfig;
+  /** Optional reference image Base64 or Data URI */
+  imageBase64?: string;
+  imageMimeType?: string;
+  /** Geometric silhouette metrics computed from reference image */
+  silhouetteMeasurements?: SilhouetteMetrics;
+  /** Existing SculptSpec to revise */
+  reviseSpec?: SculptSpec;
+  /** Director revision instructions / feedback */
+  revisionFeedback?: string;
+}
+
+/** Parses data URL or raw base64 into clean base64 string and mimeType */
+export function parseBase64Image(dataOrBase64: string, defaultMime = 'image/png'): { base64: string; mimeType: string } {
+  if (dataOrBase64.startsWith('data:')) {
+    const match = dataOrBase64.match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      return { mimeType: match[1], base64: match[2] };
+    }
+  }
+  return { base64: dataOrBase64.replace(/^data:[^;]+;base64,/, ''), mimeType: defaultMime };
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -393,8 +475,17 @@ export function buildOllamaRequest(
   prompt: string,
   systemPrompt: string = OBJECT_REASONER_SYSTEM_PROMPT,
   schema: any = PART_GRAPH_JSON_SCHEMA,
-  userPrefix: string = 'Object to build: '
+  userPrefix: string = 'Object to build: ',
+  imageBase64?: string
 ): ProviderRequest {
+  const userMsg: Record<string, unknown> = {
+    role: 'user',
+    content: `${userPrefix}${prompt}`,
+  };
+  if (imageBase64) {
+    const { base64 } = parseBase64Image(imageBase64);
+    userMsg.images = [base64];
+  }
   return {
     url: `${cfg.url}/api/chat`,
     headers: { 'Content-Type': 'application/json' },
@@ -404,11 +495,12 @@ export function buildOllamaRequest(
       // Planning before emitting JSON is what keeps small local models from looping.
       think: true,
       format: schema,
-      keep_alive: '10m',
+      // Zero VRAM clash: immediately unload vision model from GPU (keep_alive: 0) so ComfyUI keeps 24GB VRAM!
+      keep_alive: imageBase64 ? 0 : '10m',
       options: { temperature: 0.3, num_ctx: 16384, num_predict: 12000 },
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `${userPrefix}${prompt}` },
+        userMsg,
       ],
     },
   };
@@ -423,14 +515,25 @@ export function buildOpenAiRequest(
   mode: JsonMode = 'schema',
   systemPrompt: string = OBJECT_REASONER_SYSTEM_PROMPT,
   schema: any = PART_GRAPH_JSON_SCHEMA,
-  userPrefix: string = 'Object to build: '
+  userPrefix: string = 'Object to build: ',
+  imageBase64?: string
 ): ProviderRequest {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
+
+  let userContent: unknown = `${userPrefix}${prompt}`;
+  if (imageBase64) {
+    const { base64, mimeType } = parseBase64Image(imageBase64);
+    userContent = [
+      { type: 'text', text: `${userPrefix}${prompt}` },
+      { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64}` } },
+    ];
+  }
+
   const body: Record<string, unknown> = {
     messages: [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `${userPrefix}${prompt}` },
+      { role: 'user', content: userContent },
     ],
     temperature: 0.3,
     max_tokens: 12000,
@@ -455,7 +558,8 @@ export function buildGeminiRequest(
   mode: JsonMode = 'schema',
   systemPrompt: string = OBJECT_REASONER_SYSTEM_PROMPT,
   schema: any = PART_GRAPH_JSON_SCHEMA,
-  userPrefix: string = 'Object to build: '
+  userPrefix: string = 'Object to build: ',
+  imageBase64?: string
 ): ProviderRequest {
   const model = cfg.model.replace(/^models\//, '');
   const generationConfig: Record<string, unknown> = {
@@ -465,12 +569,24 @@ export function buildGeminiRequest(
   };
   if (mode !== 'none') generationConfig.responseMimeType = 'application/json';
   if (mode === 'schema') generationConfig.responseJsonSchema = schema;
+
+  const userParts: any[] = [{ text: `${userPrefix}${prompt}` }];
+  if (imageBase64) {
+    const { base64, mimeType } = parseBase64Image(imageBase64);
+    userParts.push({
+      inlineData: {
+        mimeType,
+        data: base64,
+      },
+    });
+  }
+
   return {
     url: `${cfg.url || GEMINI_BASE_URL}/models/${encodeURIComponent(model)}:generateContent`,
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.apiKey },
     body: {
       systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents: [{ role: 'user', parts: [{ text: `${userPrefix}${prompt}` }] }],
+      contents: [{ role: 'user', parts: userParts }],
       generationConfig,
     },
   };
@@ -557,8 +673,8 @@ function validateConfig(cfg: ReasonerConfig) {
 const isSchemaRejection = (status: number, body: any) =>
   status === 400 && /schema|response_format|json|unknown name|invalid argument/i.test(errorText(body, status));
 
-/** Ask the configured model to reason a prompt into a PartGraph. Throws ObjectReasonerError on failure. */
-export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Promise<PartGraph> {
+/** Ask the configured model to reason a prompt into a SculptSpec / PartGraph. Throws ObjectReasonerError on failure. */
+export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Promise<SculptSpec> {
   const cfg = opts.config ?? getReasonerConfig();
   validateConfig(cfg);
   const timeoutMs = opts.timeoutMs ?? 240_000;
@@ -569,7 +685,18 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
   const t0 = Date.now();
   const protocol = cfg.info.protocol;
 
+  // Augment prompt with silhouette measurements and revision instructions if provided
+  let augmentedPrompt = prompt;
+  if (opts.silhouetteMeasurements) {
+    augmentedPrompt += `\n\nReference Image Geometric Silhouette Measurements:\n${opts.silhouetteMeasurements.promptDescription}`;
+  }
+  if (opts.reviseSpec) {
+    augmentedPrompt = `Existing Sculpt Spec to refine:\n${JSON.stringify(opts.reviseSpec, null, 2)}\n\nDirector Revision Instructions: ${opts.revisionFeedback || prompt || 'Refine proportions, parts, and silhouette alignment.'}\n\nReturn the revised SculptSpec or a SculptPatch with modifications.`;
+  }
+
   opts.onStage?.(`Reasoning parts, proportions & materials with ${describeReasoner(cfg)}...`);
+
+  const activeSchema = opts.reviseSpec ? SCULPT_SPEC_JSON_SCHEMA : SCULPT_SPEC_JSON_SCHEMA;
 
   // Servers differ in structured-output support: try the strict schema first, then relax.
   const modes: JsonMode[] = protocol === 'ollama' ? ['schema'] : ['schema', 'object', 'none'];
@@ -578,10 +705,33 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
     for (let i = 0; i < modes.length; i++) {
       const req =
         protocol === 'ollama'
-          ? buildOllamaRequest(cfg, prompt)
+          ? buildOllamaRequest(
+              cfg,
+              augmentedPrompt,
+              OBJECT_REASONER_SYSTEM_PROMPT,
+              activeSchema,
+              'Object to build: ',
+              opts.imageBase64
+            )
           : protocol === 'openai'
-            ? buildOpenAiRequest(cfg, prompt, modes[i])
-            : buildGeminiRequest(cfg, prompt, modes[i]);
+            ? buildOpenAiRequest(
+                cfg,
+                augmentedPrompt,
+                modes[i],
+                OBJECT_REASONER_SYSTEM_PROMPT,
+                activeSchema,
+                'Object to build: ',
+                opts.imageBase64
+              )
+            : buildGeminiRequest(
+                cfg,
+                augmentedPrompt,
+                modes[i],
+                OBJECT_REASONER_SYSTEM_PROMPT,
+                activeSchema,
+                'Object to build: ',
+                opts.imageBase64
+              );
       let response: Response;
       try {
         response = await fetch(req.url, {
@@ -617,7 +767,13 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
   }
 
   const raw = parseModelJson(text);
-  const graph = sanitizePartGraph(raw, prompt);
+  let graph: SculptSpec;
+  if (opts.reviseSpec && raw && typeof raw === 'object' && ('set' in raw || 'add' in raw || 'remove' in raw)) {
+    graph = applySculptPatch(opts.reviseSpec, raw);
+  } else {
+    graph = sanitizeSculptSpec(raw, prompt);
+  }
+
   if (graph.route === 'author' && graph.parts.length < 3) {
     throw new ObjectReasonerError('The model described too few parts to build a recognisable object.', 'invalid');
   }
@@ -628,6 +784,9 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
   };
   return graph;
 }
+
+/** Primary alias for reasonObject */
+export const reasonSculpt = reasonObject;
 
 /** Ask the configured model to reason a filming location prompt into an EnvironmentSpec. */
 export async function reasonEnvironment(

@@ -12,6 +12,7 @@ import type { ProceduralKitResult, QuadrupedMorphology } from './proceduralKits'
 import { createQuadrupedWalker, createBipedWalker } from './proceduralKits';
 import { createStandardPalette } from './craftForms';
 import { safeGetItem, safeSetItem } from '../../services/storage';
+import { lookupSculptSpec, registerSculptSpec } from './sculptSpec';
 
 export type Vec3 = [number, number, number];
 
@@ -526,13 +527,24 @@ export function registerPartGraph(prompt: string, graph: PartGraph) {
   hydrate();
   registry.set(partGraphKey(prompt), graph);
   persist();
+  try {
+    registerSculptSpec(prompt, graph as any);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function lookupPartGraph(prompt?: string): PartGraph | undefined {
   if (!prompt || !prompt.trim()) return undefined;
   hydrate();
   const key = partGraphKey(prompt);
-  return registry.get(key) || lookupCuratedPartGraph(key) || lookupCuratedPartGraph(prompt);
+  return (
+    registry.get(key) ||
+    (lookupSculptSpec(prompt) as any) ||
+    (lookupSculptSpec(key) as any) ||
+    lookupCuratedPartGraph(key) ||
+    lookupCuratedPartGraph(prompt)
+  );
 }
 
 export function lookupCuratedPartGraph(idOrPrompt?: string): PartGraph | undefined {

@@ -4,7 +4,7 @@
  */
 import * as THREE from 'three';
 import { reasonObject, setReasonerConfig } from '../../src/services/objectReasoner';
-import { buildPartGraph } from '../../src/engine/procedural3D/partGraph';
+import { buildSculpt } from '../../src/engine/procedural3D/sculptSpec';
 
 const args = process.argv.slice(2);
 const model = args.find((a) => a.startsWith('--model='))?.slice(8);
@@ -30,7 +30,7 @@ for (const p of graph.parts) {
   );
 }
 
-const kit = buildPartGraph(graph);
+const kit = buildSculpt(graph);
 kit.group.updateMatrixWorld(true);
 const box = new THREE.Box3().setFromObject(kit.group);
 let meshes = 0;
