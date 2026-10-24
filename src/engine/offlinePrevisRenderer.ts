@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { Muxer, ArrayBufferTarget } from 'mp4-muxer';
 import { snapFrames } from '../pipeline/templateBinder';
 import { preloadGltfModels } from './gltfModelLoader';
+import { renderOpenPoseCanvas } from './kinematics/openPoseRenderer';
+import { HumanoidRig } from './kinematics/skeletonHierarchy';
 
 export interface PrevisRenderOptions {
   scene: THREE.Scene;
@@ -11,12 +13,13 @@ export interface PrevisRenderOptions {
   fps?: number;
   width?: number;
   height?: number;
-  renderPass?: 'rgb' | 'depth' | 'both';
+  renderPass?: 'rgb' | 'depth' | 'openpose' | 'both' | 'all';
   snap8n1?: boolean;
   syncPositions: (time: number) => void;
   onProgress?: (progressPercent: number) => void;
   onFrame?: (frameIndex: number, totalFrames: number) => void;
   modelUrls?: string[];
+  humanoidRigs?: HumanoidRig[];
 }
 
 export interface PrevisRenderResult {
@@ -24,6 +27,8 @@ export interface PrevisRenderResult {
   rgbUrl?: string;
   depthBlob?: Blob;
   depthUrl?: string;
+  openposeBlob?: Blob;
+  openposeUrl?: string;
   totalFrames: number;
   durationSeconds: number;
   fps: number;
@@ -203,12 +208,14 @@ export async function renderOfflinePrevisPasses(
     ? snapFrames(durationSeconds, fps, '8n+1')
     : Math.max(2, Math.round(durationSeconds * fps));
 
-  const shouldRenderRgb = renderPass === 'rgb' || renderPass === 'both';
-  const shouldRenderDepth = renderPass === 'depth' || renderPass === 'both';
+  const shouldRenderRgb = renderPass === 'rgb' || renderPass === 'both' || renderPass === 'all';
+  const shouldRenderDepth = renderPass === 'depth' || renderPass === 'both' || renderPass === 'all';
+  const shouldRenderOpenpose = renderPass === 'openpose' || renderPass === 'all';
 
   // 2. Offscreen intermediate canvases
   const rgbFrames: HTMLCanvasElement[] = [];
   const depthFrames: HTMLCanvasElement[] = [];
+  const openposeFrames: HTMLCanvasElement[] = [];
 
   // Temporary depth override material
   const depthMaterial = new THREE.MeshDepthMaterial({
@@ -270,6 +277,22 @@ export async function renderOfflinePrevisPasses(
         depthFrames.push(invertedDepthCanvas);
       }
 
+      // --- Pass 3: ControlNet OpenPose Skeleton Pass ---
+      if (shouldRenderOpenpose) {
+        const activeRigs: HumanoidRig[] = options.humanoidRigs ? [...options.humanoidRigs] : [];
+        if (!options.humanoidRigs) {
+          scene.traverse((obj) => {
+            if (obj.userData?.rig && !activeRigs.includes(obj.userData.rig)) {
+              activeRigs.push(obj.userData.rig);
+            }
+          });
+        }
+
+        const openposeCanvas = document.createElement('canvas');
+        renderOpenPoseCanvas(activeRigs, camera, openposeCanvas, width, height);
+        openposeFrames.push(openposeCanvas);
+      }
+
       onFrame?.(f, totalFrames);
       if (onProgress) {
         const pct = Math.round(((f + 1) / totalFrames) * 80); // First 80% is rendering
@@ -287,6 +310,8 @@ export async function renderOfflinePrevisPasses(
     let rgbUrl: string | undefined;
     let depthBlob: Blob | undefined;
     let depthUrl: string | undefined;
+    let openposeBlob: Blob | undefined;
+    let openposeUrl: string | undefined;
 
     if (shouldRenderRgb && rgbFrames.length > 0) {
       onProgress?.(85);
@@ -298,11 +323,20 @@ export async function renderOfflinePrevisPasses(
     }
 
     if (shouldRenderDepth && depthFrames.length > 0) {
-      onProgress?.(95);
+      onProgress?.(92);
       depthBlob = await muxFramesToMp4(depthFrames, width, height, fps);
       depthUrl =
         typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
           ? URL.createObjectURL(depthBlob)
+          : undefined;
+    }
+
+    if (shouldRenderOpenpose && openposeFrames.length > 0) {
+      onProgress?.(98);
+      openposeBlob = await muxFramesToMp4(openposeFrames, width, height, fps);
+      openposeUrl =
+        typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+          ? URL.createObjectURL(openposeBlob)
           : undefined;
     }
 
@@ -313,6 +347,8 @@ export async function renderOfflinePrevisPasses(
       rgbUrl,
       depthBlob,
       depthUrl,
+      openposeBlob,
+      openposeUrl,
       totalFrames,
       durationSeconds,
       fps,

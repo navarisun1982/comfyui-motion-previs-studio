@@ -14,6 +14,9 @@ import {
   exportBonePose,
   applyBonePose,
   POSE_PRESETS,
+  evaluateGait,
+  extractOpenPoseKeypoints,
+  OPENPOSE_LIMBS,
 } from '../src/engine/kinematics';
 import { HUMANOID_BONES } from '../src/engine/procedural3D/sculptSpec';
 
@@ -244,5 +247,92 @@ describe('Pose Presets & Serialization', () => {
     expect(result.reachedDistance).toBeGreaterThan(0);
     expect(Number.isFinite(root.quaternion.x)).toBe(true);
     expect(Number.isFinite(mid.quaternion.x)).toBe(true);
+  });
+});
+
+describe('Procedural Humanoid Gait Engine', () => {
+  it('evaluates walk gait and cycles limb joints across time', () => {
+    const rig = createHumanoidSkeleton(5.0);
+    const times = [0.0, 0.25, 0.5, 0.75, 1.0];
+
+    for (const t of times) {
+      const res = evaluateGait(rig, t, { gait: 'walk' });
+      expect(res.effectiveGait).toBe('walk');
+      expect(res.phase).toBeGreaterThanOrEqual(0);
+      expect(res.phase).toBeLessThanOrEqual(1);
+
+      // Verify all bones maintain finite numbers
+      for (const [name, bone] of rig.bones) {
+        expect(Number.isFinite(bone.quaternion.x), `${name} qx at ${t}`).toBe(true);
+        expect(Number.isFinite(bone.quaternion.y), `${name} qy at ${t}`).toBe(true);
+        expect(Number.isFinite(bone.quaternion.z), `${name} qz at ${t}`).toBe(true);
+        expect(Number.isFinite(bone.quaternion.w), `${name} qw at ${t}`).toBe(true);
+      }
+    }
+  });
+
+  it('resolves auto gait correctly based on velocity speed', () => {
+    const rig = createHumanoidSkeleton(5.0);
+
+    const idleRes = evaluateGait(rig, 0, { gait: 'auto', speed: 0.02 });
+    expect(idleRes.effectiveGait).toBe('idle');
+
+    const walkRes = evaluateGait(rig, 0, { gait: 'auto', speed: 1.2 });
+    expect(walkRes.effectiveGait).toBe('walk');
+
+    const runRes = evaluateGait(rig, 0, { gait: 'auto', speed: 3.5 });
+    expect(runRes.effectiveGait).toBe('run');
+  });
+
+  it('simulates sneak gait with crouched pelvic height', () => {
+    const rig = createHumanoidSkeleton(5.0);
+    evaluateGait(rig, 0.5, { gait: 'sneak' });
+
+    const hips = rig.bones.get('Hips')!;
+    // Pelvic position Y should be lower than rest pose 0.52 * 5.0 = 2.6
+    expect(hips.position.y).toBeLessThan(2.6);
+  });
+
+  it('respects none gait mode by leaving rig untouched', () => {
+    const rig = createHumanoidSkeleton(5.0);
+    const res = evaluateGait(rig, 1.0, { gait: 'none' });
+    expect(res.effectiveGait).toBe('none');
+  });
+});
+
+describe('ControlNet OpenPose Previs Renderer', () => {
+  it('extracts projected 2D OpenPose keypoints from a 3D humanoid rig', () => {
+    const rig = createHumanoidSkeleton(5.0);
+    const camera = new THREE.PerspectiveCamera(60, 16 / 9, 0.1, 1000);
+    camera.position.set(0, 2.5, 8);
+    camera.lookAt(0, 2.5, 0);
+    camera.updateMatrixWorld(true);
+
+    const keypoints = extractOpenPoseKeypoints(rig, camera, 1280, 720);
+    expect(keypoints.size).toBeGreaterThanOrEqual(18);
+
+    const head = keypoints.get('Head');
+    const chest = keypoints.get('Chest');
+    const leftHand = keypoints.get('LeftHand');
+    const rightFoot = keypoints.get('RightFoot');
+
+    expect(head).toBeDefined();
+    expect(head?.visible).toBe(true);
+    expect(head?.x).toBeGreaterThan(0);
+    expect(head?.x).toBeLessThan(1280);
+    expect(head?.y).toBeGreaterThan(0);
+    expect(head?.y).toBeLessThan(720);
+
+    expect(chest).toBeDefined();
+    expect(leftHand).toBeDefined();
+    expect(rightFoot).toBeDefined();
+  });
+
+  it('defines standard OpenPose anatomical limb connections', () => {
+    expect(OPENPOSE_LIMBS.length).toBe(15);
+    const colors = OPENPOSE_LIMBS.map((l) => l.color);
+    expect(colors).toContain('rgb(0, 0, 255)');
+    expect(colors).toContain('rgb(255, 0, 0)');
+    expect(colors).toContain('rgb(0, 255, 0)');
   });
 });

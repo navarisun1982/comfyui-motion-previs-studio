@@ -41,6 +41,8 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
     setReferenceImage,
     previsVideoUrl,
     previsVideoBlob,
+    previsOpenPoseUrl,
+    previsOpenPoseBlob,
     isRenderingPrevis,
     previsProgress,
     renderPrevisVideo,
@@ -59,6 +61,7 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
 
   const [profile, setProfile] = useState<QualityProfile>('final');
   const [userSelectedMode, setUserSelectedMode] = useState<GenerationMode | null>(null);
+  const [controlPassSource, setControlPassSource] = useState<'viewfinder' | 'openpose'>('viewfinder');
   const [icLoraStrength, setIcLoraStrength] = useState<number>(1.0);
   const [icLoraModel, setIcLoraModel] = useState<string>('ltx-video-camera-lora.safetensors');
 
@@ -185,14 +188,18 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
       let controlFilename: string | undefined = undefined;
 
       if (mode === 'control') {
-        if (previsVideoBlob) {
-          controlBlob = previsVideoBlob;
-        } else if (previsVideoUrl) {
+        const useOpenPose = controlPassSource === 'openpose' && (previsOpenPoseBlob || previsOpenPoseUrl);
+        const sourceBlob = useOpenPose ? (previsOpenPoseBlob || previsVideoBlob) : previsVideoBlob;
+        const sourceUrl = useOpenPose ? (previsOpenPoseUrl || previsVideoUrl) : previsVideoUrl;
+
+        if (sourceBlob) {
+          controlBlob = sourceBlob;
+        } else if (sourceUrl) {
           try {
-            const res = await fetch(previsVideoUrl);
+            const res = await fetch(sourceUrl);
             if (res.ok) controlBlob = await res.blob();
           } catch (e) {
-            console.warn('Failed to fetch previs blob from url', e);
+            console.warn('Failed to fetch control video blob from url', e);
           }
         }
 
@@ -357,8 +364,36 @@ export const ComfyExecutionPanel: React.FC<ComfyExecutionPanelProps> = ({ onBack
 
         {previsVideoUrl ? (
           <div className="flex flex-col gap-2 pt-1">
+            {previsOpenPoseUrl && (
+              <div className="flex items-center gap-1.5 p-1 bg-black/40 rounded-lg border border-white/10 text-[10px] font-mono">
+                <span className="text-slate-400 pl-1">Conditioning Pass:</span>
+                <button
+                  type="button"
+                  onClick={() => setControlPassSource('viewfinder')}
+                  className={`px-2 py-0.5 rounded transition-all ${
+                    controlPassSource === 'viewfinder'
+                      ? 'bg-director-gold text-director-darkest font-bold'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  3D Viewfinder
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setControlPassSource('openpose')}
+                  className={`px-2 py-0.5 rounded transition-all ${
+                    controlPassSource === 'openpose'
+                      ? 'bg-purple-500 text-white font-bold'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  OpenPose Skeleton
+                </button>
+              </div>
+            )}
             <video
-              src={previsVideoUrl}
+              key={controlPassSource === 'openpose' && previsOpenPoseUrl ? previsOpenPoseUrl : previsVideoUrl}
+              src={controlPassSource === 'openpose' && previsOpenPoseUrl ? previsOpenPoseUrl : previsVideoUrl}
               controls
               autoPlay
               loop

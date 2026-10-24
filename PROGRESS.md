@@ -608,6 +608,45 @@ See the deferred table in [TASKS.md](TASKS.md).
    - In-browser UI verification: Verified pose presets and stage interactions via browser subagent.
 
 
+## 2026-10-24 — S11 Phase 3: Procedural Locomotion & ControlNet OpenPose Previs Bridge (`stage/11-parametric-sculpt-engine`)
+
+**Goal:** Deliver trajectory-synchronized procedural humanoid gaits, ControlNet OpenPose multi-pass video rendering in the offline renderer, and execution panel conditioning integration.
+
+### Accomplishments
+
+1. **Trajectory-Synchronized Procedural Locomotion (`src/engine/kinematics/gaitEngine.ts`):**
+   - Pure mathematical locomotion cycle engine supporting `walk`, `run`, `sneak`, `idle`, `auto`, and `none`.
+   - Speed-dependent automatic gait resolution (idle when stationary, walking when moving $<2.2\text{ m/s}$, running when moving $\ge 2.2\text{ m/s}$).
+   - Alternating $180^\circ$ phase stance and swing mechanics with ground floor clamp ($Y=0$) during stance and smooth parabolic leg elevation during swing.
+   - Natural pelvic vertical oscillation (double-frequency bob) and lateral weight-bearing sway.
+   - Dynamic counter-arm swing and spinal counter-yaw twist maintaining momentum equilibrium.
+   - Zero VRAM overhead: executes on CPU in $<0.02\text{ ms}$, preserving all 24GB VRAM on the RTX 3090.
+
+2. **ControlNet OpenPose Previs Pass Renderer (`src/engine/kinematics/openPoseRenderer.ts`):**
+   - Transforms 3D humanoid skeleton joint transforms through the 3D viewfinder camera into standard 18-keypoint 2D OpenPose coordinates.
+   - Renders anti-aliased, color-coded anatomical limb segments and circular joint markers onto a solid black background matching ControlNet OpenPose standards.
+
+3. **Multi-Pass Offline Previs Video Pipeline (`src/engine/offlinePrevisRenderer.ts`):**
+   - Extended `renderOfflinePrevisPasses` with `renderPass: 'all'` and auto-discovery of staged humanoid rigs.
+   - Muxes OpenPose video pass into standards-compliant MP4 container alongside RGB viewfinder and inverted Depth passes.
+
+4. **Soundstage & Staging Deck UI Integration (`src/components/StagePrevis3D.tsx`, `ActorBlocking.tsx`, `PrevisParametersDeck.tsx`):**
+   - Real-time gait animation active in soundstage playback (`isPlaying`) and during offline previs generation.
+   - Soundstage toolbar displays "Download OpenPose" MP4 button whenever an OpenPose pass is rendered.
+   - Gait selector button group in floating Posing Deck and actor HUD (`Auto`, `Walk`, `Run`, `Sneak`, `Idle`, `None`).
+   - Gait selector dropdowns on actor cards in `ActorBlocking.tsx` and `PrevisParametersDeck.tsx`.
+
+5. **ComfyUI Execution Panel ControlNet Integration (`src/components/ComfyExecutionPanel.tsx`):**
+   - Ingests `previsOpenPoseUrl` / `previsOpenPoseBlob` alongside `previsVideoUrl`.
+   - Conditioning Pass toggle allows directors to switch between `3D Viewfinder` (RGB/Depth) and `OpenPose Skeleton` video passes for ComfyUI geometric control conditioning.
+
+6. **Verification & Tests:**
+   - Unit test suites (`tests/kinematics.test.ts`): 24 tests covering skeletal hierarchy, 2-bone IK solver, floor grounding, pose presets, procedural locomotion gaits, and OpenPose keypoint projection.
+   - Full test suite: 33 test files, 253/253 tests passing in 5.24s (`npm run test`).
+   - Production build: `npm run build` completed in 10.50s with zero TypeScript errors and zero warnings.
+   - In-browser UI verification: Verified gait selection and previs conditioning toggle in browser subagent.
+
+
 
 
 

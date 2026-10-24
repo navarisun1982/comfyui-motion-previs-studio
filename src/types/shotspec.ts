@@ -159,8 +159,10 @@ export const ActorSchema = z.object({
   posePreset: z.string().optional(),
   pose: ActorPoseSchema.optional(),
   ikTargets: ActorIKTargetsSchema.optional(),
+  gait: z.enum(['auto', 'walk', 'run', 'sneak', 'idle', 'none']).default('auto').optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
+export type ActorGait = 'auto' | 'walk' | 'run' | 'sneak' | 'idle' | 'none';
 
 export const LightingStyleSchema = z.enum([
   'cinematic-natural',

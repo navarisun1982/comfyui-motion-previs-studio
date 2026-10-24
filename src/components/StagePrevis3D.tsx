@@ -22,6 +22,7 @@ import {
   applyBonePose,
   HumanoidRig,
   POSE_PRESETS,
+  evaluateGait,
 } from '../engine/kinematics';
 import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
 
@@ -202,10 +203,12 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     removeActorKeyframe,
     removeActor,
     previsVideoUrl,
+    previsOpenPoseUrl,
     isRenderingPrevis,
     previsProgress,
     registerPrevisRenderer,
     setPrevisVideo,
+    setPrevisOpenPose,
     setPrevisRendering,
     beginGesture,
     endGesture,
@@ -2093,7 +2096,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         const end = actor.trajectory.endPosition;
         const dx = end.x - start.x;
         const dz = end.y - start.y;
-        const isMoving = Math.sqrt(dx * dx + dz * dz) > 1.0;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const speed = duration > 0 ? (dist / duration) * 0.15 : 0;
+        const isMoving = dist > 1.0;
 
         if (isMoving) {
           mesh.lookAt(actorPos.x + dx, actorPos.y, actorPos.z + dz);
@@ -2102,6 +2107,17 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           if (!otherActor.kind || otherActor.kind === 'human') {
             const otherPos = getActorPositionAtTime(otherActor, t);
             mesh.lookAt(otherPos.x, actorPos.y, otherPos.z);
+          }
+        }
+
+        // Procedural Locomotion / Gait Cycle for rigged humanoids
+        if (mesh.userData.rig && isHuman) {
+          const reqGait = actor.gait || 'auto';
+          if (reqGait !== 'none') {
+            evaluateGait(mesh.userData.rig, t, {
+              gait: reqGait,
+              speed: isMoving ? Math.max(speed, 1.2) : 0,
+            });
           }
         }
       }
@@ -2141,6 +2157,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
       // Deterministic render (8n+1 frame snapping if target model is LTX-2.5)
       const isLtx = shot.targetModel === 'ltx-2.5';
+      const hasHumanActor = shot.actors.some((a) => !a.kind || a.kind === 'human');
+      const renderPassMode = hasHumanActor ? 'all' : 'rgb';
+
       const result = await renderOfflinePrevisPasses({
         scene: stageSceneRef.current,
         camera: vfCameraRef.current,
@@ -2149,7 +2168,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         fps: shot.frameRate || 24,
         width: 1280,
         height: 720,
-        renderPass: 'rgb',
+        renderPass: renderPassMode,
         snap8n1: isLtx,
         syncPositions,
         modelUrls: actorModelUrls,
@@ -2163,6 +2182,10 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
       // Restore positions to current time
       syncPositions(currentTime);
+
+      if (result.openposeBlob && result.openposeUrl) {
+        setPrevisOpenPose(result.openposeUrl, result.openposeBlob);
+      }
 
       if (result.rgbBlob && result.rgbUrl) {
         setPrevisVideo(result.rgbUrl, result.rgbBlob);
@@ -2199,6 +2222,16 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     const a = document.createElement('a');
     a.href = previsVideoUrl;
     a.download = `${shot.name.replace(/\s+/g, '_')}_3D_Previs.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleDownloadOpenPose = () => {
+    if (!previsOpenPoseUrl) return;
+    const a = document.createElement('a');
+    a.href = previsOpenPoseUrl;
+    a.download = `${shot.name.replace(/\s+/g, '_')}_OpenPose_Previs.mp4`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -2622,6 +2655,17 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
               <span>Download MP4</span>
             </button>
           )}
+
+          {previsOpenPoseUrl && !isRenderingPrevis && (
+            <button
+              onClick={handleDownloadOpenPose}
+              className="flex items-center gap-1 rounded px-2 py-1 bg-purple-500/20 border border-purple-500/40 text-purple-300 hover:bg-purple-500/30 font-mono text-[10px] transition-all"
+              title="Download rendered ControlNet OpenPose Previs MP4 to your computer"
+            >
+              <Download className="h-3 w-3" />
+              <span>Download OpenPose</span>
+            </button>
+          )}
         </div>
 
         {/* Import GLB / GLTF 3D Model Button */}
@@ -2730,6 +2774,29 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
                       </button>
                     );
                   })}
+                </div>
+              </div>
+
+              {/* Procedural Locomotion Gait */}
+              <div className="flex flex-col gap-1 pt-1 border-t border-director-border/60">
+                <div className="flex items-center justify-between text-[9px] text-slate-400">
+                  <span>Locomotion Gait:</span>
+                  <span className="text-director-cyan uppercase font-bold">{activeActor.gait || 'auto'}</span>
+                </div>
+                <div className="flex gap-1">
+                  {(['auto', 'walk', 'run', 'sneak', 'idle', 'none'] as const).map((g) => (
+                    <button
+                      key={g}
+                      onClick={() => updateActor(activeActor.id, { gait: g })}
+                      className={`flex-1 py-0.5 text-[8px] rounded font-mono uppercase transition-all ${
+                        (activeActor.gait || 'auto') === g
+                          ? 'bg-director-cyan text-director-darkest font-bold'
+                          : 'bg-white/5 hover:bg-white/10 text-slate-400'
+                      }`}
+                    >
+                      {g}
+                    </button>
+                  ))}
                 </div>
               </div>
 

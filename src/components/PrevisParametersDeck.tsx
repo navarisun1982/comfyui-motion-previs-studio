@@ -964,6 +964,23 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                               </option>
                             ))}
                           </select>
+
+                          {/* Gait / Locomotion Mode */}
+                          <div className="flex items-center justify-between pt-1">
+                            <span className="text-[9px] font-mono text-slate-400">Locomotion Gait:</span>
+                            <select
+                              value={actor.gait || 'auto'}
+                              onChange={(e) => updateActor(actor.id, { gait: e.target.value as any })}
+                              className="rounded bg-[#161a25] border border-white/10 px-1.5 py-0.5 text-slate-300 text-[9px] font-mono focus:border-director-cyan focus:outline-none"
+                            >
+                              <option value="auto">Auto (Walk on Move / Idle)</option>
+                              <option value="walk">Walk</option>
+                              <option value="run">Run</option>
+                              <option value="sneak">Sneak</option>
+                              <option value="idle">Idle Stance</option>
+                              <option value="none">None (Frozen)</option>
+                            </select>
+                          </div>
                         </div>
                       )}
 

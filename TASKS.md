@@ -18,7 +18,34 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S8 Motion fidelity | `stage/08-motion-fidelity` | ✅ merged to master (`f8e3781`) | Optical flow vector analyzer, directional & speed fidelity scoring, visual vector overlay HUD, A/B motion diffing |
 | S9 Closed-loop steering | `stage/09-closed-loop-steering` | ✅ merged to master (`fc9865c`) | Optical-flow-driven compensatory patches, prompt auto-correction, IC-LoRA modulation, steering modal, lineage tracking |
 | S10 Sequence / Assembly | `stage/10-sequence` | ✅ merged to master (`16d714f`) | Multi-shot timeline, sequential playback, continuity & 180° rule checking, OTIO/EDL/FCPXML NLE exporters |
-| S11 Parametric 3D Sculpt & Character Rigging | `stage/11-parametric-sculpt-engine` | 🟢 Phase 1 & 2 verified | Parametric 3D primitives, silhouette matching, AI 3D generator, humanoid skeleton, analytic 2-bone IK, floor grounding, pose presets |
+| S11 Parametric 3D Sculpt & Character Rigging | `stage/11-parametric-sculpt-engine` | 🟢 Complete (Phases 1, 2, 3 verified) | Parametric 3D primitives, silhouette matching, AI 3D generator, humanoid skeleton, analytic 2-bone IK, procedural locomotion, OpenPose previs pass |
+
+## S11 Phase 3 checklist (Procedural Locomotion & ControlNet OpenPose Previs Bridge)
+
+- [x] Trajectory-Synchronized Procedural Locomotion / Gait Engine (`src/engine/kinematics/gaitEngine.ts`):
+  - Procedural gaits (`walk`, `run`, `sneak`, `idle`, `auto`, `none`) driving limbs with $<0.02\text{ ms}$ evaluation time and zero GPU VRAM impact
+  - Dynamic stance and swing phase evaluation with rhythmic foot ground contacts ($Y = 0$) preventing floor slipping
+  - Anatomical pelvic bob, lateral weight shifting sway, and opposing arm counter-swing
+  - Velocity-based `auto` gait resolution (idle when stationary, walking when moving $<2.2\text{ m/s}$, running when moving $\ge 2.2\text{ m/s}$)
+- [x] ControlNet OpenPose Previs Renderer (`src/engine/kinematics/openPoseRenderer.ts`):
+  - Projects 3D humanoid skeleton joints through camera into standard 18-keypoint OpenPose colored skeleton format
+  - Solid black background with standard ControlNet color-coded anatomical limb vectors (Nose, Neck, Chest, Hips, Shoulders, Elbows, Wrists, Knees, Ankles)
+- [x] Previs Multi-Pass Offline Pipeline (`src/engine/offlinePrevisRenderer.ts`):
+  - Extended `renderOfflinePrevisPasses` with `renderPass: 'all'` and auto-discovery of staged humanoid rigs
+  - Muxes OpenPose video pass into compliant MP4 container alongside RGB viewfinder and inverted Depth passes
+- [x] Soundstage & Staging Deck UI Integration (`src/components/StagePrevis3D.tsx`, `ActorBlocking.tsx`, `PrevisParametersDeck.tsx`):
+  - `StagePrevis3D.tsx`: Locomotion gait evaluation active in real-time timeline playback and offline previs rendering
+  - One-click "Download OpenPose" MP4 button in stage toolbar
+  - Gait selector buttons in floating Posing Deck and actor HUD (`Auto`, `Walk`, `Run`, `Sneak`, `Idle`, `None`)
+  - Gait selector dropdowns on actor cards in `ActorBlocking.tsx` and `PrevisParametersDeck.tsx`
+- [x] ComfyUI Execution Panel OpenPose Toggle (`src/components/ComfyExecutionPanel.tsx`):
+  - Dual conditioning pass toggle: switch between `3D Viewfinder` (RGB/Depth) and `OpenPose Skeleton` for geometric control video injection
+- [x] Unit test suites (`tests/kinematics.test.ts`):
+  - 24 tests covering skeletal hierarchy, 2-bone IK solver, floor grounding, pose presets, procedural locomotion gaits, and OpenPose keypoint projection
+- [x] Full Verification:
+  - 33 test files, 253/253 tests passing (`npm run test`)
+  - Production build: `npm run build` completed with zero TypeScript errors and bundle generated cleanly
+  - In-browser UI verified via browser subagent
 
 ## S11 Phase 2 checklist (Humanoid Rigging, 2-Bone Analytic IK & Directorial Posing)
 

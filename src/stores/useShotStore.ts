@@ -77,12 +77,15 @@ interface ShotState {
   // In-App 3D Previs Video
   previsVideoUrl?: string;
   previsVideoBlob?: Blob;
+  previsOpenPoseUrl?: string;
+  previsOpenPoseBlob?: Blob;
   isRenderingPrevis: boolean;
   previsProgress: number;
   previsRendererFn: (() => Promise<{ url: string; blob: Blob } | null>) | null;
   registerPrevisRenderer: (fn: (() => Promise<{ url: string; blob: Blob } | null>) | null) => void;
   renderPrevisVideo: () => Promise<{ url: string; blob: Blob } | null>;
   setPrevisVideo: (url?: string, blob?: Blob) => void;
+  setPrevisOpenPose: (url?: string, blob?: Blob) => void;
   setPrevisRendering: (rendering: boolean, progress?: number) => void;
 
   // Prompt Management
@@ -282,6 +285,8 @@ export const useShotStore = create<ShotState>((set, get) => {
     selectedActorId: initialShot.actors[0]?.id,
     previsVideoUrl: undefined,
     previsVideoBlob: undefined,
+    previsOpenPoseUrl: undefined,
+    previsOpenPoseBlob: undefined,
     isRenderingPrevis: false,
     previsProgress: 0,
     previsRendererFn: null,
@@ -317,6 +322,13 @@ export const useShotStore = create<ShotState>((set, get) => {
       commitShot(newShot, {
         previsVideoUrl: url,
         previsVideoBlob: blob,
+      });
+    },
+
+    setPrevisOpenPose: (url?: string, blob?: Blob) => {
+      set({
+        previsOpenPoseUrl: url,
+        previsOpenPoseBlob: blob,
       });
     },
 
