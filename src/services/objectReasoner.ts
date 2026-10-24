@@ -657,6 +657,32 @@ function providerError(cfg: ReasonerConfig, status: number, body: any): ObjectRe
 }
 
 /* ------------------------------------------------------------------------------------------ */
+/* Wire URL Resolution (Vite Dev Proxy)                                                        */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * In Vite dev server mode, browser fetch calls directly to local services like Ollama (port 11434)
+ * or llama.cpp (port 8080) get blocked by browser CORS unless proxied through Vite.
+ */
+export function resolveWireUrl(url: string, provider: ReasonerProvider): string {
+  const isBrowser = typeof window !== 'undefined';
+  const isDevServer =
+    isBrowser &&
+    (Boolean((import.meta as any).env?.DEV) || window.location.port === '5173') &&
+    !window.location.protocol.startsWith('file:');
+
+  if (!isDevServer) return url;
+
+  if (provider === 'ollama') {
+    return url.replace(/^https?:\/\/(?:127\.0\.0\.1|localhost):11434/, '/api/ollama');
+  }
+  if (provider === 'llamacpp') {
+    return url.replace(/^https?:\/\/(?:127\.0\.0\.1|localhost):8080/, '/api/llamacpp');
+  }
+  return url;
+}
+
+/* ------------------------------------------------------------------------------------------ */
 /* Reasoning                                                                                   */
 /* ------------------------------------------------------------------------------------------ */
 
@@ -734,7 +760,8 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
               );
       let response: Response;
       try {
-        response = await fetch(req.url, {
+        const wireUrl = resolveWireUrl(req.url, cfg.provider);
+        response = await fetch(wireUrl, {
           method: 'POST',
           signal: ctrl.signal,
           headers: req.headers,
@@ -836,7 +863,8 @@ export async function reasonEnvironment(
               );
       let response: Response;
       try {
-        response = await fetch(req.url, {
+        const wireUrl = resolveWireUrl(req.url, cfg.provider);
+        response = await fetch(wireUrl, {
           method: 'POST',
           signal: ctrl.signal,
           headers: req.headers,
@@ -927,9 +955,9 @@ export async function listReasonerModels(config: ReasonerConfig = getReasonerCon
   let r: Response;
   try {
     if (protocol === 'ollama') {
-      r = await fetch(`${cfg.url}/api/tags`);
+      r = await fetch(resolveWireUrl(`${cfg.url}/api/tags`, cfg.provider));
     } else if (protocol === 'openai') {
-      r = await fetch(`${cfg.url}/models`, {
+      r = await fetch(resolveWireUrl(`${cfg.url}/models`, cfg.provider), {
         headers: cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {},
       });
     } else {

@@ -25,6 +25,16 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
+      '/api/ollama': {
+        target: 'http://127.0.0.1:11434',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/ollama/, ''),
+      },
+      '/api/llamacpp': {
+        target: 'http://127.0.0.1:8080',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/llamacpp/, ''),
+      },
     },
   },
   build: {

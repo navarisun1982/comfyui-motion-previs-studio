@@ -15,6 +15,7 @@ import {
   ReasonerConfig,
   setReasonerConfig,
   ObjectReasonerError,
+  resolveWireUrl,
 } from '../src/services/objectReasoner';
 import { installMemoryStorage } from './helpers/memoryStorage';
 
@@ -258,4 +259,30 @@ describe('reasonObject transport', () => {
     const seat = revised.parts.find((p) => p.id === 'seat');
     expect(seat?.size[0]).toBe(0.6);
   });
+
+  describe('resolveWireUrl (CORS dev proxy)', () => {
+    it('returns raw URL unchanged in non-browser/test environment', () => {
+      expect(resolveWireUrl('http://127.0.0.1:11434/api/chat', 'ollama')).toBe('http://127.0.0.1:11434/api/chat');
+      expect(resolveWireUrl('http://localhost:8080/v1/models', 'llamacpp')).toBe('http://localhost:8080/v1/models');
+      expect(resolveWireUrl('https://api.openai.com/v1/chat/completions', 'openai')).toBe('https://api.openai.com/v1/chat/completions');
+    });
+
+    it('rewrites local Ollama and llamacpp endpoints when simulated in dev browser', () => {
+      const originalWindow = globalThis.window;
+      try {
+        (globalThis as any).window = {
+          location: { port: '5173', protocol: 'http:' },
+        };
+
+        expect(resolveWireUrl('http://127.0.0.1:11434/api/chat', 'ollama')).toBe('/api/ollama/api/chat');
+        expect(resolveWireUrl('http://localhost:11434/api/tags', 'ollama')).toBe('/api/ollama/api/tags');
+        expect(resolveWireUrl('http://127.0.0.1:8080/v1/models', 'llamacpp')).toBe('/api/llamacpp/v1/models');
+        // Non-local or external endpoints are unchanged
+        expect(resolveWireUrl('https://api.openai.com/v1', 'openai')).toBe('https://api.openai.com/v1');
+      } finally {
+        (globalThis as any).window = originalWindow;
+      }
+    });
+  });
 });
+
