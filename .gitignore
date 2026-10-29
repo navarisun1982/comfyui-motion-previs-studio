@@ -33,6 +33,7 @@ scripts/*.ps1
 test_gallery.html
 demo_scene_construction_*.mp4
 demo_full_pipeline_*.mp4
+demo_alley_pursuit_*.mp4
 scratch/
 docs/COMPETITION_REQUIREMENTS.md
 docs/archive/

@@ -1647,7 +1647,48 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
     // Independent Camera Look-At: Camera target direction is defined solely by liveShot.camera.movement.targetLookAt.
     // Moving characters does NOT move or rotate the camera. Camera moves alone, characters move alone.
-    const lookAtCoord = liveShot.camera.movement.targetLookAt ?? { x: 50, y: 50 };
+    const baseLookAt = liveShot.camera.movement.targetLookAt ?? { x: 50, y: 50 };
+    const camLookKfs = (liveShot.camera.movement.keyframes || [])
+      .filter((k) => k.lookAt !== undefined && k.time >= 0 && k.time <= liveDur)
+      .sort((a, b) => a.time - b.time);
+
+    let lookAtCoord: { x: number; y: number; z?: number } = baseLookAt;
+    if (camLookKfs.length > 0) {
+      const lookWaypoints: Array<{ time: number; lookAt: { x: number; y: number; z?: number } }> = [];
+      if (camLookKfs[0].time > 0.01) {
+        lookWaypoints.push({ time: 0, lookAt: camLookKfs[0].lookAt! });
+      }
+      for (const kf of camLookKfs) {
+        lookWaypoints.push({ time: kf.time, lookAt: kf.lookAt! });
+      }
+      if (lookWaypoints[lookWaypoints.length - 1].time < liveDur - 0.01) {
+        lookWaypoints.push({ time: liveDur, lookAt: baseLookAt });
+      }
+      const clampedT = Math.max(0, Math.min(liveDur, t));
+      if (clampedT <= lookWaypoints[0].time) {
+        lookAtCoord = lookWaypoints[0].lookAt;
+      } else if (clampedT >= lookWaypoints[lookWaypoints.length - 1].time) {
+        lookAtCoord = lookWaypoints[lookWaypoints.length - 1].lookAt;
+      } else {
+        for (let i = 0; i < lookWaypoints.length - 1; i++) {
+          const wA = lookWaypoints[i];
+          const wB = lookWaypoints[i + 1];
+          if (clampedT >= wA.time && clampedT <= wB.time) {
+            const seg = wB.time - wA.time;
+            const u = seg > 0 ? (clampedT - wA.time) / seg : 0;
+            const smoothU = u * u * (3 - 2 * u);
+            const zA = wA.lookAt.z ?? 50;
+            const zB = wB.lookAt.z ?? 50;
+            lookAtCoord = {
+              x: wA.lookAt.x + (wB.lookAt.x - wA.lookAt.x) * smoothU,
+              y: wA.lookAt.y + (wB.lookAt.y - wA.lookAt.y) * smoothU,
+              z: zA + (zB - zA) * smoothU,
+            };
+            break;
+          }
+        }
+      }
+    }
     let targetX = (lookAtCoord.x - 50) * 1.0;
     let targetZ = (lookAtCoord.y - 50) * 1.0;
     const shotType = liveShot.camera.shotType;
@@ -1661,7 +1702,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         : shotType === 'medium'
         ? 3.45
         : 2.85;
-    let targetY = lookAtCoord.z !== undefined ? baseLookHeight + (lookAtCoord.z - 50) * 0.05 : baseLookHeight;
+    let targetY = lookAtCoord.z !== undefined ? baseLookHeight + (lookAtCoord.z - 50) * 0.075 : baseLookHeight;
 
     const ratio = liveDur > 0 ? Math.min(1, Math.max(0, t / liveDur)) : 0;
 
@@ -1716,12 +1757,23 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     }
 
     if (trajectoryLineRef.current) {
-      const start = liveShot.camera.movement.startPosition;
-      const end = liveShot.camera.movement.endPosition;
-      const startPt = new THREE.Vector3((start.x - 50) * 1.0, (start.z ?? 50) * 0.3 + 1.5, (start.y - 50) * 1.0);
-      const endPt = new THREE.Vector3((end.x - 50) * 1.0, (end.z ?? 50) * 0.3 + 1.5, (end.y - 50) * 1.0);
+      const hasCamKfs = Boolean(liveShot.camera.movement.keyframes && liveShot.camera.movement.keyframes.length > 0);
+      const pts: THREE.Vector3[] = [];
+      if (hasCamKfs) {
+        const steps = 16;
+        for (let i = 0; i <= steps; i++) {
+          const tau = (i / steps) * liveDur;
+          const p = getCameraPositionAtTime(tau);
+          pts.push(new THREE.Vector3(p.x, p.y + 1.5, p.z));
+        }
+      } else {
+        const start = liveShot.camera.movement.startPosition;
+        const end = liveShot.camera.movement.endPosition;
+        pts.push(new THREE.Vector3((start.x - 50) * 1.0, (start.z ?? 50) * 0.3 + 1.5, (start.y - 50) * 1.0));
+        pts.push(new THREE.Vector3((end.x - 50) * 1.0, (end.z ?? 50) * 0.3 + 1.5, (end.y - 50) * 1.0));
+      }
       trajectoryLineRef.current.geometry.dispose();
-      trajectoryLineRef.current.geometry = new THREE.BufferGeometry().setFromPoints([startPt, endPt]);
+      trajectoryLineRef.current.geometry = new THREE.BufferGeometry().setFromPoints(pts);
       trajectoryLineRef.current.computeLineDistances();
     }
 
