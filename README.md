@@ -137,8 +137,8 @@ npm run build
 
 1. **🔌 Additional Live ComfyUI Workflow Templates (LTX-2.5 IC-LoRA, Wan 2.1, HunyuanVideo)**
    - Expand the live ComfyUI execution bridge beyond `minimax_h3_ref2va` with one-click live templates for **LTX-2.5 (22B Distilled INT8)** multi-controlnet (Depth + OpenPose + Camera Matrix) and **Wan 2.1**.
-2. **☁️ Cloud Video API Direct Integration (Runway, Kling, Wan, MiniMax Hailuo, Luma, Fal.ai / Replicate)**
-   - Send exported 3D Previs plates and compiled director prompts directly to cloud video APIs (for users without a high-VRAM local GPU) and receive the generated video back inside the Shot Bible.
+2. **☁️ Cloud Video API Direct Integration (Runware, Fal.ai, ComfyUI Cloud)**
+   - Send exported 3D Previs plates and compiled director prompts directly to **Runware**, **Fal.ai**, and **ComfyUI Cloud** (for users without a high-VRAM local GPU) and receive the generated video back inside the Shot Bible.
 3. **🎞️ Multi-Shot Timeline NLE & Sequence Assembly (Animatic-to-Final Editor)**
    - Stitch multiple shots from the **Shot Bible** into a continuous sequence timeline with cut points, transitions, dialogue/SFX audio tracks, and one-click full-scene export (Previs Animatic vs. Final AI Render).
 4. **🕺 Video-to-3D Motion Capture (Extract Pose from Reference Video)**
