@@ -47,8 +47,12 @@ function attachComfyMiddleware(middlewares: { use: (fn: (req: any, res: any, nex
     );
 
     proxyReq.on('error', (err) => {
-      res.writeHead(502, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      } else {
+        res.destroy();
+      }
     });
 
     req.pipe(proxyReq);
