@@ -73,7 +73,7 @@ Upon launch, the **Shot Bible** loads 3 complete director-grade scenes (6 shots 
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/<your-username>/comfyui-motion-previs-studio.git
+git clone https://github.com/navarisun1982/comfyui-motion-previs-studio.git
 cd comfyui-motion-previs-studio
 ```
 
