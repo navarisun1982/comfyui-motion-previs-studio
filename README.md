@@ -28,12 +28,14 @@
   - **Right Viewport (`Camera Viewfinder`)**: Live through-the-lens render locked to your chosen aspect ratio (`16:9`, `2.39:1`, `9:16`, `1:1`), focal length (`14mm`–`135mm`), and depth-of-field aperture (`f/1.4`–`f/22`).
 - **Bottom Transport & Keyframe Scrubber**: Frame-accurate `24fps` timeline with camera and subject keyframe diamonds, playback loop controls, and timecode readout.
 
-### 2. 3D Character Control Panel (2026 Inspector Architecture)
+### 2. 3D Character Control Panel & Biomechanical Human Gait Engine
 ![3D Character Control Panel](docs/screenshots/02-character-control-panel.png)
+- **Biomechanical Human Locomotion (`gaitEngine.ts`)**: Anatomically grounded walking and running with asymmetric stance/swing timing (`60/40` walk, `38/62` run), **heel-strike → flat-foot → toe-off** ankle roll (`createFootRollController`), natural bent-elbow arm swing (`24°–38°` walk, `~90°` athletic pump in run), contrapposto pelvic sway/roll, `Spine`+`Chest` counter-torsion, `solveLookAt` horizon head stabilization, and smooth acceleration/deceleration stride envelopes.
 - **Ready-Made Motion Studio**: One-click procedural biomechanical animations across **Move / Jump** (`Walk Forward`, `Run / Sprint`, `Jump / Leap`, `Sneak / Stealth`, `Back Up / Retreat`), **Fight / Action** (`Sword Slash`, `Dodge / Roll`, `Martial Combo`, `Aim & Fire`), and **Act / Emote** (`Wave / Greet`, `Heroic Taunt`, `Look Around`, `Victory Cheer`, `Talk / Dialogue`).
 - **Auto / Move / Spot Execution Modes & Action Cycles (`1x`–`5x`)**: Automatically calculate floor travel paths or lock actions in-place, define exact **Action Cycles (`1x`–`5x`)** across the shot duration so gestures play naturally without robotic looping, and dial in **Facing Direction (`Body Yaw`)** (`Face Cam`, `3/4 Left`, `Profile`, `OTS Back`).
 - **Natural-Language Acting Director**: Type stage directions (e.g., `"walks slowly from 30 to 48 then waves"`) to synthesize multi-cue keyframe trajectories and skeletal poses using local or cloud reasoning models.
-- **Appearance, Procedural 3D & Vision-to-3D Rigging**:
+- **ComfyUI Reference Image Sync (`<picture 1>`–`<picture 3>`) & Vision-to-3D Rigging**:
+  - Upload a **ComfyUI Reference Image** directly on any character, vehicle, or prop in Directing Mode (with instant thumbnail preview and automatic upload to `D:\ComfyUI\input\`) — automatically synced to the Render & Export Studio with zero re-uploading.
   - Edit 3D look by text prompt, generate 3D props from reference images using **Vision models**, or attach custom `.GLB` 3D assets.
   - Interactive **FK/IK Bone Manipulation** right in the 3D viewport (`Pose Bones` mode) + **Socket to Character Bone** (attach props like swords, lanterns, or relics directly to `Right Hand`, `Left Hand`, `Head`, or `Spine`).
 
@@ -44,11 +46,15 @@
 
 ### 4. 3D Set & Environment Builder + Multi-Light Studio Rig
 ![Set & Lighting Studio](docs/screenshots/04-environment-and-lighting.png)
-- **Procedural 3D Environments**: Instant architectural soundstages (`Cyberpunk Alleyway`, `Ancient Temple Ruins`, `Warm Candlelit Rooftop Terrace`, `Sci-Fi Corridor`, `Film Studio Cyc Wall`) with grounded hero props, atmospheric fog, and custom prompt-driven 3D object sculpting.
+- **Procedural 3D Environments**: Instant architectural soundstages (`Cyberpunk Alleyway`, `Ancient Temple Ruins`, `Warm Candlelit Rooftop Terrace`, `Sci-Fi Corridor`, `Film Studio Cyc Wall`) with grounded hero props, atmospheric fog, custom prompt-driven 3D object sculpting, and **Set / Background Reference Image (`<picture 4>`)** upload for ComfyUI video generation.
 - **Three-Point + Practical Studio Lighting**: Interactive 3D light gizmos (`Key`, `Fill`, `Rim`, `Practical`) with real-time intensity, color temperature, cone angle, and shadow control.
 
-### 5. Previs Render & Multi-Pass Export Deck
+### 5. Previs Render, Live ComfyUI MiniMax H3 Bridge & Side-by-Side Sync Deck
 ![Previs Render & Export Deck](docs/screenshots/05-previs-export-deck.png)
+- **⚡ Live ComfyUI MiniMax H3 Bridge (`minimax_h3_ref2va`)**:
+  - **One-Click `Render in ComfyUI (MiniMax H3)`**: Automatically renders your 24fps 3D RGB Previs MP4, uploads it to ComfyUI Node `638` (`<Video 1>`), binds up to 4 object/character/set Reference Images (`<picture 1>`–`<picture 4>`, Nodes `137`/`139`/`144`/`151`), injects the spatially locked Ref2VA prompt (Node `646`) and seed (Node `142`), and streams live node-by-node progress via WebSocket + HTTP `/history` fallback.
+  - **Zero-CORS Local Proxy (`127.0.0.1:51731` / `/api/comfy`)**: Built-in loopback proxy in both Electron and Vite dev server guarantees rock-solid connectivity to `http://127.0.0.1:8188` without browser CORS blocks, with live GPU/VRAM badge in **Settings (`⚙ Settings`)** and the top header bar.
+  - **In-App `Final Render` & `Side-by-Side Sync` Player**: Stream, scrub, and compare your 3D Previs MP4 alongside the final ComfyUI MiniMax H3 MP4+Audio render right inside the studio, with 1-click MP4 download and exact disk location readout (`D:\ComfyUI\output\...`).
 - **Offline Hardware-Accelerated 24fps Renderer**: Exports frame-accurate `.mp4` (via `mp4-muxer`) for **Composite Previs**, **Clean Beauty**, **OpenPose 18-Joint Skeletons**, **Normalized Depth Maps**, and **Subject Alpha Masks**.
 - **Deterministic ComfyUI & Video Reference Bundles**: Exports `.zip` or JSON bundles containing your rendered control passes, `4×4` camera extrinsic matrices, compiled engine prompts, and verified ComfyUI API graphs for **LTX-2.5**, **MiniMax H3**, **Seedance**, and **any video model that accepts video reference**.
 
@@ -117,10 +123,10 @@ npm run build
 
 ## 🗺️ Upcoming Features & Roadmap
 
-1. **⚡ Direct ComfyUI Live API Bridge & In-App Video Rendering**
-   - One-click **Render in ComfyUI** directly from within the studio without manually exporting or importing files.
-   - Automatic upload of rendered **RGB Previs, OpenPose Skeletons, Depth Maps, and Camera Matrices** to a running local or remote ComfyUI server (`HTTP REST` + `WebSocket` live node progress streaming).
-   - **In-App Final Result Player & Side-by-Side Sync View**: Stream and play the final AI-generated video right inside the studio viewport, synchronized frame-for-frame beside your 3D Previs stage for instant shot comparison and retakes.
+1. **✅ [Shipped] Direct ComfyUI Live API Bridge & In-App Video Rendering (`minimax_h3_ref2va`)**
+   - One-click **Render in ComfyUI (MiniMax H3)** directly from within the studio with zero-CORS local proxy (`127.0.0.1:51731` / `/api/comfy`).
+   - Automatic upload of rendered **RGB Previs MP4 (`<Video 1>`)** and **4 Object/Set Reference Images (`<picture 1>`–`<picture 4>`)** to a running ComfyUI server (`HTTP REST` + `WebSocket` live progress + `/history` fallback).
+   - **In-App Final Result Player & Side-by-Side Sync View**: Stream and play the final AI-generated MP4+Audio video right inside the studio viewport, synchronized frame-for-frame beside your 3D Previs stage.
 2. **☁️ Cloud Video API Direct Integration (Runway, Kling, Wan, MiniMax Hailuo, Luma, Fal.ai / Replicate)**
    - Send exported 3D Previs plates and compiled director prompts directly to cloud video APIs (for users without a high-VRAM local GPU) and receive the generated video back inside the Shot Bible.
 3. **🎞️ Multi-Shot Timeline NLE & Sequence Assembly (Animatic-to-Final Editor)**
@@ -129,10 +135,10 @@ npm run build
    - Upload any real-world phone video or film clip to extract 3D skeletal motion (via local pose estimation) and apply it directly onto your 3D characters in the soundstage.
 5. **🗣️ Lip-Sync, Facial Expressions & Audio-Driven Acting**
    - Attach dialogue audio clips to characters to drive automatic jaw/lip-sync visemes, eye-gaze targets, and emotional facial blendshapes during Close-Up and OTS dialogue shots.
-6. **🎨 Reference Character Sheet & LoRA / IP-Adapter Consistency Manager**
-   - Link each 3D character in your scene to a specific **Character Reference Sheet**, **LoRA weight**, or **IP-Adapter face ID** so every shot in your storyboard automatically renders the exact same actor identity in ComfyUI.
+6. **✅ [Shipped] Two-Way Reference Character/Object/Set Image Sync (`<picture 1>`–`<picture 4>`) & LoRA / IP-Adapter Expansion**
+   - Link each 3D character, vehicle, prop, and set in Directing Mode to a reference image (`conceptImageUrl` / `conceptImageName`) with live thumbnails and automatic ComfyUI upload; next phase expands to multi-LoRA weight & IP-Adapter face ID presets.
 7. **📦 Custom `.FBX` / `.GLTF` Animation Library & Mixamo Drag-and-Drop**
-   - Import custom `.FBX` / `.GLB` skeletal animations and retarget them onto any character in the studio alongside the built-in procedural motions and Action Cycles.
+   - Import custom `.FBX` / `.GLB` skeletal animations and retarget them onto any character in the studio alongside the built-in biomechanical gait engine and Action Cycles.
 
 ---
 

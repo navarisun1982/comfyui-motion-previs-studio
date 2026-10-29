@@ -167,6 +167,7 @@ export const ActorSchema = z.object({
     keyframes: z.array(TrajectoryKeyframeSchema).optional(),
   }),
   conceptImageUrl: z.string().optional(),
+  conceptImageName: z.string().optional(),
   modelUrl: z.string().optional(),
   scale: z.number().min(0.05).max(30).default(1.0).optional(),
   partGraph: z.any().optional(),
