@@ -123,6 +123,7 @@ export const TrajectoryKeyframeSchema = z.object({
   posePreset: z.string().optional(),
   gait: z.enum(['auto', 'walk', 'run', 'sneak', 'idle', 'none']).optional(),
   motionClip: z.string().optional(),
+  motionCycles: z.number().int().min(1).max(20).optional(),
   rotation: Point3DSchema.optional(),
   cueLabel: z.string().optional(),
 });
@@ -175,6 +176,7 @@ export const ActorSchema = z.object({
   ikTargets: ActorIKTargetsSchema.optional(),
   gait: z.enum(['auto', 'walk', 'run', 'sneak', 'idle', 'none']).default('auto').optional(),
   motionClip: z.string().optional(),
+  motionCycles: z.number().int().min(1).max(20).optional(),
   rotation: Point3DSchema.optional(),
   socketToBone: ActorSocketSchema.optional(),
   color: z.string().optional(),

@@ -120,6 +120,7 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
       startTimeSec: 0,
       endTimeSec: 10,
       travelMode: 'in-place',
+      motionCycles: 1,
     });
   });
 
@@ -130,6 +131,9 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     // Stance / Loop & Floor Spot
     expect(getByText('Stance / Loop')).toBeTruthy();
     expect(getByText(/Floor Spot/)).toBeTruthy();
+    expect(getByText('Action Cycles')).toBeTruthy();
+    fireEvent.click(getByText('2x'));
+    expect(props.onUpdateActor).toHaveBeenCalledWith('actor-test-1', { motionCycles: 2 });
 
     // Timing & Direction
     const promptInput = getByDisplayValue('running fast from 25 to 8');

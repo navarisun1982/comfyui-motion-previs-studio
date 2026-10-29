@@ -520,6 +520,8 @@ export interface CompileReadyMadeMotionOptions {
   travelMode?: 'auto' | 'travel' | 'in-place';
   /** Optional target destination on the 0..100 stage floor */
   targetPosition?: Point2D;
+  /** Number of times the action cycle repeats across [startTimeSec, endTimeSec] (default 1) */
+  motionCycles?: number;
 }
 
 /**
@@ -540,6 +542,7 @@ export function compileReadyMadeMotionKeyframes(
   const winStart = Math.max(0, options.startTimeSec);
   const winEnd = Math.max(winStart + 0.4, options.endTimeSec);
   const dur = winEnd - winStart;
+  const safeCycles = Math.max(1, Math.min(20, Math.round(options.motionCycles ?? actor.motionCycles ?? 1)));
 
   const startX = options.startPosition.x ?? 50;
   const startY = options.startPosition.y ?? 50;
@@ -836,7 +839,8 @@ export function compileReadyMadeMotionKeyframes(
       gait: clip.baseGait || 'none',
       posePreset: i === numSamples ? clip.basePosePreset : undefined,
       motionClip: clip.id,
-      cueLabel: i === 0 ? `${clip.icon} ${clip.name}` : undefined,
+      motionCycles: safeCycles,
+      cueLabel: i === 0 ? `${clip.icon} ${clip.name}${safeCycles > 1 ? ` (${safeCycles}x)` : ''}` : undefined,
     });
   }
 
@@ -857,7 +861,8 @@ export function evaluateReadyMadeHumanoidClip(
   clipId: string,
   timeSeconds: number,
   clipProgress01?: number,
-  isTravelingOnFloor?: boolean
+  isTravelingOnFloor?: boolean,
+  motionCycles?: number
 ): boolean {
   const h = rig.height;
   const root = rig.root;
@@ -977,11 +982,15 @@ export function evaluateReadyMadeHumanoidClip(
     return true;
   }
 
-  // Phase in [0..1] for multi-phase action clips
-  const u =
+  // Phase in [0..1] per cycle across `motionCycles` repetitions within the active window
+  const safeCycles = Math.max(1, Math.min(20, Math.round(motionCycles || 1)));
+  const rawProgress =
     clipProgress01 !== undefined
       ? THREE.MathUtils.clamp(clipProgress01, 0, 1)
-      : (timeSeconds * 0.65) % 1.0;
+      : (timeSeconds * 0.5) % 1.0;
+  const scaledProgress = rawProgress * safeCycles;
+  const u = scaledProgress >= safeCycles ? 1.0 : scaledProgress % 1.0;
+  const cycleEnvelope = Math.sin(u * Math.PI);
 
   switch (clipId) {
     case 'human-jump-leap': {
@@ -1042,10 +1051,10 @@ export function evaluateReadyMadeHumanoidClip(
 
     case 'human-combo-punch': {
       resetToRest();
-      // 2-beat martial arts combo: Beat 1 = Left Jab, Beat 2 = Right Cross
-      const cycle = (timeSeconds * 1.35) % 1.0;
+      // 2-beat martial arts combo per cycle: Beat 1 = Left Jab [0..0.45], Beat 2 = Right Cross [0.45..0.90], Guard settle [0.90..1.0]
+      const cycle = u;
       const jabExt = cycle < 0.45 ? Math.sin((cycle / 0.45) * Math.PI) : 0;
-      const crossExt = cycle >= 0.45 && cycle < 0.92 ? Math.sin(((cycle - 0.45) / 0.47) * Math.PI) : 0;
+      const crossExt = cycle >= 0.45 && cycle < 0.90 ? Math.sin(((cycle - 0.45) / 0.45) * Math.PI) : 0;
 
       const torsoYaw = -0.32 * jabExt + 0.44 * crossExt;
       const torsoPitch = 0.10 + 0.08 * (jabExt + crossExt);
@@ -1081,8 +1090,8 @@ export function evaluateReadyMadeHumanoidClip(
 
     case 'human-sword-slash': {
       resetToRest();
-      // Wind-up [0..0.35], Cleave slash [0.35..0.72], Follow-through [0.72..1.0]
-      const cycle = (timeSeconds * 0.9) % 1.0;
+      // Wind-up [0..0.35], Cleave slash [0.35..0.75], Follow-through recovery [0.75..1.0] per cycle
+      const cycle = u;
       let rx = -0.22;
       let ry = 0.78;
       let rz = 0.25;
@@ -1129,9 +1138,9 @@ export function evaluateReadyMadeHumanoidClip(
 
     case 'human-aim-fire': {
       resetToRest();
-      // Sharp recoil kick every 0.65 seconds
-      const shotPhase = (timeSeconds * 1.55) % 1.0;
-      const recoil = shotPhase < 0.28 ? Math.sin((shotPhase / 0.28) * Math.PI) : 0;
+      // 1 crisp recoil shot per cycle [0.20..0.60], stabilizing aim before and after
+      const shotPhase = u;
+      const recoil = shotPhase >= 0.20 && shotPhase < 0.60 ? Math.sin(((shotPhase - 0.20) / 0.40) * Math.PI) : 0;
 
       setHipsOffsetAndTilt(0, -0.03, 0, -0.04 * recoil, 0.12, 0);
       setChestTilt(-0.12 * recoil, -0.10, 0);
@@ -1183,42 +1192,48 @@ export function evaluateReadyMadeHumanoidClip(
 
     case 'human-wave-greet': {
       resetToRest();
-      const waveOsc = Math.sin(timeSeconds * 7.5);
+      // Smoothly raises right hand (cycleEnvelope), waves gently twice per cycle, and lowers arm back to natural rest
+      const lift = Math.sin(Math.min(1, u < 0.5 ? u * 2.2 : (1 - u) * 2.2) * (Math.PI / 2));
+      const waveOsc = Math.sin(u * Math.PI * 3) * lift;
       const breathe = Math.sin(timeSeconds * 2.2) * 0.008;
 
-      setHipsOffsetAndTilt(0.01 * waveOsc, breathe, 0, 0, 0, 0.02);
-      setChestTilt(0, -0.06, -0.04);
+      setHipsOffsetAndTilt(0.01 * waveOsc, breathe, 0, 0, -0.04 * lift, 0.02 * lift);
+      setChestTilt(0.02 * lift, -0.06 * lift, -0.04 * lift);
 
       if (!applyWalkingLegsIfTraveling()) {
         solveLimbIK(rig, 'leftLeg', rigPoint(0.10, 0.04, 0), rigPoint(0.12, 0.32, 0.55));
         solveLimbIK(rig, 'rightLeg', rigPoint(-0.10, 0.04, 0), rigPoint(-0.12, 0.32, 0.55));
       }
 
-      // Left arm relaxed at side, Right arm raised waving
+      // Left arm relaxed at side, Right arm smoothly lifts to wave and settles back down
       solveLimbIK(rig, 'leftArm', rigPoint(0.21, 0.48, 0.05), rigPoint(0.26, 0.62, -0.28));
       solveLimbIK(
         rig,
         'rightArm',
-        rigPoint(-0.28 + waveOsc * 0.09, 0.94 + Math.abs(waveOsc) * 0.03, 0.20),
-        rigPoint(-0.34, 0.70, -0.15)
+        rigPoint(
+          -0.22 - 0.06 * lift + waveOsc * 0.08,
+          0.50 + 0.44 * lift + Math.abs(waveOsc) * 0.025,
+          0.08 + 0.14 * lift
+        ),
+        rigPoint(-0.34, 0.64 + 0.06 * lift, -0.18)
       );
-      solveLookAt(rig, rigPoint(-0.05, 0.90, 0.95));
+      solveLookAt(rig, rigPoint(-0.04 * lift, 0.90, 0.95));
       return true;
     }
 
     case 'human-look-search': {
       resetToRest();
-      const scan = Math.sin(timeSeconds * 2.4);
-      setHipsOffsetAndTilt(0, -0.02, 0, 0.03, scan * 0.15, 0);
-      setChestTilt(0.04, scan * 0.32, 0);
+      const scan = Math.sin(u * Math.PI * 2) * cycleEnvelope;
+      setHipsOffsetAndTilt(0, -0.02 * cycleEnvelope, 0, 0.03 * cycleEnvelope, scan * 0.15, 0);
+      setChestTilt(0.04 * cycleEnvelope, scan * 0.32, 0);
 
       if (!applyWalkingLegsIfTraveling()) {
         solveLimbIK(rig, 'leftLeg', rigPoint(0.11, 0.04, 0.03), rigPoint(0.12, 0.32, 0.55));
         solveLimbIK(rig, 'rightLeg', rigPoint(-0.11, 0.04, -0.03), rigPoint(-0.12, 0.32, 0.55));
       }
 
-      solveLimbIK(rig, 'leftArm', rigPoint(0.22, 0.54, 0.12), rigPoint(0.28, 0.62, -0.25));
-      solveLimbIK(rig, 'rightArm', rigPoint(-0.22, 0.54, 0.12), rigPoint(-0.28, 0.62, -0.25));
+      solveLimbIK(rig, 'leftArm', rigPoint(0.22, 0.52 + 0.04 * cycleEnvelope, 0.10 + 0.04 * cycleEnvelope), rigPoint(0.28, 0.62, -0.25));
+      solveLimbIK(rig, 'rightArm', rigPoint(-0.22, 0.52 + 0.04 * cycleEnvelope, 0.10 + 0.04 * cycleEnvelope), rigPoint(-0.28, 0.62, -0.25));
       solveLookAt(rig, rigPoint(-scan * 0.75, 0.88, 0.75));
       return true;
     }
@@ -1245,11 +1260,12 @@ export function evaluateReadyMadeHumanoidClip(
 
     case 'human-victory-cheer': {
       resetToRest();
-      const pump = Math.sin(timeSeconds * 6.5);
+      const lift = Math.sin(Math.min(1, u < 0.5 ? u * 2.2 : (1 - u) * 2.2) * (Math.PI / 2));
+      const pump = Math.sin(u * Math.PI * 3) * lift;
       const bounce = Math.abs(pump) * 0.04;
 
-      setHipsOffsetAndTilt(0, bounce, 0, -0.04, 0, 0);
-      setChestTilt(-0.08, 0, 0);
+      setHipsOffsetAndTilt(0, bounce, 0, -0.04 * lift, 0, 0);
+      setChestTilt(-0.08 * lift, 0, 0);
 
       if (!applyWalkingLegsIfTraveling()) {
         solveLimbIK(rig, 'leftLeg', rigPoint(0.12, 0.04, 0), rigPoint(0.14, 0.32, 0.55));
@@ -1259,16 +1275,16 @@ export function evaluateReadyMadeHumanoidClip(
       solveLimbIK(
         rig,
         'leftArm',
-        rigPoint(0.26, 0.98 + pump * 0.06, 0.14),
-        rigPoint(0.34, 0.72, -0.15)
+        rigPoint(0.22 + 0.04 * lift, 0.50 + 0.48 * lift + pump * 0.06, 0.08 + 0.06 * lift),
+        rigPoint(0.34, 0.65 + 0.07 * lift, -0.15)
       );
       solveLimbIK(
         rig,
         'rightArm',
-        rigPoint(-0.26, 0.98 - pump * 0.06, 0.14),
-        rigPoint(-0.34, 0.72, -0.15)
+        rigPoint(-0.22 - 0.04 * lift, 0.50 + 0.48 * lift - pump * 0.06, 0.08 + 0.06 * lift),
+        rigPoint(-0.34, 0.65 + 0.07 * lift, -0.15)
       );
-      solveLookAt(rig, rigPoint(0, 1.05, 0.85));
+      solveLookAt(rig, rigPoint(0, 0.90 + 0.15 * lift, 0.85));
       return true;
     }
 

@@ -1809,7 +1809,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
               activeMotionClip,
               t,
               currentPoseResult?.clipProgress,
-              isTravelingOnFloor
+              isTravelingOnFloor,
+              currentPoseResult?.motionCycles ?? actor.motionCycles ?? 1
             );
           }
 

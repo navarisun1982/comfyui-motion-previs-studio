@@ -392,6 +392,7 @@ export interface InterpolatedPoseResult {
   gait?: 'auto' | 'walk' | 'run' | 'sneak' | 'idle' | 'none';
   motionClip?: string;
   clipProgress?: number;
+  motionCycles?: number;
 }
 
 /**
@@ -420,6 +421,7 @@ export function interpolateActorPoseAtTime(
     .sort((a, b) => a.time - b.time);
   let activeMotionClip: string | undefined;
   let activeClipProgress: number | undefined;
+  let activeMotionCycles: number | undefined;
 
   if (clipKfs.length > 0) {
     // Find the clip segment spanning evalTime
@@ -434,6 +436,7 @@ export function interpolateActorPoseAtTime(
     }
     if (activeMotionClip) {
       const matching = clipKfs.filter((k) => k.motionClip === activeMotionClip);
+      activeMotionCycles = matching.find((k) => k.motionCycles !== undefined)?.motionCycles;
       if (matching.length >= 2) {
         const segStart = matching[0].time;
         const segEnd = matching[matching.length - 1].time;
@@ -450,7 +453,7 @@ export function interpolateActorPoseAtTime(
     .sort((a, b) => a.time - b.time);
 
   if (kfs.length === 0) {
-    return { pose: basePose, motionClip: activeMotionClip, clipProgress: activeClipProgress };
+    return { pose: basePose, motionClip: activeMotionClip, clipProgress: activeClipProgress, motionCycles: activeMotionCycles };
   }
 
   if (kfs.length === 1) {
@@ -460,6 +463,7 @@ export function interpolateActorPoseAtTime(
       gait: kfs[0].gait,
       motionClip: activeMotionClip,
       clipProgress: activeClipProgress,
+      motionCycles: activeMotionCycles,
     };
   }
 
@@ -473,6 +477,7 @@ export function interpolateActorPoseAtTime(
         gait: kfs[0].gait,
         motionClip: activeMotionClip,
         clipProgress: activeClipProgress,
+        motionCycles: activeMotionCycles,
       };
     }
     return {
@@ -481,6 +486,7 @@ export function interpolateActorPoseAtTime(
       gait: kfs[0].gait,
       motionClip: activeMotionClip,
       clipProgress: activeClipProgress,
+      motionCycles: activeMotionCycles,
     };
   }
 
@@ -493,6 +499,7 @@ export function interpolateActorPoseAtTime(
       gait: last.gait,
       motionClip: activeMotionClip,
       clipProgress: activeClipProgress,
+      motionCycles: activeMotionCycles,
     };
   }
 
@@ -512,6 +519,7 @@ export function interpolateActorPoseAtTime(
           gait: kB.gait,
           motionClip: activeMotionClip,
           clipProgress: activeClipProgress,
+          motionCycles: activeMotionCycles,
         };
       if (!poseB)
         return {
@@ -520,6 +528,7 @@ export function interpolateActorPoseAtTime(
           gait: kA.gait,
           motionClip: activeMotionClip,
           clipProgress: activeClipProgress,
+          motionCycles: activeMotionCycles,
         };
 
       return {
@@ -528,11 +537,12 @@ export function interpolateActorPoseAtTime(
         gait: t > 0.5 ? kB.gait : kA.gait,
         motionClip: activeMotionClip,
         clipProgress: activeClipProgress,
+        motionCycles: activeMotionCycles,
       };
     }
   }
 
-  return { pose: basePose, motionClip: activeMotionClip, clipProgress: activeClipProgress };
+  return { pose: basePose, motionClip: activeMotionClip, clipProgress: activeClipProgress, motionCycles: activeMotionCycles };
 }
 
 /**

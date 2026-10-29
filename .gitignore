@@ -31,6 +31,8 @@ scripts/dev/*.ps1
 scripts/dev/*.txt
 scripts/*.ps1
 test_gallery.html
+demo_scene_construction_*.mp4
+demo_full_pipeline_*.mp4
 scratch/
 docs/COMPETITION_REQUIREMENTS.md
 docs/archive/

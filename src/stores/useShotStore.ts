@@ -111,7 +111,7 @@ interface ShotState {
   socketActorToBone: (propActorId: string, targetActorId: string, boneName: string, offset?: Point3D, rotationOffset?: Point3D) => void;
   unsocketActor: (propActorId: string) => void;
   applyDirectorialMotion: (actorId: string, prompt: string, options?: { startTimeSec?: number; endTimeSec?: number }) => void;
-  applyReadyMadeMotion: (actorId: string, clipId: string, options?: { startTimeSec?: number; endTimeSec?: number; travelMode?: 'auto' | 'travel' | 'in-place' }) => void;
+  applyReadyMadeMotion: (actorId: string, clipId: string, options?: { startTimeSec?: number; endTimeSec?: number; travelMode?: 'auto' | 'travel' | 'in-place'; motionCycles?: number }) => void;
   setClaymationMode: (enabled: boolean, fps?: number) => void;
   stagingMoveMode: 'base' | 'keyframe';
   setStagingMoveMode: (mode: 'base' | 'keyframe') => void;
@@ -902,7 +902,32 @@ export const useShotStore = create<ShotState>((set, get) => {
 
     updateActor: (actorId, updates) => {
       const { shot } = get();
-      const updatedActors = shot.actors.map((a) => (a.id === actorId ? { ...a, ...updates } : a));
+      const updatedActors = shot.actors.map((a) => {
+        if (a.id !== actorId) return a;
+        let nextTrajectory = updates.trajectory ?? a.trajectory;
+        if (updates.rotation && !updates.trajectory && nextTrajectory?.keyframes?.length) {
+          const prevRot = a.rotation ?? { x: 0, y: 0, z: 0 };
+          const dX = updates.rotation.x - prevRot.x;
+          const dY = updates.rotation.y - prevRot.y;
+          const dZ = updates.rotation.z - prevRot.z;
+          nextTrajectory = {
+            ...nextTrajectory,
+            keyframes: nextTrajectory.keyframes.map((kf) =>
+              kf.rotation
+                ? {
+                    ...kf,
+                    rotation: {
+                      x: Number((kf.rotation.x + dX).toFixed(2)),
+                      y: Number((kf.rotation.y + dY).toFixed(2)),
+                      z: Number((kf.rotation.z + dZ).toFixed(2)),
+                    },
+                  }
+                : kf
+            ),
+          };
+        }
+        return { ...a, ...updates, trajectory: nextTrajectory };
+      });
       const targetActor = updatedActors.find((a) => a.id === actorId);
       logger.action(`Updated actor "${targetActor?.name || actorId}" properties`, updates);
       const updated: ShotSpec = { ...shot, actors: updatedActors };
@@ -1247,6 +1272,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         },
         startRotation: target.rotation,
         travelMode: options?.travelMode ?? 'auto',
+        motionCycles: options?.motionCycles ?? target.motionCycles ?? 1,
       });
 
       const preservedKeyframes = (target.trajectory.keyframes || []).filter(
@@ -1278,6 +1304,7 @@ export const useShotStore = create<ShotState>((set, get) => {
               ...a,
               actionDescription: compiled.clip.promptPhrase,
               motionClip: compiled.clip.id,
+              motionCycles: Math.max(1, Math.min(20, Math.round(options?.motionCycles ?? target.motionCycles ?? 1))),
               gait: compiled.clip.baseGait ?? 'none',
               posePreset: compiled.clip.basePosePreset,
               pose: undefined,
@@ -1762,3 +1789,7 @@ export const useShotStore = create<ShotState>((set, get) => {
     },
   };
 });
+
+if (typeof window !== 'undefined') {
+  (window as unknown as { __useShotStore?: typeof useShotStore }).__useShotStore = useShotStore;
+}
