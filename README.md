@@ -112,10 +112,38 @@ Click the **Settings (`⚙ Settings • Ollama / Gemini / OpenAI`)** button in t
 
 - All motion presets, Action Cycles (`1x`–`5x`), 3D character rigging, camera optics, lighting, and offline MP4/OpenPose/Depth rendering also work **out of the box with zero API keys required**.
 
-### 6. Connect Local ComfyUI Server (Live MiniMax H3 Ref2VA Rendering)
-1. Start your local **ComfyUI** server at `http://127.0.0.1:8188` (no special `--enable-cors-header` flag is required thanks to the studio's built-in local HTTP proxy).
-2. Verify the green **`● Comfy`** pill in the top header bar (or click **`⚙ Settings`** → **ComfyUI Server Connection (`127.0.0.1:8188`)** → **Test / Reconnect** to inspect your active GPU & VRAM).
-3. In **Directing Mode**, upload a **ComfyUI Reference Image** on any character, vehicle, prop, or set — then switch to **Render, Prompt & Export** and click **`⚡ Render in ComfyUI (MiniMax H3)`** to render and compare your final video side-by-side in the app.
+### 6. Connect Local ComfyUI Server & MiniMax H3 Ref2VA Workflow Setup
+
+If you want to render final AI videos directly inside the studio using **`⚡ Render in ComfyUI (MiniMax H3)`**, follow these steps to set up the workflow and models in your local ComfyUI installation:
+
+#### Step A — Download the ComfyUI Workflow
+- 📥 **[Download Visual ComfyUI Workflow (`MiniMax_H3_Ref2VA_ComfyUI_Workflow.json`)](workflows/templates/MiniMax_H3_Ref2VA_ComfyUI_Workflow.json)** *(or click **`⬇ Download Workflow (.json)`** inside the studio's Render tab)*.
+- 📥 **[View Bound API Workflow (`minimax_h3_ref2va.api.json`)](workflows/templates/minimax_h3_ref2va.api.json)** *(automatically executed by the studio when you click `Render in ComfyUI`)*.
+
+#### Step B — Install Required Custom Nodes in ComfyUI
+1. Open your local ComfyUI in the browser at `http://127.0.0.1:8188` and **drag-and-drop [`MiniMax_H3_Ref2VA_ComfyUI_Workflow.json`](workflows/templates/MiniMax_H3_Ref2VA_ComfyUI_Workflow.json)** onto the canvas.
+2. Open **ComfyUI Manager → Install Missing Custom Nodes** to install any missing node packs:
+   - `ComfyUI-VideoHelperSuite` (`VHS_LoadVideo`, `VHS_VideoCombine`)
+   - `rgthree-comfy` (`Any Switch (rgthree)`, `Power Lora Loader (rgthree)`)
+   - `ComfyUI-KJNodes` (`PathchSageAttentionKJ`, `ImageResizeKJv2`)
+   - `ComfyUI-Easy-Use` (`easy seed`, `easy cleanGpuUsed`)
+   - `ComfyUI-SolAttn` / `ComfyUI-Frame-Interpolation` (`SolAttnPatch`, `RIFEInterpolation`)
+
+#### Step C — Download Required MiniMax H3 Model Weights
+Download the official MiniMax H3 weights from **[🤗 Comfy-Org/MiniMax-H3 on Hugging Face](https://huggingface.co/Comfy-Org/MiniMax-H3)** and place them into your `ComfyUI/models/` folder structure:
+
+| Model Role | File Name & Download Link | Target Folder inside `ComfyUI/models/` |
+| :--- | :--- | :--- |
+| **Diffusion Model (Ref2VA INT8)** | [`minimax_h3_ref2va_pruned_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors) | `ComfyUI/models/diffusion_models/Minimax h3/` |
+| **Text Encoder (Qwen3-VL 32B)** | [`qwen3vl_32b_minimax_h3_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/text_encoders) | `ComfyUI/models/text_encoders/Minimax h3/` |
+| **8-Step Turbo LoRA** | `minimax_h3_turbo_v4_step600_ema.safetensors` | `ComfyUI/models/loras/MiniMax H3/` |
+| **Video VAE (FP16)** | [`minimax_h3_video_vae_fp16.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors) | `ComfyUI/models/vae/minimax/` |
+| **Audio VAE (FP32)** | [`minimax_h3_audio_vae_fp32.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors) | `ComfyUI/models/vae/minimax/` |
+
+#### Step D — Render Directly from the Studio
+1. Ensure ComfyUI is running at `http://127.0.0.1:8188` and verify the green **`● Comfy`** pill in the studio's top header bar (or click **`⚙ Settings`** → **Test / Reconnect**).
+2. In **Directing Mode**, upload a **ComfyUI Reference Image** on any character, vehicle, prop, or set.
+3. Switch to **Render, Prompt & Export** and click **`⚡ Render in ComfyUI (MiniMax H3)`** — the studio automatically renders your 24fps 3D Previs MP4, uploads all reference assets, runs the workflow, and streams the final MP4+Audio result into the **Side-by-Side Sync** player.
 
 ---
 
