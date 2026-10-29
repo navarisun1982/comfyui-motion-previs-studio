@@ -35,7 +35,9 @@ export class ComfyClient {
     if (window.location.protocol.startsWith('file:')) return false;
     return (
       Boolean(import.meta.env.DEV) ||
-      ['5173', '5174', '5175', '4173'].includes(window.location.port)
+      ['5173', '5174', '5175', '4173', '51265', '51266'].includes(window.location.port) ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname === 'localhost'
     );
   }
 
@@ -96,6 +98,7 @@ export class ComfyClient {
   private resolveUrl(targetUrl?: string): string {
     const isDevServer = this.isHttpDevContext();
     if (!targetUrl) return this.baseUrl;
+    if (this.baseUrl.includes('127.0.0.1:51731')) return this.baseUrl;
     const cleanUrl = targetUrl.replace(/\/+$/, '');
     if (isDevServer && (cleanUrl.includes('127.0.0.1:8188') || cleanUrl.includes('localhost:8188'))) {
       return '/api/comfy';
@@ -154,7 +157,7 @@ export class ComfyClient {
 
   async checkHealth(): Promise<{ ok: boolean; stats?: ComfySystemStats; raw?: unknown; error?: string }> {
     const candidates = Array.from(
-      new Set([this.baseUrl, '/api/comfy', 'http://127.0.0.1:8188'])
+      new Set([this.baseUrl, 'http://127.0.0.1:51731/api/comfy', '/api/comfy', 'http://127.0.0.1:8188'])
     );
     let lastError = 'Connection failed';
     for (const candidate of candidates) {

@@ -1,6 +1,59 @@
 import type { Plugin } from 'vite';
 import { createRequire } from 'module';
+import http from 'http';
 const require = createRequire(import.meta.url);
+
+function attachComfyMiddleware(middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void }) {
+  middlewares.use((req, res, next) => {
+    const rawUrl = req.url || '';
+    if (!rawUrl.startsWith('/api/comfy')) {
+      next();
+      return;
+    }
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    const forwardPath = rawUrl.replace(/^\/api\/comfy/, '') || '/';
+    const outHeaders: Record<string, any> = { ...req.headers };
+    delete outHeaders['host'];
+    outHeaders['host'] = '127.0.0.1:8188';
+    outHeaders['origin'] = 'http://127.0.0.1:8188';
+    outHeaders['referer'] = 'http://127.0.0.1:8188/';
+
+    const proxyReq = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: 8188,
+        path: forwardPath,
+        method: req.method,
+        headers: outHeaders,
+      },
+      (proxyRes) => {
+        const resHeaders = { ...proxyRes.headers };
+        resHeaders['access-control-allow-origin'] = '*';
+        resHeaders['access-control-allow-headers'] = '*';
+        resHeaders['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+        res.writeHead(proxyRes.statusCode || 200, resHeaders);
+        proxyRes.pipe(res);
+      }
+    );
+
+    proxyReq.on('error', (err) => {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    });
+
+    req.pipe(proxyReq);
+  });
+}
 
 function getAuthService() {
   try {
@@ -13,7 +66,11 @@ function getAuthService() {
 export function openaiAuthPlugin(): Plugin {
   return {
     name: 'openai-auth-plugin',
+    configurePreviewServer(server) {
+      attachComfyMiddleware(server.middlewares);
+    },
     configureServer(server) {
+      attachComfyMiddleware(server.middlewares);
       server.middlewares.use(async (req, res, next) => {
         const rawUrl = req.url || '';
         const pathname = rawUrl.split('?')[0].replace(/\/+$/, '') || '/';

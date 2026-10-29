@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "desktop": "npm run build && electron .",
-    "start:desktop": "electron ."
+    "start:desktop": "set \"ELECTRON_RUN_AS_NODE=\" && electron ."
   },
   "dependencies": {
     "clsx": "^2.1.1",

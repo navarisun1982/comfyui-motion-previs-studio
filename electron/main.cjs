@@ -81,6 +81,75 @@ function scheduleSaveWindowState(win) {
 }
 
 let mainWindow = null;
+let localProxyServer = null;
+
+function startLocalProxyServer() {
+  if (localProxyServer) return;
+  localProxyServer = http.createServer((req, res) => {
+    // Add permissive CORS headers on all responses
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    const rawUrl = req.url || '/';
+    let targetHost = '127.0.0.1';
+    let targetPort = 8188;
+    let forwardPath = rawUrl;
+
+    if (rawUrl.startsWith('/api/comfy')) {
+      forwardPath = rawUrl.replace(/^\/api\/comfy/, '') || '/';
+    } else if (rawUrl.startsWith('/api/ollama')) {
+      targetPort = 11434;
+      forwardPath = rawUrl.replace(/^\/api\/ollama/, '') || '/';
+    } else if (rawUrl.startsWith('/api/llamacpp')) {
+      targetPort = 8080;
+      forwardPath = rawUrl.replace(/^\/api\/llamacpp/, '') || '/';
+    }
+
+    const outHeaders = { ...req.headers };
+    delete outHeaders['host'];
+    outHeaders['host'] = `${targetHost}:${targetPort}`;
+    outHeaders['origin'] = `http://${targetHost}:${targetPort}`;
+    outHeaders['referer'] = `http://${targetHost}:${targetPort}/`;
+
+    const proxyReq = http.request(
+      {
+        hostname: targetHost,
+        port: targetPort,
+        path: forwardPath,
+        method: req.method,
+        headers: outHeaders,
+      },
+      (proxyRes) => {
+        const resHeaders = { ...proxyRes.headers };
+        resHeaders['access-control-allow-origin'] = '*';
+        resHeaders['access-control-allow-headers'] = '*';
+        resHeaders['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+        res.writeHead(proxyRes.statusCode || 200, resHeaders);
+        proxyRes.pipe(res);
+      }
+    );
+
+    proxyReq.on('error', (err) => {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    });
+
+    req.pipe(proxyReq);
+  });
+
+  localProxyServer.on('error', () => {
+    // Port 51731 may already be bound by another instance
+  });
+
+  localProxyServer.listen(51731, '127.0.0.1');
+}
 
 nativeTheme.themeSource = 'dark';
 
@@ -242,11 +311,13 @@ app.whenReady().then(() => {
     }
   );
 
+  startLocalProxyServer();
   createWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+      startLocalProxyServer();
+  createWindow();
     }
   });
 });
