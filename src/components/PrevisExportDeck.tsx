@@ -1,9 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useShotStore } from '../stores/useShotStore';
+import { useComfyStore } from '../stores/useComfyStore';
 import { getAdapter } from '../adapters';
 import { getReasonerConfig } from '../services/objectReasoner';
 import { directPromptWithAI } from '../services/aiPromptDirector';
 import { exportCameraPoseBundle, exportCameraExtrinsicsJson } from '../engine/cameraMatrixExport';
+import { defaultComfyClient } from '../services/comfyClient';
+import { defaultJobRunner } from '../pipeline/jobRunner';
+import { loadBundledTemplates } from '../pipeline/templateLoader';
+import { templateRegistry } from '../pipeline/templateRegistry';
 import {
   Film,
   Download,
@@ -25,6 +30,11 @@ import {
   ChevronDown,
   ChevronUp,
   Code2,
+  Zap,
+  Columns,
+  Upload,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 
 interface PrevisExportDeckProps {
@@ -49,7 +59,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   const [activeEngineTab, setActiveEngineTab] = useState<'ltx-2.5' | 'minimax-h3' | 'seedance'>(
     shot.targetModel === 'minimax-h3' ? 'minimax-h3' : shot.targetModel === 'seedance' ? 'seedance' : 'ltx-2.5'
   );
-  const [activePassTab, setActivePassTab] = useState<'rgb' | 'openpose' | 'depth'>('rgb');
+  const [activePassTab, setActivePassTab] = useState<'rgb' | 'openpose' | 'depth' | 'comfy-final' | 'side-by-side'>('rgb');
   const [renderPassMode, setRenderPassMode] = useState<'all' | 'rgb' | 'openpose' | 'depth'>('all');
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [copiedNegative, setCopiedNegative] = useState(false);
@@ -59,6 +69,172 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   const [isDirectingPrompt, setIsDirectingPrompt] = useState(false);
   const [aiDirectorFeedback, setAiDirectorFeedback] = useState<string | null>(null);
   const [showTimelineDetails, setShowTimelineDetails] = useState(true);
+
+  // ComfyUI Live Bridge State (MiniMax H3 Ref2VA & LTX-2.5)
+  const { activeJob } = useComfyStore();
+  const [comfyOnline, setComfyOnline] = useState<boolean>(false);
+  const [comfyGpuLabel, setComfyGpuLabel] = useState<string>('Checking 127.0.0.1:8188...');
+  const [refImageNames, setRefImageNames] = useState<[string, string, string, string]>([
+    'char1.png',
+    'char2.png',
+    'char3.png',
+    'char4.png',
+  ]);
+  const [refImageFiles, setRefImageFiles] = useState<[File | null, File | null, File | null, File | null]>([
+    null,
+    null,
+    null,
+    null,
+  ]);
+  const [comfySeed, setComfySeed] = useState<number>(532752046112665);
+  const [isSubmittingComfy, setIsSubmittingComfy] = useState<boolean>(false);
+  const [comfyStatusText, setComfyStatusText] = useState<string | null>(null);
+  const [comfyErrorText, setComfyErrorText] = useState<string | null>(null);
+  const [finalComfyVideoUrl, setFinalComfyVideoUrl] = useState<string | null>(null);
+  const [finalComfyFilename, setFinalComfyFilename] = useState<string | null>(null);
+  const [finalComfyMeta, setFinalComfyMeta] = useState<string | null>(null);
+
+  const syncLeftVideoRef = useRef<HTMLVideoElement | null>(null);
+  const syncRightVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Ensure bundled workflow templates are registered and probe ComfyUI on mount
+  useEffect(() => {
+    if (templateRegistry.list().length === 0) {
+      loadBundledTemplates();
+    }
+    let mounted = true;
+    (async () => {
+      const health = await defaultComfyClient.checkHealth();
+      if (!mounted) return;
+      if (health.ok && health.stats) {
+        setComfyOnline(true);
+        setComfyGpuLabel(`${health.stats.gpuName} (${health.stats.vramTotalGb}GB VRAM)`);
+        const latest = await defaultComfyClient.fetchLatestCompletedOutput(10);
+        if (mounted && latest) {
+          setFinalComfyVideoUrl(latest.videoUrl);
+          setFinalComfyFilename(latest.filename);
+          const metaParts = [
+            latest.width && latest.height ? `${latest.width}×${latest.height}` : null,
+            latest.fps ? `${latest.fps}fps` : null,
+            latest.duration ? `${latest.duration.toFixed(1)}s` : null,
+          ].filter(Boolean);
+          setFinalComfyMeta(metaParts.join(' • ') || 'ComfyUI Output');
+        }
+      } else {
+        setComfyOnline(false);
+        setComfyGpuLabel('Offline (127.0.0.1:8188)');
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleLoadLatestComfyRender = async () => {
+    setComfyErrorText(null);
+    setComfyStatusText('Checking ComfyUI /history for latest completed render...');
+    const latest = await defaultComfyClient.fetchLatestCompletedOutput(15);
+    if (latest) {
+      setFinalComfyVideoUrl(latest.videoUrl);
+      setFinalComfyFilename(latest.filename);
+      const metaParts = [
+        latest.width && latest.height ? `${latest.width}×${latest.height}` : null,
+        latest.fps ? `${latest.fps}fps` : null,
+        latest.duration ? `${latest.duration.toFixed(1)}s` : null,
+      ].filter(Boolean);
+      setFinalComfyMeta(metaParts.join(' • ') || 'ComfyUI Output');
+      setComfyStatusText(`Loaded latest ComfyUI render: ${latest.filename}`);
+      setActivePassTab(previsVideoUrl ? 'side-by-side' : 'comfy-final');
+    } else {
+      setComfyErrorText('No completed video output found in ComfyUI history.');
+      setComfyStatusText(null);
+    }
+  };
+
+  const handleRenderInComfyUI = async () => {
+    setComfyErrorText(null);
+    // Validate that all 4 Reference Image slots are filled for MiniMax H3 Ref2VA
+    const trimmedRefs = refImageNames.map((n) => n.trim()) as [string, string, string, string];
+    if (trimmedRefs.some((n) => n.length === 0)) {
+      setComfyErrorText('All 4 Reference Image slots (<picture 1> to <picture 4>) must be filled before submitting to MiniMax H3 Ref2VA.');
+      return;
+    }
+
+    setIsSubmittingComfy(true);
+    try {
+      // 1. Ensure 3D RGB Previs MP4 exists (auto-render if needed)
+      let rgbUrl = useShotStore.getState().previsVideoUrl;
+      if (!rgbUrl) {
+        setComfyStatusText('Step 1/3: Rendering 24fps 3D RGB Previs MP4 for <Video 1> reference...');
+        await renderPrevisVideo('rgb');
+        rgbUrl = useShotStore.getState().previsVideoUrl;
+      }
+      if (!rgbUrl) {
+        throw new Error('Failed to generate 3D RGB Previs video for ComfyUI upload.');
+      }
+
+      // Fetch blob from object URL
+      setComfyStatusText('Step 2/3: Uploading 3D Previs MP4 & Reference Images to ComfyUI (127.0.0.1:8188)...');
+      const previsBlob = await (await fetch(rgbUrl)).blob();
+
+      if (templateRegistry.list().length === 0) {
+        loadBundledTemplates();
+      }
+
+      // 2. Queue job via JobRunner using minimax_h3_ref2va (mode: 'control')
+      setComfyStatusText('Step 3/3: Binding minimax_h3_ref2va (SolAttn + 8-Step Turbo LoRA) & queuing in ComfyUI...');
+      await defaultJobRunner.run({
+        shot,
+        engine: 'minimax-h3',
+        mode: 'control',
+        profile: selectedResolution === '1080p' ? 'final' : 'draft',
+        prompt: displayPositivePrompt,
+        negative: displayNegativePrompt,
+        seed: Math.max(0, Math.floor(comfySeed)),
+        promptSource: 'compiled',
+        controlVideoBlob: previsBlob,
+        refImageBlobs: refImageFiles,
+        refImageFilenames: trimmedRefs,
+        onProgress: (pct, title) => {
+          setComfyStatusText(`ComfyUI Executing (${pct}%): ${title}`);
+        },
+        onSuccess: (_revId, videoUrl, filename) => {
+          setFinalComfyVideoUrl(videoUrl);
+          setFinalComfyFilename(filename);
+          setFinalComfyMeta('1504×832 • 60fps RIFE + Audio');
+          setComfyStatusText(`Completed! Final video ready: ${filename}`);
+          setIsSubmittingComfy(false);
+          setActivePassTab('side-by-side');
+        },
+        onError: (err) => {
+          setComfyErrorText(err.message);
+          setComfyStatusText(null);
+          setIsSubmittingComfy(false);
+        },
+        onInterrupted: () => {
+          setComfyErrorText('ComfyUI execution interrupted.');
+          setComfyStatusText(null);
+          setIsSubmittingComfy(false);
+        },
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setComfyErrorText(msg);
+      setComfyStatusText(null);
+      setIsSubmittingComfy(false);
+    }
+  };
+
+  const handleSyncRestartBoth = () => {
+    if (syncLeftVideoRef.current) {
+      syncLeftVideoRef.current.currentTime = 0;
+      syncLeftVideoRef.current.play().catch(() => {});
+    }
+    if (syncRightVideoRef.current) {
+      syncRightVideoRef.current.currentTime = 0;
+      syncRightVideoRef.current.play().catch(() => {});
+    }
+  };
 
   // Keep local tab synced if shot.targetModel changes externally (e.g. from Right Inspector)
   useEffect(() => {
@@ -133,14 +309,22 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       ? previsVideoUrl
       : activePassTab === 'openpose'
       ? previsOpenPoseUrl
-      : previsDepthUrl;
+      : activePassTab === 'depth'
+      ? previsDepthUrl
+      : activePassTab === 'comfy-final'
+      ? finalComfyVideoUrl
+      : finalComfyVideoUrl || previsVideoUrl;
 
   const currentPassLabel =
     activePassTab === 'rgb'
       ? 'RGB Viewfinder'
       : activePassTab === 'openpose'
       ? 'OpenPose Rig'
-      : 'Volumetric Depth';
+      : activePassTab === 'depth'
+      ? 'Volumetric Depth'
+      : activePassTab === 'comfy-final'
+      ? 'Final ComfyUI Render (MP4 + Audio)'
+      : 'Side-by-Side Sync (Previs vs Final)';
 
   const downloadFile = (url: string, filename: string) => {
     const a = document.createElement('a');
@@ -294,7 +478,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
               </div>
 
               {/* Multi-Pass Selector Tabs */}
-              <div className="flex items-center bg-black/60 rounded-xl p-1 border border-white/10 gap-1 text-[11px] font-mono">
+              <div className="flex flex-wrap items-center bg-black/60 rounded-xl p-1 border border-white/10 gap-1 text-[11px] font-mono">
                 <button
                   onClick={() => setActivePassTab('rgb')}
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
@@ -331,12 +515,91 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   <span>Depth</span>
                   {previsDepthUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
                 </button>
+                <button
+                  onClick={() => setActivePassTab('comfy-final')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
+                    activePassTab === 'comfy-final'
+                      ? 'bg-indigo-500 text-white font-bold shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Zap className="h-3 w-3" />
+                  <span>Final Render</span>
+                  {finalComfyVideoUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
+                </button>
+                <button
+                  onClick={() => setActivePassTab('side-by-side')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
+                    activePassTab === 'side-by-side'
+                      ? 'bg-gradient-to-r from-amber-500 to-indigo-500 text-white font-bold shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Columns className="h-3 w-3" />
+                  <span>Side-by-Side Sync</span>
+                  {previsVideoUrl && finalComfyVideoUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
+                </button>
               </div>
             </div>
 
             {/* Video Viewport / Player */}
             <div className="relative rounded-xl overflow-hidden bg-black/80 border border-white/10 aspect-video flex items-center justify-center group">
-              {currentPassUrl ? (
+              {activePassTab === 'side-by-side' ? (
+                <div className="w-full h-full grid grid-cols-2 gap-1 bg-black p-1">
+                  {/* Left: 3D RGB Previs */}
+                  <div className="relative rounded-lg overflow-hidden bg-[#080a0f] border border-amber-500/30 flex items-center justify-center">
+                    {previsVideoUrl ? (
+                      <video
+                        ref={syncLeftVideoRef}
+                        key={previsVideoUrl}
+                        src={previsVideoUrl}
+                        controls
+                        loop
+                        autoPlay
+                        muted
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <div className="text-center p-4 text-[11px] font-mono text-slate-400">
+                        Click <strong>&quot;Render Previs Video&quot;</strong> below to populate left 3D Previs plate.
+                      </div>
+                    )}
+                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-amber-500/40 text-[9px] font-mono text-amber-300 font-bold">
+                      1. 3D RGB PREVIS (&lt;Video 1&gt;)
+                    </div>
+                  </div>
+                  {/* Right: Final ComfyUI Render */}
+                  <div className="relative rounded-lg overflow-hidden bg-[#080a0f] border border-indigo-500/40 flex items-center justify-center">
+                    {finalComfyVideoUrl ? (
+                      <video
+                        ref={syncRightVideoRef}
+                        key={finalComfyVideoUrl}
+                        src={finalComfyVideoUrl}
+                        controls
+                        loop
+                        autoPlay
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <div className="text-center p-4 text-[11px] font-mono text-slate-400">
+                        Click <strong>&quot;Render in ComfyUI&quot;</strong> or <strong>&quot;Load Latest ComfyUI Render&quot;</strong> below.
+                      </div>
+                    )}
+                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-indigo-500/40 text-[9px] font-mono text-indigo-300 font-bold">
+                      2. MINIMAX H3 FINAL RENDER ({finalComfyFilename || 'ComfyUI'})
+                    </div>
+                  </div>
+                  {previsVideoUrl && finalComfyVideoUrl && (
+                    <button
+                      onClick={handleSyncRestartBoth}
+                      className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-indigo-600/90 hover:bg-indigo-500 text-white font-mono text-[10px] font-bold shadow-lg border border-white/20 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      <span>Sync Restart Both Videos (0.0s)</span>
+                    </button>
+                  )}
+                </div>
+              ) : currentPassUrl ? (
                 <video
                   key={currentPassUrl}
                   src={currentPassUrl}
@@ -478,6 +741,188 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Live ComfyUI MiniMax H3 Reference-to-Video Bridge Card */}
+          <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-[#101424] via-[#0f121b] to-[#141126] p-5 shadow-xl flex flex-col gap-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="h-7 w-7 rounded-lg bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-indigo-300">
+                  <Zap className="h-4 w-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs font-bold text-white tracking-wide uppercase">
+                      Live ComfyUI MiniMax H3 Bridge (Ref2VA Workflow)
+                    </h3>
+                    <span
+                      className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold border ${
+                        comfyOnline
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                          : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                      }`}
+                    >
+                      {comfyOnline ? `ONLINE • ${comfyGpuLabel}` : comfyGpuLabel}
+                    </span>
+                  </div>
+                  <p className="text-[10px] font-mono text-slate-400">
+                    Template: <span className="text-indigo-300 font-semibold">minimax_h3_ref2va</span> (SolAttn + 8-Step Turbo LoRA @ 0.7 • Node 638 Previs Video + 4 Ref Images → Node 145 60fps MP4+Audio)
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleLoadLatestComfyRender}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-indigo-200 border border-indigo-400/30 font-mono text-[11px] font-semibold transition-all cursor-pointer"
+                  title="Load the most recent completed render from ComfyUI /history into the player"
+                >
+                  <Columns className="h-3.5 w-3.5 text-indigo-400" />
+                  <span>Load Latest Render</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRenderInComfyUI}
+                  disabled={isSubmittingComfy || activeJob?.status === 'executing'}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-indigo-500/25 disabled:opacity-50 transition-all cursor-pointer"
+                  title="Auto-upload 3D RGB Previs MP4 + 4 Reference Images and execute MiniMax H3 Ref2VA in ComfyUI"
+                >
+                  {isSubmittingComfy || activeJob?.status === 'executing' ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      <span>Executing in ComfyUI...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="h-3.5 w-3.5 fill-current" />
+                      <span>Render in ComfyUI (MiniMax H3)</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* 4 Required Reference Image Slots (<picture 1> to <picture 4> -> Nodes 137, 139, 144, 151) + Seed */}
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 pt-1">
+              {[0, 1, 2, 3].map((idx) => {
+                const nodeIds = ['137', '139', '144', '151'];
+                const actorLabel =
+                  idx < 3
+                    ? shot.actors[idx]?.name || `Subject ${idx + 1}`
+                    : 'Alley / Set Env';
+                return (
+                  <div
+                    key={idx}
+                    className="rounded-xl bg-black/50 border border-white/10 p-2 flex flex-col gap-1"
+                  >
+                    <div className="flex items-center justify-between text-[9px] font-mono">
+                      <span className="text-indigo-300 font-bold">
+                        &lt;picture {idx + 1}&gt; (Node {nodeIds[idx]})
+                      </span>
+                      <span className="text-slate-500 truncate max-w-[75px]">{actorLabel}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={refImageNames[idx]}
+                        onChange={(e) => {
+                          const next = [...refImageNames] as [string, string, string, string];
+                          next[idx] = e.target.value;
+                          setRefImageNames(next);
+                        }}
+                        placeholder={`char${idx + 1}.png`}
+                        className="w-full bg-black/70 border border-white/15 rounded px-1.5 py-1 text-[10px] font-mono text-slate-200 focus:outline-none focus:border-indigo-400"
+                      />
+                      <label
+                        className="px-1.5 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/35 border border-indigo-400/30 text-indigo-200 cursor-pointer shrink-0"
+                        title={`Upload custom image file for <picture ${idx + 1}>`}
+                      >
+                        <Upload className="h-3 w-3" />
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0] || null;
+                            if (f) {
+                              const nextFiles = [...refImageFiles] as [File | null, File | null, File | null, File | null];
+                              nextFiles[idx] = f;
+                              setRefImageFiles(nextFiles);
+                              const nextNames = [...refImageNames] as [string, string, string, string];
+                              nextNames[idx] = f.name;
+                              setRefImageNames(nextNames);
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Seed Control (Node 142) */}
+              <div className="rounded-xl bg-black/50 border border-white/10 p-2 flex flex-col gap-1">
+                <div className="flex items-center justify-between text-[9px] font-mono">
+                  <span className="text-amber-300 font-bold">SEED (Node 142)</span>
+                  <button
+                    type="button"
+                    onClick={() => setComfySeed(Math.floor(Math.random() * 900000000000000) + 100000000000000)}
+                    className="text-indigo-300 hover:text-white underline"
+                  >
+                    Random
+                  </button>
+                </div>
+                <input
+                  type="number"
+                  value={comfySeed}
+                  onChange={(e) => setComfySeed(Number(e.target.value) || 0)}
+                  className="w-full bg-black/70 border border-white/15 rounded px-1.5 py-1 text-[10px] font-mono text-slate-200 focus:outline-none focus:border-amber-400"
+                />
+              </div>
+            </div>
+
+            {/* Live Progress / Status / Output Banner */}
+            {(comfyStatusText || comfyErrorText || finalComfyFilename) && (
+              <div
+                className={`rounded-xl border px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono ${
+                  comfyErrorText
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                    : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-200'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  {comfyErrorText ? (
+                    <AlertCircle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+                  ) : (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                  )}
+                  <span>
+                    {comfyErrorText ||
+                      comfyStatusText ||
+                      `Latest ComfyUI Render Ready: ${finalComfyFilename} (${finalComfyMeta})`}
+                  </span>
+                </div>
+                {finalComfyVideoUrl && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setActivePassTab('side-by-side')}
+                      className="px-2 py-0.5 rounded bg-indigo-500/30 hover:bg-indigo-500/50 text-white text-[10px] font-bold border border-indigo-400/40 cursor-pointer"
+                    >
+                      View Side-by-Side
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => downloadFile(finalComfyVideoUrl, finalComfyFilename || 'minimax_h3_output.mp4')}
+                      className="px-2 py-0.5 rounded bg-emerald-500/25 hover:bg-emerald-500/40 text-emerald-200 text-[10px] font-bold border border-emerald-400/40 cursor-pointer"
+                    >
+                      Download Final MP4
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Stage Temporal Beats & Timeline Choreography */}

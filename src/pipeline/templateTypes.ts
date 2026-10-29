@@ -30,6 +30,10 @@ export const BINDABLE_FIELDS = [
   'timeline',
   'filenamePrefix',
   'controlVideo',
+  'refImage1',
+  'refImage2',
+  'refImage3',
+  'refImage4',
   'icLora',
   'icLoraStrength',
 ] as const;

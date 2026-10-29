@@ -399,5 +399,53 @@ describe('bundled production templates', () => {
     const timelineData = JSON.parse(finalRes.workflow['4'].inputs.timeline_data as string);
     expect(timelineData.characters[0].file).toBe('cyberpunk_first.png');
   });
+
+  it('loads, verifies, and binds minimax_h3_ref2va (SolAttn + 8-step Turbo LoRA + 4 Ref Images) without errors', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+
+    const apiRaw = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../workflows/templates/minimax_h3_ref2va.api.json'), 'utf8'));
+    const bindingRaw = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../workflows/templates/minimax_h3_ref2va.binding.json'), 'utf8'));
+
+    const parsed = parseBinding(bindingRaw, 'minimax_h3_ref2va.binding.json');
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.binding).toBeDefined();
+
+    const verification = verifyBinding(apiRaw, parsed.binding!);
+    expect(verification.errors).toEqual([]);
+    expect(verification.ok).toBe(true);
+
+    const bound = bindTemplate(apiRaw, parsed.binding!, {
+      mode: 'control',
+      profile: 'final',
+      prompt: 'subject_definitions:\n<Subject 1> is Agent Mercer...',
+      negative: '',
+      seed: 532752046112665,
+      durationSeconds: 6,
+      frameRate: 24,
+      aspectRatio: '16:9',
+      width: 1280,
+      height: 720,
+      filenamePrefix: 'mmh3_alley_oner',
+      controlVideoFile: 'alley_pursuit_rgb_previs.mp4',
+      refImage1File: 'char1.png',
+      refImage2File: 'char2.png',
+      refImage3File: 'char3.png',
+      refImage4File: 'char4.png',
+    });
+
+    expect(bound.workflow['138'].inputs.value).toContain('<Subject 1> is Agent Mercer');
+    expect(bound.workflow['142'].inputs.seed).toBe(532752046112665);
+    expect(bound.workflow['132'].inputs.value).toBe(6);
+    expect(bound.workflow['115'].inputs.aspect_ratio).toBe('16:9 (Widescreen)');
+    expect(bound.workflow['115'].inputs.megapixels).toBe(1.2);
+    expect(bound.workflow['638'].inputs.video).toBe('alley_pursuit_rgb_previs.mp4');
+    expect(bound.workflow['137'].inputs.image).toBe('char1.png');
+    expect(bound.workflow['139'].inputs.image).toBe('char2.png');
+    expect(bound.workflow['144'].inputs.image).toBe('char3.png');
+    expect(bound.workflow['151'].inputs.image).toBe('char4.png');
+    expect(bound.workflow['145'].inputs.filename_prefix).toBe('mmh3_alley_oner');
+    expect((bound.workflow['674'].inputs.lora_1 as Record<string, unknown>).strength).toBe(0.7);
+  });
 });
 

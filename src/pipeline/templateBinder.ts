@@ -26,6 +26,10 @@ export interface BindValues {
   firstFrameFile?: string;
   /** ComfyUI input-folder filename of the uploaded geometric control/previs video; required for control mode. */
   controlVideoFile?: string;
+  refImage1File?: string;
+  refImage2File?: string;
+  refImage3File?: string;
+  refImage4File?: string;
   icLora?: string;
   icLoraStrength?: number;
   filenamePrefix: string;
@@ -157,6 +161,14 @@ function fieldValue(field: BindableField, v: BindValues): unknown {
       throw new BindError('The "timeline" field must use a patcher.');
     case 'controlVideo':
       return v.controlVideoFile;
+    case 'refImage1':
+      return v.refImage1File ?? 'char1.png';
+    case 'refImage2':
+      return v.refImage2File ?? 'char2.png';
+    case 'refImage3':
+      return v.refImage3File ?? 'char3.png';
+    case 'refImage4':
+      return v.refImage4File ?? 'char4.png';
     case 'icLora':
       return v.icLora ?? 'none';
     case 'icLoraStrength':

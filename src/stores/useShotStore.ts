@@ -337,6 +337,32 @@ const DEFAULT_CAST_POOL: Actor[] = [
       endPosition: { x: 49, y: 46, z: 0 },
     },
   },
+  {
+    id: 'cast-detective-miller',
+    name: 'Detective Miller',
+    kind: 'human',
+    color: '#ef4444',
+    token: 'hardboiled neo-noir detective in a rain-slicked charcoal trench coat',
+    actionDescription: 'walks cautiously down the rain-slicked alley and glances over his shoulder',
+    trajectory: {
+      startTimeSeconds: 0,
+      startPosition: { x: 50, y: 65, z: 0 },
+      endPosition: { x: 50, y: 40, z: 0 },
+    },
+  },
+  {
+    id: 'cast-recon-hound',
+    name: 'Recon Hound',
+    kind: 'quadruped',
+    color: '#06b6d4',
+    token: 'autonomous cybernetic tracking hound with glowing optics',
+    actionDescription: 'prowls alongside the operative',
+    trajectory: {
+      startTimeSeconds: 0,
+      startPosition: { x: 54, y: 65, z: 0 },
+      endPosition: { x: 54, y: 40, z: 0 },
+    },
+  },
 ];
 
 const loadCachedCastPool = (): Actor[] => {

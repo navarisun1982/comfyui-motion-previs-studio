@@ -443,6 +443,46 @@ export class ComfyClient {
     }
   }
 
+  async fetchLatestCompletedOutput(maxItems = 10): Promise<{
+    promptId: string;
+    filename: string;
+    videoUrl: string;
+    width?: number;
+    height?: number;
+    fps?: number;
+    duration?: number;
+  } | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/history?max_items=${maxItems}`);
+      if (!res.ok) return null;
+      const data = (await res.json()) as Record<string, Record<string, unknown>>;
+      const entries = Object.entries(data).reverse();
+      for (const [promptId, item] of entries) {
+        const outputs = item.outputs as Record<string, Record<string, unknown>> | undefined;
+        if (!outputs) continue;
+        for (const nodeOut of Object.values(outputs)) {
+          const v = this.extractVideoOutput(nodeOut);
+          if (v) {
+            const gifMeta = Array.isArray(nodeOut.gifs) && nodeOut.gifs[0] ? (nodeOut.gifs[0] as Record<string, unknown>) : null;
+            const metadata = gifMeta?.metadata as Record<string, number> | undefined;
+            return {
+              promptId,
+              filename: v.filename,
+              videoUrl: this.getViewUrl(v.filename, v.subfolder || '', v.type || 'output'),
+              width: metadata?.width,
+              height: metadata?.height,
+              fps: (gifMeta?.frame_rate as number) || metadata?.fps,
+              duration: metadata?.duration,
+            };
+          }
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   getViewUrl(filename: string, subfolder = '', type = 'output'): string {
     const params = new URLSearchParams({
       filename,

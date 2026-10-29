@@ -278,13 +278,13 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
 }
 
 /**
- * MiniMax H3 / Hailuo Prompt Compiler
- * Follows official MiniMax / Hailuo prompting guidelines:
- * - Structured multi-section formula:
- *   [Camera Shot + Motion] + [Subject + Micro-Acting] + [Timeline Choreography] + [Scene Environment] + [Lighting & Tone] + [Cinematic Style & Optical Gear]
- * - Prioritizes human micro-acting and expressive physical performance cues.
- * - Explicit chronological time tags for sequential movement.
- * - Real-world cinema camera & lens optical signatures (Arri Alexa 65).
+ * MiniMax H3 / Hailuo Reference-to-Video (Ref2VA) Prompt Compiler
+ * Follows the official MiniMax H3 Reference-to-Video multi-subject & video-reference schema:
+ * - subject_definitions: Maps <Subject 1..4> to <picture 1..4> and 3D previz hex color IDs, plus <Video 1> (3D previz plate).
+ * - summary: [reference generation] overview.
+ * - retention_analysis: Identity & attribute transfer directives for <Subject 1..4> and <Video 1>.
+ * - detailed_description: Continuous time-stamped [Shot 1] camera, optics, and micro-acting choreography.
+ * - overall_soundscape & non_diegetic_music: Drives the MiniMax H3 audio VAE decoder.
  */
 export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
   const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed);
@@ -293,27 +293,76 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
   const lightInfo = formatLighting(shot.lighting.style, shot.lighting.direction, shot.lighting.contrast);
   const timeline = buildTemporalTimeline(shot);
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
+  const defaultPalette = ['#EF4444', '#06B6D4', '#F59E0B', '#10B981'];
 
-  // Subject with micro-acting nuances
-  const subjectBlocks = shot.actors.map((actor) => {
-    const scale = actor.scale ?? 1.0;
-    const scalePrefix = scale >= 2.0 ? 'towering, massive ' : scale >= 1.4 ? 'large, prominent ' : scale <= 0.4 ? 'miniature, tiny ' : scale <= 0.7 ? 'small ' : '';
-    return `${scalePrefix}${actor.token}, displaying nuanced physical presence, subtle micro-expressions, rhythmic chest breathing, and focused eye direction as they perform: ${actor.actionDescription}`;
-  }).join('; ');
+  // Build up to 3 actor subject definitions (<Subject 1..3>) + <Subject 4> environment
+  const subjectDefLines: string[] = [];
+  const retentionLines: string[] = [];
 
-  // Chronological timeline section
-  const timelineString = timeline.map((beat) => `[${beat.timeRange}]: ${beat.cameraAction}; ${beat.actorAction}`).join(' | ');
+  for (let i = 0; i < 3; i++) {
+    const actor = shot.actors[i];
+    const subjIdx = i + 1;
+    if (actor) {
+      const hex = (actor.color || defaultPalette[i]).toUpperCase();
+      const scale = actor.scale ?? 1.0;
+      const scalePrefix =
+        scale >= 2.0 ? 'towering, massive ' : scale >= 1.4 ? 'large, prominent ' : scale <= 0.4 ? 'miniature, tiny ' : scale <= 0.7 ? 'small ' : '';
+      const socketNote = actor.socketToBone ? ` (carrying prop attached to bone ${actor.socketToBone.boneName})` : '';
+      subjectDefLines.push(
+        `<Subject ${subjIdx}> is ${actor.name}, defined by <picture ${subjIdx}>: ${scalePrefix}${actor.token}${socketNote}, performing ${actor.actionDescription}. Preserve the same identity across all angles. Replaces the ${hex} previz figure; the color is an identification cue, not surface skin/paint.`
+      );
+      retentionLines.push(
+        `<Subject ${subjIdx}> (appears in [Shot 1]): ${actor.kind === 'character' ? 'fully_preserved - facial identity, hair, and wardrobe from <picture ' + subjIdx + '>' : 'attribute_transfer - retain previz spatial role and trajectory from <picture ' + subjIdx + '>'}.`
+      );
+    } else {
+      subjectDefLines.push(
+        `<Subject ${subjIdx}> is an auxiliary scene element defined by <picture ${subjIdx}>, preserving natural material fidelity within the shot.`
+      );
+      retentionLines.push(
+        `<Subject ${subjIdx}> (appears in [Shot 1]): attribute_transfer - preserve reference appearance from <picture ${subjIdx}>.`
+      );
+    }
+  }
+
+  const envDesc = `${shot.environment?.promptDescription || shot.sceneDescription.trim()}${envText ? ` (${envText})` : ''}`;
+  subjectDefLines.push(
+    `<Subject 4> is the [Scene Environment]: ${envDesc}, replacing the dark-slate #334155 previz architecture blocks presented by <picture 4>, with rich material textures and atmospheric depth.`
+  );
+  retentionLines.push(
+    `<Subject 4> (appears in [Shot 1]): attribute_transfer - preserve spatial layout and architectural relationships while replacing proxy geometry with realistic architecture from <picture 4>.`
+  );
+
+  subjectDefLines.push(
+    `<Video 1> is the supplied 3D previz reference video. Reference only the animated 3D camera movement, spatial layout, and character blocking. Exclude any proxy wireframe or helper artifacts.`
+  );
+  retentionLines.push(
+    `<Video 1> ([Shot 1] motion and blocking reference): partially_preserved - retain the continuous 3D camera trajectory, focal framing, and subject blocking across the ${shot.durationSeconds.toFixed(1)}-second duration.`
+  );
+
+  // Subject micro-acting summary for metadata
+  const subjectBlocks = shot.actors
+    .map((actor) => `${actor.token} (${actor.name}): ${actor.actionDescription}`)
+    .join('; ');
+
+  const styleLine = shot.claymationMode
+    ? `Authentic stop-motion claymation aesthetic, handcrafted malleable clay surface textures, tactile fingerprint imperfections, animated on-twos at ${shot.claymationFps || 12}fps motion cadence.`
+    : `The target video is a photorealistic cinema shot in ${shot.aspectRatio}, lasting ${shot.durationSeconds.toFixed(1)} seconds at 24fps motion cadence. Use one uninterrupted take with ${lensInfo}, ${angleInfo}, ${cameraMove}, realistic motion blur, and natural 180-degree shutter angle.`;
+
+  const beatParagraphs = timeline
+    .map((beat, idx) => {
+      const prefix = idx === 0 ? `[Shot 1] From ${beat.timeRange}` : `From ${beat.timeRange}`;
+      return `${prefix}, ${beat.cameraAction}. Simultaneously, ${beat.actorAction}.`;
+    })
+    .join('\n\n');
 
   const positivePrompt = [
-    `[Camera Shot & Motion]: ${angleInfo}, ${cameraMove}.`,
-    subjectBlocks ? `[Subject & Micro-Acting]: ${subjectBlocks}.` : '',
-    `[Timeline Choreography]: ${timelineString}.`,
-    `[Scene Environment]: ${shot.environment?.promptDescription || shot.sceneDescription.trim()}${envText ? ` (${envText})` : ''}, rich material textures and atmospheric depth.`,
-    `[Lighting & Atmosphere]: ${lightInfo}.`,
-    shot.claymationMode
-      ? `[Cinematic Style & Gear]: Authentic stop-motion claymation aesthetic, handcrafted malleable clay surface textures, tactile fingerprint imperfections, animated on-twos at ${shot.claymationFps || 12}fps motion cadence.`
-      : `[Cinematic Style & Gear]: Shot on Arri Alexa 65 with ${lensInfo}, 24fps motion cadence, natural 180-degree shutter angle, lifelike character physics and optical photorealism.`,
-  ].filter(Boolean).join(' ');
+    `subject_definitions:\n${subjectDefLines.join('\n\n')}`,
+    `summary: [reference generation] Create a cinematic, photorealistic ${shot.aspectRatio}, ${shot.durationSeconds.toFixed(1)}-second continuous shot ("${shot.name}"), using <Video 1> for blocking and camera-path guidance and <picture 1>–<picture 4> for subject and environment identity.`,
+    `retention_analysis:\n${retentionLines.join('\n')}`,
+    `detailed_description: ${styleLine}\n\n${beatParagraphs}\n\nThroughout, ${lightInfo}. Preserve natural skin tones, readable facial micro-expressions, and physical depth. No readable text, subtitles, or interface graphics.`,
+    `overall_soundscape: Natural environmental ambiance matching ${shot.environment?.name || 'the scene'}, realistic footsteps and cloth movement synchronized with subject locomotion, and subtle spatial acoustics. No unintended vocalizations.`,
+    `non_diegetic_music: N/A.`,
+  ].join('\n\n');
 
   const negativePrompt = shot.negativePrompt || 'blurry, low quality, deformed limbs, floating artifacts, jerky camera, unnatural motion, digital noise, oversaturated, morphing';
 
@@ -325,7 +374,7 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     lightingDirectives: `Lighting: ${lightInfo}.`,
     styleDirectives: shot.claymationMode
       ? `Stop-motion claymation aesthetic, handcrafted clay textures, ${shot.claymationFps || 12}fps motion cadence.`
-      : 'Arri Alexa 65, cinematic realism, 24fps motion cadence, 180-degree shutter.',
+      : 'MiniMax H3 Ref2VA, Arri Alexa 65, cinematic realism, 24fps motion cadence, 180-degree shutter.',
     temporalBeats: timeline,
     modelPromptParadigm: 'minimax-structured-cinematic',
     technicalMetadata: {

@@ -1,0 +1,115 @@
+{
+  "schema": 1,
+  "templateId": "minimax_h3_ref2va",
+  "engine": "minimax-h3",
+  "label": "MiniMax H3 Reference-to-Video (SolAttn + 8-Step Turbo LoRA + 4 Ref Images)",
+  "api": "minimax_h3_ref2va.api.json",
+  "modes": [
+    "control"
+  ],
+  "nodes": {
+    "115": "ResolutionSelector",
+    "119": "VAELoader",
+    "120": "VAELoader",
+    "121": "VAEDecodeAudio",
+    "122": "VAEDecode",
+    "124": "BasicScheduler",
+    "125": "SamplerCustomAdvanced",
+    "126": "BasicGuider",
+    "128": "CLIPLoader",
+    "131": "ComfyMathExpression",
+    "132": "PrimitiveFloat",
+    "136": "MiniMaxH3ReferenceToVideo",
+    "137": "LoadImage",
+    "138": "PrimitiveStringMultiline",
+    "139": "LoadImage",
+    "142": "easy seed",
+    "144": "LoadImage",
+    "145": "VHS_VideoCombine",
+    "146": "PrimitiveFloat",
+    "147": "RIFEInterpolation",
+    "151": "LoadImage",
+    "157": "PathchSageAttentionKJ",
+    "620": "UNETLoader",
+    "636": "SolAttnPatch",
+    "638": "VHS_LoadVideo",
+    "669": "ImageScaleToMaxDimension",
+    "674": "Power Lora Loader (rgthree)"
+  },
+  "fields": {
+    "prompt": {
+      "node": "138",
+      "input": "value"
+    },
+    "seed": {
+      "node": "142",
+      "input": "seed"
+    },
+    "durationSeconds": {
+      "node": "132",
+      "input": "value"
+    },
+    "aspectRatio": {
+      "node": "115",
+      "input": "aspect_ratio",
+      "map": {
+        "16:9": "16:9 (Widescreen)",
+        "9:16": "9:16 (Vertical)",
+        "1:1": "1:1 (Square)",
+        "4:3": "4:3 (Classic TV)",
+        "2.39:1": "21:9 (Ultrawide)"
+      }
+    },
+    "controlVideo": {
+      "node": "638",
+      "input": "video"
+    },
+    "refImage1": {
+      "node": "137",
+      "input": "image"
+    },
+    "refImage2": {
+      "node": "139",
+      "input": "image"
+    },
+    "refImage3": {
+      "node": "144",
+      "input": "image"
+    },
+    "refImage4": {
+      "node": "151",
+      "input": "image"
+    },
+    "filenamePrefix": {
+      "node": "145",
+      "input": "filename_prefix"
+    }
+  },
+  "profiles": {
+    "draft": [
+      {
+        "node": "115",
+        "input": "megapixels",
+        "value": 0.9
+      }
+    ],
+    "final": [
+      {
+        "node": "115",
+        "input": "megapixels",
+        "value": 1.2
+      }
+    ]
+  },
+  "output": {
+    "node": "145"
+  },
+  "frameRule": "any",
+  "notes": [
+    "MiniMax H3 Reference-to-Video (Ref2VA) workflow on RTX 3090.",
+    "Uses SolAttnPatch + 8-step Turbo LoRA (Node 674 Power Lora Loader @ 0.7).",
+    "Binds 3D Previs MP4 into VHS_LoadVideo (Node 638) and 4 Reference Images (<picture 1>–<picture 4>) into LoadImage Nodes 137, 139, 144, 151.",
+    "Outputs 60fps RIFE-interpolated video + spatial audio via VHS_VideoCombine (Node 145)."
+  ]
+}
+
