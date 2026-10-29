@@ -49,14 +49,21 @@
 - **Procedural 3D Environments**: Instant architectural soundstages (`Cyberpunk Alleyway`, `Ancient Temple Ruins`, `Warm Candlelit Rooftop Terrace`, `Sci-Fi Corridor`, `Film Studio Cyc Wall`) with grounded hero props, atmospheric fog, custom prompt-driven 3D object sculpting, and **Set / Background Reference Image (`<picture 4>`)** upload for ComfyUI video generation.
 - **Three-Point + Practical Studio Lighting**: Interactive 3D light gizmos (`Key`, `Fill`, `Rim`, `Practical`) with real-time intensity, color temperature, cone angle, and shadow control.
 
-### 5. Previs Render, Live ComfyUI MiniMax H3 Bridge & Side-by-Side Sync Deck
+### 5. Previs Render & Multi-Pass Export Deck
 ![Previs Render & Export Deck](docs/screenshots/05-previs-export-deck.png)
-- **⚡ Live ComfyUI MiniMax H3 Bridge (`minimax_h3_ref2va`)**:
-  - **One-Click `Render in ComfyUI (MiniMax H3)`**: Automatically renders your 24fps 3D RGB Previs MP4, uploads it to ComfyUI Node `638` (`<Video 1>`), binds up to 4 object/character/set Reference Images (`<picture 1>`–`<picture 4>`, Nodes `137`/`139`/`144`/`151`), injects the spatially locked Ref2VA prompt (Node `646`) and seed (Node `142`), and streams live node-by-node progress via WebSocket + HTTP `/history` fallback.
-  - **Zero-CORS Local Proxy (`127.0.0.1:51731` / `/api/comfy`)**: Built-in loopback proxy in both Electron and Vite dev server guarantees rock-solid connectivity to `http://127.0.0.1:8188` without browser CORS blocks, with live GPU/VRAM badge in **Settings (`⚙ Settings`)** and the top header bar.
-  - **In-App `Final Render` & `Side-by-Side Sync` Player**: Stream, scrub, and compare your 3D Previs MP4 alongside the final ComfyUI MiniMax H3 MP4+Audio render right inside the studio, with 1-click MP4 download and exact disk location readout (`D:\ComfyUI\output\...`).
 - **Offline Hardware-Accelerated 24fps Renderer**: Exports frame-accurate `.mp4` (via `mp4-muxer`) for **Composite Previs**, **Clean Beauty**, **OpenPose 18-Joint Skeletons**, **Normalized Depth Maps**, and **Subject Alpha Masks**.
 - **Deterministic ComfyUI & Video Reference Bundles**: Exports `.zip` or JSON bundles containing your rendered control passes, `4×4` camera extrinsic matrices, compiled engine prompts, and verified ComfyUI API graphs for **LTX-2.5**, **MiniMax H3**, **Seedance**, and **any video model that accepts video reference**.
+
+### 6. ⚡ Direct ComfyUI Live API Bridge & In-App Video Rendering (`minimax_h3_ref2va`)
+- **One-Click `Render in ComfyUI (MiniMax H3)`**: Directly executes the 15-node **MiniMax H3 Ref2VA (`SolAttn` + `8-Step Turbo LoRA @ 0.7`)** workflow on your local ComfyUI server (`http://127.0.0.1:8188`) without manually exporting or importing files.
+- **Automatic Previs MP4 + 4 Reference Image Binding**:
+  - Renders and uploads your 24fps 3D RGB Previs MP4 directly into **Node `638` (`<Video 1>`)** as the motion & camera reference plate.
+  - Synchronizes up to **4 Object, Character & Set Reference Images (`<picture 1>`–`<picture 4>`, Nodes `137` / `139` / `144` / `151`)** uploaded in Directing Mode or Render Mode with live thumbnails and interactive target object dropdowns.
+  - Compiles spatially locked Ref2VA prompts (**Node `646`**) that map 3D viewport positions (`screen-left midground`, `center-frame background`, `screen-right midground`) and distinguish human character identity (`fully_preserved`) from prop/vehicle styling (`attribute_transfer`).
+- **In-App `Final Render` & `Side-by-Side Sync` Player**:
+  - Streams live node-by-node execution progress over WebSocket (with automatic HTTP `/history` fallback) and loads the finished **60fps MP4+Audio (`Node 145`)** directly inside the studio viewport.
+  - Compare your **3D Previs MP4** side-by-side in frame-accurate sync with the **Final ComfyUI Render**, download the final `.mp4` in one click, or inspect the exact disk path (`D:\ComfyUI\output\...`).
+- **Zero-CORS Local Proxy & Live GPU Status**: Built-in loopback proxy (`127.0.0.1:51731` in Electron + `/api/comfy` in Vite) and live ComfyUI connection card in **`⚙ Settings`** + top navbar `● Comfy` status indicator showing your active GPU and VRAM.
 
 ---
 
@@ -105,6 +112,11 @@ Click the **Settings (`⚙ Settings • Ollama / Gemini / OpenAI`)** button in t
 
 - All motion presets, Action Cycles (`1x`–`5x`), 3D character rigging, camera optics, lighting, and offline MP4/OpenPose/Depth rendering also work **out of the box with zero API keys required**.
 
+### 6. Connect Local ComfyUI Server (Live MiniMax H3 Ref2VA Rendering)
+1. Start your local **ComfyUI** server at `http://127.0.0.1:8188` (no special `--enable-cors-header` flag is required thanks to the studio's built-in local HTTP proxy).
+2. Verify the green **`● Comfy`** pill in the top header bar (or click **`⚙ Settings`** → **ComfyUI Server Connection (`127.0.0.1:8188`)** → **Test / Reconnect** to inspect your active GPU & VRAM).
+3. In **Directing Mode**, upload a **ComfyUI Reference Image** on any character, vehicle, prop, or set — then switch to **Render, Prompt & Export** and click **`⚡ Render in ComfyUI (MiniMax H3)`** to render and compare your final video side-by-side in the app.
+
 ---
 
 ## 🧪 Verification, Type-Checking & Tests
@@ -123,10 +135,8 @@ npm run build
 
 ## 🗺️ Upcoming Features & Roadmap
 
-1. **✅ [Shipped] Direct ComfyUI Live API Bridge & In-App Video Rendering (`minimax_h3_ref2va`)**
-   - One-click **Render in ComfyUI (MiniMax H3)** directly from within the studio with zero-CORS local proxy (`127.0.0.1:51731` / `/api/comfy`).
-   - Automatic upload of rendered **RGB Previs MP4 (`<Video 1>`)** and **4 Object/Set Reference Images (`<picture 1>`–`<picture 4>`)** to a running ComfyUI server (`HTTP REST` + `WebSocket` live progress + `/history` fallback).
-   - **In-App Final Result Player & Side-by-Side Sync View**: Stream and play the final AI-generated MP4+Audio video right inside the studio viewport, synchronized frame-for-frame beside your 3D Previs stage.
+1. **🔌 Additional Live ComfyUI Workflow Templates (LTX-2.5 IC-LoRA, Wan 2.1, HunyuanVideo)**
+   - Expand the live ComfyUI execution bridge beyond `minimax_h3_ref2va` with one-click live templates for **LTX-2.5 (22B Distilled INT8)** multi-controlnet (Depth + OpenPose + Camera Matrix) and **Wan 2.1**.
 2. **☁️ Cloud Video API Direct Integration (Runway, Kling, Wan, MiniMax Hailuo, Luma, Fal.ai / Replicate)**
    - Send exported 3D Previs plates and compiled director prompts directly to cloud video APIs (for users without a high-VRAM local GPU) and receive the generated video back inside the Shot Bible.
 3. **🎞️ Multi-Shot Timeline NLE & Sequence Assembly (Animatic-to-Final Editor)**
@@ -135,8 +145,8 @@ npm run build
    - Upload any real-world phone video or film clip to extract 3D skeletal motion (via local pose estimation) and apply it directly onto your 3D characters in the soundstage.
 5. **🗣️ Lip-Sync, Facial Expressions & Audio-Driven Acting**
    - Attach dialogue audio clips to characters to drive automatic jaw/lip-sync visemes, eye-gaze targets, and emotional facial blendshapes during Close-Up and OTS dialogue shots.
-6. **✅ [Shipped] Two-Way Reference Character/Object/Set Image Sync (`<picture 1>`–`<picture 4>`) & LoRA / IP-Adapter Expansion**
-   - Link each 3D character, vehicle, prop, and set in Directing Mode to a reference image (`conceptImageUrl` / `conceptImageName`) with live thumbnails and automatic ComfyUI upload; next phase expands to multi-LoRA weight & IP-Adapter face ID presets.
+6. **🧬 Multi-LoRA Weight & IP-Adapter Face ID Preset Manager**
+   - Extend the existing `<picture 1>`–`<picture 4>` Reference Image Sync with per-character ComfyUI LoRA weight sliders and IP-Adapter FaceID embedding caches across scenes.
 7. **📦 Custom `.FBX` / `.GLTF` Animation Library & Mixamo Drag-and-Drop**
    - Import custom `.FBX` / `.GLB` skeletal animations and retarget them onto any character in the studio alongside the built-in biomechanical gait engine and Action Cycles.
 
