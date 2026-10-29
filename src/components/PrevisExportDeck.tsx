@@ -71,9 +71,18 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   const [showTimelineDetails, setShowTimelineDetails] = useState(true);
 
   // ComfyUI Live Bridge State (MiniMax H3 Ref2VA & LTX-2.5)
-  const { activeJob } = useComfyStore();
-  const [comfyOnline, setComfyOnline] = useState<boolean>(false);
-  const [comfyGpuLabel, setComfyGpuLabel] = useState<string>('Checking 127.0.0.1:8188...');
+  const {
+    activeJob,
+    serverUrl: storeServerUrl,
+    connectionStatus: storeConnectionStatus,
+    systemStats: storeSystemStats,
+    setConnectionStatus: setStoreConnectionStatus,
+    setSystemStats: setStoreSystemStats,
+  } = useComfyStore();
+  const [comfyOnline, setComfyOnline] = useState<boolean>(storeConnectionStatus === 'connected');
+  const [comfyGpuLabel, setComfyGpuLabel] = useState<string>(
+    storeSystemStats ? `${storeSystemStats.gpuName} (${storeSystemStats.vramTotalGb}GB VRAM)` : 'Checking 127.0.0.1:8188...'
+  );
   const [refImageNames, setRefImageNames] = useState<[string, string, string, string]>([
     'char1.png',
     'char2.png',
@@ -97,37 +106,50 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   const syncLeftVideoRef = useRef<HTMLVideoElement | null>(null);
   const syncRightVideoRef = useRef<HTMLVideoElement | null>(null);
 
+  const probeComfyHealth = async () => {
+    setComfyErrorText(null);
+    setComfyGpuLabel('Connecting to 127.0.0.1:8188...');
+    const health = await defaultComfyClient.checkHealth();
+    if (health.ok && health.stats) {
+      setComfyOnline(true);
+      setStoreConnectionStatus('connected');
+      setStoreSystemStats(health.stats);
+      setComfyGpuLabel(`${health.stats.gpuName} (${health.stats.vramTotalGb}GB VRAM)`);
+      const latest = await defaultComfyClient.fetchLatestCompletedOutput(10);
+      if (latest) {
+        setFinalComfyVideoUrl(latest.videoUrl);
+        setFinalComfyFilename(latest.filename);
+        const metaParts = [
+          latest.width && latest.height ? `${latest.width}×${latest.height}` : null,
+          latest.fps ? `${latest.fps}fps` : null,
+          latest.duration ? `${latest.duration.toFixed(1)}s` : null,
+        ].filter(Boolean);
+        setFinalComfyMeta(metaParts.join(' • ') || 'ComfyUI Output');
+      }
+      return true;
+    } else {
+      setComfyOnline(false);
+      setStoreConnectionStatus('error');
+      setComfyGpuLabel('Offline (127.0.0.1:8188) • Click to Reconnect');
+      return false;
+    }
+  };
+
+  // Sync when Settings modal updates useComfyStore
+  useEffect(() => {
+    if (storeConnectionStatus === 'connected' && storeSystemStats) {
+      setComfyOnline(true);
+      setComfyGpuLabel(`${storeSystemStats.gpuName} (${storeSystemStats.vramTotalGb}GB VRAM)`);
+      setComfyErrorText(null);
+    }
+  }, [storeConnectionStatus, storeSystemStats, storeServerUrl]);
+
   // Ensure bundled workflow templates are registered and probe ComfyUI on mount
   useEffect(() => {
     if (templateRegistry.list().length === 0) {
       loadBundledTemplates();
     }
-    let mounted = true;
-    (async () => {
-      const health = await defaultComfyClient.checkHealth();
-      if (!mounted) return;
-      if (health.ok && health.stats) {
-        setComfyOnline(true);
-        setComfyGpuLabel(`${health.stats.gpuName} (${health.stats.vramTotalGb}GB VRAM)`);
-        const latest = await defaultComfyClient.fetchLatestCompletedOutput(10);
-        if (mounted && latest) {
-          setFinalComfyVideoUrl(latest.videoUrl);
-          setFinalComfyFilename(latest.filename);
-          const metaParts = [
-            latest.width && latest.height ? `${latest.width}×${latest.height}` : null,
-            latest.fps ? `${latest.fps}fps` : null,
-            latest.duration ? `${latest.duration.toFixed(1)}s` : null,
-          ].filter(Boolean);
-          setFinalComfyMeta(metaParts.join(' • ') || 'ComfyUI Output');
-        }
-      } else {
-        setComfyOnline(false);
-        setComfyGpuLabel('Offline (127.0.0.1:8188)');
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
+    probeComfyHealth();
   }, []);
 
   const handleLoadLatestComfyRender = async () => {
@@ -760,15 +782,18 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                     <h3 className="text-xs font-bold text-white tracking-wide uppercase">
                       Live ComfyUI MiniMax H3 Bridge (Ref2VA Workflow)
                     </h3>
-                    <span
-                      className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold border ${
+                    <button
+                      type="button"
+                      onClick={() => probeComfyHealth()}
+                      title="Click to test & reconnect to ComfyUI at 127.0.0.1:8188"
+                      className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold border transition-all cursor-pointer ${
                         comfyOnline
-                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                          : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
+                          : 'bg-rose-500/20 text-rose-300 border-rose-500/40 hover:bg-rose-500/30'
                       }`}
                     >
                       {comfyOnline ? `ONLINE • ${comfyGpuLabel}` : comfyGpuLabel}
-                    </span>
+                    </button>
                   </div>
                   <p className="text-[10px] font-mono text-slate-400">
                     Template: <span className="text-indigo-300 font-semibold">minimax_h3_ref2va</span> (SolAttn + 8-Step Turbo LoRA @ 0.7 • Node 638 Previs Video + 4 Ref Images → Node 145 60fps MP4+Audio)

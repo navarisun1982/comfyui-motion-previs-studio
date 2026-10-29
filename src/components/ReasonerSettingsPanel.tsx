@@ -21,6 +21,8 @@ import {
   logoutOpenAi,
   pollUntilLoggedIn,
 } from '../services/openaiAuth';
+import { useComfyStore } from '../stores/useComfyStore';
+import { defaultComfyClient } from '../services/comfyClient';
 import {
   Cpu,
   Cloud,
@@ -39,6 +41,7 @@ import {
   SlidersHorizontal,
   ShieldCheck,
   User,
+  Zap,
 } from 'lucide-react';
 
 type Status = { tone: 'ok' | 'err' | 'info'; text: string } | null;
@@ -96,6 +99,65 @@ export const ReasonerSettingsPanel: React.FC<{ onSaved?: () => void; onClose?: (
   const [showAdvancedOpenAi, setShowAdvancedOpenAi] = useState(false);
   const [openAiAuth, setOpenAiAuth] = useState<OpenAiAuthStatus | null>(null);
   const [openAiMode, setOpenAiMode] = useState<'apikey' | 'browser'>('browser');
+
+  // ComfyUI Server Connection State
+  const {
+    serverUrl: comfyServerUrl,
+    connectionStatus: comfyStatus,
+    systemStats: comfyStats,
+    detectedModels: comfyDetected,
+    setServerUrl: setComfyServerUrl,
+    setConnectionStatus: setComfyConnectionStatus,
+    setSystemStats: setComfySystemStats,
+    setDetectedModels: setComfyDetectedModels,
+  } = useComfyStore();
+  const [comfyUrlInput, setComfyUrlInput] = useState<string>(comfyServerUrl || 'http://127.0.0.1:8188');
+  const [comfyBusy, setComfyBusy] = useState<boolean>(false);
+  const [comfyMessage, setComfyMessage] = useState<Status>(null);
+
+  const testAndConnectComfy = async (targetUrl?: string) => {
+    const cleanUrl = (targetUrl ?? comfyUrlInput).trim().replace(/\/+$/, '') || 'http://127.0.0.1:8188';
+    setComfyBusy(true);
+    setComfyConnectionStatus('connecting');
+    setComfyMessage({ tone: 'info', text: `Testing ComfyUI connection at ${cleanUrl}...` });
+    try {
+      setComfyServerUrl(cleanUrl);
+      defaultComfyClient.updateServerUrl(cleanUrl);
+      const health = await defaultComfyClient.checkHealth();
+      if (health.ok && health.stats) {
+        setComfyConnectionStatus('connected');
+        setComfySystemStats(health.stats);
+        const detected = await defaultComfyClient.detectModels(cleanUrl);
+        setComfyDetectedModels({
+          ltx: detected.ltxDetected,
+          minimax: detected.minimaxDetected,
+          wan: detected.wanDetected,
+          customNodes: detected.customNodes,
+        });
+        setComfyMessage({
+          tone: 'ok',
+          text: `Connected to ComfyUI v${health.stats.comfyVersion} • ${health.stats.gpuName} (${health.stats.vramTotalGb}GB VRAM, ${health.stats.vramFreeGb}GB free)`,
+        });
+      } else {
+        setComfyConnectionStatus('error');
+        setComfySystemStats(null);
+        setComfyMessage({
+          tone: 'err',
+          text: `ComfyUI unreachable at ${cleanUrl}: ${health.error || 'Connection failed'}. Ensure ComfyUI is running on port 8188.`,
+        });
+      }
+    } catch (e: unknown) {
+      setComfyConnectionStatus('error');
+      setComfyMessage({ tone: 'err', text: errMsg(e) });
+    } finally {
+      setComfyBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    // Automatically check ComfyUI connection when Settings opens
+    testAndConnectComfy(comfyServerUrl || 'http://127.0.0.1:8188');
+  }, []);
 
   useEffect(() => {
     const unsub = subscribeOpenAiAuth((newStatus) => {
@@ -260,12 +322,99 @@ export const ReasonerSettingsPanel: React.FC<{ onSaved?: () => void; onClose?: (
       }}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-slate-200 tracking-wide">Object reasoner · LLM provider</span>
+        <span className="text-xs font-bold text-slate-200 tracking-wide">Studio Settings · ComfyUI Bridge &amp; AI Reasoner</span>
         {onClose && (
           <button type="button" onClick={onClose} className="text-[11px] text-slate-400 hover:text-white" id="reasoner-settings-close">
             Close
           </button>
         )}
+      </div>
+
+      {/* ComfyUI Server Connection & Live Status Card */}
+      <div className="rounded-xl border border-indigo-500/35 bg-gradient-to-br from-indigo-950/40 via-slate-900/60 to-black/60 p-3.5 space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <div className="h-6 w-6 rounded-md bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-indigo-300">
+              <Zap className="h-3.5 w-3.5" />
+            </div>
+            <span className="text-xs font-bold text-white tracking-wide">ComfyUI Local Server (MiniMax H3 &amp; LTX-2.5)</span>
+          </div>
+          <span
+            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
+              comfyStatus === 'connected'
+                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                : comfyStatus === 'connecting'
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+            }`}
+          >
+            {comfyStatus === 'connected' && comfyStats
+              ? `ONLINE • ${comfyStats.gpuName} (${comfyStats.vramTotalGb}GB VRAM)`
+              : comfyStatus === 'connecting'
+              ? 'CONNECTING...'
+              : 'OFFLINE'}
+          </span>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            id="comfyui-server-url"
+            className={inputCls}
+            value={comfyUrlInput}
+            onChange={(e) => setComfyUrlInput(e.target.value)}
+            placeholder="http://127.0.0.1:8188"
+          />
+          <button
+            type="button"
+            id="comfyui-test-connect"
+            onClick={() => testAndConnectComfy()}
+            disabled={comfyBusy}
+            className="shrink-0 flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-indigo-500/20 disabled:opacity-50 cursor-pointer"
+          >
+            {comfyBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+            <span>Test &amp; Connect ComfyUI</span>
+          </button>
+        </div>
+
+        {comfyStatus === 'connected' && (
+          <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+            <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
+              ✓ MiniMax H3 Ref2VA Ready
+            </span>
+            <span
+              className={`px-2 py-0.5 rounded border ${
+                comfyDetected.ltx
+                  ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300'
+                  : 'bg-white/5 border-white/10 text-slate-400'
+              }`}
+            >
+              {comfyDetected.ltx ? '✓ LTX-2.5 Nodes Detected' : 'LTX-2.5 Nodes'}
+            </span>
+            {comfyStats && (
+              <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300">
+                ComfyUI v{comfyStats.comfyVersion} • RAM {comfyStats.ramFreeGb}/{comfyStats.ramTotalGb}GB free
+              </span>
+            )}
+          </div>
+        )}
+
+        {comfyMessage && (
+          <div
+            className={`rounded-lg border px-2.5 py-1.5 text-[10px] font-mono ${
+              comfyMessage.tone === 'ok'
+                ? 'border-emerald-500/40 bg-emerald-950/50 text-emerald-200'
+                : comfyMessage.tone === 'err'
+                ? 'border-rose-500/40 bg-rose-950/60 text-rose-200'
+                : 'border-sky-500/30 bg-sky-950/40 text-sky-200'
+            }`}
+          >
+            {comfyMessage.text}
+          </div>
+        )}
+      </div>
+
+      <div className="pt-1 border-t border-white/10 flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-200 tracking-wide">Object Reasoner &amp; Prompt Director · LLM Provider</span>
       </div>
 
       {/* Provider selector */}

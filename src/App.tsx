@@ -5,6 +5,8 @@ import { useHistoryStore } from './stores/useHistoryStore';
 import { MotionPrevisStage } from './components/MotionPrevisStage';
 import { PrevisParametersDeck } from './components/PrevisParametersDeck';
 import { useLogStore } from './stores/useLogStore';
+import { useComfyStore } from './stores/useComfyStore';
+import { defaultComfyClient } from './services/comfyClient';
 import { getReasonerConfig, PROVIDERS } from './services/objectReasoner';
 import {
   Clapperboard,
@@ -103,6 +105,29 @@ export default function App() {
   const [showDiffInspector, setShowDiffInspector] = useState<boolean>(false);
   const [showWelcomeModal, setShowWelcomeModal] = useState<boolean>(false);
   const { toggleOpen: toggleDebugger } = useLogStore();
+  const {
+    connectionStatus: comfyConnectionStatus,
+    setConnectionStatus: setComfyConnectionStatus,
+    setSystemStats: setComfySystemStats,
+  } = useComfyStore();
+
+  // Auto-probe ComfyUI connection on startup
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const health = await defaultComfyClient.checkHealth();
+      if (!mounted) return;
+      if (health.ok && health.stats) {
+        setComfyConnectionStatus('connected');
+        setComfySystemStats(health.stats);
+      } else {
+        setComfyConnectionStatus('disconnected');
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [setComfyConnectionStatus, setComfySystemStats]);
 
   // Global Keyboard Shortcuts (Undo/Redo, Debugger) with Editable Element Guard
   useEffect(() => {
@@ -298,6 +323,18 @@ export default function App() {
           >
             <Settings className="h-3.5 w-3.5 text-[#F0AE42]" />
             <span className="text-[11px] font-semibold text-white">Settings</span>
+            <span className="h-3 w-px bg-[#273247]" />
+            <span className="flex items-center gap-1 text-[9.5px] font-mono text-[#98A5BC]">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  comfyConnectionStatus === 'connected'
+                    ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]'
+                    : 'bg-rose-400'
+                }`}
+                title={comfyConnectionStatus === 'connected' ? 'ComfyUI Connected (127.0.0.1:8188)' : 'ComfyUI Disconnected'}
+              />
+              <span>Comfy</span>
+            </span>
             <span className="h-3 w-px bg-[#273247]" />
             <span className="flex items-center gap-1 text-[9.5px] font-mono text-[#98A5BC]">
               <Brain className="h-3 w-3 text-[#8E84FF]" />
