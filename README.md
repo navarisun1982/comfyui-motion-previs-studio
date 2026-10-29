@@ -10,6 +10,14 @@
 
 ---
 
+## 🎬 Live Studio Demo Video
+
+[![ComfyUI Motion Previs Studio — Full Demo Video](docs/demo/Comfy-AI-Director-Preview.gif)](https://github.com/navarisun1982/comfyui-motion-previs-studio/raw/master/docs/demo/Comfy-AI-Director-Demo.mp4)
+
+> ▶️ **[Click here or click the preview above to watch / download the full 1080p HD Demo Video (`Comfy-AI-Director-Demo.mp4`)](https://github.com/navarisun1982/comfyui-motion-previs-studio/raw/master/docs/demo/Comfy-AI-Director-Demo.mp4)** *(also available inside the repo at [`docs/demo/Comfy-AI-Director-Demo.mp4`](docs/demo/Comfy-AI-Director-Demo.mp4))*.
+
+---
+
 ## 📸 Visual Feature Tour & Screenshots
 
 ### 1. Full Studio Workspace — Dual 3D Viewports & 24fps Timeline
@@ -111,6 +119,7 @@ npm run build
 
 ```text
 ├── docs/
+│   ├── demo/                 # Full 1080p studio demo video & inline animated preview
 │   ├── screenshots/          # Feature tour screenshots for GitHub README
 │   └── ARCHITECTURE.md       # System architecture & data flow
 ├── public/
