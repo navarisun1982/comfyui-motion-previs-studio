@@ -62,6 +62,8 @@ export const EnvironmentSpecSchema = z.object({
   groundColor: z.string().default('#131722'),
   ambientColor: z.string().default('#38bdf8'),
   visibleInPrevis: z.boolean().default(true),
+  conceptImageUrl: z.string().optional(),
+  conceptImageName: z.string().optional(),
 });
 export type EnvironmentSpec = z.infer<typeof EnvironmentSpecSchema>;
 

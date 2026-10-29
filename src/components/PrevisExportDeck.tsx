@@ -54,6 +54,8 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     previsProgress,
     renderPrevisVideo,
     updateTargetModel,
+    updateActor,
+    setEnvironment,
   } = useShotStore();
 
   const [activeEngineTab, setActiveEngineTab] = useState<'ltx-2.5' | 'minimax-h3' | 'seedance'>(
@@ -84,10 +86,22 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     storeSystemStats ? `${storeSystemStats.gpuName} (${storeSystemStats.vramTotalGb}GB VRAM)` : 'Checking 127.0.0.1:8188...'
   );
   const [refImageNames, setRefImageNames] = useState<[string, string, string, string]>([
-    'char1.png',
-    'char2.png',
-    'char3.png',
-    'char4.png',
+    shot.actors[0]?.conceptImageName || 'char1.png',
+    shot.actors[1]?.conceptImageName || 'char2.png',
+    shot.actors[2]?.conceptImageName || 'char3.png',
+    shot.environment?.conceptImageName || 'char4.png',
+  ]);
+  const [refSlotTargets, setRefSlotTargets] = useState<[string, string, string, string]>(() => [
+    shot.actors[0]?.id || 'custom',
+    shot.actors[1]?.id || 'custom',
+    shot.actors[2]?.id || 'custom',
+    'environment',
+  ]);
+  const [refImageThumbs, setRefImageThumbs] = useState<[string | null, string | null, string | null, string | null]>([
+    shot.actors[0]?.conceptImageUrl || null,
+    shot.actors[1]?.conceptImageUrl || null,
+    shot.actors[2]?.conceptImageUrl || null,
+    shot.environment?.conceptImageUrl || null,
   ]);
   const [refImageFiles, setRefImageFiles] = useState<[File | null, File | null, File | null, File | null]>([
     null,
@@ -178,6 +192,56 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     }
   };
 
+  // Automatically sync reference image slots with Directing Stage object/set reference images
+  useEffect(() => {
+    setRefSlotTargets((prevTargets) => {
+      const nextTargets = [...prevTargets] as [string, string, string, string];
+      for (let i = 0; i < 3; i++) {
+        const cur = nextTargets[i];
+        const exists = shot.actors.some((a) => a.id === cur);
+        if (!exists && shot.actors[i]) {
+          nextTargets[i] = shot.actors[i].id;
+        }
+      }
+      return nextTargets;
+    });
+  }, [shot.actors]);
+
+  useEffect(() => {
+    const nextThumbs: [string | null, string | null, string | null, string | null] = [...refImageThumbs] as any;
+    const nextNames: [string, string, string, string] = [...refImageNames] as any;
+    let changed = false;
+
+    for (let idx = 0; idx < 4; idx++) {
+      const targetId = refSlotTargets[idx];
+      if (targetId === 'environment') {
+        if (shot.environment?.conceptImageUrl && nextThumbs[idx] !== shot.environment.conceptImageUrl) {
+          nextThumbs[idx] = shot.environment.conceptImageUrl;
+          changed = true;
+        }
+        if (shot.environment?.conceptImageName && nextNames[idx] !== shot.environment.conceptImageName) {
+          nextNames[idx] = shot.environment.conceptImageName;
+          changed = true;
+        }
+      } else if (targetId && targetId !== 'custom') {
+        const actor = shot.actors.find((a) => a.id === targetId);
+        if (actor?.conceptImageUrl && nextThumbs[idx] !== actor.conceptImageUrl) {
+          nextThumbs[idx] = actor.conceptImageUrl;
+          changed = true;
+        }
+        if (actor?.conceptImageName && nextNames[idx] !== actor.conceptImageName) {
+          nextNames[idx] = actor.conceptImageName;
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      setRefImageThumbs(nextThumbs);
+      setRefImageNames(nextNames);
+    }
+  }, [refSlotTargets, shot.actors, shot.environment]);
+
   const handleRenderInComfyUI = async () => {
     setComfyErrorText(null);
     // Validate that all 4 Reference Image slots are filled for MiniMax H3 Ref2VA
@@ -200,9 +264,23 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
         throw new Error('Failed to generate 3D RGB Previs video for ComfyUI upload.');
       }
 
-      // Fetch blob from object URL
+      // Fetch blob from object URL + resolve any DataURL thumbnails uploaded in Directing Stage into Blobs!
       setComfyStatusText('Step 2/3: Uploading 3D Previs MP4 & Reference Images to ComfyUI (127.0.0.1:8188)...');
       const previsBlob = await (await fetch(rgbUrl)).blob();
+
+      const resolvedRefBlobs: [Blob | null, Blob | null, Blob | null, Blob | null] = [null, null, null, null];
+      for (let i = 0; i < 4; i++) {
+        if (refImageFiles[i]) {
+          resolvedRefBlobs[i] = refImageFiles[i];
+        } else if (refImageThumbs[i]) {
+          try {
+            const res = await fetch(refImageThumbs[i]!);
+            resolvedRefBlobs[i] = await res.blob();
+          } catch {
+            resolvedRefBlobs[i] = null;
+          }
+        }
+      }
 
       if (templateRegistry.list().length === 0) {
         loadBundledTemplates();
@@ -220,7 +298,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
         seed: Math.max(0, Math.floor(comfySeed)),
         promptSource: 'compiled',
         controlVideoBlob: previsBlob,
-        refImageBlobs: refImageFiles,
+        refImageBlobs: resolvedRefBlobs,
         refImageFilenames: trimmedRefs,
         onProgress: (pct, title) => {
           setComfyStatusText(`ComfyUI Executing (${pct}%): ${title}`);
@@ -834,58 +912,170 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
             </div>
 
             {/* 4 Required Reference Image Slots (<picture 1> to <picture 4> -> Nodes 137, 139, 144, 151) + Seed */}
-            <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5 pt-1">
               {[0, 1, 2, 3].map((idx) => {
                 const nodeIds = ['137', '139', '144', '151'];
-                const actorLabel =
-                  idx < 3
-                    ? shot.actors[idx]?.name || `Subject ${idx + 1}`
-                    : 'Alley / Set Env';
+                const targetVal = refSlotTargets[idx];
+                const mappedActor =
+                  targetVal && targetVal !== 'environment' && targetVal !== 'custom'
+                    ? shot.actors.find((a) => a.id === targetVal)
+                    : undefined;
+                const displayObjectTitle =
+                  targetVal === 'environment'
+                    ? `🌍 Set: ${shot.environment?.name || 'Alley / Studio Set'}`
+                    : mappedActor
+                    ? `${mappedActor.kind === 'human' || mappedActor.kind === 'character' ? '👤 Character' : `📦 ${mappedActor.kind || 'Object'}`}: ${mappedActor.name}`
+                    : `🖼️ Custom Reference ${idx + 1}`;
+                const thumbUrl = refImageThumbs[idx];
+
                 return (
                   <div
                     key={idx}
-                    className="rounded-xl bg-black/50 border border-white/10 p-2 flex flex-col gap-1"
+                    className="rounded-xl bg-black/60 border border-white/15 p-2.5 flex flex-col gap-1.5"
                   >
-                    <div className="flex items-center justify-between text-[9px] font-mono">
-                      <span className="text-indigo-300 font-bold">
-                        &lt;picture {idx + 1}&gt; (Node {nodeIds[idx]})
-                      </span>
-                      <span className="text-slate-500 truncate max-w-[75px]">{actorLabel}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="text"
-                        value={refImageNames[idx]}
-                        onChange={(e) => {
-                          const next = [...refImageNames] as [string, string, string, string];
-                          next[idx] = e.target.value;
-                          setRefImageNames(next);
-                        }}
-                        placeholder={`char${idx + 1}.png`}
-                        className="w-full bg-black/70 border border-white/15 rounded px-1.5 py-1 text-[10px] font-mono text-slate-200 focus:outline-none focus:border-indigo-400"
-                      />
-                      <label
-                        className="px-1.5 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/35 border border-indigo-400/30 text-indigo-200 cursor-pointer shrink-0"
-                        title={`Upload custom image file for <picture ${idx + 1}>`}
+                    {/* Prominent Object / Character Title + Slot Badge */}
+                    <div className="flex items-center justify-between gap-1">
+                      <span
+                        className="text-[10.5px] font-bold text-white truncate"
+                        title={displayObjectTitle}
                       >
-                        <Upload className="h-3 w-3" />
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0] || null;
-                            if (f) {
-                              const nextFiles = [...refImageFiles] as [File | null, File | null, File | null, File | null];
-                              nextFiles[idx] = f;
-                              setRefImageFiles(nextFiles);
-                              const nextNames = [...refImageNames] as [string, string, string, string];
-                              nextNames[idx] = f.name;
-                              setRefImageNames(nextNames);
-                            }
-                          }}
+                        {displayObjectTitle}
+                      </span>
+                      <span className="text-[8.5px] font-mono text-indigo-300 bg-indigo-500/15 border border-indigo-400/30 px-1.5 py-0.2 rounded shrink-0">
+                        &lt;pic {idx + 1}&gt; #{nodeIds[idx]}
+                      </span>
+                    </div>
+
+                    {/* Dropdown to pick which Stage Object / Character / Set maps to this <picture 1..4> slot */}
+                    <select
+                      value={targetVal}
+                      onChange={(e) => {
+                        const newTarget = e.target.value;
+                        const nextTargets = [...refSlotTargets] as [string, string, string, string];
+                        nextTargets[idx] = newTarget;
+                        setRefSlotTargets(nextTargets);
+
+                        if (newTarget === 'environment') {
+                          if (shot.environment?.conceptImageUrl) {
+                            const nextThumbs = [...refImageThumbs] as [string | null, string | null, string | null, string | null];
+                            nextThumbs[idx] = shot.environment.conceptImageUrl;
+                            setRefImageThumbs(nextThumbs);
+                          }
+                          if (shot.environment?.conceptImageName) {
+                            const nextNames = [...refImageNames] as [string, string, string, string];
+                            nextNames[idx] = shot.environment.conceptImageName;
+                            setRefImageNames(nextNames);
+                          }
+                        } else if (newTarget !== 'custom') {
+                          const found = shot.actors.find((a) => a.id === newTarget);
+                          if (found?.conceptImageUrl) {
+                            const nextThumbs = [...refImageThumbs] as [string | null, string | null, string | null, string | null];
+                            nextThumbs[idx] = found.conceptImageUrl;
+                            setRefImageThumbs(nextThumbs);
+                          }
+                          if (found?.conceptImageName) {
+                            const nextNames = [...refImageNames] as [string, string, string, string];
+                            nextNames[idx] = found.conceptImageName;
+                            setRefImageNames(nextNames);
+                          }
+                        }
+                      }}
+                      className="w-full bg-[#0d1220] border border-white/15 rounded px-1.5 py-1 text-[9.5px] font-mono text-indigo-200 focus:outline-none focus:border-indigo-400"
+                      title={`Select which Stage Object or Set maps to <picture ${idx + 1}>`}
+                    >
+                      {shot.actors.map((act) => (
+                        <option key={act.id} value={act.id}>
+                          {act.kind === 'human' || act.kind === 'character' ? '👤 ' : '📦 '}
+                          {act.name} ({act.kind || 'human'})
+                          {act.conceptImageUrl ? ' ✓ Ref' : ''}
+                        </option>
+                      ))}
+                      <option value="environment">
+                        🌍 Set: {shot.environment?.name || 'Active Environment'}
+                        {shot.environment?.conceptImageUrl ? ' ✓ Ref' : ''}
+                      </option>
+                      <option value="custom">🖼️ Custom / ComfyUI Input File</option>
+                    </select>
+
+                    {/* Thumbnail Preview + Filename + Upload Button */}
+                    <div className="flex items-center gap-2 pt-0.5">
+                      {thumbUrl ? (
+                        <img
+                          src={thumbUrl}
+                          alt={displayObjectTitle}
+                          className="h-10 w-10 rounded-lg object-cover border border-emerald-400/50 shrink-0 bg-black"
                         />
-                      </label>
+                      ) : (
+                        <div className="h-10 w-10 rounded-lg bg-white/5 border border-dashed border-white/15 flex items-center justify-center text-[8.5px] font-mono text-slate-400 shrink-0">
+                          NO THUMB
+                        </div>
+                      )}
+
+                      <div className="flex flex-col gap-1 flex-1 min-w-0">
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={refImageNames[idx]}
+                            onChange={(e) => {
+                              const next = [...refImageNames] as [string, string, string, string];
+                              next[idx] = e.target.value;
+                              setRefImageNames(next);
+                            }}
+                            placeholder={`char${idx + 1}.png`}
+                            className="w-full bg-black/70 border border-white/15 rounded px-1.5 py-1 text-[10px] font-mono text-slate-200 focus:outline-none focus:border-indigo-400"
+                          />
+                          <label
+                            className="px-2 py-1 rounded bg-indigo-500/25 hover:bg-indigo-500/40 border border-indigo-400/40 text-indigo-200 cursor-pointer shrink-0 flex items-center gap-1 text-[9.5px] font-mono"
+                            title={`Upload reference image for ${displayObjectTitle} (syncs back to Directing Stage)`}
+                          >
+                            <Upload className="h-3 w-3" />
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0] || null;
+                                if (!f) return;
+                                const nextFiles = [...refImageFiles] as [File | null, File | null, File | null, File | null];
+                                nextFiles[idx] = f;
+                                setRefImageFiles(nextFiles);
+
+                                const nextNames = [...refImageNames] as [string, string, string, string];
+                                nextNames[idx] = f.name;
+                                setRefImageNames(nextNames);
+
+                                const reader = new FileReader();
+                                reader.onload = () => {
+                                  if (typeof reader.result === 'string') {
+                                    const dataUrl = reader.result;
+                                    const nextThumbs = [...refImageThumbs] as [string | null, string | null, string | null, string | null];
+                                    nextThumbs[idx] = dataUrl;
+                                    setRefImageThumbs(nextThumbs);
+
+                                    // Sync back to the mapped Stage Object or Environment so Directing Stage also has it!
+                                    if (targetVal === 'environment' && shot.environment) {
+                                      setEnvironment({
+                                        ...shot.environment,
+                                        conceptImageUrl: dataUrl,
+                                        conceptImageName: f.name,
+                                      });
+                                    } else if (targetVal && targetVal !== 'custom') {
+                                      updateActor(targetVal, {
+                                        conceptImageUrl: dataUrl,
+                                        conceptImageName: f.name,
+                                      });
+                                    }
+                                  }
+                                };
+                                reader.readAsDataURL(f);
+                              }}
+                            />
+                          </label>
+                        </div>
+                        <span className="text-[8.5px] font-mono text-slate-400 truncate">
+                          {thumbUrl ? '✓ Synced from Directing Stage' : `ComfyUI input/${refImageNames[idx]}`}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 );

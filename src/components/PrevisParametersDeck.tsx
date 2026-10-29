@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 
 import { useAssetLibraryStore } from '../stores/useAssetLibraryStore';
+import { Upload } from 'lucide-react';
 import { CINEMATIC_ENVIRONMENT_PRESETS } from '../types/environment';
 import { reasonEnvironment, reasonObject } from '../services/objectReasoner';
 import { registerModelFile } from '../services/modelStorage';
@@ -1159,6 +1160,87 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
               </div>
 
               <div className="space-y-1">
+                <div className="rounded-xl bg-[#0b101d] border border-emerald-500/30 p-2 flex items-center justify-between gap-2.5 mb-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    {shot.environment?.conceptImageUrl ? (
+                      <img
+                        src={shot.environment.conceptImageUrl}
+                        alt={shot.environment?.name || 'Set Reference'}
+                        className="h-11 w-11 rounded-lg object-cover border border-emerald-400/50 shrink-0 bg-black"
+                      />
+                    ) : (
+                      <div className="h-11 w-11 rounded-lg bg-black/60 border border-dashed border-emerald-400/35 flex items-center justify-center text-emerald-300/70 shrink-0 text-[10px] font-mono">
+                        SET
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10.5px] font-bold text-emerald-200 truncate">
+                          Set / Environment Reference Image
+                        </span>
+                        {shot.environment?.conceptImageUrl && (
+                          <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 border border-emerald-500/40 text-[8.5px] font-mono text-emerald-300">
+                            Ready
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[9.5px] text-slate-400 leading-tight">
+                        Used in ComfyUI video render (e.g. &lt;picture 4&gt; location plate) without re-uploading.
+                      </p>
+                      {shot.environment?.conceptImageName && (
+                        <div className="text-[9px] font-mono text-emerald-300 truncate mt-0.5">
+                          📎 {shot.environment.conceptImageName}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <label
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-400/40 text-[10px] font-semibold text-emerald-100 cursor-pointer transition-colors"
+                      title="Upload reference image for the Set / Environment (used in ComfyUI video render)"
+                    >
+                      <Upload className="h-3 w-3 text-emerald-300" />
+                      <span>{shot.environment?.conceptImageUrl ? 'Change' : 'Upload Ref'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = () => {
+                            if (typeof reader.result === 'string') {
+                              setEnvironment({
+                                ...(shot.environment || CINEMATIC_ENVIRONMENT_PRESETS[0].spec),
+                                conceptImageUrl: reader.result,
+                                conceptImageName: file.name,
+                              });
+                            }
+                          };
+                          reader.readAsDataURL(file);
+                        }}
+                      />
+                    </label>
+                    {shot.environment?.conceptImageUrl && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEnvironment({
+                            ...(shot.environment || CINEMATIC_ENVIRONMENT_PRESETS[0].spec),
+                            conceptImageUrl: undefined,
+                            conceptImageName: undefined,
+                          })
+                        }
+                        className="p-1.5 rounded-lg bg-rose-950/50 hover:bg-rose-900/70 border border-rose-500/35 text-rose-300"
+                        title="Clear set reference image"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
                 <span className="text-[9px] font-mono text-slate-400">Environment Visual & Architectural Cue:</span>
                 <textarea
                   rows={2}

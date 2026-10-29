@@ -339,6 +339,87 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
       {/* ================= CARD BODY ================= */}
       {!isCollapsed && (
         <div className="space-y-2.5 pt-2 border-t border-white/[0.07]" onClick={(e) => e.stopPropagation()}>
+          {/* ================= A2. COMFYUI VIDEO REFERENCE IMAGE ================= */}
+          <div className="rounded-xl bg-[#101524] border border-indigo-500/30 p-2 flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {actor.conceptImageUrl ? (
+                <img
+                  src={actor.conceptImageUrl}
+                  alt={actor.name}
+                  className="h-11 w-11 rounded-lg object-cover border border-indigo-400/50 shrink-0 bg-black"
+                />
+              ) : (
+                <div className="h-11 w-11 rounded-lg bg-black/60 border border-dashed border-indigo-400/35 flex items-center justify-center text-indigo-300/70 shrink-0 text-[10px] font-mono">
+                  IMG
+                </div>
+              )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10.5px] font-bold text-indigo-200 truncate">
+                    ComfyUI Reference Image
+                  </span>
+                  {actor.conceptImageUrl && (
+                    <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 border border-emerald-500/40 text-[8.5px] font-mono text-emerald-300">
+                      Ready
+                    </span>
+                  )}
+                </div>
+                <p className="text-[9.5px] text-slate-400 leading-tight">
+                  Used directly as subject reference in ComfyUI video render (no re-upload needed in Render Studio).
+                </p>
+                {actor.conceptImageName && (
+                  <div className="text-[9px] font-mono text-indigo-300 truncate mt-0.5">
+                    📎 {actor.conceptImageName}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              <label
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-400/40 text-[10px] font-semibold text-indigo-100 cursor-pointer transition-colors"
+                title="Upload reference image for this character/object (used in ComfyUI MiniMax H3 / LTX video)"
+              >
+                <Upload className="h-3 w-3 text-indigo-300" />
+                <span>{actor.conceptImageUrl ? 'Change' : 'Upload Ref'}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      if (typeof reader.result === 'string') {
+                        onUpdateActor(actor.id, {
+                          conceptImageUrl: reader.result,
+                          conceptImageName: file.name,
+                        });
+                      }
+                    };
+                    reader.readAsDataURL(file);
+                  }}
+                />
+              </label>
+              {actor.conceptImageUrl && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onUpdateActor(actor.id, {
+                      conceptImageUrl: undefined,
+                      conceptImageName: undefined,
+                    })
+                  }
+                  className="p-1.5 rounded-lg bg-rose-950/50 hover:bg-rose-900/70 border border-rose-500/35 text-rose-300"
+                  title="Clear reference image"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* ================= B. MOTION STUDIO ================= */}
           <div className="inspector-section space-y-2.5">
             {/* Motion Studio Header + Auto / Move / Spot Segmented Control */}
