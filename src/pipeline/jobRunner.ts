@@ -171,7 +171,7 @@ export class JobRunner {
           if (outputData) {
             const v = client.extractVideoOutput(outputData);
             if (v) {
-              capturedVideoUrl = client.getViewUrl(v.filename, v.subfolder, v.type);
+              capturedVideoUrl = await client.fetchVideoBlobUrl(v.filename, v.subfolder, v.type);
               capturedFilename = v.filename;
             }
           }
@@ -222,11 +222,11 @@ export class JobRunner {
         comfyStore.updateJobProgress(pct, `Sampling (${current}/${max})`);
         options.onProgress?.(pct, `Sampling (${current}/${max}) - ${nodeTitle}`);
       },
-      onExecuted: (nodeId, output) => {
+      onExecuted: async (nodeId, output) => {
         // Check if output is from the designated target output node
         const v = client.extractVideoOutput(output, outputNodeId, nodeId);
         if (v) {
-          capturedVideoUrl = client.getViewUrl(v.filename, v.subfolder, v.type);
+          capturedVideoUrl = await client.fetchVideoBlobUrl(v.filename, v.subfolder, v.type);
           capturedFilename = v.filename;
         }
       },
@@ -242,6 +242,25 @@ export class JobRunner {
         options.onError?.(new Error(msg));
       },
     });
+
+    const pollInterval = setInterval(async () => {
+      if (isCompleted) {
+        clearInterval(pollInterval);
+        return;
+      }
+      const hist = await client.getPromptHistory(promptId);
+      if (hist && hist.outputs) {
+        const outputs = hist.outputs as Record<string, Record<string, unknown>>;
+        const outputData = outputs[outputNodeId] || outputs[Object.keys(outputs)[0]];
+        if (outputData) {
+          const v = client.extractVideoOutput(outputData);
+          if (v) {
+            clearInterval(pollInterval);
+            await finalizeSuccess();
+          }
+        }
+      }
+    }, 3500);
 
     const handle: ActiveJobHandle = {
       promptId,

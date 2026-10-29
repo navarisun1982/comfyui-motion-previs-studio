@@ -274,6 +274,7 @@ function createWindow() {
 app.whenReady().then(() => {
   const localDaemonUrls = [
     'http://127.0.0.1:8188/*',
+    'ws://127.0.0.1:8188/*',
     'http://localhost:8188/*',
     'http://127.0.0.1:11434/*',
     'http://localhost:11434/*',

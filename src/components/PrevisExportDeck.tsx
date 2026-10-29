@@ -449,6 +449,10 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
   const handleDownloadActivePass = () => {
     if (!currentPassUrl) return;
+    if ((activePassTab === 'comfy-final' || activePassTab === 'side-by-side') && finalComfyVideoUrl) {
+      downloadFile(finalComfyVideoUrl, finalComfyFilename || `${shot.name.replace(/[^a-z0-9_-]/gi, '_')}_Final_Render.mp4`);
+      return;
+    }
     const sanitized = shot.name.replace(/[^a-z0-9_-]/gi, '_') || 'previs_shot';
     const tag = activePassTab === 'rgb' ? 'RGB' : activePassTab === 'openpose' ? 'OpenPose' : 'Depth';
     downloadFile(currentPassUrl, `${sanitized}_${tag}_${selectedResolution}.mp4`);
@@ -683,6 +687,8 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                         controls
                         loop
                         autoPlay
+                        muted
+                        playsInline
                         className="w-full h-full object-contain"
                       />
                     ) : (
@@ -711,6 +717,8 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   controls
                   loop
                   autoPlay
+                  muted
+                  playsInline
                   className="w-full h-full object-contain"
                 />
               ) : isRenderingPrevis ? (
@@ -830,7 +838,17 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                     title={`Download ${currentPassLabel} MP4`}
                   >
                     <Download className="h-3.5 w-3.5" />
-                    <span>Download {activePassTab === 'rgb' ? 'RGB' : activePassTab === 'openpose' ? 'Pose' : 'Depth'} MP4</span>
+                    <span>
+                      Download{' '}
+                      {activePassTab === 'rgb'
+                        ? 'RGB'
+                        : activePassTab === 'openpose'
+                        ? 'Pose'
+                        : activePassTab === 'depth'
+                        ? 'Depth'
+                        : 'Final Render'}{' '}
+                      MP4
+                    </span>
                   </button>
                 )}
 
@@ -1125,6 +1143,9 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 </div>
                 {finalComfyVideoUrl && (
                   <div className="flex items-center gap-1.5">
+                    <span className="px-2 py-0.5 rounded bg-black/50 text-slate-300 text-[9.5px] font-mono border border-white/10">
+                      📁 D:\ComfyUI\output\{finalComfyFilename}
+                    </span>
                     <button
                       type="button"
                       onClick={() => setActivePassTab('side-by-side')}

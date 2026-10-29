@@ -485,7 +485,7 @@ export class ComfyClient {
             return {
               promptId,
               filename: v.filename,
-              videoUrl: this.getViewUrl(v.filename, v.subfolder || '', v.type || 'output'),
+              videoUrl: await this.fetchVideoBlobUrl(v.filename, v.subfolder || '', v.type || 'output'),
               width: metadata?.width,
               height: metadata?.height,
               fps: (gifMeta?.frame_rate as number) || metadata?.fps,
@@ -507,6 +507,25 @@ export class ComfyClient {
       type,
     });
     return `${this.baseUrl}/view?${params.toString()}`;
+  }
+
+  private blobUrlCache = new Map<string, string>();
+
+  async fetchVideoBlobUrl(filename: string, subfolder = '', type = 'output'): Promise<string> {
+    const viewUrl = this.getViewUrl(filename, subfolder, type);
+    const cached = this.blobUrlCache.get(viewUrl);
+    if (cached) return cached;
+    try {
+      const res = await fetch(viewUrl);
+      if (!res.ok) return viewUrl;
+      const rawBlob = await res.blob();
+      const videoBlob = new Blob([rawBlob], { type: 'video/mp4' });
+      const blobUrl = URL.createObjectURL(videoBlob);
+      this.blobUrlCache.set(viewUrl, blobUrl);
+      return blobUrl;
+    } catch {
+      return viewUrl;
+    }
   }
 
   extractVideoOutput(
