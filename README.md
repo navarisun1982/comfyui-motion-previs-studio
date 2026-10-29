@@ -115,6 +115,27 @@ npm run build
 
 ---
 
+## 🗺️ Upcoming Features & Roadmap
+
+1. **⚡ Direct ComfyUI Live API Bridge & In-App Video Rendering**
+   - One-click **Render in ComfyUI** directly from within the studio without manually exporting or importing files.
+   - Automatic upload of rendered **RGB Previs, OpenPose Skeletons, Depth Maps, and Camera Matrices** to a running local or remote ComfyUI server (`HTTP REST` + `WebSocket` live node progress streaming).
+   - **In-App Final Result Player & Side-by-Side Sync View**: Stream and play the final AI-generated video right inside the studio viewport, synchronized frame-for-frame beside your 3D Previs stage for instant shot comparison and retakes.
+2. **☁️ Cloud Video API Direct Integration (Runway, Kling, Wan, MiniMax Hailuo, Luma, Fal.ai / Replicate)**
+   - Send exported 3D Previs plates and compiled director prompts directly to cloud video APIs (for users without a high-VRAM local GPU) and receive the generated video back inside the Shot Bible.
+3. **🎞️ Multi-Shot Timeline NLE & Sequence Assembly (Animatic-to-Final Editor)**
+   - Stitch multiple shots from the **Shot Bible** into a continuous sequence timeline with cut points, transitions, dialogue/SFX audio tracks, and one-click full-scene export (Previs Animatic vs. Final AI Render).
+4. **🕺 Video-to-3D Motion Capture (Extract Pose from Reference Video)**
+   - Upload any real-world phone video or film clip to extract 3D skeletal motion (via local pose estimation) and apply it directly onto your 3D characters in the soundstage.
+5. **🗣️ Lip-Sync, Facial Expressions & Audio-Driven Acting**
+   - Attach dialogue audio clips to characters to drive automatic jaw/lip-sync visemes, eye-gaze targets, and emotional facial blendshapes during Close-Up and OTS dialogue shots.
+6. **🎨 Reference Character Sheet & LoRA / IP-Adapter Consistency Manager**
+   - Link each 3D character in your scene to a specific **Character Reference Sheet**, **LoRA weight**, or **IP-Adapter face ID** so every shot in your storyboard automatically renders the exact same actor identity in ComfyUI.
+7. **📦 Custom `.FBX` / `.GLTF` Animation Library & Mixamo Drag-and-Drop**
+   - Import custom `.FBX` / `.GLB` skeletal animations and retarget them onto any character in the studio alongside the built-in procedural motions and Action Cycles.
+
+---
+
 ## 📂 Project Architecture
 
 ```text
