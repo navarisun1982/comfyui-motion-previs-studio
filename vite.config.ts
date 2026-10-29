@@ -19,16 +19,26 @@ export default defineConfig({
       '/api/comfy': {
         target: 'http://127.0.0.1:8188',
         changeOrigin: true,
+        headers: {
+          Origin: 'http://127.0.0.1:8188',
+          Referer: 'http://127.0.0.1:8188/',
+        },
         rewrite: (path) => path.replace(/^\/api\/comfy/, ''),
       },
       '/ws': {
         target: 'ws://127.0.0.1:8188',
         ws: true,
         changeOrigin: true,
+        headers: {
+          Origin: 'http://127.0.0.1:8188',
+        },
       },
       '/api/ollama': {
         target: 'http://127.0.0.1:11434',
         changeOrigin: true,
+        headers: {
+          Origin: 'http://127.0.0.1:11434',
+        },
         rewrite: (path) => path.replace(/^\/api\/ollama/, ''),
       },
       '/api/llamacpp': {

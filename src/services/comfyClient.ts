@@ -30,12 +30,17 @@ export class ComfyClient {
   private isConnecting = false;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
+  private isHttpDevContext(): boolean {
+    if (typeof window === 'undefined') return false;
+    if (window.location.protocol.startsWith('file:')) return false;
+    return (
+      Boolean(import.meta.env.DEV) ||
+      ['5173', '5174', '5175', '4173'].includes(window.location.port)
+    );
+  }
+
   constructor(serverUrl: string = 'http://127.0.0.1:8188') {
-    const isBrowser = typeof window !== 'undefined';
-    const isDevServer =
-      isBrowser &&
-      (Boolean(import.meta.env.DEV) || window.location.port === '5173') &&
-      !window.location.protocol.startsWith('file:');
+    const isDevServer = this.isHttpDevContext();
 
     // In Vite dev mode, use proxy '/api/comfy' to avoid CORS issues.
     // In Electron or production desktop builds, connect directly to ComfyUI.
@@ -61,10 +66,8 @@ export class ComfyClient {
   }
 
   updateServerUrl(serverUrl: string) {
-    const isBrowser = typeof window !== 'undefined';
     const isDevServer =
-      isBrowser &&
-      window.location.port === '5173' &&
+      this.isHttpDevContext() &&
       (serverUrl.includes('127.0.0.1:8188') || serverUrl.includes('localhost:8188'));
 
     this.baseUrl = isDevServer ? '/api/comfy' : serverUrl.replace(/\/+$/, '');
@@ -91,8 +94,7 @@ export class ComfyClient {
   }
 
   private resolveUrl(targetUrl?: string): string {
-    const isBrowser = typeof window !== 'undefined';
-    const isDevServer = isBrowser && window.location.port === '5173';
+    const isDevServer = this.isHttpDevContext();
     if (!targetUrl) return this.baseUrl;
     const cleanUrl = targetUrl.replace(/\/+$/, '');
     if (isDevServer && (cleanUrl.includes('127.0.0.1:8188') || cleanUrl.includes('localhost:8188'))) {
@@ -151,29 +153,41 @@ export class ComfyClient {
   }
 
   async checkHealth(): Promise<{ ok: boolean; stats?: ComfySystemStats; raw?: unknown; error?: string }> {
-    try {
-      const res = await fetch(`${this.baseUrl}/system_stats`, { signal: AbortSignal.timeout(4000) });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    const candidates = Array.from(
+      new Set([this.baseUrl, '/api/comfy', 'http://127.0.0.1:8188'])
+    );
+    let lastError = 'Connection failed';
+    for (const candidate of candidates) {
+      try {
+        const res = await fetch(`${candidate}/system_stats`, { signal: AbortSignal.timeout(4000) });
+        if (!res.ok) {
+          lastError = `HTTP ${res.status}: ${res.statusText}`;
+          continue;
+        }
+        const data = await res.json();
+        if (!data || typeof data !== 'object' || !data.system) {
+          continue;
+        }
+        if (candidate !== this.baseUrl) {
+          this.baseUrl = candidate;
+        }
+        const gpu = data.devices?.[0];
+        const stats: ComfySystemStats = {
+          os: data.system?.os || 'windows',
+          ramTotalGb: Math.round((data.system?.ram_total || 0) / (1024 * 1024 * 1024)),
+          ramFreeGb: Math.round((data.system?.ram_free || 0) / (1024 * 1024 * 1024)),
+          comfyVersion: data.system?.comfyui_version || 'unknown',
+          gpuName: gpu?.name || 'NVIDIA GPU',
+          vramTotalGb: Math.round((gpu?.vram_total || 0) / (1024 * 1024 * 1024)),
+          vramFreeGb: Math.round((gpu?.vram_free || 0) / (1024 * 1024 * 1024)),
+        };
+
+        return { ok: true, stats, raw: data };
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err.message : String(err);
       }
-      const data = await res.json();
-
-      const gpu = data.devices?.[0];
-      const stats: ComfySystemStats = {
-        os: data.system?.os || 'windows',
-        ramTotalGb: Math.round((data.system?.ram_total || 0) / (1024 * 1024 * 1024)),
-        ramFreeGb: Math.round((data.system?.ram_free || 0) / (1024 * 1024 * 1024)),
-        comfyVersion: data.system?.comfyui_version || 'unknown',
-        gpuName: gpu?.name || 'NVIDIA GPU',
-        vramTotalGb: Math.round((gpu?.vram_total || 0) / (1024 * 1024 * 1024)),
-        vramFreeGb: Math.round((gpu?.vram_free || 0) / (1024 * 1024 * 1024)),
-      };
-
-      return { ok: true, stats, raw: data };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: msg };
     }
+    return { ok: false, error: lastError };
   }
 
   async getObjectInfo(nodeClass?: string): Promise<Record<string, unknown> | null> {

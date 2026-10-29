@@ -133,6 +133,11 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   const handleLoadLatestComfyRender = async () => {
     setComfyErrorText(null);
     setComfyStatusText('Checking ComfyUI /history for latest completed render...');
+    const health = await defaultComfyClient.checkHealth();
+    if (health.ok && health.stats) {
+      setComfyOnline(true);
+      setComfyGpuLabel(`${health.stats.gpuName} (${health.stats.vramTotalGb}GB VRAM)`);
+    }
     const latest = await defaultComfyClient.fetchLatestCompletedOutput(15);
     if (latest) {
       setFinalComfyVideoUrl(latest.videoUrl);

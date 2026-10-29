@@ -212,12 +212,15 @@ app.whenReady().then(() => {
     'http://localhost:8080/*',
   ];
 
-  // Prevent sending 'null' or 'file://' origin to local daemon services like Ollama (which rejects null origin with HTTP 403)
+  // Prevent ComfyUI (8188) and Ollama (11434) from rejecting requests with HTTP 403 due to mismatched Origin headers
   session.defaultSession.webRequest.onBeforeSendHeaders(
     { urls: localDaemonUrls },
     (details, callback) => {
       const headers = { ...details.requestHeaders };
-      if (!headers['Origin'] || headers['Origin'] === 'null' || headers['Origin'].startsWith('file:')) {
+      if (details.url.includes(':8188')) {
+        headers['Origin'] = 'http://127.0.0.1:8188';
+        headers['Referer'] = 'http://127.0.0.1:8188/';
+      } else if (!headers['Origin'] || headers['Origin'] === 'null' || headers['Origin'].startsWith('file:')) {
         headers['Origin'] = 'http://127.0.0.1';
       }
       callback({ requestHeaders: headers });
