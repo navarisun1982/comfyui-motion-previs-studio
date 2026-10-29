@@ -112,33 +112,30 @@ Click the **Settings (`⚙ Settings • Ollama / Gemini / OpenAI`)** button in t
 
 - All motion presets, Action Cycles (`1x`–`5x`), 3D character rigging, camera optics, lighting, and offline MP4/OpenPose/Depth rendering also work **out of the box with zero API keys required**.
 
-### 6. Connect Local ComfyUI Server & MiniMax H3 Ref2VA Workflow Setup
+### 6. Connect Local ComfyUI Server & Stubelius Ultimate H3 (`stuubszzz`) Workflow Setup
 
-If you want to render final AI videos directly inside the studio using **`⚡ Render in ComfyUI (MiniMax H3)`**, follow these steps to set up the workflow and models in your local ComfyUI installation:
+If you want to render final AI videos directly inside the studio using **`⚡ Render in ComfyUI (MiniMax H3)`**, follow these steps to set up the **Stubelius Ultimate H3 (`stuubszzz`)** workflow and models in your local ComfyUI installation:
 
-#### Step A — Download the ComfyUI Workflow
-- 📥 **[Download Visual ComfyUI Workflow (`MiniMax_H3_Ref2VA_ComfyUI_Workflow.json`)](workflows/templates/MiniMax_H3_Ref2VA_ComfyUI_Workflow.json)** *(or click **`⬇ Download Workflow (.json)`** inside the studio's Render tab)*.
+#### Step A — Download the ComfyUI Workflow & Custom Node
+- 🔗 **Official Custom Node & Workflow Repository**: **[`stuubszzz/Stubelius-Ultimate-H3`](https://github.com/stuubszzz/Stubelius-Ultimate-H3)**
+- 📥 **[Download Stubelius Ultimate H3 Workflow (`Stubelius_Ultimate_H3.json`)](workflows/templates/Stubelius_Ultimate_H3.json)** *(or click **`⬇ Download Stubelius H3 Workflow (.json)`** inside the studio's Render tab)*.
 - 📥 **[View Bound API Workflow (`minimax_h3_ref2va.api.json`)](workflows/templates/minimax_h3_ref2va.api.json)** *(automatically executed by the studio when you click `Render in ComfyUI`)*.
 
 #### Step B — Install Required Custom Nodes in ComfyUI
-1. Open your local ComfyUI in the browser at `http://127.0.0.1:8188` and **drag-and-drop [`MiniMax_H3_Ref2VA_ComfyUI_Workflow.json`](workflows/templates/MiniMax_H3_Ref2VA_ComfyUI_Workflow.json)** onto the canvas.
-2. Open **ComfyUI Manager → Install Missing Custom Nodes** to install any missing node packs:
-   - `ComfyUI-VideoHelperSuite` (`VHS_LoadVideo`, `VHS_VideoCombine`)
-   - `rgthree-comfy` (`Any Switch (rgthree)`, `Power Lora Loader (rgthree)`)
-   - `ComfyUI-KJNodes` (`PathchSageAttentionKJ`, `ImageResizeKJv2`)
-   - `ComfyUI-Easy-Use` (`easy seed`, `easy cleanGpuUsed`)
-   - `ComfyUI-SolAttn` / `ComfyUI-Frame-Interpolation` (`SolAttnPatch`, `RIFEInterpolation`)
+1. Install **[`stuubszzz/Stubelius-Ultimate-H3`](https://github.com/stuubszzz/Stubelius-Ultimate-H3)** via **ComfyUI Manager** (or `git clone https://github.com/stuubszzz/Stubelius-Ultimate-H3` inside `ComfyUI/custom_nodes/`).
+2. Open your local ComfyUI in the browser at `http://127.0.0.1:8188`, **drag-and-drop [`Stubelius_Ultimate_H3.json`](workflows/templates/Stubelius_Ultimate_H3.json)** onto the canvas, and use **ComfyUI Manager → Install Missing Custom Nodes** if prompted (`ComfyUI-VideoHelperSuite`, `rgthree-comfy`, `ComfyUI-KJNodes`, `ComfyUI-Easy-Use`, `ComfyUI-SolAttn`).
 
 #### Step C — Download Required MiniMax H3 Model Weights
 Download the official MiniMax H3 weights from **[🤗 Comfy-Org/MiniMax-H3 on Hugging Face](https://huggingface.co/Comfy-Org/MiniMax-H3)** and place them into your `ComfyUI/models/` folder structure:
 
 | Model Role | File Name & Download Link | Target Folder inside `ComfyUI/models/` |
 | :--- | :--- | :--- |
-| **Diffusion Model (Ref2VA INT8)** | [`minimax_h3_ref2va_pruned_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors) | `ComfyUI/models/diffusion_models/Minimax h3/` |
-| **Text Encoder (Qwen3-VL 32B)** | [`qwen3vl_32b_minimax_h3_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/text_encoders) | `ComfyUI/models/text_encoders/Minimax h3/` |
-| **8-Step Turbo LoRA** | `minimax_h3_turbo_v4_step600_ema.safetensors` | `ComfyUI/models/loras/MiniMax H3/` |
-| **Video VAE (FP16)** | [`minimax_h3_video_vae_fp16.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors) | `ComfyUI/models/vae/minimax/` |
-| **Audio VAE (FP32)** | [`minimax_h3_audio_vae_fp32.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors) | `ComfyUI/models/vae/minimax/` |
+| **Ref2VA Diffusion Model (INT8)** | [`minimax_h3_ref2va_pruned_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors) | `ComfyUI/models/diffusion_models/` |
+| **FL2VA Diffusion Model (INT8)** | [`minimax_h3_fl2va_pruned_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors) | `ComfyUI/models/diffusion_models/` |
+| **Text Encoder (Qwen3-VL 32B)** | [`qwen3vl_32b_minimax_h3_int8_convrot.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/text_encoders) | `ComfyUI/models/text_encoders/` |
+| **8-Step Speedup LoRA** | `minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors` / `minimax_h3_turbo_v4_step600_ema.safetensors` | `ComfyUI/models/loras/` |
+| **Video VAE (FP16)** | [`minimax_h3_video_vae_fp16.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors) | `ComfyUI/models/vae/` |
+| **Audio VAE (FP32)** | [`minimax_h3_audio_vae_fp32.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors) | `ComfyUI/models/vae/` |
 
 #### Step D — Render Directly from the Studio
 1. Ensure ComfyUI is running at `http://127.0.0.1:8188` and verify the green **`● Comfy`** pill in the studio's top header bar (or click **`⚙ Settings`** → **Test / Reconnect**).

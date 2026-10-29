@@ -914,13 +914,13 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
               <div className="flex flex-wrap items-center gap-2">
                 <a
-                  href="./workflows/MiniMax_H3_Ref2VA_ComfyUI_Workflow.json"
-                  download="MiniMax_H3_Ref2VA_ComfyUI_Workflow.json"
+                  href="./workflows/Stubelius_Ultimate_H3.json"
+                  download="Stubelius_Ultimate_H3.json"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-amber-200 border border-amber-400/30 font-mono text-[11px] font-semibold transition-all cursor-pointer"
-                  title="Download the MiniMax H3 Ref2VA ComfyUI workflow (.json) to drag-and-drop into ComfyUI and install missing nodes"
+                  title="Download the Stubelius Ultimate H3 (stuubszzz) ComfyUI workflow (.json) to drag-and-drop into ComfyUI"
                 >
                   <Download className="h-3.5 w-3.5 text-amber-400" />
-                  <span>Download Workflow (.json)</span>
+                  <span>Download Stubelius H3 Workflow (.json)</span>
                 </a>
                 <button
                   type="button"
@@ -956,16 +956,24 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
             {/* Collapsible Workflow Setup & Required Models Guide */}
             <details className="rounded-xl bg-black/40 border border-white/10 px-3.5 py-2 text-[10px] font-mono text-slate-300">
               <summary className="cursor-pointer font-semibold text-indigo-300 hover:text-indigo-200 select-none">
-                📦 First time rendering? Click here for ComfyUI Workflow Setup & Required MiniMax H3 Models
+                📦 First time rendering? Click here for Stubelius Ultimate H3 (stuubszzz) Workflow &amp; Model Setup
               </summary>
               <div className="mt-2.5 space-y-2 border-t border-white/10 pt-2.5 text-slate-300 leading-relaxed">
                 <div>
-                  <span className="text-amber-300 font-bold">1. Install Custom Nodes:</span> Click{' '}
-                  <span className="text-amber-200 font-semibold">Download Workflow (.json)</span> above, drag & drop it into your ComfyUI browser window (<code className="text-indigo-300">http://127.0.0.1:8188</code>), and use{' '}
-                  <span className="text-white font-semibold">ComfyUI Manager → Install Missing Custom Nodes</span> (<code className="text-slate-400">ComfyUI-VideoHelperSuite</code>, <code className="text-slate-400">rgthree-comfy</code>, <code className="text-slate-400">ComfyUI-KJNodes</code>, <code className="text-slate-400">ComfyUI-Easy-Use</code>, <code className="text-slate-400">ComfyUI-SolAttn</code>).
+                  <span className="text-amber-300 font-bold">1. Install Stubelius Ultimate H3 Custom Node &amp; Workflow:</span> Install{' '}
+                  <a
+                    href="https://github.com/stuubszzz/Stubelius-Ultimate-H3"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-indigo-300 underline hover:text-indigo-200 font-semibold"
+                  >
+                    stuubszzz/Stubelius-Ultimate-H3
+                  </a>{' '}
+                  via ComfyUI Manager (or clone into <code className="text-slate-200">ComfyUI/custom_nodes/</code>), then click{' '}
+                  <span className="text-amber-200 font-semibold">Download Stubelius H3 Workflow (.json)</span> above and drag &amp; drop it into ComfyUI (<code className="text-indigo-300">http://127.0.0.1:8188</code>).
                 </div>
                 <div>
-                  <span className="text-emerald-300 font-bold">2. Download Required Model Weights</span> from{' '}
+                  <span className="text-emerald-300 font-bold">2. Download Required MiniMax H3 Model Weights</span> from{' '}
                   <a
                     href="https://huggingface.co/Comfy-Org/MiniMax-H3"
                     target="_blank"
@@ -977,16 +985,19 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   into your <code className="text-white">ComfyUI/models/</code> directory:
                   <ul className="list-disc pl-5 mt-1 space-y-0.5 text-slate-400">
                     <li>
-                      <code className="text-slate-200">models/diffusion_models/Minimax h3/minimax_h3_ref2va_pruned_int8_convrot.safetensors</code>
+                      <code className="text-slate-200">models/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors</code> (Ref2VA Model)
                     </li>
                     <li>
-                      <code className="text-slate-200">models/text_encoders/Minimax h3/qwen3vl_32b_minimax_h3_int8_convrot.safetensors</code>
+                      <code className="text-slate-200">models/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors</code> (FL2VA Model)
                     </li>
                     <li>
-                      <code className="text-slate-200">models/loras/MiniMax H3/minimax_h3_turbo_v4_step600_ema.safetensors</code> (8-Step Turbo LoRA)
+                      <code className="text-slate-200">models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors</code> (Text Encoder)
                     </li>
                     <li>
-                      <code className="text-slate-200">models/vae/minimax/minimax_h3_video_vae_fp16.safetensors</code> &amp;{' '}
+                      <code className="text-slate-200">models/loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors</code> (8-Step Speedup LoRA)
+                    </li>
+                    <li>
+                      <code className="text-slate-200">models/vae/minimax_h3_video_vae_fp16.safetensors</code> &amp;{' '}
                       <code className="text-slate-200">minimax_h3_audio_vae_fp32.safetensors</code>
                     </li>
                   </ul>
