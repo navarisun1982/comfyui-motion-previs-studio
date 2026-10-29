@@ -946,35 +946,57 @@ export function evaluateReadyMadeHumanoidClip(
 
   const applyWalkingLegsIfTraveling = (): boolean => {
     if (!isTravelingOnFloor) return false;
-    const phase = timeSeconds * Math.PI * 2 * 1.45;
-    const strideLen = 0.16;
-    const liftHeight = 0.08;
+    const phase = timeSeconds * Math.PI * 2 * 1.15;
+    const strideLen = 0.14;
+    const liftHeight = 0.052;
     const lSin = Math.sin(phase);
     const lCos = Math.cos(phase);
     const rSin = Math.sin(phase + Math.PI);
     const rCos = Math.cos(phase + Math.PI);
 
-    const lY = 0.04 + Math.max(0, lCos) * liftHeight;
+    const lY = 0.056 + Math.max(0, lCos) * liftHeight;
     const lZ = lSin * strideLen;
-    const rY = 0.04 + Math.max(0, rCos) * liftHeight;
+    const rY = 0.056 + Math.max(0, rCos) * liftHeight;
     const rZ = rSin * strideLen;
 
-    solveLimbIK(rig, 'leftLeg', rigPoint(0.11, lY, lZ), rigPoint(0.13, 0.34, 0.55));
-    solveLimbIK(rig, 'rightLeg', rigPoint(-0.11, rY, rZ), rigPoint(-0.13, 0.34, 0.55));
+    solveLimbIK(rig, 'leftLeg', rigPoint(0.058, lY, lZ), rigPoint(0.08, 0.32, 0.55));
+    solveLimbIK(rig, 'rightLeg', rigPoint(-0.058, rY, rZ), rigPoint(-0.08, 0.32, 0.55));
     return true;
+  };
+
+  // Compute smooth acceleration/deceleration stride envelope when clipProgress01 is supplied
+  const computeLocomotionEnvelope = (prog?: number): number => {
+    if (prog === undefined) return 1.0;
+    const p = THREE.MathUtils.clamp(prog, 0, 1);
+    if (p < 0.12) return 0.35 + 0.65 * (p / 0.12);
+    if (p > 0.88) return 0.25 + 0.75 * ((1.0 - p) / 0.12);
+    return 1.0;
   };
 
   // Continuous locomotion clips delegate to evaluateGait with tailored frequency/speed
   if (clipId === 'human-walk-forward' || clipId === 'human-back-retreat') {
-    evaluateGait(rig, timeSeconds, { gait: 'walk', speed: 1.5 });
+    evaluateGait(rig, timeSeconds, {
+      gait: 'walk',
+      speed: 1.5,
+      strideEnvelope: computeLocomotionEnvelope(clipProgress01),
+    });
     return true;
   }
   if (clipId === 'human-run-sprint') {
-    evaluateGait(rig, timeSeconds, { gait: 'run', speed: 2.8, frequencyScale: 1.1 });
+    evaluateGait(rig, timeSeconds, {
+      gait: 'run',
+      speed: 2.8,
+      frequencyScale: 1.05,
+      strideEnvelope: computeLocomotionEnvelope(clipProgress01),
+    });
     return true;
   }
   if (clipId === 'human-sneak-prowl') {
-    evaluateGait(rig, timeSeconds, { gait: 'sneak', speed: 1.0 });
+    evaluateGait(rig, timeSeconds, {
+      gait: 'sneak',
+      speed: 1.0,
+      strideEnvelope: computeLocomotionEnvelope(clipProgress01),
+    });
     return true;
   }
   if (clipId === 'human-idle-breathe') {

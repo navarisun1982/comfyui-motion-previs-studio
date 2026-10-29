@@ -191,7 +191,7 @@ export function buildTemporalTimeline(shot: ShotSpec): TemporalPromptBeat[] {
       }
       if (phase === 'mid') {
         if (hasDisplacement) {
-          return `${actor.name}${socketStr} advances continuously from the ${startZone} toward the ${endZone}${midPoseStr}, natural cloth and body dynamics shifting with locomotion`;
+          return `${actor.name}${socketStr} advances continuously from the ${startZone} toward the ${endZone}${midPoseStr} with fluid, lifelike human biomechanics—grounded heel-to-toe footsteps, natural hip weight transfer, relaxed shoulder counter-rotation, natural elbow flexion, and realistic garment drape`;
         }
         return `${actor.name}${socketStr} stays anchored in the ${startZone} (${actor.actionDescription})`;
       }
@@ -370,10 +370,10 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
   );
 
   subjectDefLines.push(
-    `<Video 1> is the supplied 3D previz reference video. Reference the animated 3D camera movement, perspective, and exact left-to-right spatial blocking (${proxySpatialAnchors.join('; ')}). Exclude any flat proxy shading or helper artifacts.`
+    `<Video 1> is the supplied 3D previz reference video. Reference the animated 3D camera movement, perspective, and exact left-to-right spatial blocking (${proxySpatialAnchors.join('; ')}). Replace any synthetic 3D mannequin limb stiffness with fluid, organic human biomechanics (natural heel-to-toe footfalls, relaxed shoulder counter-swing, bent elbows, and steady head stabilization). Exclude any flat proxy shading or helper artifacts.`
   );
   retentionLines.push(
-    `<Video 1> ([Shot 1] motion and blocking reference): partially_preserved - strictly retain the continuous 3D camera trajectory, left-to-right subject arrangement, and locomotion timing across the ${shot.durationSeconds.toFixed(1)}-second duration.`
+    `<Video 1> ([Shot 1] motion and blocking reference): partially_preserved - strictly retain the continuous 3D camera trajectory, left-to-right subject arrangement, and locomotion speed across the ${shot.durationSeconds.toFixed(1)}-second duration while rendering lifelike, natural human gait physics.`
   );
 
   // Subject micro-acting summary for metadata
