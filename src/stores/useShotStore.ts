@@ -238,12 +238,12 @@ if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', flushShotsPersistence);
 }
 
-const COMPETITION_DEMO_VERSION = 'competition-3x6-v3';
+const BUILTIN_DEMO_VERSION = 'studio-demo-3x6-v3';
 const DEMO_VERSION_STORAGE_KEY = 'comfy_ai_director_demo_version_v1';
 
 const loadCachedShots = (): Record<string, ShotSpec> => {
   const savedVer = safeGetItem<string | null>(DEMO_VERSION_STORAGE_KEY, null);
-  if (savedVer !== COMPETITION_DEMO_VERSION) {
+  if (savedVer !== BUILTIN_DEMO_VERSION) {
     return {};
   }
   const parsed = safeGetItem<Record<string, ShotSpec>>(STORAGE_KEYS.SHOTS_CACHE, {});
@@ -341,7 +341,7 @@ const DEFAULT_CAST_POOL: Actor[] = [
 
 const loadCachedCastPool = (): Actor[] => {
   const savedVer = safeGetItem<string | null>(DEMO_VERSION_STORAGE_KEY, null);
-  if (savedVer !== COMPETITION_DEMO_VERSION) {
+  if (savedVer !== BUILTIN_DEMO_VERSION) {
     return DEFAULT_CAST_POOL;
   }
   const parsed = safeGetItem<Actor[]>(STORAGE_KEYS.CAST_POOL, DEFAULT_CAST_POOL);

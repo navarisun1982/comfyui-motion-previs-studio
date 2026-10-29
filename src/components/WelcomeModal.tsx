@@ -68,7 +68,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
             <div>
               <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/30 px-2.5 py-0.5 text-[10px] font-mono text-amber-400 mb-1.5 font-bold">
                 <Sparkles className="h-3 w-3" />
-                Higgsfield Open Source Competition Edition
+                Open-Source Replacement for Higgsfield 3D-Jutsu
               </div>
               <h2 id="welcome-modal-title" className="font-display text-xl font-bold tracking-tight text-white md:text-2xl">
                 ComfyUI Motion Previs Studio

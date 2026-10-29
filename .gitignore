@@ -24,7 +24,7 @@ Thumbs.db
 *.tsbuildinfo
 coverage/
 
-# Dev probe outputs & ad-hoc scratch scripts
+# Dev probe outputs & internal notes
 scripts/**/out_*.json
 scripts/dev/*.cjs
 scripts/dev/*.ps1
@@ -32,3 +32,12 @@ scripts/dev/*.txt
 scripts/*.ps1
 test_gallery.html
 scratch/
+docs/COMPETITION_REQUIREMENTS.md
+docs/archive/
+docs/character_rigging_and_sculpt_previs_blueprint.md
+docs/DECISIONS.md
+docs/RISK_REGISTER.md
+PROGRESS.md
+TASKS.md
+AGENTS.md
+.agents/

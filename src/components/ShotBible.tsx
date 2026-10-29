@@ -1272,7 +1272,7 @@ export const buildDefaultShotSpec = (shotItem: ShotBibleItem): ShotSpec => {
   return baseSpec;
 };
 
-export const COMPETITION_DEMO_VERSION = 'competition-3x6-v3';
+export const BUILTIN_DEMO_VERSION = 'studio-demo-3x6-v3';
 const DEMO_VERSION_STORAGE_KEY = 'comfy_ai_director_demo_version_v1';
 
 export const DEFAULT_SCENES: SceneItem[] = [
@@ -1479,8 +1479,8 @@ export const DEFAULT_SCENES: SceneItem[] = [
 const loadSavedScenes = (): SceneItem[] => {
   try {
     const savedVer = safeGetItem<string | null>(DEMO_VERSION_STORAGE_KEY, null);
-    if (savedVer !== COMPETITION_DEMO_VERSION) {
-      safeSetItem(DEMO_VERSION_STORAGE_KEY, COMPETITION_DEMO_VERSION);
+    if (savedVer !== BUILTIN_DEMO_VERSION) {
+      safeSetItem(DEMO_VERSION_STORAGE_KEY, BUILTIN_DEMO_VERSION);
       safeRemoveItem(STORAGE_KEYS.SCENES);
       safeRemoveItem(STORAGE_KEYS.SHOTS_CACHE);
       safeRemoveItem(STORAGE_KEYS.CAST_POOL);
@@ -1562,7 +1562,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
     return () => window.removeEventListener('click', handleClickOutside);
   }, []);
 
-  // Hydrate initial Shot 01A competition showcase scene when starting from generic fallback
+  // Hydrate initial Shot 01A showcase scene when starting from generic fallback
   useEffect(() => {
     const current = useShotStore.getState().shot;
     const firstScene = scenes[0];

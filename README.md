@@ -1,19 +1,18 @@
 # ComfyUI Motion Previs Studio — Cinematic Command Center 2026
 
 > **"Direct the Shot, Not the Prompt."**  
-> Built for the **ComfyUI Open Source Higgsfield Competition** (Best Overall · Most Innovative · Open Weights Only · VFX Workflow Built with LTX).
+> Built as a replacement for **Higgsfield 3D-Jutsu** — an open-source, local-first 3D camera, character, and lighting previsualization studio for AI video workflows.  
+> Includes built-in interactive demo scenes for learning and instant experimentation.
 
-**ComfyUI Motion Previs Studio** is a real-time **3D Motion Previsualization & Camera Blocking Studio** designed for filmmakers, VFX supervisors, and AI video directors. Instead of guessing text prompts for camera movement, character blocking, and lens framing, you direct actors, cameras, sets, and lights inside an interactive 3D soundstage — and export deterministic **24fps MP4 previs**, **OpenPose skeletal passes**, **Depth maps**, **4×4 camera matrices**, and **ComfyUI workflow bundles** for **LTX-2.5 (22B Distilled INT8)** and **MiniMax H3**.
+**ComfyUI Motion Previs Studio** is a real-time **3D Motion Previsualization & Camera Blocking Studio** designed for filmmakers, VFX supervisors, and AI video directors. Instead of guessing text prompts for camera movement, character blocking, and lens framing, you direct actors, cameras, sets, and lights inside an interactive 3D soundstage — and export deterministic **24fps MP4 previs**, **OpenPose skeletal passes**, **Depth maps**, **4×4 camera matrices**, and **ComfyUI workflow bundles** for **LTX-2.5 (22B Distilled INT8)**, **MiniMax H3**, **Seedance**, and **any video model that accepts video reference**.
 
 ---
 
 ## 📸 Visual Feature Tour & Screenshots
 
-> Place your captured screenshots in `docs/screenshots/` using the filenames below (or run the automated screenshot script in Step 3 below) so GitHub renders them automatically.
-
 ### 1. Full Studio Workspace — Dual 3D Viewports & 24fps Timeline
 ![Full Studio Workspace](docs/screenshots/01-studio-workspace.png)
-- **Left Sidebar (`Shot Bible`)**: Multi-scene, multi-shot storyboard manager with instant scene switching, shot duplication, continuity propagation, and 3 built-in competition demo scenes (18 curated cinematic shots).
+- **Left Sidebar (`Shot Bible`)**: Multi-scene, multi-shot storyboard manager with instant scene switching, shot duplication, continuity propagation, and built-in demo scenes for learning.
 - **Center Dual-Viewport Stage (`3D Soundstage` + `Camera Viewfinder`)**:
   - **Left Viewport (`3D Soundstage`)**: Free-orbit director's perspective showing the 3D set, volumetric lighting cones, camera frustum rig, motion paths, and actor transform gizmos.
   - **Right Viewport (`Camera Viewfinder`)**: Live through-the-lens render locked to your chosen aspect ratio (`16:9`, `2.39:1`, `9:16`, `1:1`), focal length (`14mm`–`135mm`), and depth-of-field aperture (`f/1.4`–`f/22`).
@@ -41,25 +40,7 @@
 ### 5. Previs Render & Multi-Pass Export Deck
 ![Previs Render & Export Deck](docs/screenshots/05-previs-export-deck.png)
 - **Offline Hardware-Accelerated 24fps Renderer**: Exports frame-accurate `.mp4` (via `mp4-muxer`) for **Composite Previs**, **Clean Beauty**, **OpenPose 18-Joint Skeletons**, **Normalized Depth Maps**, and **Subject Alpha Masks**.
-- **Deterministic ComfyUI Workflow Bundles**: Exports `.zip` or JSON bundles containing your rendered control passes, `4×4` camera extrinsic matrices, compiled engine prompts, and verified ComfyUI API graphs for **LTX-2.5** and **MiniMax H3**.
-
----
-
-## 🎬 Built-in Competition Demo Scenes (18 Shots)
-
-Upon launch, the **Shot Bible** loads 3 complete director-grade scenes (6 shots each) showcasing the full spectrum of camera blocking and character animation:
-
-1. **Scene 01 — Neon Protocol (Cyberpunk Action Thriller)**
-   - Crane establishers, 35mm tracking runs, 85mm OTS dialogue standoffs, katana combat choreography, orbital breach shots, and 24mm crane pull-backs.
-2. **Scene 02 — Chronos Relic (Temple Expedition Adventure)**
-   - Torch-lit colonnade walk-ins, relic inspection close-ups, guardian awakening pedestals, 24mm dodge-and-sprint escapes, and heroic doorway silhouettes.
-3. **Scene 03 — Golden Hour Romance (Intimate Rooftop Drama)**
-   - **Shot 03A**: `50mm` Anamorphic Two-Shot Dolly In as Elena and Julian walk toward each other on a warm candlelit terrace.
-   - **Shot 03B**: `85mm f/1.4` Over-the-Shoulder Close-Up on Elena (`close-up` eye-line framing with soft foreground bokeh).
-   - **Shot 03C**: `85mm f/1.4` Reverse OTS Close-Up on Julian responding in intimate dialogue.
-   - **Shot 03D**: `135mm f/1.4` Extreme Close-Up Profile Drift as they step inches apart.
-   - **Shot 03E**: `85mm f/1.8` Candlelight Dialogue Medium Close-Up with a slow romantic orbit.
-   - **Shot 03F**: `50mm f/1.8` Starlight Embrace & Slow Pull-Back into the golden-hour skyline.
+- **Deterministic ComfyUI & Video Reference Bundles**: Exports `.zip` or JSON bundles containing your rendered control passes, `4×4` camera extrinsic matrices, compiled engine prompts, and verified ComfyUI API graphs for **LTX-2.5**, **MiniMax H3**, **Seedance**, and **any video model that accepts video reference**.
 
 ---
 
@@ -69,7 +50,7 @@ Upon launch, the **Shot Bible** loads 3 complete director-grade scenes (6 shots 
 - **OS**: Windows 10 / 11, macOS, or Linux
 - **Node.js**: `v20.x` or `v22.x` LTS (includes `npm`)
 - **Git**: For cloning and version control
-- *(Optional)* **ComfyUI** running locally at `http://127.0.0.1:8188` for live LTX-2.5 / MiniMax H3 video generation (the 3D Previs Studio and MP4/ControlNet Pass Exporters run 100% locally in WebGL without requiring ComfyUI to be online).
+- *(Optional)* **ComfyUI** running locally at `http://127.0.0.1:8188` for live video generation (the 3D Previs Studio and MP4/ControlNet Pass Exporters run 100% locally in WebGL without requiring ComfyUI to be online).
 
 ### 1. Clone the Repository
 ```bash
@@ -122,14 +103,13 @@ npm run build
 ```text
 ├── docs/
 │   ├── screenshots/          # Feature tour screenshots for GitHub README
-│   ├── ARCHITECTURE.md       # System architecture & data flow
-│   └── COMPETITION_REQUIREMENTS.md
+│   └── ARCHITECTURE.md       # System architecture & data flow
 ├── public/
 │   └── models/               # Rigged humanoid skeletal meshes (x-bot / y-bot)
 ├── src/
 │   ├── adapters/             # Engine prompt & config adapters (LTX-2.5, MiniMax H3, Seedance)
 │   ├── components/           # 2026 Cinematic Command Center UI
-│   │   ├── ShotBible.tsx             # Multi-scene / 18-shot storyboard manager
+│   │   ├── ShotBible.tsx             # Multi-scene storyboard manager with built-in learning demo
 │   │   ├── StagePrevis3D.tsx         # Dual-viewport Three.js soundstage & camera viewfinder
 │   │   ├── PrevisParametersDeck.tsx  # Right-hand inspector (Actors, Camera, Set, Lights, Render)
 │   │   ├── CharacterControlCard.tsx  # Modular 3D Character Control Panel
@@ -149,4 +129,4 @@ npm run build
 
 ## 📄 License
 
-Released as Open Source for the **ComfyUI Open Source Higgsfield Competition**.
+Released as Open Source.
