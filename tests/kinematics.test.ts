@@ -329,7 +329,7 @@ describe('ControlNet OpenPose Previs Renderer', () => {
   });
 
   it('defines standard OpenPose anatomical limb connections', () => {
-    expect(OPENPOSE_LIMBS.length).toBe(15);
+    expect(OPENPOSE_LIMBS.length).toBe(21);
     const colors = OPENPOSE_LIMBS.map((l) => l.color);
     expect(colors).toContain('rgb(0, 0, 255)');
     expect(colors).toContain('rgb(255, 0, 0)');

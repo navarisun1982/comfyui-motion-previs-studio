@@ -1,11 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { openaiAuthPlugin } from './src/server/openaiAuthPlugin';
 
 // https://vitejs.dev/config/
 export default defineConfig({
   base: './',
-  plugins: [react()],
+  plugins: [react(), openaiAuthPlugin()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -34,6 +35,12 @@ export default defineConfig({
         target: 'http://127.0.0.1:8080',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/llamacpp/, ''),
+      },
+      '/api/openai-proxy': {
+        target: 'https://api.openai.com/v1',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/api\/openai-proxy/, ''),
       },
     },
   },

@@ -27,9 +27,152 @@ export interface SilhouetteMetrics {
 }
 
 /**
+/**
+ * Labels connected components and keeps only the central dominant subject(s),
+ * pruning small disconnected noise (such as scattered coffee beans, table crumbs, or floor vignetting).
+ */
+export function isolateDominantSubject(
+  data: Uint8Array,
+  width: number,
+  height: number,
+  minAreaRatio = 0.04
+): Uint8Array {
+  const size = width * height;
+  const labels = new Int32Array(size).fill(-1);
+  const components: {
+    id: number;
+    count: number;
+    sumX: number;
+    sumY: number;
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+  }[] = [];
+
+  let currentLabel = 0;
+  const queue = new Int32Array(size);
+
+  // 4-connectivity BFS labeling
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = y * width + x;
+      if (data[idx] === 1 && labels[idx] === -1) {
+        let qHead = 0;
+        let qTail = 0;
+        queue[qTail++] = idx;
+        labels[idx] = currentLabel;
+
+        let count = 0;
+        let sumX = 0;
+        let sumY = 0;
+        let minX = x;
+        let maxX = x;
+        let minY = y;
+        let maxY = y;
+
+        while (qHead < qTail) {
+          const curr = queue[qHead++];
+          const cy = Math.floor(curr / width);
+          const cx = curr % width;
+
+          count++;
+          sumX += cx;
+          sumY += cy;
+          if (cx < minX) minX = cx;
+          if (cx > maxX) maxX = cx;
+          if (cy < minY) minY = cy;
+          if (cy > maxY) maxY = cy;
+
+          // 4 neighbors
+          const neighbors = [
+            cy > 0 ? curr - width : -1,
+            cy < height - 1 ? curr + width : -1,
+            cx > 0 ? curr - 1 : -1,
+            cx < width - 1 ? curr + 1 : -1,
+          ];
+
+          for (const n of neighbors) {
+            if (n >= 0 && data[n] === 1 && labels[n] === -1) {
+              labels[n] = currentLabel;
+              queue[qTail++] = n;
+            }
+          }
+        }
+
+        components.push({
+          id: currentLabel,
+          count,
+          sumX,
+          sumY,
+          minX,
+          maxX,
+          minY,
+          maxY,
+        });
+        currentLabel++;
+      }
+    }
+  }
+
+  if (components.length <= 1) {
+    return data;
+  }
+
+  // Score each component: prioritize high pixel count and proximity to image center
+  const scored = components.map((c) => {
+    const avgX = c.sumX / c.count;
+    const avgY = c.sumY / c.count;
+    const dx = (avgX - width / 2) / width;
+    const dy = (avgY - height / 2) / height;
+    const distFromCenter = Math.sqrt(dx * dx + dy * dy);
+    // Score heavily favors larger components and penalizes those far in corners
+    const score = c.count / (1 + 2.5 * distFromCenter);
+    return { ...c, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  const dominant = scored[0];
+  const dominantArea = dominant.count;
+
+  // Keep the dominant component plus any closely associated substantial components (e.g. cap, base, accessories)
+  // Prune disconnected small specks (beans, crumbs, table reflections)
+  const keepLabels = new Set<number>();
+  keepLabels.add(dominant.id);
+
+  const domWidth = dominant.maxX - dominant.minX + 1;
+  const domHeight = dominant.maxY - dominant.minY + 1;
+
+  for (let i = 1; i < scored.length; i++) {
+    const c = scored[i];
+    const areaRatio = c.count / dominantArea;
+    if (areaRatio < minAreaRatio) {
+      // Discard small noise/scattered specks
+      continue;
+    }
+    // Check if it's horizontally aligned with or adjacent to the dominant subject
+    const horizOverlap = !(c.maxX < dominant.minX - domWidth * 0.35 || c.minX > dominant.maxX + domWidth * 0.35);
+    const vertClose = !(c.maxY < dominant.minY - domHeight * 0.25 || c.minY > dominant.maxY + domHeight * 0.25);
+    if (horizOverlap && vertClose && areaRatio >= 0.08) {
+      keepLabels.add(c.id);
+    }
+  }
+
+  const result = new Uint8Array(size);
+  for (let i = 0; i < size; i++) {
+    if (labels[i] >= 0 && keepLabels.has(labels[i])) {
+      result[i] = 1;
+    }
+  }
+
+  return result;
+}
+
+/**
  * Extracts a binary silhouette mask from raw RGBA pixel data.
  * If transparent pixels exist, uses alpha channel (alpha > 30).
- * Otherwise detects background by sampling corner pixels and thresholds color distance.
+ * Otherwise detects background by perimeter border sampling and thresholds color distance,
+ * followed by Connected Component Analysis (CCA) to isolate the central dominant subject.
  */
 export function extractMaskFromRgba(
   rgba: Uint8ClampedArray | Uint8Array,
@@ -51,25 +194,34 @@ export function extractMaskFromRgba(
     for (let i = 0, p = 0; i < rgba.length; i += 4, p++) {
       data[p] = rgba[i + 3] > 40 ? 1 : 0;
     }
-    return { width, height, data };
+    const filtered = isolateDominantSubject(data, width, height, 0.03);
+    return { width, height, data: filtered };
   }
 
-  // No alpha: sample the 4 corners to estimate the background color
-  const sampleCorner = (x: number, y: number): [number, number, number] => {
+  // Sample perimeter border pixels for robust background estimation
+  let sumR = 0, sumG = 0, sumB = 0, borderCount = 0;
+  const samplePixel = (x: number, y: number) => {
     const idx = (y * width + x) * 4;
-    return [rgba[idx], rgba[idx + 1], rgba[idx + 2]];
+    sumR += rgba[idx];
+    sumG += rgba[idx + 1];
+    sumB += rgba[idx + 2];
+    borderCount++;
   };
 
-  const corners = [
-    sampleCorner(0, 0),
-    sampleCorner(width - 1, 0),
-    sampleCorner(0, height - 1),
-    sampleCorner(width - 1, height - 1),
-  ];
+  // Sample top and bottom rows
+  for (let x = 0; x < width; x += Math.max(1, Math.floor(width / 32))) {
+    samplePixel(x, 0);
+    samplePixel(x, height - 1);
+  }
+  // Sample left and right columns
+  for (let y = 0; y < height; y += Math.max(1, Math.floor(height / 32))) {
+    samplePixel(0, y);
+    samplePixel(width - 1, y);
+  }
 
-  const bgR = Math.round(corners.reduce((sum, c) => sum + c[0], 0) / 4);
-  const bgG = Math.round(corners.reduce((sum, c) => sum + c[1], 0) / 4);
-  const bgB = Math.round(corners.reduce((sum, c) => sum + c[2], 0) / 4);
+  const bgR = Math.round(sumR / Math.max(borderCount, 1));
+  const bgG = Math.round(sumG / Math.max(borderCount, 1));
+  const bgB = Math.round(sumB / Math.max(borderCount, 1));
 
   for (let i = 0, p = 0; i < rgba.length; i += 4, p++) {
     const dr = rgba[i] - bgR;
@@ -79,7 +231,10 @@ export function extractMaskFromRgba(
     data[p] = dist > colorThreshold ? 1 : 0;
   }
 
-  return { width, height, data };
+  // Filter out scattered table items, coffee beans, noise, and shadow islands
+  const cleanedData = isolateDominantSubject(data, width, height, 0.04);
+
+  return { width, height, data: cleanedData };
 }
 
 /**
@@ -332,10 +487,209 @@ export function renderSculptSilhouette(spec: SculptSpec, resolution = 128): Silh
  * Loads an image from URL or Data URL, downsamples if necessary (e.g. max 512px for fast processing),
  * draws to an offscreen 2D canvas, and extracts the binary SilhouetteMask.
  */
+function componentToHex(c: number): string {
+  const hex = Math.max(0, Math.min(255, Math.round(c))).toString(16);
+  return hex.length === 1 ? '0' + hex : hex;
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  return `#${componentToHex(r)}${componentToHex(g)}${componentToHex(b)}`;
+}
+
+export interface ExtractedPalette {
+  skin?: string;
+  hair?: string;
+  primaryClothing?: string;
+  secondaryClothing?: string;
+  leather?: string;
+  metal?: string;
+  weaponWood?: string;
+  weaponAccent?: string;
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  dominantColors: string[];
+}
+
+/**
+ * Deterministically samples dominant and anatomical color swatches from reference image pixels
+ * using vertical spatial zoning (head/skin, upper torso/hood, waist/leather, legs) and color clustering.
+ */
+export function extractPaletteFromRgba(
+  rgba: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number,
+  mask?: SilhouetteMask
+): ExtractedPalette {
+  const pixels: { r: number; g: number; b: number; nx: number; ny: number; isInterior: boolean }[] = [];
+  const maskData = mask?.data;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const isFg = maskData ? maskData[y * width + x] === 1 : rgba[idx + 3] > 40;
+      if (isFg) {
+        const isBorder = maskData ? (
+          x <= 1 || x >= width - 2 || y <= 1 || y >= height - 2 ||
+          maskData[(y - 1) * width + x] === 0 ||
+          maskData[(y + 1) * width + x] === 0 ||
+          maskData[y * width + x - 1] === 0 ||
+          maskData[y * width + x + 1] === 0
+        ) : false;
+
+        pixels.push({
+          r: rgba[idx],
+          g: rgba[idx + 1],
+          b: rgba[idx + 2],
+          nx: x / width,
+          ny: y / height,
+          isInterior: !isBorder,
+        });
+      }
+    }
+  }
+
+  if (pixels.length === 0) {
+    return {
+      skin: '#f3ceb2',
+      hair: '#ad8748',
+      primaryClothing: '#2e4e3f',
+      secondaryClothing: '#3d6350',
+      leather: '#4a3321',
+      metal: '#c2a649',
+      weaponWood: '#4a2810',
+      weaponAccent: '#e5e7eb',
+      primaryColor: '#c82828',
+      secondaryColor: '#f59e0b',
+      accentColor: '#ffffff',
+      dominantColors: ['#c82828', '#f59e0b', '#ffffff'],
+    };
+  }
+
+  // 0. Extract universal dominant colors: prioritize interior pixels to avoid background halos
+  const interiorPixels = pixels.filter((p) => p.isInterior);
+  const sampleSet = interiorPixels.length > 40 ? interiorPixels : pixels;
+
+  const buckets = new Map<number, { count: number; sumR: number; sumG: number; sumB: number }>();
+  for (const p of sampleSet) {
+    const bucketKey = ((p.r >> 4) << 8) | ((p.g >> 4) << 4) | (p.b >> 4);
+    const existing = buckets.get(bucketKey);
+    if (existing) {
+      existing.count++;
+      existing.sumR += p.r;
+      existing.sumG += p.g;
+      existing.sumB += p.b;
+    } else {
+      buckets.set(bucketKey, { count: 1, sumR: p.r, sumG: p.g, sumB: p.b });
+    }
+  }
+
+  // Score buckets: favor vibrant, chromatic and luminous colors over dark shadow noise
+  const scoredBuckets = Array.from(buckets.values()).map((b) => {
+    const avgR = b.sumR / b.count;
+    const avgG = b.sumG / b.count;
+    const avgB = b.sumB / b.count;
+    const brightness = (avgR + avgG + avgB) / 3;
+    const chroma = Math.max(avgR, avgG, avgB) - Math.min(avgR, avgG, avgB);
+    const shadowPenalty = brightness < 35 ? (chroma < 15 ? 0.2 : 0.6) : 1.0;
+    const score = b.count * (1 + (chroma / 255) * 1.5) * shadowPenalty;
+    return { ...b, avgR, avgG, avgB, score };
+  });
+
+  scoredBuckets.sort((a, b) => b.score - a.score);
+  const dominantColors: string[] = scoredBuckets.slice(0, 5).map((b) =>
+    rgbToHex(b.avgR, b.avgG, b.avgB)
+  );
+  const primaryColor = dominantColors[0] || '#c82828';
+  const secondaryColor = dominantColors[1] || primaryColor;
+  const accentColor = dominantColors[2] || secondaryColor;
+
+  // 1. Head / Face zone: top 8% to 32% of character, centered horizontally
+  const headPixels = pixels.filter((p) => p.ny >= 0.08 && p.ny <= 0.32 && Math.abs(p.nx - 0.5) <= 0.25);
+  const skinCandidates = headPixels.filter(
+    (p) => p.r > p.g && p.g >= p.b && p.r > 120 && p.b < 200 && p.r - p.b > 20
+  );
+  let skin = '#f3ceb2';
+  if (skinCandidates.length > 5) {
+    const avgR = skinCandidates.reduce((s, p) => s + p.r, 0) / skinCandidates.length;
+    const avgG = skinCandidates.reduce((s, p) => s + p.g, 0) / skinCandidates.length;
+    const avgB = skinCandidates.reduce((s, p) => s + p.b, 0) / skinCandidates.length;
+    skin = rgbToHex(avgR, avgG, avgB);
+  }
+
+  // 2. Crown / Hair or Hood
+  const crownPixels = pixels.filter((p) => p.ny <= 0.22);
+  let hair = '#ad8748';
+  if (crownPixels.length > 5) {
+    const nonSkinCrown = crownPixels.filter(
+      (p) => !(p.r > 160 && p.g > 130 && p.b > 110 && Math.abs(p.r - p.g) < 40)
+    );
+    const target = nonSkinCrown.length > 5 ? nonSkinCrown : crownPixels;
+    const avgR = target.reduce((s, p) => s + p.r, 0) / target.length;
+    const avgG = target.reduce((s, p) => s + p.g, 0) / target.length;
+    const avgB = target.reduce((s, p) => s + p.b, 0) / target.length;
+    hair = rgbToHex(avgR, avgG, avgB);
+  }
+
+  // 3. Torso / Clothing zone (ny: 0.25 to 0.70)
+  const torsoPixels = pixels.filter((p) => p.ny > 0.25 && p.ny <= 0.70);
+  let primaryClothing = '#2e4e3f';
+  let secondaryClothing = '#3d6350';
+  let leather = '#4a3321';
+  let metal = '#c2a649';
+
+  if (torsoPixels.length > 10) {
+    const sortedByLuma = [...torsoPixels].sort(
+      (a, b) => 0.299 * a.r + 0.587 * a.g + 0.114 * a.b - (0.299 * b.r + 0.587 * b.g + 0.114 * b.b)
+    );
+    const medianIdx = Math.floor(sortedByLuma.length / 2);
+    const midSample = sortedByLuma.slice(Math.max(0, medianIdx - 10), Math.min(sortedByLuma.length, medianIdx + 10));
+    const pR = midSample.reduce((s, p) => s + p.r, 0) / midSample.length;
+    const pG = midSample.reduce((s, p) => s + p.g, 0) / midSample.length;
+    const pB = midSample.reduce((s, p) => s + p.b, 0) / midSample.length;
+    primaryClothing = rgbToHex(pR, pG, pB);
+
+    const leatherCandidates = torsoPixels.filter(
+      (p) => p.r > p.b && p.r < 140 && p.g < 110 && p.r - p.g < 50
+    );
+    if (leatherCandidates.length > 5) {
+      const lR = leatherCandidates.reduce((s, p) => s + p.r, 0) / leatherCandidates.length;
+      const lG = leatherCandidates.reduce((s, p) => s + p.g, 0) / leatherCandidates.length;
+      const lB = leatherCandidates.reduce((s, p) => s + p.b, 0) / leatherCandidates.length;
+      leather = rgbToHex(lR, lG, lB);
+    }
+
+    const metalCandidates = torsoPixels.filter(
+      (p) => (p.r > 160 && p.g > 140 && p.b < 120) || (p.r > 180 && p.g > 180 && p.b > 180)
+    );
+    if (metalCandidates.length > 5) {
+      const mR = metalCandidates.reduce((s, p) => s + p.r, 0) / metalCandidates.length;
+      const mG = metalCandidates.reduce((s, p) => s + p.g, 0) / metalCandidates.length;
+      const mB = metalCandidates.reduce((s, p) => s + p.b, 0) / metalCandidates.length;
+      metal = rgbToHex(mR, mG, mB);
+    }
+  }
+
+  return {
+    skin,
+    hair,
+    primaryClothing,
+    secondaryClothing,
+    leather,
+    metal,
+    weaponWood: leather,
+    weaponAccent: '#e5e7eb',
+    primaryColor,
+    secondaryColor,
+    accentColor,
+    dominantColors,
+  };
+}
+
 export async function extractMaskFromImageUrl(
   imageUrl: string,
   maxDim = 512
-): Promise<{ mask: SilhouetteMask; metrics: SilhouetteMetrics; canvasDataUrl: string }> {
+): Promise<{ mask: SilhouetteMask; metrics: SilhouetteMetrics; palette: ExtractedPalette; canvasDataUrl: string }> {
   return new Promise((resolve, reject) => {
     if (typeof Image === 'undefined') {
       reject(new Error('Image is not defined in this environment.'));
@@ -363,7 +717,8 @@ export async function extractMaskFromImageUrl(
       const imgData = ctx.getImageData(0, 0, w, h);
       const mask = extractMaskFromRgba(imgData.data, w, h);
       const metrics = measureSilhouette(mask);
-      resolve({ mask, metrics, canvasDataUrl: canvas.toDataURL('image/png') });
+      const palette = extractPaletteFromRgba(imgData.data, w, h, mask);
+      resolve({ mask, metrics, palette, canvasDataUrl: canvas.toDataURL('image/png') });
     };
     img.onerror = () => reject(new Error('Failed to load image for silhouette extraction'));
     img.src = imageUrl;

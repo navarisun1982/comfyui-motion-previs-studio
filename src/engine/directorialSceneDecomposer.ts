@@ -18,6 +18,7 @@ import {
   CameraMovementType,
   MovementSpeed,
 } from '../types/shotspec';
+import { SculptSpec, lookupSculptSpec } from './procedural3D/sculptSpec';
 
 export type LightingContrast = 'soft' | 'balanced' | 'high-contrast';
 
@@ -40,6 +41,7 @@ export interface DecomposedActor {
   scale: number;
   stagePosition: { x: number; y: number }; // 0-100 percentage coordinates
   actionDescription: string;
+  sculpt?: SculptSpec;
 }
 
 export interface DecomposedScene {
@@ -270,6 +272,84 @@ export function decomposeDirectorialScene(prompt: string): DecomposedScene {
   // -------------------------------------------------------------------------
   const extractedActors: DecomposedActor[] = [];
 
+  // Coiled Snake Ring / Jewelry / Hollow Ring (Torus)
+  if (/snake\s*ring|gold\s*ring|diamond\s*ring|ring\b|jewelry|jewellery|finger\s*ring|band\s*ring/i.test(lower) || /(خاتم|دبلة|محبس|مجوهرات|سوار)/.test(lower)) {
+    extractedActors.push({
+      name: 'Coiled Snake Ring',
+      kind: 'prop',
+      tokenPrompt: 'a hollow coiled serpent band ring crafted in mirror-polished gold with diamond pave scales and emerald eyes',
+      scale: 0.8,
+      stagePosition: { x: 50, y: 50 },
+      actionDescription: 'Gleaming hollow gold serpent ring resting on presentation pedestal',
+    });
+  }
+
+  // Sports Car / Modern Supercar / Vehicle
+  if (/sports\s*car|supercar|racecar|hypercar|formula|gt\s*car/i.test(lower) || /(سيارة\s*رياضية|سيارة\s*سباق)/.test(lower)) {
+    extractedActors.push({
+      name: 'Sports Car',
+      kind: 'vehicle',
+      tokenPrompt: 'a high-performance aerodynamic supercar with sculpted rosso chassis, carbon fiber ground effects, aerodynamic cockpit canopy, and 4 alloy wheels',
+      scale: 1.8,
+      stagePosition: { x: 50, y: 50 },
+      actionDescription: 'Gleaming sports car chassis parked on reflective ground',
+    });
+  } else if (/car|automobile|vehicle|truck|sedan|مركبة|سيارة/i.test(lower) && !extractedActors.some((a) => a.kind === 'vehicle')) {
+    extractedActors.push({
+      name: 'Automobile',
+      kind: 'vehicle',
+      tokenPrompt: 'a sleek cinematic automobile with glossy metallic paint, chrome trim, and detailed headlamps',
+      scale: 1.8,
+      stagePosition: { x: 50, y: 50 },
+      actionDescription: 'Gleaming vehicle chassis parked on wet reflective ground',
+    });
+  }
+
+  // Modern Ergonomic Office Chair / Executive Furniture
+  if (/office\s*chair|desk\s*chair|ergonomic\s*chair|executive\s*chair|swivel\s*chair/i.test(lower) || /(كرسي\s*مكتب|كرسي\s*مريح|كرسي\s*دوار)/.test(lower)) {
+    extractedActors.push({
+      name: 'Office Chair',
+      kind: 'prop',
+      tokenPrompt: 'an ergonomic executive desk chair featuring a five-star polished aluminum caster base, gas lift, contoured seat, breathable mesh backrest, and headrest',
+      scale: 1.3,
+      stagePosition: { x: 50, y: 45 },
+      actionDescription: 'Modern ergonomic office chair with breathable mesh lumbar support',
+    });
+  } else if (/armchair|chesterfield|leather\s*chair|sofa|couch|كرسي|اريكة/i.test(lower) && !extractedActors.some((a) => a.name.includes('Chair'))) {
+    extractedActors.push({
+      name: 'Leather Armchair',
+      kind: 'prop',
+      tokenPrompt: 'a classic tufted leather armchair with dark mahogany wooden legs and brass nailhead trim',
+      scale: 1.3,
+      stagePosition: { x: 65, y: 45 },
+      actionDescription: 'Stationary plush leather armchair facing warm hearth',
+    });
+  }
+
+  // Forged Longsword / Hero Weapon / Blade
+  if (/longsword|broadsword|steel\s*sword|sword|blade|katana|medieval\s*sword/i.test(lower) || /(سيف|نصل)/.test(lower)) {
+    extractedActors.push({
+      name: 'Forged Longsword',
+      kind: 'prop',
+      tokenPrompt: 'a double-edged high-carbon forged steel longsword with tapered blade, central blood fuller, arched brass crossguard with quillon finials, and wheel pommel',
+      scale: 1.4,
+      stagePosition: { x: 50, y: 45 },
+      actionDescription: 'Gleaming forged steel longsword with brass quillons',
+    });
+  }
+
+  // Glass Wine Bottle / Translucent Vessel / Flask
+  if (/wine\s*bottle|glass\s*bottle|potion\s*flask|potion\s*bottle|bottle\b|flask\b/i.test(lower) || /(زجاجة|قارورة|قنينة)/.test(lower)) {
+    extractedActors.push({
+      name: 'Glass Wine Bottle',
+      kind: 'prop',
+      tokenPrompt: 'a translucent antique green glass Bordeaux wine bottle with punt base, cylindrical body, tapered shoulder, slender neck, gold foil capsule, and cork stopper',
+      scale: 0.8,
+      stagePosition: { x: 50, y: 50 },
+      actionDescription: 'Translucent green glass wine bottle with gold foil seal',
+    });
+  }
+
   // Fireplace Prop
   if (/fireplace|hearth|fire\s*box|مدفأة|موقد/i.test(lower)) {
     extractedActors.push({
@@ -294,20 +374,8 @@ export function decomposeDirectorialScene(prompt: string): DecomposedScene {
     });
   }
 
-  // Armchair / Chesterfield Sofa
-  if (/armchair|chesterfield|leather\s*chair|sofa|couch|كرسي|اريكة/i.test(lower)) {
-    extractedActors.push({
-      name: 'Leather Armchair',
-      kind: 'prop',
-      tokenPrompt: 'a classic tufted leather armchair with dark mahogany wooden legs and brass nailhead trim',
-      scale: 1.3,
-      stagePosition: { x: 65, y: 45 },
-      actionDescription: 'Stationary plush leather armchair facing warm hearth',
-    });
-  }
-
   // Desk / Study Table
-  if (/desk|study\s*table|writing\s*desk|مكتب|طاولة\s*كتابة/i.test(lower)) {
+  if (/desk|study\s*table|writing\s*desk|مكتب|طاولة\s*كتابة/i.test(lower) && !extractedActors.some((a) => a.name.includes('Chair'))) {
     extractedActors.push({
       name: 'Mahogany Writing Desk',
       kind: 'prop',
@@ -354,18 +422,6 @@ export function decomposeDirectorialScene(prompt: string): DecomposedScene {
     });
   }
 
-  // Automobile / Car
-  if (/car|automobile|vehicle|truck|sports\s*car|سيارة|مركبة/i.test(lower)) {
-    extractedActors.push({
-      name: 'Automobile',
-      kind: 'vehicle',
-      tokenPrompt: 'a sleek cinematic automobile with glossy metallic paint, chrome trim, and detailed headlamps',
-      scale: 1.8,
-      stagePosition: { x: 50, y: 50 },
-      actionDescription: 'Gleaming vehicle chassis parked on wet reflective ground',
-    });
-  }
-
   // Ancient Stone Well
   if (/stone\s*well|well\s*in|water\s*well|بئر/i.test(lower)) {
     extractedActors.push({
@@ -376,6 +432,52 @@ export function decomposeDirectorialScene(prompt: string): DecomposedScene {
       stagePosition: { x: 50, y: 45 },
       actionDescription: 'Ancient masonry well with mossy stone ring',
     });
+  }
+
+  // Human Characters (Archer, Detective)
+  if (/archer|bowman|hunter|رامي/i.test(lower)) {
+    extractedActors.push({
+      name: 'Tribal Archer Female',
+      kind: 'human',
+      tokenPrompt: 'a tribal scout archer female in layered linen tunic with leather quiver and recurve bow',
+      scale: 1.75,
+      stagePosition: { x: 50, y: 50 },
+      actionDescription: 'Standing ready with recurve hunting bow',
+    });
+  } else if (/detective|sherlock|investigator|محقق/i.test(lower)) {
+    extractedActors.push({
+      name: 'Detective Investigator',
+      kind: 'human',
+      tokenPrompt: 'a Victorian trench coat detective with tweed cap and magnifying glass',
+      scale: 1.7,
+      stagePosition: { x: 45, y: 50 },
+      actionDescription: 'Observing clue with trench coat',
+    });
+  }
+
+  // Universal fallback: extract focal subject if no cataloged actors matched
+  if (extractedActors.length === 0 && p.length > 2) {
+    const subjectMatch = p.match(/(?:a|an|the|this)\s+([a-zA-Z\s]{3,28}?)(?:\s+(?:on|in|with|at|under|near|beside|by|facing|driving|resting|placed)|\.|\,|$)/i);
+    const candidateName = subjectMatch ? subjectMatch[1].trim() : p.slice(0, 32).trim();
+    if (candidateName && candidateName.length >= 3 && !/^(shot|scene|view|close|wide|cinematic|lighting|studio)/i.test(candidateName)) {
+      const cleanName = candidateName.charAt(0).toUpperCase() + candidateName.slice(1);
+      extractedActors.push({
+        name: cleanName,
+        kind: 'prop',
+        tokenPrompt: p,
+        scale: 1.2,
+        stagePosition: { x: 50, y: 50 },
+        actionDescription: `Procedural 3D stage subject for "${cleanName}"`,
+      });
+    }
+  }
+
+  // Bind authentic SculptSpec directly to all extracted actors
+  for (const actor of extractedActors) {
+    const spec = lookupSculptSpec(actor.tokenPrompt) || lookupSculptSpec(actor.name);
+    if (spec) {
+      actor.sculpt = spec;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -443,3 +545,34 @@ export function decomposeDirectorialScene(prompt: string): DecomposedScene {
     summary,
   };
 }
+
+/**
+ * Asynchronously decomposes the scene and invokes the Object Reasoner / Synthesizer
+ * for any newly extracted or uncataloged actor, attaching a real SculptSpec to actor.sculpt.
+ */
+export async function decomposeDirectorialSceneWithReasoner(prompt: string): Promise<DecomposedScene> {
+  const scene = decomposeDirectorialScene(prompt);
+  for (const actor of scene.extractedActors) {
+    if (!actor.sculpt) {
+      try {
+        const { reasonObject } = await import('../services/objectReasoner');
+        const spec = await reasonObject(actor.tokenPrompt || actor.name);
+        if (spec && Array.isArray(spec.parts) && spec.parts.length >= 3) {
+          actor.sculpt = spec;
+        }
+      } catch {
+        try {
+          const { synthesizeRecipeFromImage } = await import('./procedural3D/imageToRecipe');
+          const synth = synthesizeRecipeFromImage({ name: actor.name, prompt: actor.tokenPrompt || actor.name });
+          if (synth && Array.isArray(synth.parts) && synth.parts.length >= 3) {
+            actor.sculpt = synth;
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+  return scene;
+}
+

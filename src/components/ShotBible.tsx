@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useShotStore } from '../stores/useShotStore';
 import { logger } from '../stores/useLogStore';
-import { ShotCreationMode, Actor, ShotSpec, createDefaultShotSpec, FocalLength } from '../types/shotspec';
+import { ShotCreationMode, Actor, ShotSpec, createDefaultShotSpec, FocalLength, CINEMATIC_ENVIRONMENT_PRESETS } from '../types/shotspec';
+import { compileReadyMadeMotionKeyframes } from '../engine/kinematics';
 import { safeGetItem, safeSetItem, safeRemoveItem, STORAGE_KEYS } from '../services/storage';
 import {
   ChevronDown,
@@ -11,14 +12,10 @@ import {
   MoreVertical,
   CheckCircle2,
   FolderOpen,
-  Box,
-  Video,
-  Sparkles,
-  X,
   Trash2,
   Copy,
   RotateCcw,
-  Film,
+  Edit3,
 } from 'lucide-react';
 
 export interface ShotBibleItem {
@@ -38,8 +35,70 @@ export interface SceneItem {
   shots: ShotBibleItem[];
 }
 
+function withMotion(
+  actor: Actor,
+  clipId: string,
+  durationSec: number,
+  travelMode: 'auto' | 'travel' | 'in-place' = 'auto'
+): Actor {
+  const startPos = {
+    x: actor.trajectory.startPosition.x ?? 50,
+    y: actor.trajectory.startPosition.y ?? 50,
+    z: 0,
+  };
+  const endPos = {
+    x: actor.trajectory.endPosition.x ?? startPos.x,
+    y: actor.trajectory.endPosition.y ?? startPos.y,
+    z: 0,
+  };
+  const hasExplicitTravelTarget =
+    travelMode === 'travel' && Math.hypot(endPos.x - startPos.x, endPos.y - startPos.y) > 0.5;
+
+  const compiled = compileReadyMadeMotionKeyframes(actor, clipId, {
+    startTimeSec: 0,
+    endTimeSec: durationSec,
+    startPosition: startPos,
+    targetPosition: hasExplicitTravelTarget ? endPos : undefined,
+    startRotation: actor.rotation,
+    travelMode,
+  });
+
+  // Ensure every keyframe stays grounded on the stage floor (z = 0) unless jumping
+  const groundedKeyframes = compiled.keyframes.map((kf) => ({
+    ...kf,
+    position: {
+      x: kf.position.x,
+      y: kf.position.y,
+      z: clipId === 'human-jump-leap' ? (kf.position.z ?? 0) : 0,
+    },
+  }));
+
+  return {
+    ...actor,
+    actionDescription: actor.actionDescription || compiled.clip.promptPhrase,
+    motionClip: compiled.clip.id,
+    gait: compiled.clip.baseGait ?? 'none',
+    posePreset: compiled.clip.basePosePreset,
+    rotation: compiled.endRotation,
+    trajectory: {
+      ...actor.trajectory,
+      startPosition:
+        groundedKeyframes.length > 0 ? groundedKeyframes[0].position : startPos,
+      endPosition:
+        groundedKeyframes.length > 0
+          ? groundedKeyframes[groundedKeyframes.length - 1].position
+          : { ...compiled.endPosition, z: 0 },
+      keyframes: groundedKeyframes,
+    },
+  };
+}
+
+function getEnvPreset(id: string) {
+  return CINEMATIC_ENVIRONMENT_PRESETS.find((p) => p.id === id)?.spec || CINEMATIC_ENVIRONMENT_PRESETS[0].spec;
+}
+
 export const buildDefaultShotSpec = (shotItem: ShotBibleItem): ShotSpec => {
-  const fullTitle = `${shotItem.code} ${shotItem.title}`;
+  const fullTitle = shotItem.code;
   const durNumber = Math.min(15, Math.max(1, parseInt(shotItem.duration, 10) || 4));
   const parsedFocal = parseInt(shotItem.focalLength, 10);
   const validFocals: FocalLength[] = ['18mm', '24mm', '35mm', '50mm', '85mm', '135mm'];
@@ -52,516 +111,1365 @@ export const buildDefaultShotSpec = (shotItem: ShotBibleItem): ShotSpec => {
   const baseSpec = createDefaultShotSpec({
     id: shotItem.id,
     name: fullTitle,
-    creationMode: shotItem.mode || 'construct-3d',
-    durationSeconds: durNumber,
   });
-
+  baseSpec.durationSeconds = durNumber;
+  baseSpec.aspectRatio = '16:9';
   baseSpec.camera.lens.focalLength = focalLength;
 
+  // ==========================================================================
+  // SCENE 01: NEON PROTOCOL (Cyberpunk Neo-Noir Action)
+  // ==========================================================================
   if (shotItem.id === 'shot-01a') {
+    baseSpec.environment = getEnvPreset('env-cyberpunk-alley');
     baseSpec.camera.movement.type = 'dolly-in';
     baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 50, y: 85, z: 20 };
-    baseSpec.camera.movement.endPosition = { x: 50, y: 55, z: 20 };
+    baseSpec.camera.movement.startPosition = { x: 50, y: 78, z: 10 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 66, z: 9 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 48 };
     baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'medium';
-    baseSpec.lighting = { style: 'low-key-film-noir', direction: 'rim-backlit', contrast: 'balanced' };
-    const det: Actor = {
-      id: 'actor-det',
-      name: 'Lead Detective',
-      kind: 'human',
-      token: 'a seasoned detective in a dark trench coat',
-      actionDescription: 'walking forward through the damp rain',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 50 }, endPosition: { x: 50, y: 50 } },
+    baseSpec.camera.shotType = 'medium-wide';
+    baseSpec.lighting = {
+      style: 'neon-cyberpunk',
+      direction: 'side-key',
+      contrast: 'high-contrast',
+      lights: [
+        { id: 'lgt-1', name: 'Cyan Alley Key', position: { x: 26, y: 58, z: 48 }, color: '#38bdf8', intensity: 3.4, enabled: true },
+        { id: 'lgt-2', name: 'Magenta Neon Fill', position: { x: 74, y: 56, z: 44 }, color: '#ec4899', intensity: 3.0, enabled: true },
+        { id: 'lgt-3', name: 'Warm Streetlamp Rim', position: { x: 50, y: 26, z: 62 }, color: '#fbbf24', intensity: 2.8, enabled: true },
+      ],
     };
-    baseSpec.actors = [det];
-    baseSpec.sceneDescription = 'A lone detective walking through a rain-slicked alleyway under flickering neon signs.';
-    baseSpec.creationMode = 'video-plate';
+
+    // Agent Kael walks forward toward the camera down the center of the alley (y: 36 -> 54, facing +Z = 0 deg)
+    const kael = withMotion(
+      {
+        id: 'actor-kael',
+        name: 'Agent Kael',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'cyberpunk operative in a charcoal trenchcoat walking forward down a neon-lit alley',
+        actionDescription: 'walks forward with a natural steady stride down the neon alley',
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 36, z: 0 }, endPosition: { x: 50, y: 54, z: 0 } },
+      },
+      'human-walk-forward',
+      durNumber,
+      'travel'
+    );
+    const interceptorCar = withMotion(
+      {
+        id: 'veh-interceptor',
+        name: 'Interceptor Coupe',
+        kind: 'car',
+        color: '#06b6d4',
+        scale: 1.0,
+        token: 'sleek cyberpunk sports car parked on the left side of the alley',
+        actionDescription: 'idles in place with glowing cyan headlights',
+        rotation: { x: 0, y: 25, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 34, y: 44, z: 0 }, endPosition: { x: 34, y: 44, z: 0 } },
+      },
+      'veh-idle-rumble',
+      durNumber,
+      'in-place'
+    );
+    const cyberPine: Actor = {
+      id: 'env-cyber-pine',
+      name: 'Street Planter Tree',
+      kind: 'tree',
+      color: '#10b981',
+      scale: 0.9,
+      token: 'sculpted urban street tree on the right sidewalk',
+      actionDescription: 'framing the right side of the alley',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 66, y: 42, z: 0 }, endPosition: { x: 66, y: 42, z: 0 } },
+    };
+
+    baseSpec.actors = [kael, interceptorCar, cyberPine];
+    baseSpec.sceneDescription =
+      'Cinematic dolly-in down a neon-lit cyberpunk alley as Agent Kael walks purposefully toward the camera past his parked Interceptor Coupe.';
     return baseSpec;
   }
 
   if (shotItem.id === 'shot-01b') {
-    baseSpec.camera.movement.type = 'pan-right';
-    baseSpec.camera.movement.speed = 'moderate';
-    baseSpec.camera.movement.startPosition = { x: 40, y: 70, z: 25 };
-    baseSpec.camera.movement.endPosition = { x: 60, y: 70, z: 25 };
+    baseSpec.environment = getEnvPreset('env-cyberpunk-alley');
+    baseSpec.camera.movement.type = 'orbit-clockwise';
+    baseSpec.camera.movement.speed = 'slow-cinematic';
+    baseSpec.camera.movement.startPosition = { x: 50, y: 62, z: 10 };
+    baseSpec.camera.movement.endPosition = { x: 60, y: 56, z: 10 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 50 };
     baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'wide';
-    baseSpec.lighting = { style: 'neon-cyberpunk', direction: 'side-key', contrast: 'balanced' };
-    const det: Actor = {
-      id: 'actor-det',
-      name: 'Lead Detective',
-      kind: 'human',
-      token: 'a detective scanning the sidewalk',
-      actionDescription: 'pauses and turns right',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 45, y: 48 }, endPosition: { x: 45, y: 48 } },
+    baseSpec.camera.shotType = 'medium-close-up';
+    baseSpec.lighting = {
+      style: 'neon-cyberpunk',
+      direction: 'side-key',
+      contrast: 'balanced',
+      lights: [
+        { id: 'lgt-1', name: 'Hologram Table Glow', position: { x: 50, y: 60, z: 36 }, color: '#38bdf8', intensity: 3.4, enabled: true },
+        { id: 'lgt-2', name: 'Magenta Key Right', position: { x: 72, y: 50, z: 48 }, color: '#a855f7', intensity: 3.0, enabled: true },
+        { id: 'lgt-3', name: 'Alley Backlight', position: { x: 50, y: 28, z: 58 }, color: '#f59e0b', intensity: 2.6, enabled: true },
+      ],
     };
-    const tree: Actor = {
-      id: 'actor-tree-1',
-      name: 'Urban Tree',
-      kind: 'tree',
-      token: 'a stylized wet pine tree on the curb',
-      actionDescription: 'swaying gently in the city breeze',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 65, y: 45 }, endPosition: { x: 65, y: 45 } },
+
+    const kael = withMotion(
+      {
+        id: 'actor-kael',
+        name: 'Agent Kael',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'cyberpunk operative standing on the left side of the terminal table',
+        actionDescription: 'scans the surroundings alertly during the informant meeting',
+        rotation: { x: 0, y: 90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 42, y: 50, z: 0 }, endPosition: { x: 42, y: 50, z: 0 } },
+      },
+      'human-look-search',
+      durNumber,
+      'in-place'
+    );
+    const cipher = withMotion(
+      {
+        id: 'actor-cipher',
+        name: 'Cipher Informant',
+        kind: 'human',
+        color: '#a855f7',
+        token: 'hooded informant standing on the right side of the table',
+        actionDescription: 'signals and gestures toward Agent Kael across the table',
+        rotation: { x: 0, y: -90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 58, y: 50, z: 0 }, endPosition: { x: 58, y: 50, z: 0 } },
+      },
+      'human-wave-greet',
+      durNumber,
+      'in-place'
+    );
+    const holoTable: Actor = {
+      id: 'prop-holo-table',
+      name: 'Holo-Terminal Table',
+      kind: 'table',
+      color: '#06b6d4',
+      scale: 0.9,
+      token: 'sleek briefing table between the two operatives',
+      actionDescription: 'positioned at center stage between Kael and Cipher',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 50, z: 0 }, endPosition: { x: 50, y: 50, z: 0 } },
     };
-    baseSpec.actors = [det, tree];
-    baseSpec.sceneDescription = 'Cyberpunk urban sidewalk with wet asphalt and holographic reflections.';
+
+    baseSpec.actors = [kael, cipher, holoTable];
+    baseSpec.sceneDescription =
+      'Smooth 50mm orbital camera move around Agent Kael and the Cipher Informant as they exchange intelligence across a central briefing table.';
     return baseSpec;
   }
 
   if (shotItem.id === 'shot-01c') {
+    baseSpec.environment = getEnvPreset('env-cyberpunk-alley');
     baseSpec.camera.movement.type = 'dolly-in';
-    baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 50, y: 90, z: 15 };
-    baseSpec.camera.movement.endPosition = { x: 50, y: 40, z: 15 };
-    baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'close-up';
-    baseSpec.lighting = { style: 'cinematic-natural', direction: 'side-key', contrast: 'balanced' };
-    const det: Actor = {
-      id: 'actor-det',
-      name: 'Lead Detective',
-      kind: 'human',
-      token: 'detective with focused piercing eyes',
-      actionDescription: 'stares directly into camera',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 50 }, endPosition: { x: 50, y: 50 } },
+    baseSpec.camera.movement.speed = 'rapid-dynamic';
+    baseSpec.camera.movement.startPosition = { x: 50, y: 76, z: 10 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 62, z: 9 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 48 };
+    baseSpec.camera.angle = 'dutch-angle';
+    baseSpec.camera.shotType = 'medium-wide';
+    baseSpec.lighting = {
+      style: 'neon-cyberpunk',
+      direction: 'overhead-top',
+      contrast: 'high-contrast',
+      lights: [
+        { id: 'lgt-1', name: 'Searchlight Beam', position: { x: 50, y: 55, z: 68 }, color: '#f43f5e', intensity: 3.5, enabled: true },
+        { id: 'lgt-2', name: 'Cyan Rim Fill', position: { x: 28, y: 44, z: 45 }, color: '#06b6d4', intensity: 3.0, enabled: true },
+      ],
     };
-    baseSpec.actors = [det];
-    baseSpec.sceneDescription = "Intense close-up of detective's focused eyes as headlights sweep across the face.";
+
+    const kael = withMotion(
+      {
+        id: 'actor-kael',
+        name: 'Agent Kael',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'operative in tactical stance aiming forward during ambush',
+        actionDescription: 'raises weapon in a tactical stance and fires with recoil',
+        rotation: { x: 0, y: 0, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 44, y: 48, z: 0 }, endPosition: { x: 44, y: 48, z: 0 } },
+      },
+      'human-aim-fire',
+      durNumber,
+      'in-place'
+    );
+    const cipher = withMotion(
+      {
+        id: 'actor-cipher',
+        name: 'Cipher Informant',
+        kind: 'human',
+        color: '#a855f7',
+        token: 'informant sneaking forward into cover on the right flank',
+        actionDescription: 'sneaks forward in a low cautious stealth crouch',
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 58, y: 42, z: 0 }, endPosition: { x: 58, y: 54, z: 0 } },
+      },
+      'human-sneak-prowl',
+      durNumber,
+      'travel'
+    );
+    const barricade: Actor = {
+      id: 'prop-barricade',
+      name: 'Security Barricade',
+      kind: 'monolith',
+      color: '#eab308',
+      scale: 0.75,
+      token: 'armored security pillar providing tactical cover',
+      actionDescription: 'standing on stage left',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 34, y: 46, z: 0 }, endPosition: { x: 34, y: 46, z: 0 } },
+    };
+
+    baseSpec.actors = [kael, cipher, barricade];
+    baseSpec.sceneDescription =
+      'Dynamic Dutch-angle push-in as crimson searchlights sweep the alley; Agent Kael holds tactical cover while Cipher sneaks forward along the flank.';
     return baseSpec;
   }
 
   if (shotItem.id === 'shot-01d') {
-    baseSpec.camera.movement.type = 'pedestal-up';
-    baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 50, y: 75, z: 5 };
-    baseSpec.camera.movement.endPosition = { x: 50, y: 75, z: 35 };
+    baseSpec.environment = getEnvPreset('env-cyberpunk-alley');
+    baseSpec.camera.movement.type = 'truck-right';
+    baseSpec.camera.movement.speed = 'rapid-dynamic';
+    baseSpec.camera.movement.startPosition = { x: 42, y: 70, z: 8 };
+    baseSpec.camera.movement.endPosition = { x: 58, y: 70, z: 8 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 50 };
     baseSpec.camera.angle = 'low-angle';
-    baseSpec.camera.shotType = 'medium-wide';
-    baseSpec.lighting = { style: 'low-key-film-noir', direction: 'underlit-dramatic', contrast: 'balanced' };
-    const det: Actor = {
-      id: 'actor-det',
-      name: 'Lead Detective',
-      kind: 'human',
-      token: 'detective standing over shipping crates',
-      actionDescription: 'observing the freight yard',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 48, y: 50 }, endPosition: { x: 48, y: 50 } },
+    baseSpec.camera.shotType = 'medium';
+    baseSpec.lighting = {
+      style: 'neon-cyberpunk',
+      direction: 'rim-backlit',
+      contrast: 'high-contrast',
+      lights: [
+        { id: 'lgt-1', name: 'Crimson Duel Rim', position: { x: 64, y: 42, z: 48 }, color: '#ec4899', intensity: 3.5, enabled: true },
+        { id: 'lgt-2', name: 'Cyan Duel Key', position: { x: 36, y: 58, z: 45 }, color: '#06b6d4', intensity: 3.2, enabled: true },
+      ],
     };
-    const crate: Actor = {
-      id: 'prop-crate',
-      name: 'Cargo Crate',
-      kind: 'prop',
-      token: 'industrial shipping freight container',
-      actionDescription: 'stacked on the warehouse tarmac',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 58, y: 52 }, endPosition: { x: 58, y: 52 } },
-    };
-    baseSpec.actors = [det, crate];
-    baseSpec.sceneDescription = 'Low angle looking up from the alley floor past industrial cargo crates.';
+
+    const kael = withMotion(
+      {
+        id: 'actor-kael',
+        name: 'Agent Kael',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'cyberpunk operative throwing a martial arts punch combo',
+        actionDescription: 'throws a rapid martial arts jab and cross punch combination',
+        rotation: { x: 0, y: 90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 44, y: 50, z: 0 }, endPosition: { x: 44, y: 50, z: 0 } },
+      },
+      'human-combo-punch',
+      durNumber,
+      'in-place'
+    );
+    const ronin = withMotion(
+      {
+        id: 'actor-ronin',
+        name: 'Ronin Enforcer',
+        kind: 'human',
+        color: '#ef4444',
+        token: 'armored syndicate warrior swinging a diagonal weapon slash',
+        actionDescription: 'lunges forward and swings a powerful diagonal weapon slash',
+        rotation: { x: 0, y: -90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 56, y: 50, z: 0 }, endPosition: { x: 56, y: 50, z: 0 } },
+      },
+      'human-sword-slash',
+      durNumber,
+      'in-place'
+    );
+
+    baseSpec.actors = [kael, ronin];
+    baseSpec.sceneDescription =
+      'Low-angle lateral tracking shot across wet neon asphalt as Agent Kael and the Ronin Enforcer clash in close-quarters combat at center stage.';
     return baseSpec;
   }
 
   if (shotItem.id === 'shot-01e') {
-    baseSpec.camera.movement.type = 'truck-right';
-    baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 35, y: 65, z: 20 };
-    baseSpec.camera.movement.endPosition = { x: 65, y: 65, z: 20 };
-    baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'medium';
-    baseSpec.lighting = { style: 'cinematic-natural', direction: 'rim-backlit', contrast: 'balanced' };
-    const det: Actor = {
-      id: 'actor-det',
-      name: 'Detective',
-      kind: 'human',
-      token: 'detective holding confidential envelope',
-      actionDescription: 'facing informant',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 40, y: 50 }, endPosition: { x: 40, y: 50 } },
+    baseSpec.environment = getEnvPreset('env-cyberpunk-alley');
+    baseSpec.camera.movement.type = 'truck-left';
+    baseSpec.camera.movement.speed = 'rapid-dynamic';
+    baseSpec.camera.movement.startPosition = { x: 62, y: 78, z: 12 };
+    baseSpec.camera.movement.endPosition = { x: 38, y: 78, z: 12 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 50 };
+    baseSpec.camera.angle = 'low-angle';
+    baseSpec.camera.shotType = 'wide';
+    baseSpec.lighting = {
+      style: 'neon-cyberpunk',
+      direction: 'side-key',
+      contrast: 'high-contrast',
+      lights: [
+        { id: 'lgt-1', name: 'Expressway Arc Key', position: { x: 50, y: 55, z: 65 }, color: '#fbbf24', intensity: 3.4, enabled: true },
+        { id: 'lgt-2', name: 'Cyan Street Fill', position: { x: 32, y: 60, z: 45 }, color: '#38bdf8', intensity: 3.0, enabled: true },
+      ],
     };
-    const inf: Actor = {
-      id: 'actor-inf',
-      name: 'Informant',
-      kind: 'human',
-      token: 'mysterious informant in dark leather jacket',
-      actionDescription: 'whispering confidential intel',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 60, y: 50 }, endPosition: { x: 60, y: 50 } },
-    };
-    baseSpec.actors = [det, inf];
-    baseSpec.sceneDescription = 'Two figures meeting in shadow, silhouettes rimmed in sodium vapor light.';
+
+    const heroCar = withMotion(
+      {
+        id: 'veh-hero-interceptor',
+        name: 'Kael Interceptor',
+        kind: 'car',
+        color: '#3b82f6',
+        scale: 1.05,
+        token: 'pursuit interceptor sports car launching forward down the expressway',
+        actionDescription: 'launches forward at full throttle down the left lane',
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 42, y: 36, z: 0 }, endPosition: { x: 42, y: 58, z: 0 } },
+      },
+      'veh-accel-launch',
+      durNumber,
+      'travel'
+    );
+    const syndicateCar = withMotion(
+      {
+        id: 'veh-syndicate-sedan',
+        name: 'Syndicate Chase Sedan',
+        kind: 'car',
+        color: '#ef4444',
+        scale: 1.05,
+        token: 'syndicate pursuit sedan racing alongside in the right lane',
+        actionDescription: 'drives forward at high speed in pursuit',
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 58, y: 34, z: 0 }, endPosition: { x: 58, y: 56, z: 0 } },
+      },
+      'veh-drive-cruise',
+      durNumber,
+      'travel'
+    );
+
+    baseSpec.actors = [heroCar, syndicateCar];
+    baseSpec.sceneDescription =
+      'High-speed 24mm lateral tracking shot as Agent Kael Interceptor launches at full throttle alongside a pursuing Syndicate Sedan.';
     return baseSpec;
   }
 
+  if (shotItem.id === 'shot-01f') {
+    baseSpec.environment = getEnvPreset('env-modern-penthouse');
+    baseSpec.camera.movement.type = 'dolly-out';
+    baseSpec.camera.movement.speed = 'slow-cinematic';
+    baseSpec.camera.movement.startPosition = { x: 50, y: 68, z: 10 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 82, z: 13 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 48 };
+    baseSpec.camera.angle = 'eye-level';
+    baseSpec.camera.shotType = 'medium-wide';
+    baseSpec.lighting = {
+      style: 'golden-hour',
+      direction: 'rim-backlit',
+      contrast: 'balanced',
+      lights: [
+        { id: 'lgt-1', name: 'Dawn Horizon Gold', position: { x: 50, y: 24, z: 58 }, color: '#f59e0b', intensity: 3.5, enabled: true },
+        { id: 'lgt-2', name: 'Penthouse Warm Key', position: { x: 35, y: 66, z: 46 }, color: '#fde047', intensity: 2.8, enabled: true },
+      ],
+    };
+
+    const kael = withMotion(
+      {
+        id: 'actor-kael',
+        name: 'Agent Kael',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'operative standing on the penthouse floor signaling extraction',
+        actionDescription: 'raises one hand high and waves toward extraction',
+        rotation: { x: 0, y: 0, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 44, y: 50, z: 0 }, endPosition: { x: 44, y: 50, z: 0 } },
+      },
+      'human-wave-greet',
+      durNumber,
+      'in-place'
+    );
+    const cipher = withMotion(
+      {
+        id: 'actor-cipher',
+        name: 'Cipher Informant',
+        kind: 'human',
+        color: '#a855f7',
+        token: 'ally standing calmly beside Kael at dawn',
+        actionDescription: 'stands naturally with subtle breathing watching the horizon',
+        rotation: { x: 0, y: 0, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 56, y: 50, z: 0 }, endPosition: { x: 56, y: 50, z: 0 } },
+      },
+      'human-idle-breathe',
+      durNumber,
+      'in-place'
+    );
+    const loungeTable: Actor = {
+      id: 'prop-penthouse-table',
+      name: 'Penthouse Console Table',
+      kind: 'table',
+      color: '#eab308',
+      scale: 0.95,
+      token: 'designer glass-and-walnut console table in the penthouse',
+      actionDescription: 'placed behind the operatives',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 40, z: 0 }, endPosition: { x: 50, y: 40, z: 0 } },
+    };
+
+    baseSpec.actors = [kael, cipher, loungeTable];
+    baseSpec.sceneDescription =
+      'Sweeping 85mm dolly-out across the sunlit Minimalist Penthouse as Agent Kael and Cipher complete the mission at golden hour.';
+    return baseSpec;
+  }
+
+  // ==========================================================================
+  // SCENE 02: CHRONOS RELIC (Epic Adventure & Sci-Fi Worldbuilding)
+  // ==========================================================================
   if (shotItem.id === 'shot-02a') {
-    baseSpec.camera.movement.type = 'truck-right';
-    baseSpec.camera.movement.speed = 'rapid-dynamic';
-    baseSpec.camera.movement.startPosition = { x: 30, y: 70, z: 20 };
-    baseSpec.camera.movement.endPosition = { x: 70, y: 70, z: 20 };
+    baseSpec.environment = getEnvPreset('env-desert-dunes');
+    baseSpec.camera.movement.type = 'pedestal-down';
+    baseSpec.camera.movement.speed = 'moderate';
+    baseSpec.camera.movement.startPosition = { x: 50, y: 80, z: 20 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 68, z: 10 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 46 };
     baseSpec.camera.angle = 'eye-level';
     baseSpec.camera.shotType = 'wide';
-    baseSpec.lighting = { style: 'golden-hour', direction: 'side-key', contrast: 'balanced' };
-    const car1: Actor = {
-      id: 'car-1',
-      name: 'Hero Interceptor',
-      kind: 'car',
-      token: 'matte black pursuit interceptor muscle car',
-      actionDescription: 'accelerating aggressively',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 42, y: 55 }, endPosition: { x: 42, y: 38 } },
+    baseSpec.lighting = {
+      style: 'golden-hour',
+      direction: 'side-key',
+      contrast: 'balanced',
+      lights: [
+        { id: 'lgt-1', name: 'Saharan Sun Key', position: { x: 75, y: 40, z: 68 }, color: '#f59e0b', intensity: 3.6, enabled: true },
+        { id: 'lgt-2', name: 'Warm Sand Bounce', position: { x: 30, y: 64, z: 38 }, color: '#fde047', intensity: 2.8, enabled: true },
+      ],
     };
-    const car2: Actor = {
-      id: 'car-2',
-      name: 'Fleeing Sedan',
-      kind: 'car',
-      token: 'silver getaway sedan with smoking tires',
-      actionDescription: 'swerving to evade pursuit',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 58, y: 65 }, endPosition: { x: 58, y: 48 } },
+
+    const scout = withMotion(
+      {
+        id: 'actor-aria',
+        name: 'Explorer Aria',
+        kind: 'human',
+        color: '#10b981',
+        token: 'expedition archaeologist running forward across golden desert dunes',
+        actionDescription: 'runs forward in an energetic sprint toward the foreground',
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 44, y: 38, z: 0 }, endPosition: { x: 44, y: 56, z: 0 } },
+      },
+      'human-run-sprint',
+      durNumber,
+      'travel'
+    );
+    const duneBuggy = withMotion(
+      {
+        id: 'veh-dune-buggy',
+        name: 'Nomad Dune Buggy',
+        kind: 'car',
+        color: '#eab308',
+        scale: 1.05,
+        token: 'rugged desert expedition rover driving across the sand dunes',
+        actionDescription: 'drives forward smoothly across the golden desert',
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 58, y: 36, z: 0 }, endPosition: { x: 58, y: 54, z: 0 } },
+      },
+      'veh-drive-cruise',
+      durNumber,
+      'travel'
+    );
+    const obelisk: Actor = {
+      id: 'env-desert-obelisk',
+      name: 'Ancient Solar Obelisk',
+      kind: 'monolith',
+      color: '#a855f7',
+      scale: 1.3,
+      token: 'ancient weathered stone obelisk rising from the desert floor',
+      actionDescription: 'standing monumentally in the background center',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 28, z: 0 }, endPosition: { x: 50, y: 28, z: 0 } },
     };
-    baseSpec.actors = [car1, car2];
-    baseSpec.sceneDescription = 'Two high-speed vehicles tearing down a wide coastal highway in low golden sunset.';
+
+    baseSpec.actors = [scout, duneBuggy, obelisk];
+    baseSpec.sceneDescription =
+      'Sweeping 18mm crane descent over the Vast Saharan Dunes as Explorer Aria and the Nomad Dune Buggy advance from the Ancient Solar Obelisk.';
     return baseSpec;
   }
 
   if (shotItem.id === 'shot-02b') {
-    baseSpec.camera.movement.type = 'dolly-in';
-    baseSpec.camera.movement.speed = 'moderate';
-    baseSpec.camera.movement.startPosition = { x: 50, y: 80, z: 12 };
-    baseSpec.camera.movement.endPosition = { x: 50, y: 50, z: 12 };
-    baseSpec.camera.angle = 'low-angle';
+    baseSpec.environment = getEnvPreset('env-misty-forest');
+    baseSpec.camera.movement.type = 'pan-right';
+    baseSpec.camera.movement.speed = 'slow-cinematic';
+    baseSpec.camera.movement.startPosition = { x: 50, y: 74, z: 10 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 70, z: 10 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 46 };
+    baseSpec.camera.angle = 'eye-level';
     baseSpec.camera.shotType = 'medium-wide';
-    baseSpec.lighting = { style: 'golden-hour', direction: 'overhead-top', contrast: 'balanced' };
-    const carLead: Actor = {
-      id: 'car-lead',
-      name: 'Fleeing Sedan',
-      kind: 'car',
-      token: 'silver getaway sedan braking hard',
-      actionDescription: 'approaching roadblock obstacle',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 68 }, endPosition: { x: 50, y: 48 } },
+    baseSpec.lighting = {
+      style: 'moonlight-foggy',
+      direction: 'overhead-top',
+      contrast: 'balanced',
+      lights: [
+        { id: 'lgt-1', name: 'Forest Canopy Key', position: { x: 46, y: 54, z: 65 }, color: '#93c5fd', intensity: 3.4, enabled: true },
+        { id: 'lgt-2', name: 'Emerald Shrine Glow', position: { x: 54, y: 42, z: 38 }, color: '#10b981', intensity: 3.2, enabled: true },
+      ],
     };
-    const b1: Actor = {
-      id: 'prop-barrier-1',
-      name: 'Roadblock Crate A',
-      kind: 'prop',
-      token: 'industrial steel barrier container',
-      actionDescription: 'blocking the road',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 44, y: 35 }, endPosition: { x: 44, y: 35 } },
+
+    const aria = withMotion(
+      {
+        id: 'actor-aria',
+        name: 'Explorer Aria',
+        kind: 'human',
+        color: '#10b981',
+        token: 'explorer walking cautiously through the redwood forest clearing',
+        actionDescription: 'sneaks forward cautiously toward the forest clearing',
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 46, y: 38, z: 0 }, endPosition: { x: 46, y: 52, z: 0 } },
+      },
+      'human-sneak-prowl',
+      durNumber,
+      'travel'
+    );
+    const shrineMonolith: Actor = {
+      id: 'env-forest-shrine',
+      name: 'Chronos Shrine',
+      kind: 'monolith',
+      color: '#06b6d4',
+      scale: 1.15,
+      token: 'moss-covered stone shrine with glowing emerald carvings',
+      actionDescription: 'standing in the forest clearing',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 56, y: 42, z: 0 }, endPosition: { x: 56, y: 42, z: 0 } },
     };
-    const b2: Actor = {
-      id: 'prop-barrier-2',
-      name: 'Roadblock Crate B',
-      kind: 'prop',
-      token: 'industrial hazard crate barrier',
-      actionDescription: 'blocking the road',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 56, y: 35 }, endPosition: { x: 56, y: 35 } },
+    const treeLeft: Actor = {
+      id: 'env-redwood-1',
+      name: 'Redwood Pine Left',
+      kind: 'tree',
+      color: '#10b981',
+      scale: 1.15,
+      token: 'tall conifer tree framing stage left',
+      actionDescription: 'standing on stage left',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 32, y: 44, z: 0 }, endPosition: { x: 32, y: 44, z: 0 } },
     };
-    baseSpec.actors = [carLead, b1, b2];
-    baseSpec.sceneDescription = 'Speeding car approaching a barricade of industrial shipping crates on the highway.';
+    const treeRight: Actor = {
+      id: 'env-redwood-2',
+      name: 'Redwood Pine Right',
+      kind: 'tree',
+      color: '#10b981',
+      scale: 1.15,
+      token: 'tall conifer tree framing stage right',
+      actionDescription: 'standing on stage right',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 68, y: 44, z: 0 }, endPosition: { x: 68, y: 44, z: 0 } },
+    };
+
+    baseSpec.actors = [aria, shrineMonolith, treeLeft, treeRight];
+    baseSpec.sceneDescription =
+      'Atmospheric 35mm pan across the Deep Redwood Forest as Explorer Aria advances past the glowing Chronos Shrine framed by ancient pines.';
     return baseSpec;
   }
 
-  if (shotItem.id === 'shot-03a') {
+  if (shotItem.id === 'shot-02c') {
+    baseSpec.environment = getEnvPreset('env-medieval-courtyard');
+    baseSpec.camera.movement.type = 'pedestal-down';
+    baseSpec.camera.movement.speed = 'slow-cinematic';
+    baseSpec.camera.movement.startPosition = { x: 50, y: 76, z: 22 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 68, z: 11 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 48 };
+    baseSpec.camera.angle = 'high-angle';
+    baseSpec.camera.shotType = 'wide';
+    baseSpec.lighting = {
+      style: 'practical-candlelight',
+      direction: 'side-key',
+      contrast: 'balanced',
+      lights: [
+        { id: 'lgt-1', name: 'Brazier Torch West', position: { x: 30, y: 52, z: 48 }, color: '#f59e0b', intensity: 3.4, enabled: true },
+        { id: 'lgt-2', name: 'Brazier Torch East', position: { x: 70, y: 52, z: 48 }, color: '#f59e0b', intensity: 3.4, enabled: true },
+        { id: 'lgt-3', name: 'Courtyard Moon Fill', position: { x: 50, y: 30, z: 68 }, color: '#93c5fd', intensity: 2.8, enabled: true },
+      ],
+    };
+
+    const aria = withMotion(
+      {
+        id: 'actor-aria',
+        name: 'Explorer Aria',
+        kind: 'human',
+        color: '#10b981',
+        token: 'explorer walking down the center of the stone castle courtyard',
+        actionDescription: 'walks forward steadily between the two courtyard guardians',
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 36, z: 0 }, endPosition: { x: 50, y: 54, z: 0 } },
+      },
+      'human-walk-forward',
+      durNumber,
+      'travel'
+    );
+    const guardianLeft = withMotion(
+      {
+        id: 'actor-guardian-left',
+        name: 'Citadel Guardian A',
+        kind: 'human',
+        color: '#ef4444',
+        scale: 1.1,
+        token: 'armored temple knight standing guard on the left flank',
+        actionDescription: 'performs a ceremonial guardian slash on the left flank',
+        rotation: { x: 0, y: 90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 36, y: 46, z: 0 }, endPosition: { x: 36, y: 46, z: 0 } },
+      },
+      'human-sword-slash',
+      durNumber,
+      'in-place'
+    );
+    const guardianRight = withMotion(
+      {
+        id: 'actor-guardian-right',
+        name: 'Citadel Guardian B',
+        kind: 'human',
+        color: '#a855f7',
+        scale: 1.1,
+        token: 'armored temple knight standing guard on the right flank',
+        actionDescription: 'performs a ceremonial guardian slash on the right flank',
+        rotation: { x: 0, y: -90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 64, y: 46, z: 0 }, endPosition: { x: 64, y: 46, z: 0 } },
+      },
+      'human-sword-slash',
+      durNumber,
+      'in-place'
+    );
+
+    baseSpec.actors = [aria, guardianLeft, guardianRight];
+    baseSpec.sceneDescription =
+      'Majestic crane descent into the torchlit Medieval Castle Courtyard as Explorer Aria walks down the center aisle between two Citadel Guardians.';
+    return baseSpec;
+  }
+
+  if (shotItem.id === 'shot-02d') {
+    baseSpec.environment = getEnvPreset('env-post-apocalyptic');
+    baseSpec.camera.movement.type = 'dolly-in';
+    baseSpec.camera.movement.speed = 'rapid-dynamic';
+    baseSpec.camera.movement.startPosition = { x: 50, y: 74, z: 9 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 62, z: 8 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 48 };
+    baseSpec.camera.angle = 'low-angle';
+    baseSpec.camera.shotType = 'medium';
+    baseSpec.lighting = {
+      style: 'low-key-film-noir',
+      direction: 'side-key',
+      contrast: 'high-contrast',
+      lights: [
+        { id: 'lgt-1', name: 'Amber Ruin Key', position: { x: 36, y: 56, z: 48 }, color: '#f59e0b', intensity: 3.5, enabled: true },
+        { id: 'lgt-2', name: 'Storm Sky Rim', position: { x: 64, y: 38, z: 62 }, color: '#38bdf8', intensity: 3.0, enabled: true },
+      ],
+    };
+
+    const aria = withMotion(
+      {
+        id: 'actor-aria',
+        name: 'Explorer Aria',
+        kind: 'human',
+        color: '#10b981',
+        token: 'explorer leaping forward across ancient stone ruins',
+        actionDescription: 'crouches and leaps through the air before landing firmly on both feet',
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 43, y: 40, z: 0 }, endPosition: { x: 43, y: 52, z: 0 } },
+      },
+      'human-jump-leap',
+      durNumber,
+      'travel'
+    );
+    const golem = withMotion(
+      {
+        id: 'actor-construct',
+        name: 'Ruin Sentinel',
+        kind: 'human',
+        color: '#ef4444',
+        scale: 1.15,
+        token: 'ancient sentinel staggering back from kinetic shockwave',
+        actionDescription: 'recoils backward from impact and staggers before regaining balance',
+        rotation: { x: 0, y: 0, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 57, y: 48, z: 0 }, endPosition: { x: 57, y: 40, z: 0 } },
+      },
+      'human-hit-stagger',
+      durNumber,
+      'travel'
+    );
+    const ruinPillar: Actor = {
+      id: 'env-ruin-pillar',
+      name: 'Ancient Stone Pillar',
+      kind: 'monolith',
+      color: '#eab308',
+      scale: 0.9,
+      token: 'weathered stone column standing in the ruins',
+      actionDescription: 'framing the background of the ruins',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 32, z: 0 }, endPosition: { x: 50, y: 32, z: 0 } },
+    };
+
+    baseSpec.actors = [aria, golem, ruinPillar];
+    baseSpec.sceneDescription =
+      'Dynamic 50mm low-angle push-in as Explorer Aria leaps forward across the ruins while the Ruin Sentinel staggers backward from the impact.';
+    return baseSpec;
+  }
+
+  if (shotItem.id === 'shot-02e') {
+    baseSpec.environment = getEnvPreset('env-rustic-hearth');
     baseSpec.camera.movement.type = 'dolly-in';
     baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 50, y: 85, z: 18 };
-    baseSpec.camera.movement.endPosition = { x: 50, y: 55, z: 18 };
+    baseSpec.camera.movement.startPosition = { x: 50, y: 62, z: 10 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 57, z: 10 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 50 };
+    baseSpec.camera.angle = 'eye-level';
+    baseSpec.camera.shotType = 'close-up';
+    baseSpec.lighting = {
+      style: 'practical-candlelight',
+      direction: 'front-soft',
+      contrast: 'balanced',
+      lights: [
+        { id: 'lgt-1', name: 'Hearth Firelight Key', position: { x: 50, y: 36, z: 42 }, color: '#f97316', intensity: 3.6, enabled: true },
+        { id: 'lgt-2', name: 'Warm Chamber Fill', position: { x: 40, y: 64, z: 48 }, color: '#fbbf24', intensity: 2.8, enabled: true },
+      ],
+    };
+
+    const aria = withMotion(
+      {
+        id: 'actor-aria',
+        name: 'Explorer Aria',
+        kind: 'human',
+        color: '#10b981',
+        token: 'explorer standing on the left of the council map table',
+        actionDescription: 'scans the ancient map table in the warm firelight',
+        rotation: { x: 0, y: 90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 41, y: 50, z: 0 }, endPosition: { x: 41, y: 50, z: 0 } },
+      },
+      'human-look-search',
+      durNumber,
+      'in-place'
+    );
+    const elder = withMotion(
+      {
+        id: 'actor-elder',
+        name: 'Archivist Vance',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'scholarly archivist standing on the right of the council table',
+        actionDescription: 'gestures across the map table toward Explorer Aria',
+        rotation: { x: 0, y: -90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 59, y: 50, z: 0 }, endPosition: { x: 59, y: 50, z: 0 } },
+      },
+      'human-wave-greet',
+      durNumber,
+      'in-place'
+    );
+    const mapTable: Actor = {
+      id: 'prop-council-table',
+      name: 'Council Map Table',
+      kind: 'table',
+      color: '#eab308',
+      scale: 0.95,
+      token: 'carved oak council table at center stage',
+      actionDescription: 'standing between Aria and Archivist Vance',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 50, z: 0 }, endPosition: { x: 50, y: 50, z: 0 } },
+    };
+
+    baseSpec.actors = [aria, elder, mapTable];
+    baseSpec.sceneDescription =
+      'Intimate 85mm push-in inside the Rustic Hearthside Chamber as Explorer Aria and Archivist Vance study the Council Map Table by warm firelight.';
+    return baseSpec;
+  }
+
+  if (shotItem.id === 'shot-02f') {
+    baseSpec.environment = getEnvPreset('env-scifi-hangar');
+    baseSpec.camera.movement.type = 'pedestal-up';
+    baseSpec.camera.movement.speed = 'slow-cinematic';
+    baseSpec.camera.movement.startPosition = { x: 50, y: 78, z: 9 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 74, z: 16 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 46 };
+    baseSpec.camera.angle = 'low-angle';
+    baseSpec.camera.shotType = 'wide';
+    baseSpec.lighting = {
+      style: 'neon-cyberpunk',
+      direction: 'rim-backlit',
+      contrast: 'balanced',
+      lights: [
+        { id: 'lgt-1', name: 'Hangar Deck Flood', position: { x: 50, y: 60, z: 58 }, color: '#38bdf8', intensity: 3.6, enabled: true },
+        { id: 'lgt-2', name: 'Bay Beacon Amber', position: { x: 28, y: 46, z: 48 }, color: '#f59e0b', intensity: 3.0, enabled: true },
+        { id: 'lgt-3', name: 'Starship Rim Glow', position: { x: 72, y: 46, z: 48 }, color: '#10b981', intensity: 3.0, enabled: true },
+      ],
+    };
+
+    const aria = withMotion(
+      {
+        id: 'actor-aria',
+        name: 'Explorer Aria',
+        kind: 'human',
+        color: '#10b981',
+        token: 'explorer celebrating on the orbital hangar deck',
+        actionDescription: 'raises both arms overhead and cheers in triumph',
+        rotation: { x: 0, y: 0, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 43, y: 54, z: 0 }, endPosition: { x: 43, y: 54, z: 0 } },
+      },
+      'human-victory-cheer',
+      durNumber,
+      'in-place'
+    );
+    const elder = withMotion(
+      {
+        id: 'actor-elder',
+        name: 'Commander Vance',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'commander standing beside Aria on the hangar deck',
+        actionDescription: 'raises one hand high and waves in salute',
+        rotation: { x: 0, y: 0, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 57, y: 54, z: 0 }, endPosition: { x: 57, y: 54, z: 0 } },
+      },
+      'human-wave-greet',
+      durNumber,
+      'in-place'
+    );
+    const starship: Actor = {
+      id: 'veh-chronos-starship',
+      name: 'Chronos Ark Starship',
+      kind: 'spaceship',
+      color: '#06b6d4',
+      scale: 1.35,
+      token: 'sleek deep-space exploration starship docked at center bay',
+      actionDescription: 'positioned majestically behind the crew in the orbital hangar bay',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 34, z: 0 }, endPosition: { x: 50, y: 34, z: 0 } },
+    };
+
+    baseSpec.actors = [aria, elder, starship];
+    baseSpec.sceneDescription =
+      'Monumental 135mm low-angle crane ascent inside the Orbital Starship Hangar as Explorer Aria and Commander Vance celebrate before the docked Chronos Ark Starship.';
+    return baseSpec;
+  }
+
+  // ==========================================================================
+  // SCENE 03: GOLDEN HOUR ROMANCE (Intimate Close-Ups, OTS Dialogue & Two-Shots)
+  // ==========================================================================
+  if (shotItem.id === 'shot-03a') {
+    baseSpec.environment = getEnvPreset('env-modern-penthouse');
+    baseSpec.camera.movement.type = 'dolly-in';
+    baseSpec.camera.movement.speed = 'slow-cinematic';
+    baseSpec.camera.movement.startPosition = { x: 50, y: 65, z: 10 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 58, z: 10 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 48 };
     baseSpec.camera.angle = 'eye-level';
     baseSpec.camera.shotType = 'medium';
-    baseSpec.lighting = { style: 'low-key-film-noir', direction: 'overhead-top', contrast: 'balanced' };
-    const tbl: Actor = {
-      id: 'tbl-1',
-      name: 'War Room Table',
-      kind: 'table',
-      token: 'worn wooden war room table with maps',
-      actionDescription: 'center of the hideout room',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 48 }, endPosition: { x: 50, y: 48 } },
+    baseSpec.lighting = {
+      style: 'golden-hour',
+      direction: 'side-key',
+      contrast: 'soft',
+      lights: [
+        { id: 'lgt-1', name: 'Sunset Golden Key', position: { x: 32, y: 58, z: 46 }, color: '#f59e0b', intensity: 3.5, enabled: true },
+        { id: 'lgt-2', name: 'Warm Rose Fill', position: { x: 68, y: 58, z: 44 }, color: '#f472b6', intensity: 2.8, enabled: true },
+        { id: 'lgt-3', name: 'Amber Hair Rim', position: { x: 50, y: 30, z: 56 }, color: '#fde047', intensity: 3.0, enabled: true },
+      ],
     };
-    const chr: Actor = {
-      id: 'chr-1',
-      name: 'Leather Chair',
-      kind: 'chair',
-      token: 'vintage brown leather armchair',
-      actionDescription: 'pulled up to the war room table',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 40 }, endPosition: { x: 50, y: 40 } },
-    };
-    const prp: Actor = {
-      id: 'prp-1',
-      name: 'Munitions Crate',
-      kind: 'prop',
-      token: 'military equipment storage container',
-      actionDescription: 'resting against the wall',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 64, y: 52 }, endPosition: { x: 64, y: 52 } },
-    };
-    const boss: Actor = {
-      id: 'act-boss',
-      name: 'Syndicate Boss',
-      kind: 'human',
-      token: 'syndicate boss in dark tailored suit',
-      actionDescription: 'standing contemplatively beside the table',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 38, y: 48 }, endPosition: { x: 38, y: 48 } },
-    };
-    baseSpec.actors = [tbl, chr, prp, boss];
-    baseSpec.sceneDescription = 'Dimly lit clandestine warehouse office with dust motes drifting through a single hanging lightbulb.';
+
+    const julian = withMotion(
+      {
+        id: 'actor-julian',
+        name: 'Julian',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'romantic lead in a tailored navy coat walking gently toward Elena at sunset',
+        actionDescription: 'walks forward gently to meet Elena at center stage',
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 42, y: 48, z: 0 }, endPosition: { x: 47.5, y: 48, z: 0 } },
+      },
+      'human-walk-forward',
+      durNumber,
+      'travel'
+    );
+    const elena = withMotion(
+      {
+        id: 'actor-elena',
+        name: 'Elena',
+        kind: 'human',
+        color: '#ec4899',
+        token: 'graceful heroine in a rose-silk evening dress walking toward Julian',
+        actionDescription: 'walks forward warmly to meet Julian face to face',
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 58, y: 48, z: 0 }, endPosition: { x: 52.5, y: 48, z: 0 } },
+      },
+      'human-walk-forward',
+      durNumber,
+      'travel'
+    );
+
+    baseSpec.actors = [julian, elena];
+    baseSpec.sceneDescription =
+      'Romantic 50mm two-shot dolly-in across the golden-hour terrace as Julian and Elena walk toward each other and meet face-to-face.';
     return baseSpec;
   }
 
   if (shotItem.id === 'shot-03b') {
-    baseSpec.camera.movement.type = 'orbit-clockwise';
-    baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 35, y: 65, z: 20 };
-    baseSpec.camera.movement.endPosition = { x: 65, y: 65, z: 20 };
-    baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'close-up';
-    baseSpec.lighting = { style: 'low-key-film-noir', direction: 'side-key', contrast: 'balanced' };
-    const tbl: Actor = {
-      id: 'tbl-int',
-      name: 'Interrogation Table',
-      kind: 'table',
-      token: 'cold steel interrogation table',
-      actionDescription: 'separating investigator and subject',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 50 }, endPosition: { x: 50, y: 50 } },
-    };
-    const inv: Actor = {
-      id: 'act-inv',
-      name: 'Lead Detective',
-      kind: 'human',
-      token: 'hardened investigator leaning in',
-      actionDescription: 'demanding answers across table',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 60 }, endPosition: { x: 50, y: 60 } },
-    };
-    const spy: Actor = {
-      id: 'act-spy',
-      name: 'Captured Suspect',
-      kind: 'human',
-      token: 'unshaven suspect in handcuffs',
-      actionDescription: 'refusing to talk',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 40 }, endPosition: { x: 50, y: 40 } },
-    };
-    baseSpec.actors = [tbl, inv, spy];
-    baseSpec.sceneDescription = 'Tense confrontation across an interrogation table, sharp shadows cast across faces.';
-    return baseSpec;
-  }
-
-  if (shotItem.id === 'shot-04a') {
+    baseSpec.environment = getEnvPreset('env-modern-penthouse');
     baseSpec.camera.movement.type = 'dolly-in';
     baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 50, y: 90, z: 25 };
-    baseSpec.camera.movement.endPosition = { x: 50, y: 45, z: 25 };
+    baseSpec.camera.movement.startPosition = { x: 49, y: 57, z: 10 };
+    baseSpec.camera.movement.endPosition = { x: 50.5, y: 54.5, z: 10 };
+    baseSpec.camera.movement.targetLookAt = { x: 52, y: 48 };
     baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'medium-wide';
-    baseSpec.lighting = { style: 'moonlight-foggy', direction: 'rim-backlit', contrast: 'balanced' };
-    const t1: Actor = {
-      id: 'tree-hero-1',
-      name: 'Ancient Pine Left',
-      kind: 'tree',
-      token: 'massive ancient evergreen pine tree',
-      actionDescription: 'framing the left edge of frame',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 32, y: 45 }, endPosition: { x: 32, y: 45 } },
+    baseSpec.camera.shotType = 'close-up';
+    baseSpec.lighting = {
+      style: 'golden-hour',
+      direction: 'front-soft',
+      contrast: 'soft',
+      lights: [
+        { id: 'lgt-1', name: 'Beauty Key Light', position: { x: 60, y: 58, z: 45 }, color: '#fde047', intensity: 3.5, enabled: true },
+        { id: 'lgt-2', name: 'Soft Rose Cheek Fill', position: { x: 42, y: 56, z: 42 }, color: '#f472b6', intensity: 2.8, enabled: true },
+        { id: 'lgt-3', name: 'Golden Backlight Rim', position: { x: 54, y: 36, z: 54 }, color: '#f59e0b', intensity: 3.2, enabled: true },
+      ],
     };
-    const t2: Actor = {
-      id: 'tree-hero-2',
-      name: 'Towering Spruce Right',
-      kind: 'tree',
-      token: 'tall spruce tree with thick dark needle foliage',
-      actionDescription: 'framing the right edge of frame',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 68, y: 45 }, endPosition: { x: 68, y: 45 } },
-    };
-    const w: Actor = {
-      id: 'act-wanderer',
-      name: 'Hero Wanderer',
-      kind: 'human',
-      token: 'cloaked wanderer looking out toward the mountain edge',
-      actionDescription: 'standing at the edge of the overlook',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 50 }, endPosition: { x: 50, y: 50 } },
-    };
-    baseSpec.actors = [t1, t2, w];
-    baseSpec.sceneDescription = 'Dramatic vertigo reveal between deep forest pines as mist rolls over the precipice.';
+
+    const elena = withMotion(
+      {
+        id: 'actor-elena',
+        name: 'Elena',
+        kind: 'human',
+        color: '#ec4899',
+        token: 'graceful heroine in rose-silk dress smiling and gesturing softly in close-up',
+        actionDescription: 'waves and gestures warmly toward Julian in intimate close-up',
+        rotation: { x: 0, y: -25, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 52, y: 48, z: 0 }, endPosition: { x: 52, y: 48, z: 0 } },
+      },
+      'human-wave-greet',
+      durNumber,
+      'in-place'
+    );
+    const julianOts = withMotion(
+      {
+        id: 'actor-julian',
+        name: 'Julian (OTS Foreground)',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'romantic lead in foreground left shoulder framing the over-the-shoulder shot',
+        actionDescription: 'stands listening attentively in foreground over-the-shoulder framing',
+        rotation: { x: 0, y: 155, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 46.5, y: 52, z: 0 }, endPosition: { x: 46.5, y: 52, z: 0 } },
+      },
+      'human-idle-breathe',
+      durNumber,
+      'in-place'
+    );
+
+    baseSpec.actors = [elena, julianOts];
+    baseSpec.sceneDescription =
+      'Intimate 85mm Over-The-Shoulder Close-Up on Elena as golden sunset light catches her face while she speaks to Julian.';
     return baseSpec;
   }
 
-  if (shotItem.id === 'shot-04b') {
-    baseSpec.camera.movement.type = 'pan-left';
+  if (shotItem.id === 'shot-03c') {
+    baseSpec.environment = getEnvPreset('env-modern-penthouse');
+    baseSpec.camera.movement.type = 'dolly-in';
     baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 60, y: 75, z: 20 };
-    baseSpec.camera.movement.endPosition = { x: 40, y: 75, z: 20 };
+    baseSpec.camera.movement.startPosition = { x: 51, y: 57, z: 10 };
+    baseSpec.camera.movement.endPosition = { x: 49.5, y: 54.5, z: 10 };
+    baseSpec.camera.movement.targetLookAt = { x: 48, y: 48 };
     baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'wide';
-    baseSpec.lighting = { style: 'moonlight-foggy', direction: 'side-key', contrast: 'balanced' };
-    const t1: Actor = {
-      id: 'tree-bg-1',
-      name: 'Forest Pine A',
-      kind: 'tree',
-      token: 'evergreen pine',
-      actionDescription: 'standing in wilderness',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 30, y: 40 }, endPosition: { x: 30, y: 40 } },
+    baseSpec.camera.shotType = 'close-up';
+    baseSpec.lighting = {
+      style: 'golden-hour',
+      direction: 'side-key',
+      contrast: 'soft',
+      lights: [
+        { id: 'lgt-1', name: 'Warm Sunset Key', position: { x: 38, y: 58, z: 45 }, color: '#f59e0b', intensity: 3.5, enabled: true },
+        { id: 'lgt-2', name: 'Twilight Lavender Fill', position: { x: 60, y: 56, z: 42 }, color: '#c084fc', intensity: 2.8, enabled: true },
+        { id: 'lgt-3', name: 'Shoulder Rim Glow', position: { x: 46, y: 36, z: 54 }, color: '#fde047', intensity: 3.0, enabled: true },
+      ],
     };
-    const t2: Actor = {
-      id: 'tree-bg-2',
-      name: 'Forest Pine B',
-      kind: 'tree',
-      token: 'conical pine tree',
-      actionDescription: 'standing in wilderness',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 52, y: 35 }, endPosition: { x: 52, y: 35 } },
-    };
-    const t3: Actor = {
-      id: 'tree-bg-3',
-      name: 'Forest Pine C',
-      kind: 'tree',
-      token: 'tall evergreen spruce',
-      actionDescription: 'standing in wilderness',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 72, y: 42 }, endPosition: { x: 72, y: 42 } },
-    };
-    const overland: Actor = {
-      id: 'car-overland',
-      name: 'Expedition 4x4',
-      kind: 'car',
-      token: 'rugged matte overland 4x4 truck with roof rack',
-      actionDescription: 'parked in the clearing',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 48, y: 55 }, endPosition: { x: 48, y: 55 } },
-    };
-    baseSpec.actors = [t1, t2, t3, overland];
-    baseSpec.sceneDescription = 'Expedition truck parked in the quiet misty pine woods under moonlight.';
+
+    const julian = withMotion(
+      {
+        id: 'actor-julian',
+        name: 'Julian',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'romantic lead speaking earnestly in an intimate 85mm close-up',
+        actionDescription: 'looks intently at Elena with gentle head movement during his confession',
+        rotation: { x: 0, y: 25, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 48, y: 48, z: 0 }, endPosition: { x: 48, y: 48, z: 0 } },
+      },
+      'human-look-search',
+      durNumber,
+      'in-place'
+    );
+    const elenaOts = withMotion(
+      {
+        id: 'actor-elena',
+        name: 'Elena (OTS Foreground)',
+        kind: 'human',
+        color: '#ec4899',
+        token: 'heroine in foreground right framing the reverse over-the-shoulder close-up',
+        actionDescription: 'stands close in the right foreground listening to Julian',
+        rotation: { x: 0, y: -155, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 53.5, y: 52, z: 0 }, endPosition: { x: 53.5, y: 52, z: 0 } },
+      },
+      'human-idle-breathe',
+      durNumber,
+      'in-place'
+    );
+
+    baseSpec.actors = [julian, elenaOts];
+    baseSpec.sceneDescription =
+      'Reverse 85mm Over-The-Shoulder Close-Up on Julian as he confesses his feelings to Elena in warm golden-hour light.';
     return baseSpec;
   }
 
-  // Fallback default
+  if (shotItem.id === 'shot-03d') {
+    baseSpec.environment = getEnvPreset('env-rustic-hearth');
+    baseSpec.camera.movement.type = 'truck-right';
+    baseSpec.camera.movement.speed = 'slow-cinematic';
+    baseSpec.camera.movement.startPosition = { x: 48.5, y: 55.5, z: 10 };
+    baseSpec.camera.movement.endPosition = { x: 51.5, y: 55.5, z: 10 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 49 };
+    baseSpec.camera.angle = 'eye-level';
+    baseSpec.camera.shotType = 'extreme-close-up';
+    baseSpec.lighting = {
+      style: 'practical-candlelight',
+      direction: 'front-soft',
+      contrast: 'soft',
+      lights: [
+        { id: 'lgt-1', name: 'Candlelight Face Glow', position: { x: 50, y: 56, z: 42 }, color: '#fb923c', intensity: 3.5, enabled: true },
+        { id: 'lgt-2', name: 'Rose Amber Rim', position: { x: 50, y: 38, z: 48 }, color: '#f472b6', intensity: 3.0, enabled: true },
+      ],
+    };
+
+    const julian = withMotion(
+      {
+        id: 'actor-julian',
+        name: 'Julian',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'romantic lead standing inches from Elena in profile extreme close-up',
+        actionDescription: 'stands inches from Elena with gentle breathing in tight profile close-up',
+        rotation: { x: 0, y: 75, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 48.4, y: 49, z: 0 }, endPosition: { x: 48.4, y: 49, z: 0 } },
+      },
+      'human-idle-breathe',
+      durNumber,
+      'in-place'
+    );
+    const elena = withMotion(
+      {
+        id: 'actor-elena',
+        name: 'Elena',
+        kind: 'human',
+        color: '#ec4899',
+        token: 'heroine standing inches from Julian in profile extreme close-up',
+        actionDescription: 'gazes into Julian eyes in an intimate profile extreme close-up',
+        rotation: { x: 0, y: -75, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 51.6, y: 49, z: 0 }, endPosition: { x: 51.6, y: 49, z: 0 } },
+      },
+      'human-idle-breathe',
+      durNumber,
+      'in-place'
+    );
+
+    baseSpec.actors = [julian, elena];
+    baseSpec.sceneDescription =
+      'Ultra-intimate 135mm Extreme Close-Up profile two-shot as Julian and Elena stand inches apart by flickering firelight.';
+    return baseSpec;
+  }
+
+  if (shotItem.id === 'shot-03e') {
+    baseSpec.environment = getEnvPreset('env-rustic-hearth');
+    baseSpec.camera.movement.type = 'orbit-counter-clockwise';
+    baseSpec.camera.movement.speed = 'slow-cinematic';
+    baseSpec.camera.movement.startPosition = { x: 50, y: 61, z: 10 };
+    baseSpec.camera.movement.endPosition = { x: 42, y: 58, z: 10 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 50 };
+    baseSpec.camera.angle = 'eye-level';
+    baseSpec.camera.shotType = 'medium-close-up';
+    baseSpec.lighting = {
+      style: 'practical-candlelight',
+      direction: 'side-key',
+      contrast: 'balanced',
+      lights: [
+        { id: 'lgt-1', name: 'Hearth Warm Key', position: { x: 50, y: 36, z: 44 }, color: '#f97316', intensity: 3.6, enabled: true },
+        { id: 'lgt-2', name: 'Table Candle Glow', position: { x: 50, y: 58, z: 38 }, color: '#fde047', intensity: 3.0, enabled: true },
+      ],
+    };
+
+    const julian = withMotion(
+      {
+        id: 'actor-julian',
+        name: 'Julian',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'romantic lead conversing across a candlelit table',
+        actionDescription: 'gestures warmly across the candlelit table toward Elena',
+        rotation: { x: 0, y: 90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 44, y: 50, z: 0 }, endPosition: { x: 44, y: 50, z: 0 } },
+      },
+      'human-wave-greet',
+      durNumber,
+      'in-place'
+    );
+    const elena = withMotion(
+      {
+        id: 'actor-elena',
+        name: 'Elena',
+        kind: 'human',
+        color: '#ec4899',
+        token: 'heroine smiling across the candlelit dinner table',
+        actionDescription: 'looks fondly across the table at Julian',
+        rotation: { x: 0, y: -90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 56, y: 50, z: 0 }, endPosition: { x: 56, y: 50, z: 0 } },
+      },
+      'human-look-search',
+      durNumber,
+      'in-place'
+    );
+    const bistroTable: Actor = {
+      id: 'prop-bistro-table',
+      name: 'Candlelit Bistro Table',
+      kind: 'table',
+      color: '#eab308',
+      scale: 0.85,
+      token: 'intimate wooden bistro table between Julian and Elena',
+      actionDescription: 'placed at center stage between the couple',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 50, z: 0 }, endPosition: { x: 50, y: 50, z: 0 } },
+    };
+
+    baseSpec.actors = [julian, elena, bistroTable];
+    baseSpec.sceneDescription =
+      'Warm 85mm Medium-Close-Up orbital move around Julian and Elena sharing an intimate conversation across a candlelit table.';
+    return baseSpec;
+  }
+
+  if (shotItem.id === 'shot-03f') {
+    baseSpec.environment = getEnvPreset('env-misty-forest');
+    baseSpec.camera.movement.type = 'dolly-out';
+    baseSpec.camera.movement.speed = 'slow-cinematic';
+    baseSpec.camera.movement.startPosition = { x: 50, y: 58, z: 10 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 70, z: 11 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 49 };
+    baseSpec.camera.angle = 'eye-level';
+    baseSpec.camera.shotType = 'medium-close-up';
+    baseSpec.lighting = {
+      style: 'moonlight-foggy',
+      direction: 'rim-backlit',
+      contrast: 'soft',
+      lights: [
+        { id: 'lgt-1', name: 'Starlight Silver Rim', position: { x: 50, y: 34, z: 60 }, color: '#93c5fd', intensity: 3.5, enabled: true },
+        { id: 'lgt-2', name: 'Warm Lantern Fill', position: { x: 44, y: 60, z: 42 }, color: '#fbbf24', intensity: 3.0, enabled: true },
+        { id: 'lgt-3', name: 'Rose Moonlight Glow', position: { x: 58, y: 58, z: 44 }, color: '#f472b6', intensity: 2.8, enabled: true },
+      ],
+    };
+
+    const julian = withMotion(
+      {
+        id: 'actor-julian',
+        name: 'Julian',
+        kind: 'human',
+        color: '#3b82f6',
+        token: 'romantic lead celebrating with Elena under the starlit forest canopy',
+        actionDescription: 'raises arms in joyful celebration beside Elena',
+        rotation: { x: 0, y: 15, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 47.5, y: 49, z: 0 }, endPosition: { x: 47.5, y: 49, z: 0 } },
+      },
+      'human-victory-cheer',
+      durNumber,
+      'in-place'
+    );
+    const elena = withMotion(
+      {
+        id: 'actor-elena',
+        name: 'Elena',
+        kind: 'human',
+        color: '#ec4899',
+        token: 'heroine waving joyfully beside Julian under the stars',
+        actionDescription: 'waves warmly beside Julian as the camera pulls back',
+        rotation: { x: 0, y: -15, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 52.5, y: 49, z: 0 }, endPosition: { x: 52.5, y: 49, z: 0 } },
+      },
+      'human-wave-greet',
+      durNumber,
+      'in-place'
+    );
+
+    baseSpec.actors = [julian, elena];
+    baseSpec.sceneDescription =
+      'Poetic 50mm pull-back starting in a Medium-Close-Up on Julian and Elena and widening out into the starlit forest clearing.';
+    return baseSpec;
+  }
+
+  // Fallback default for any newly added user shot
   const defaultActor: Actor = {
     id: `actor-${Date.now()}`,
     name: 'Lead Subject',
     kind: 'human',
+    color: '#3b82f6',
     token: 'a dramatic subject in the spotlight',
     actionDescription: 'stands at center stage',
-    trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 50 }, endPosition: { x: 50, y: 50 } },
+    trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 50, z: 0 }, endPosition: { x: 50, y: 50, z: 0 } },
   };
   baseSpec.actors = [defaultActor];
   return baseSpec;
 };
 
-const DEFAULT_SCENES: SceneItem[] = [
+export const COMPETITION_DEMO_VERSION = 'competition-3x6-v3';
+const DEMO_VERSION_STORAGE_KEY = 'comfy_ai_director_demo_version_v1';
+
+export const DEFAULT_SCENES: SceneItem[] = [
   {
     id: 'scene-1',
-    name: 'Scene 01 - Arrival',
+    name: 'Scene 01 - Neon Protocol',
     shots: [
       {
         id: 'shot-01a',
         code: 'Shot 01A',
-        title: 'Tracking In',
-        duration: '4s',
+        title: 'Rain Alley Arrival',
+        duration: '5s',
         focalLength: '35mm',
-        movement: 'Tracking In',
+        movement: 'Crane Down Reveal',
         thumbnail: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=160&q=80&auto=format&fit=crop',
-        mode: 'video-plate',
+        mode: 'construct-3d',
       },
       {
         id: 'shot-01b',
         code: 'Shot 01B',
-        title: 'Pan Right',
+        title: 'The Informant Handoff',
         duration: '5s',
-        focalLength: '24mm',
-        movement: 'Pan Right',
+        focalLength: '50mm',
+        movement: '360° Orbit Tension',
         thumbnail: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
       {
         id: 'shot-01c',
         code: 'Shot 01C',
-        title: 'Push In',
-        duration: '3s',
-        focalLength: '50mm',
-        movement: 'Push In',
+        title: 'Rooftop Drone Ambush',
+        duration: '4s',
+        focalLength: '35mm',
+        movement: 'Dutch Push-In',
         thumbnail: 'https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
       {
         id: 'shot-01d',
         code: 'Shot 01D',
-        title: 'Low Angle',
-        duration: '4s',
-        focalLength: '35mm',
-        movement: 'Low Angle',
+        title: 'Katana Clash in Rain',
+        duration: '5s',
+        focalLength: '18mm',
+        movement: 'Ground Lateral Track',
         thumbnail: 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
       {
         id: 'shot-01e',
         code: 'Shot 01E',
-        title: 'Over Shoulder',
-        duration: '5s',
+        title: 'Interceptor Pursuit',
+        duration: '4s',
         focalLength: '24mm',
-        movement: 'Over Shoulder',
-        thumbnail: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?w=160&q=80&auto=format&fit=crop',
+        movement: 'High-Speed Track',
+        thumbnail: 'https://images.unsplash.com/photo-1502877338535-766e1452684a?w=160&q=80&auto=format&fit=crop',
+        mode: 'construct-3d',
+      },
+      {
+        id: 'shot-01f',
+        code: 'Shot 01F',
+        title: 'Penthouse Extraction',
+        duration: '6s',
+        focalLength: '85mm',
+        movement: 'Skyline Dolly Out',
+        thumbnail: 'https://images.unsplash.com/photo-1514565131-fce0801e5785?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
     ],
   },
   {
     id: 'scene-2',
-    name: 'Scene 02 - Chase',
+    name: 'Scene 02 - Chronos Relic',
     shots: [
       {
         id: 'shot-02a',
         code: 'Shot 02A',
-        title: 'High Speed Follow',
-        duration: '4s',
-        focalLength: '24mm',
-        movement: 'Tracking Lateral',
-        thumbnail: 'https://images.unsplash.com/photo-1502877338535-766e1452684a?w=160&q=80&auto=format&fit=crop',
+        title: 'Dune Horizon Convoy',
+        duration: '5s',
+        focalLength: '18mm',
+        movement: 'FPV Aerial Dive',
+        thumbnail: 'https://images.unsplash.com/photo-1509316975850-ff9c5deb0cd9?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
       {
         id: 'shot-02b',
         code: 'Shot 02B',
-        title: 'Roadblock Ahead',
+        title: 'Redwood Shrine Relic',
         duration: '5s',
         focalLength: '35mm',
-        movement: 'Dolly In (Obstacle)',
-        thumbnail: 'https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?w=160&q=80&auto=format&fit=crop',
+        movement: 'Misty Pan Reveal',
+        thumbnail: 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=160&q=80&auto=format&fit=crop',
+        mode: 'construct-3d',
+      },
+      {
+        id: 'shot-02c',
+        code: 'Shot 02C',
+        title: 'Courtyard of Guardians',
+        duration: '5s',
+        focalLength: '24mm',
+        movement: "God's-Eye Descent",
+        thumbnail: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=160&q=80&auto=format&fit=crop',
+        mode: 'construct-3d',
+      },
+      {
+        id: 'shot-02d',
+        code: 'Shot 02D',
+        title: 'Leap Across the Abyss',
+        duration: '4s',
+        focalLength: '50mm',
+        movement: 'Heroic Low Dolly',
+        thumbnail: 'https://images.unsplash.com/photo-1485846234645-a62644f84728?w=160&q=80&auto=format&fit=crop',
+        mode: 'construct-3d',
+      },
+      {
+        id: 'shot-02e',
+        code: 'Shot 02E',
+        title: 'Council by Firelight',
+        duration: '6s',
+        focalLength: '85mm',
+        movement: 'Chiaroscuro Push-In',
+        thumbnail: 'https://images.unsplash.com/photo-1541123437800-1bb1317badc2?w=160&q=80&auto=format&fit=crop',
+        mode: 'construct-3d',
+      },
+      {
+        id: 'shot-02f',
+        code: 'Shot 02F',
+        title: 'Orbital Hangar Launch',
+        duration: '6s',
+        focalLength: '135mm',
+        movement: 'Telephoto Crane Up',
+        thumbnail: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
     ],
   },
   {
     id: 'scene-3',
-    name: 'Scene 03 - Hideout',
+    name: 'Scene 03 - Golden Hour Romance',
     shots: [
       {
         id: 'shot-03a',
         code: 'Shot 03A',
-        title: 'Atmospheric Reveal',
-        duration: '6s',
+        title: 'Sunset Terrace Meet',
+        duration: '5s',
         focalLength: '50mm',
-        movement: 'Slow Dolly In',
-        thumbnail: 'https://images.unsplash.com/photo-1514565131-fce0801e5785?w=160&q=80&auto=format&fit=crop',
+        movement: 'Two-Shot Dolly In',
+        thumbnail: 'https://images.unsplash.com/photo-1516589178581-6cd7833ae3b2?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
       {
         id: 'shot-03b',
         code: 'Shot 03B',
-        title: 'Interrogation Over Table',
+        title: 'Her Eyes (OTS Close-Up)',
         duration: '5s',
-        focalLength: '35mm',
-        movement: 'Orbit Confrontation',
-        thumbnail: 'https://images.unsplash.com/photo-1541123437800-1bb1317badc2?w=160&q=80&auto=format&fit=crop',
-        mode: 'construct-3d',
-      },
-    ],
-  },
-  {
-    id: 'scene-4',
-    name: 'Scene 04 - Reveal',
-    shots: [
-      {
-        id: 'shot-04a',
-        code: 'Shot 04A',
-        title: 'Hero Dolly Zoom',
-        duration: '4s',
         focalLength: '85mm',
-        movement: 'Vertigo Zoom',
-        thumbnail: 'https://images.unsplash.com/photo-1485846234645-a62644f84728?w=160&q=80&auto=format&fit=crop',
+        movement: 'Close-Up Push-In',
+        thumbnail: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
       {
-        id: 'shot-04b',
-        code: 'Shot 04B',
-        title: 'Deep Pine Wilderness',
+        id: 'shot-03c',
+        code: 'Shot 03C',
+        title: 'His Confession (Close-Up)',
         duration: '5s',
-        focalLength: '24mm',
-        movement: 'Pan Left Overlook',
-        thumbnail: 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=160&q=80&auto=format&fit=crop',
+        focalLength: '85mm',
+        movement: 'Reverse OTS Close-Up',
+        thumbnail: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=160&q=80&auto=format&fit=crop',
+        mode: 'construct-3d',
+      },
+      {
+        id: 'shot-03d',
+        code: 'Shot 03D',
+        title: 'Whispered Promise (ECU)',
+        duration: '5s',
+        focalLength: '135mm',
+        movement: 'Extreme Close-Up Drift',
+        thumbnail: 'https://images.unsplash.com/photo-1518199266791-5375a83190b7?w=160&q=80&auto=format&fit=crop',
+        mode: 'construct-3d',
+      },
+      {
+        id: 'shot-03e',
+        code: 'Shot 03E',
+        title: 'Candlelight Dialogue (MCU)',
+        duration: '5s',
+        focalLength: '85mm',
+        movement: 'Intimate Orbit MCU',
+        thumbnail: 'https://images.unsplash.com/photo-1511285560929-80b456fea0bc?w=160&q=80&auto=format&fit=crop',
+        mode: 'construct-3d',
+      },
+      {
+        id: 'shot-03f',
+        code: 'Shot 03F',
+        title: 'Starlight Embrace Finale',
+        duration: '6s',
+        focalLength: '50mm',
+        movement: 'MCU Pull-Back Reveal',
+        thumbnail: 'https://images.unsplash.com/photo-1519741497674-611481863552?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
     ],
@@ -570,6 +1478,14 @@ const DEFAULT_SCENES: SceneItem[] = [
 
 const loadSavedScenes = (): SceneItem[] => {
   try {
+    const savedVer = safeGetItem<string | null>(DEMO_VERSION_STORAGE_KEY, null);
+    if (savedVer !== COMPETITION_DEMO_VERSION) {
+      safeSetItem(DEMO_VERSION_STORAGE_KEY, COMPETITION_DEMO_VERSION);
+      safeRemoveItem(STORAGE_KEYS.SCENES);
+      safeRemoveItem(STORAGE_KEYS.SHOTS_CACHE);
+      safeRemoveItem(STORAGE_KEYS.CAST_POOL);
+      return DEFAULT_SCENES;
+    }
     const parsed = safeGetItem<SceneItem[] | null>(STORAGE_KEYS.SCENES, null);
     if (parsed && Array.isArray(parsed) && parsed.length > 0) {
       return parsed.map((scene: SceneItem) => ({
@@ -590,23 +1506,20 @@ const loadSavedScenes = (): SceneItem[] => {
 export interface ShotBibleProps {
   activeShotId?: string;
   onSelectShot?: (shotId: string, shotTitle?: string, sceneName?: string) => void;
-  onAssembleScene?: (scene: SceneItem) => void;
 }
 
 export const ShotBible: React.FC<ShotBibleProps> = ({
   activeShotId = 'shot-01a',
   onSelectShot,
-  onAssembleScene,
 }) => {
-  const { switchShot, shot } = useShotStore();
+  const { switchShot, shot, updateShotName } = useShotStore();
   const [scenes, setScenes] = useState<SceneItem[]>(loadSavedScenes);
   const [collapsedScenes, setCollapsedScenes] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [isProjectInfoCollapsed, setIsProjectInfoCollapsed] = useState(false);
-  const [showNewShotModal, setShowNewShotModal] = useState(false);
-  const [targetSceneId, setTargetSceneId] = useState<string>('scene-1');
   const [openMenuShotId, setOpenMenuShotId] = useState<string | null>(null);
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
+  const [editingShotId, setEditingShotId] = useState<string | null>(null);
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
 
   // Computed project info
@@ -649,20 +1562,82 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
     return () => window.removeEventListener('click', handleClickOutside);
   }, []);
 
+  // Hydrate initial Shot 01A competition showcase scene when starting from generic fallback
+  useEffect(() => {
+    const current = useShotStore.getState().shot;
+    const firstScene = scenes[0];
+    const firstShotItem = firstScene?.shots?.[0];
+    if (
+      firstShotItem &&
+      current.id === 'shot-01a' &&
+      current.actors.length === 1 &&
+      current.actors[0]?.id === 'actor-1'
+    ) {
+      const built = buildDefaultShotSpec(firstShotItem);
+      useShotStore.getState().loadShot(built);
+      if (onSelectShot) {
+        onSelectShot(firstShotItem.id, firstShotItem.code, firstScene.name);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Persist scenes to localStorage
   useEffect(() => {
     safeSetItem(STORAGE_KEYS.SCENES, scenes);
   }, [scenes]);
+
+  // Sync active shot duration & focal length to Left Panel card, and keep shot.name aligned with card's main name (code)
+  useEffect(() => {
+    if (!shot?.id) return;
+    const durationStr = `${shot.durationSeconds || 4}s`;
+    const focalStr = shot.camera?.lens?.focalLength || '35mm';
+
+    setScenes((prev) => {
+      let changed = false;
+      const next = prev.map((sc) => {
+        if (!sc.shots.some((sh) => sh.id === shot.id)) return sc;
+        return {
+          ...sc,
+          shots: sc.shots.map((sh) => {
+            if (sh.id !== shot.id) return sh;
+            if (sh.duration === durationStr && sh.focalLength === focalStr) {
+              return sh;
+            }
+            changed = true;
+            return {
+              ...sh,
+              duration: durationStr,
+              focalLength: focalStr,
+            };
+          }),
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [shot?.id, shot?.durationSeconds, shot?.camera?.lens?.focalLength]);
+
+  // Keep global shot.name synced with the active card's main name (code)
+  useEffect(() => {
+    if (!shot?.id) return;
+    for (const sc of scenes) {
+      const found = sc.shots.find((sh) => sh.id === shot.id);
+      if (found && shot.name !== found.code) {
+        updateShotName(found.code);
+        break;
+      }
+    }
+  }, [shot?.id, scenes, shot?.name, updateShotName]);
 
   const toggleScene = (sceneId: string) => {
     setCollapsedScenes((prev) => ({ ...prev, [sceneId]: !prev[sceneId] }));
   };
 
   const handleSelectShot = (shotItem: SceneItem['shots'][0]) => {
-    const fullTitle = `${shotItem.code} ${shotItem.title}`;
     const parentScene = scenes.find((s) => s.shots.some((sh) => sh.id === shotItem.id));
-    if (onSelectShot) onSelectShot(shotItem.id, fullTitle, parentScene?.name);
+    if (onSelectShot) onSelectShot(shotItem.id, shotItem.code, parentScene?.name);
     switchShot(shotItem.id, () => buildDefaultShotSpec(shotItem));
+    updateShotName(shotItem.code);
   };
 
   const handleCreateNewScene = () => {
@@ -688,31 +1663,28 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
     handleSelectShot(newShot);
   };
 
-  const handleCreateShotWithMode = (mode: ShotCreationMode) => {
-    const targetScene = scenes.find((s) => s.id === targetSceneId) || scenes[0];
+  const handleCreateShot = (targetScId?: string) => {
+    const scId = targetScId || scenes[0]?.id;
+    const targetScene = scenes.find((s) => s.id === scId) || scenes[0];
     if (!targetScene) return;
     const newShotNum = targetScene.shots.length + 1;
     const letter = String.fromCharCode(64 + newShotNum);
     const scenePrefixMatch = targetScene.name.match(/\b(?:Scene\s*)?(\d+)/i);
     const sceneNumStr = scenePrefixMatch ? String(scenePrefixMatch[1]).padStart(2, '0') : '01';
-    const is3D = mode === 'construct-3d';
     const newShot: ShotBibleItem = {
       id: `shot-${sceneNumStr}${letter.toLowerCase()}-${Date.now().toString(36)}`,
       code: `Shot ${sceneNumStr}${letter}`,
-      title: is3D ? '3D Stage Previs' : 'VFX Motion Plate',
-      duration: is3D ? '4s' : '5s',
-      focalLength: is3D ? '35mm' : '50mm',
-      movement: is3D ? 'Orbit / Track' : 'Dolly In (Solved)',
-      thumbnail: is3D
-        ? 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=160&q=80&auto=format&fit=crop'
-        : 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=160&q=80&auto=format&fit=crop',
-      mode,
+      title: '3D Stage Previs',
+      duration: '4s',
+      focalLength: '35mm',
+      movement: 'Orbit / Track',
+      thumbnail: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=160&q=80&auto=format&fit=crop',
+      mode: 'construct-3d',
     };
 
     setScenes((prev) =>
       prev.map((sc) => (sc.id === targetScene.id ? { ...sc, shots: [...sc.shots, newShot] } : sc))
     );
-    setShowNewShotModal(false);
     handleSelectShot(newShot);
   };
 
@@ -812,30 +1784,52 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
     setEditingSceneId(null);
   };
 
+  const handleRenameShot = (sceneId: string, shotId: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) {
+      setEditingShotId(null);
+      return;
+    }
+    const targetScene = scenes.find((s) => s.id === sceneId);
+    const updatedScenes = scenes.map((s) =>
+      s.id === sceneId
+        ? {
+            ...s,
+            shots: s.shots.map((sh) => (sh.id === shotId ? { ...sh, code: trimmed, title: trimmed } : sh)),
+          }
+        : s
+    );
+    setScenes(updatedScenes);
+    if (activeShotId === shotId) {
+      updateShotName(trimmed);
+      if (onSelectShot) onSelectShot(shotId, trimmed, targetScene?.name);
+    }
+    setEditingShotId(null);
+  };
+
   const handleResetDemoScenes = () => {
     if (window.confirm('Reset all scenes and shots back to default demo project?')) {
       setScenes(DEFAULT_SCENES);
       safeRemoveItem(STORAGE_KEYS.SCENES);
+      safeRemoveItem(STORAGE_KEYS.SHOTS_CACHE);
+      useShotStore.getState().resetToDefault();
       handleSelectShot(DEFAULT_SCENES[0].shots[0]);
     }
   };
 
   return (
-    <div className="flex h-full w-full flex-col bg-[#0b0d13] text-slate-200 select-none relative">
+    <div className="flex h-full w-full flex-col bg-[#0D1320] text-[#F0F3FA] select-none relative">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/5 px-3.5 py-3">
+      <div className="flex items-center justify-between border-b border-[#273247] bg-[#121A2A]/80 px-3.5 py-2.5">
         <div className="flex items-center gap-2">
           <span className="font-display text-xs font-bold tracking-wider text-white">Shot Bible</span>
-          <span className="rounded bg-white/5 px-1.5 py-0.5 font-mono text-[9px] text-slate-400">
+          <span className="rounded-md bg-[#1A2436] border border-[#273247] px-1.5 py-0.5 font-mono text-[9.5px] font-semibold text-[#98A5BC]">
             {scenes.reduce((acc, sc) => acc + sc.shots.length, 0)} shots
           </span>
         </div>
         <button
-          onClick={() => {
-            setTargetSceneId(scenes[0]?.id || 'scene-1');
-            setShowNewShotModal(true);
-          }}
-          className="flex items-center gap-1 rounded bg-blue-600/80 hover:bg-blue-600 px-2 py-1 text-[10px] font-bold text-white shadow-sm transition-all active:scale-95"
+          onClick={() => handleCreateShot()}
+          className="flex items-center gap-1 rounded-lg bg-gradient-to-b from-[#6658F5] to-[#5243E2] hover:from-[#7467FF] hover:to-[#5E4FF0] px-2.5 py-1 text-[10.5px] font-bold text-white border border-[#8E84FF]/40 shadow-[0_2px_8px_rgba(102,88,245,0.35)] transition-all active:scale-95"
           title="Add New Shot"
         >
           <Plus className="h-3 w-3" />
@@ -845,11 +1839,11 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
 
       {/* Search Input */}
       {noticeMessage && (
-        <div className="mx-3 mt-2 p-2 rounded bg-amber-500/15 border border-amber-500/30 text-amber-200 text-[10px] font-mono flex items-center justify-between gap-1.5">
+        <div className="mx-3 mt-2 p-2 rounded-lg bg-[#2A2012] border border-[#F0AE42]/40 text-[#F0AE42] text-[10px] font-mono flex items-center justify-between gap-1.5">
           <span>{noticeMessage}</span>
           <button
             onClick={() => setNoticeMessage(null)}
-            className="text-amber-400 hover:text-white px-1 py-0.5 rounded hover:bg-amber-500/20"
+            className="text-[#F0AE42] hover:text-white px-1 py-0.5 rounded hover:bg-[#F0AE42]/20"
             title="Dismiss notice"
           >
             ✕
@@ -857,20 +1851,20 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
         </div>
       )}
       <div className="px-3 pt-2.5 pb-2">
-        <div className="flex items-center gap-2 rounded-md bg-[#13161f] px-2.5 py-1.5 border border-white/5">
-          <Search className="h-3 w-3 text-slate-500 shrink-0" />
+        <div className="flex items-center gap-2 rounded-lg bg-[#090D16] px-2.5 py-1.5 border border-[#273247] focus-within:border-[#6658F5] transition-colors shadow-inner">
+          <Search className="h-3.5 w-3.5 text-[#98A5BC] shrink-0" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search shots..."
-            className="w-full bg-transparent text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none"
+            className="w-full bg-transparent text-[11px] text-[#F0F3FA] placeholder-[#64748B] focus:outline-none"
           />
         </div>
       </div>
 
       {/* Scenes List */}
-      <div className="flex-1 overflow-y-auto px-2 py-1 space-y-1">
+      <div className="flex-1 overflow-y-auto px-2.5 py-1 space-y-1.5">
         {scenes.map((scene) => {
           const isCollapsed = !!collapsedScenes[scene.id];
           const filteredShots = scene.shots.filter(
@@ -881,19 +1875,19 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
           );
 
           return (
-            <div key={scene.id} className="space-y-0.5">
+            <div key={scene.id} className="space-y-1">
               {/* Scene Accordion Header with Inline Rename & Delete */}
-              <div className="group/scene flex w-full items-center justify-between rounded px-2 py-1 text-left text-[11px] font-semibold text-slate-400 hover:bg-white/5 hover:text-slate-200 transition-colors">
+              <div className="group/scene flex w-full items-center justify-between rounded-lg px-2 py-1 text-left text-[11px] font-semibold text-[#98A5BC] hover:bg-[#121A2A] hover:text-[#F0F3FA] transition-colors">
                 <div
                   onClick={() => toggleScene(scene.id)}
                   className="flex flex-1 items-center gap-1.5 cursor-pointer min-w-0 py-0.5"
                 >
                   {isCollapsed ? (
-                    <ChevronRight className="h-3 w-3 text-slate-500 shrink-0" />
+                    <ChevronRight className="h-3.5 w-3.5 text-[#64748B] shrink-0" />
                   ) : (
-                    <ChevronDown className="h-3 w-3 text-slate-500 shrink-0" />
+                    <ChevronDown className="h-3.5 w-3.5 text-[#98A5BC] shrink-0" />
                   )}
-                  <FolderOpen className="h-3 w-3 text-slate-500 shrink-0" />
+                  <FolderOpen className="h-3.5 w-3.5 text-[#6658F5] shrink-0" />
                   {editingSceneId === scene.id ? (
                     <input
                       type="text"
@@ -905,7 +1899,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
                       }}
                       onBlur={(e) => handleRenameScene(scene.id, e.target.value)}
                       onClick={(e) => e.stopPropagation()}
-                      className="bg-black/60 border border-blue-500 rounded px-1.5 py-0.5 text-white text-[11px] focus:outline-none w-36"
+                      className="bg-[#090D16] border border-[#6658F5] rounded px-1.5 py-0.5 text-white text-[11px] focus:outline-none w-36"
                     />
                   ) : (
                     <span
@@ -913,13 +1907,13 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
                         e.stopPropagation();
                         setEditingSceneId(scene.id);
                       }}
-                      className="truncate"
+                      className="truncate text-[#D5DFEE]"
                       title="Double-click to rename scene"
                     >
                       {scene.name}
                     </span>
                   )}
-                  <span className="font-mono text-[9px] text-slate-500 shrink-0">
+                  <span className="font-mono text-[9.5px] text-[#64748B] shrink-0">
                     ({scene.shots.length})
                   </span>
                 </div>
@@ -929,20 +1923,19 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onAssembleScene?.(scene);
+                      setEditingSceneId(scene.id);
                     }}
-                    className="p-1 rounded hover:bg-purple-600/30 text-slate-400 hover:text-purple-300 transition-colors"
-                    title={`Assemble ${scene.name} in Sequence Timeline`}
+                    className="p-1 rounded hover:bg-[#1A2436] text-[#98A5BC] hover:text-[#F0AE42] transition-colors"
+                    title={`Rename ${scene.name}`}
                   >
-                    <Film className="h-3 w-3" />
+                    <Edit3 className="h-3 w-3" />
                   </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setTargetSceneId(scene.id);
-                      setShowNewShotModal(true);
+                      handleCreateShot(scene.id);
                     }}
-                    className="p-1 rounded hover:bg-blue-600/30 text-slate-400 hover:text-blue-300 transition-colors"
+                    className="p-1 rounded hover:bg-[#6658F5]/25 text-[#98A5BC] hover:text-[#C4BEFF] transition-colors"
                     title={`Add shot to ${scene.name}`}
                   >
                     <Plus className="h-3 w-3" />
@@ -950,7 +1943,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
                   {scenes.length > 1 && (
                     <button
                       onClick={(e) => handleDeleteScene(scene.id, e)}
-                      className="p-1 rounded hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 transition-colors"
+                      className="p-1 rounded hover:bg-[#EF5261]/20 text-[#98A5BC] hover:text-[#EF5261] transition-colors"
                       title={`Delete ${scene.name}`}
                     >
                       <Trash2 className="h-3 w-3" />
@@ -968,14 +1961,16 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
                       <div
                         key={shotItem.id}
                         onClick={() => handleSelectShot(shotItem)}
-                        className={`group relative flex items-center gap-2.5 rounded-md p-1.5 cursor-pointer transition-all ${
+                        className={`group relative flex items-center gap-2.5 rounded-xl p-1.5 cursor-pointer transition-all border ${
                           isSelected
-                            ? 'bg-[#1a2233] border border-blue-500/80 text-white shadow-sm'
-                            : 'hover:bg-white/5 text-slate-300'
+                            ? 'bg-gradient-to-r from-[#1A2436] to-[#141D2E] border-[#6658F5]/80 text-white shadow-[0_4px_12px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.06)]'
+                            : 'bg-[#121A2A]/55 border-transparent hover:border-[#273247] hover:bg-[#151F32] text-[#D0D9E8]'
                         }`}
                       >
                         {/* Thumbnail */}
-                        <div className="relative h-10 w-14 shrink-0 overflow-hidden rounded bg-black/60 border border-white/10">
+                        <div className={`relative h-10 w-14 shrink-0 overflow-hidden rounded-lg bg-[#090D16] border ${
+                          isSelected ? 'border-[#6658F5]/60' : 'border-[#273247]'
+                        }`}>
                           <img
                             src={shotItem.thumbnail}
                             alt={shotItem.code}
@@ -984,23 +1979,57 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
                               (e.target as HTMLElement).style.display = 'none';
                             }}
                           />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-                          <span className="absolute bottom-0.5 right-1 font-mono text-[8px] text-white/90">
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent" />
+                          <span className="absolute bottom-0.5 right-1 font-mono text-[8.5px] font-bold text-white/95">
                             {shotItem.duration}
                           </span>
                         </div>
 
                         {/* Shot Info */}
-                        <div className="flex flex-1 flex-col min-w-0">
-                          <div className="flex items-center justify-between">
-                            <span className="font-semibold text-[11px] leading-tight text-white truncate">
-                              {shotItem.code}
-                            </span>
-                            <div className="relative flex items-center gap-0.5">
+                        <div className="flex flex-1 flex-col min-w-0 gap-0.5">
+                          <div className="flex items-center justify-between gap-1">
+                            {editingShotId === shotItem.id ? (
+                              <input
+                                type="text"
+                                defaultValue={shotItem.code}
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleRenameShot(scene.id, shotItem.id, (e.target as HTMLInputElement).value);
+                                  if (e.key === 'Escape') setEditingShotId(null);
+                                }}
+                                onBlur={(e) => handleRenameShot(scene.id, shotItem.id, e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                className="bg-[#090D16] border border-[#F0AE42] rounded px-1.5 py-0.5 text-white text-[10px] focus:outline-none w-full min-w-0"
+                              />
+                            ) : (
+                              <span
+                                onDoubleClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingShotId(shotItem.id);
+                                }}
+                                className="font-semibold text-[11px] leading-tight text-[#F0F3FA] truncate"
+                                title={`${shotItem.code} — ${shotItem.title} (Double-click to rename)`}
+                              >
+                                {shotItem.code} · {shotItem.title}
+                              </span>
+                            )}
+                            <div className="relative flex items-center gap-0.5 shrink-0">
+                              {/* Quick Rename Button on Hover */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingShotId(shotItem.id);
+                                }}
+                                className="opacity-0 group-hover:opacity-100 text-[#98A5BC] hover:text-[#F0AE42] hover:bg-white/10 p-1 rounded transition-all"
+                                title="Rename Shot"
+                              >
+                                <Edit3 className="h-3 w-3" />
+                              </button>
+
                               {/* Quick Delete Button on Hover */}
                               <button
                                 onClick={(e) => handleDeleteShot(scene.id, shotItem.id, e)}
-                                className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 p-1 rounded transition-all"
+                                className="opacity-0 group-hover:opacity-100 text-[#98A5BC] hover:text-[#EF5261] hover:bg-[#EF5261]/20 p-1 rounded transition-all"
                                 title="Delete Shot"
                               >
                                 <Trash2 className="h-3 w-3" />
@@ -1012,7 +2041,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
                                   e.stopPropagation();
                                   setOpenMenuShotId(openMenuShotId === shotItem.id ? null : shotItem.id);
                                 }}
-                                className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-white hover:bg-white/10 p-1 rounded transition-all"
+                                className="opacity-0 group-hover:opacity-100 text-[#98A5BC] hover:text-white hover:bg-white/10 p-1 rounded transition-all"
                                 title="Shot Options"
                               >
                                 <MoreVertical className="h-3 w-3" />
@@ -1022,44 +2051,46 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
                               {openMenuShotId === shotItem.id && (
                                 <div
                                   onClick={(e) => e.stopPropagation()}
-                                  className="absolute right-0 top-6 z-50 w-36 rounded-lg border border-white/10 bg-[#161a26] p-1 shadow-2xl backdrop-blur-md text-[11px]"
+                                  className="absolute right-0 top-6 z-50 w-36 rounded-xl border border-[#273247] bg-[#121A2A] p-1 shadow-2xl backdrop-blur-md text-[11px]"
                                 >
                                   <button
-                                    onClick={(e) => handleDuplicateShot(scene.id, shotItem, e)}
-                                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-slate-300 hover:bg-white/10 hover:text-white transition-colors"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingShotId(shotItem.id);
+                                      setOpenMenuShotId(null);
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[#D0D9E8] hover:bg-[#1A2436] hover:text-white transition-colors"
                                   >
-                                    <Copy className="h-3 w-3 text-blue-400" />
+                                    <Edit3 className="h-3 w-3 text-[#F0AE42]" />
+                                    <span>Rename Shot</span>
+                                  </button>
+                                  <button
+                                    onClick={(e) => handleDuplicateShot(scene.id, shotItem, e)}
+                                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[#D0D9E8] hover:bg-[#1A2436] hover:text-white transition-colors"
+                                  >
+                                    <Copy className="h-3 w-3 text-[#18B8D8]" />
                                     <span>Duplicate Shot</span>
                                   </button>
                                   <button
                                     onClick={(e) => handleDeleteShot(scene.id, shotItem.id, e)}
-                                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-rose-400 hover:bg-rose-950/60 hover:text-rose-300 transition-colors"
+                                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[#EF5261] hover:bg-[#EF5261]/15 hover:text-[#FF7A86] transition-colors"
                                   >
-                                    <Trash2 className="h-3 w-3 text-rose-400" />
+                                    <Trash2 className="h-3 w-3 text-[#EF5261]" />
                                     <span>Delete Shot</span>
                                   </button>
                                 </div>
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center gap-1.5 font-mono text-[9px] text-slate-400">
-                            <span>{shotItem.duration}</span>
-                            <span>•</span>
-                            <span>{shotItem.focalLength}</span>
-                            <span>•</span>
-                            <span
-                              className={`rounded px-1 py-0.2 text-[8px] font-semibold tracking-wider uppercase ${
-                                shotItem.mode === 'video-plate'
-                                  ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
-                                  : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                              }`}
-                            >
-                              {shotItem.mode === 'video-plate' ? 'VFX Plate' : '3D Previs'}
+                          <div className="flex items-center gap-1.5 font-mono text-[9.5px] text-[#98A5BC]">
+                            <span className="text-[#D5DFEE]">{isSelected ? `${shot.durationSeconds}s` : shotItem.duration}</span>
+                            <span className="text-[#384764]">•</span>
+                            <span className="text-[#18B8D8] font-semibold">{isSelected ? shot.camera.lens.focalLength : shotItem.focalLength}</span>
+                            <span className="text-[#384764]">•</span>
+                            <span className="rounded px-1.5 py-0.2 text-[8px] font-bold tracking-wider uppercase bg-[#6658F5]/20 text-[#C4BEFF] border border-[#6658F5]/35">
+                              3D Previs
                             </span>
                           </div>
-                          <span className="text-[10px] text-slate-300 truncate">
-                            {shotItem.movement}
-                          </span>
                         </div>
                       </div>
                     );
@@ -1074,32 +2105,32 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
         <div className="pt-2 pb-1">
           <button
             onClick={handleCreateNewScene}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/20 bg-white/[0.02] hover:bg-white/[0.06] hover:border-amber-400/50 py-2 font-mono text-[10px] text-slate-300 hover:text-white transition-all shadow-sm"
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-[#384764] bg-[#121A2A]/50 hover:bg-[#1A2436] hover:border-[#F0AE42]/60 py-2 font-mono text-[10.5px] text-[#D0D9E8] hover:text-white transition-all shadow-sm"
           >
-            <Plus className="h-3.5 w-3.5 text-amber-400" />
+            <Plus className="h-3.5 w-3.5 text-[#F0AE42]" />
             <span className="font-semibold">+ Add New Scene</span>
           </button>
         </div>
       </div>
 
       {/* Project Info Section */}
-      <div className="border-t border-white/5 bg-[#0e1017] p-3 text-[11px]">
+      <div className="border-t border-[#273247] bg-[#121A2A] p-3 text-[11px]">
         <button
           onClick={() => setIsProjectInfoCollapsed(!isProjectInfoCollapsed)}
-          className="flex w-full items-center justify-between text-slate-400 hover:text-white font-medium mb-2"
+          className="flex w-full items-center justify-between text-[#98A5BC] hover:text-white font-medium mb-2"
         >
-          <span className="font-display text-[11px] font-bold uppercase tracking-wider text-slate-300">
+          <span className="font-display text-[11px] font-bold uppercase tracking-wider text-[#D5DFEE]">
             Project Info
           </span>
           {isProjectInfoCollapsed ? (
-            <ChevronRight className="h-3 w-3 text-slate-500" />
+            <ChevronRight className="h-3.5 w-3.5 text-[#98A5BC]" />
           ) : (
-            <ChevronDown className="h-3 w-3 text-slate-500" />
+            <ChevronDown className="h-3.5 w-3.5 text-[#98A5BC]" />
           )}
         </button>
 
         {!isProjectInfoCollapsed && (
-          <div className="space-y-1.5 font-mono text-[10px] text-slate-400">
+          <div className="space-y-1.5 font-mono text-[10px] text-[#98A5BC]">
             <div className="flex justify-between">
               <span>Project</span>
               <span className="text-white font-sans font-semibold">Motion Previs</span>
@@ -1126,7 +2157,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
             </div>
             <div className="flex justify-between">
               <span>Active Shot</span>
-              <span className="text-amber-400 font-semibold">
+              <span className="text-[#F0AE42] font-semibold">
                 {shot?.durationSeconds ?? 4}s · {shot?.camera?.lens?.focalLength ?? '35mm'}
               </span>
             </div>
@@ -1138,23 +2169,23 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
         )}
 
         {/* Status Badge */}
-        <div className="mt-3 flex items-center justify-between rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1.5">
-          <div className="flex items-center gap-1.5 text-emerald-400">
+        <div className="mt-3 flex items-center justify-between rounded-lg bg-[#0F2924] border border-[#20C997]/35 px-2.5 py-1.5">
+          <div className="flex items-center gap-1.5 text-[#20C997]">
             <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
             <span className="font-display text-[10px] font-bold">
-              {shot.creationMode === 'video-plate' ? 'VFX Plate Mode' : '3D Previs Soundstage'}
+              3D Previs Soundstage
             </span>
           </div>
-          <span className="font-mono text-[9px] text-slate-400">
+          <span className="font-mono text-[9.5px] text-[#D0D9E8]">
             {shot.durationSeconds}s · {shot.camera.lens.focalLength}
           </span>
         </div>
 
         {/* Reset Demo Project Button */}
-        <div className="mt-2.5 pt-2 border-t border-white/5 flex justify-end">
+        <div className="mt-2.5 pt-2 border-t border-[#273247] flex justify-end">
           <button
             onClick={handleResetDemoScenes}
-            className="flex items-center gap-1 font-mono text-[9px] text-slate-500 hover:text-slate-300 transition-colors"
+            className="flex items-center gap-1 font-mono text-[9.5px] text-[#98A5BC] hover:text-white transition-colors"
             title="Restore original demo scenes & shots"
           >
             <RotateCcw className="h-2.5 w-2.5" />
@@ -1162,79 +2193,6 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
           </button>
         </div>
       </div>
-
-      {/* New Shot Modal Dialog (Two direct choices for every shot) */}
-      {showNewShotModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="relative w-full max-w-lg rounded-xl bg-[#0f121a] border border-white/15 p-5 shadow-2xl space-y-4">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
-              <div>
-                <h3 className="font-display text-sm font-bold text-white flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-amber-400" />
-                  Create New Shot
-                </h3>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Choose how you want to direct and construct this shot
-                </p>
-              </div>
-              <button
-                onClick={() => setShowNewShotModal(false)}
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* 2-Card Directorial Choice Grid */}
-            <div className="grid grid-cols-2 gap-3">
-              {/* Option 1: 3D Previs from Scratch */}
-              <button
-                onClick={() => handleCreateShotWithMode('construct-3d')}
-                className="group flex flex-col items-start justify-between rounded-lg bg-gradient-to-b from-[#182133] to-[#111723] p-4 border border-blue-500/40 hover:border-blue-400 hover:shadow-lg hover:shadow-blue-500/10 text-left transition-all active:scale-[0.98]"
-              >
-                <div className="space-y-2">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600/30 text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                    <Box className="h-5 w-5" />
-                  </div>
-                  <span className="font-display text-xs font-bold text-white group-hover:text-blue-300 transition-colors">
-                    🎬 Construct from Scratch
-                  </span>
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Build virtual soundstage scene: place characters, trees, cars, tables, and props. Direct camera dolly paths, focal lengths, framing, and cinematic lighting.
-                  </p>
-                </div>
-                <div className="mt-4 flex items-center gap-1 font-mono text-[9px] font-bold text-blue-400 group-hover:translate-x-0.5 transition-transform">
-                  <span>Start 3D Previs</span>
-                  <span>→</span>
-                </div>
-              </button>
-
-              {/* Option 2: Video Plate Solve */}
-              <button
-                onClick={() => handleCreateShotWithMode('video-plate')}
-                className="group flex flex-col items-start justify-between rounded-lg bg-gradient-to-b from-[#162927] to-[#0f1d1c] p-4 border border-teal-500/40 hover:border-teal-400 hover:shadow-lg hover:shadow-teal-500/10 text-left transition-all active:scale-[0.98]"
-              >
-                <div className="space-y-2">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-600/30 text-teal-400 group-hover:bg-teal-600 group-hover:text-white transition-all">
-                    <Video className="h-5 w-5" />
-                  </div>
-                  <span className="font-display text-xs font-bold text-white group-hover:text-teal-300 transition-colors">
-                    📹 Video Plate Solve
-                  </span>
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Upload a live-action reference video plate. Studio analyzes 5 computer vision passes (Depth, Pose, Edges, Masks, Multi-Pose) and transfers exact motion into ComfyUI.
-                  </p>
-                </div>
-                <div className="mt-4 flex items-center gap-1 font-mono text-[9px] font-bold text-teal-400 group-hover:translate-x-0.5 transition-transform">
-                  <span>Import & Solve Plate</span>
-                  <span>→</span>
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

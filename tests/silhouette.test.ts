@@ -93,4 +93,49 @@ describe('Silhouette mask extraction & measurement', () => {
     const foregroundCount = rendered.data.reduce((sum, v) => sum + v, 0);
     expect(foregroundCount).toBeGreaterThan(50);
   });
+
+  it('prunes scattered noise (e.g. coffee beans on table) to preserve central subject aspect ratio', () => {
+    // 20x20 image: a tall central pouch (width 4, height 12) from x=8..11, y=3..14
+    // Plus two small scattered noise specks at the bottom edges: x=1, y=18 and x=18, y=18
+    const maskData = new Uint8Array(20 * 20);
+
+    // Central tall pouch
+    for (let y = 3; y <= 14; y++) {
+      for (let x = 8; x <= 11; x++) {
+        maskData[y * 20 + x] = 1;
+      }
+    }
+
+    // Scattered coffee beans / noise at bottom edges
+    maskData[18 * 20 + 1] = 1; // bottom left
+    maskData[18 * 20 + 2] = 1;
+    maskData[18 * 20 + 18] = 1; // bottom right
+    maskData[18 * 20 + 19] = 1;
+
+    // Without pruning, bounding box covers x=1..19 (width 19), so aspect ratio is 16/19 = ~0.84 (squat/horizontal)
+    const rawMetrics = measureSilhouette({ width: 20, height: 20, data: maskData });
+    expect(rawMetrics.bounds.minX).toBe(1);
+    expect(rawMetrics.bounds.maxX).toBe(19);
+    expect(rawMetrics.aspectRatio).toBeLessThan(1.0);
+
+    // With isolateDominantSubject, scattered beans are discarded, keeping only the tall central pouch
+    const cleaned = extractMaskFromRgba(
+      // synthesize RGBA where mask pixels are black (0,0,0) and background is white (255,255,255)
+      new Uint8ClampedArray(
+        Array.from(maskData).flatMap((v) => (v === 1 ? [30, 20, 15, 255] : [255, 255, 255, 255]))
+      ),
+      20,
+      20,
+      30
+    );
+
+    const cleanMetrics = measureSilhouette(cleaned);
+    expect(cleanMetrics.bounds.minX).toBe(8);
+    expect(cleanMetrics.bounds.maxX).toBe(11);
+    expect(cleanMetrics.bounds.minY).toBe(3);
+    expect(cleanMetrics.bounds.maxY).toBe(14);
+    // Aspect ratio is 12 / 4 = 3.0:1 (true vertical proportion)
+    expect(cleanMetrics.aspectRatio).toBe(3.0);
+  });
 });
+

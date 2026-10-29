@@ -16,8 +16,15 @@ import {
   SculptSpec,
   sanitizeSculptSpec,
   applySculptPatch,
+  lookupSculptSpec,
 } from '../engine/procedural3D/sculptSpec';
-import { SilhouetteMetrics } from '../engine/procedural3D/silhouette';
+import {
+  compileCharacterToClaySculpt,
+  extractCharacterFeaturesFromModelOutput,
+  CharacterVisualFeatures,
+} from '../engine/procedural3D/characterClayCompiler';
+import { isHumanoidPrompt, synthesizeRecipeFromImage } from '../engine/procedural3D/imageToRecipe';
+import { SilhouetteMetrics, ExtractedPalette } from '../engine/procedural3D/silhouette';
 import { EnvironmentSpec, CINEMATIC_ENVIRONMENT_PRESETS } from '../types/environment';
 import { getRawStorage } from './storage';
 
@@ -59,7 +66,7 @@ export const PROVIDERS: Record<ReasonerProvider, ProviderInfo> = {
     protocol: 'ollama',
     local: true,
     needsKey: false,
-    hint: 'Local open-weights models. Start with: ollama serve',
+    hint: 'Local open-weights models. Note: use a model with vision (e.g. Gemma 4 or Qwen 3.5). Start with: ollama serve',
   },
   llamacpp: {
     id: 'llamacpp',
@@ -67,7 +74,7 @@ export const PROVIDERS: Record<ReasonerProvider, ProviderInfo> = {
     protocol: 'openai',
     local: true,
     needsKey: false,
-    hint: 'Start: llama-server -m model.gguf --port 8080 -c 16384 (grammar-constrained JSON).',
+    hint: 'Start: llama-server -m model.gguf --mmproj mmproj.gguf --port 8080 -c 16384. Note: use a model with vision (e.g. Gemma 4 or Qwen 3.5).',
   },
   openai: {
     id: 'openai',
@@ -75,7 +82,7 @@ export const PROVIDERS: Record<ReasonerProvider, ProviderInfo> = {
     protocol: 'openai',
     local: false,
     needsKey: false,
-    hint: 'LM Studio, OpenRouter, Groq or any /v1/chat/completions server. Key optional for local servers.',
+    hint: 'Sign in directly with your ChatGPT account in the browser, or connect any OpenAI-compatible API endpoint.',
   },
   gemini: {
     id: 'gemini',
@@ -89,10 +96,21 @@ export const PROVIDERS: Record<ReasonerProvider, ProviderInfo> = {
 
 /** Base-URL presets for the OpenAI-compatible provider. */
 export const OPENAI_COMPATIBLE_PRESETS: { label: string; baseUrl: string }[] = [
+  { label: 'OpenAI (Browser Sign-In)', baseUrl: '/api/openai' },
+  { label: 'OpenAI (Official API)', baseUrl: 'https://api.openai.com/v1' },
   { label: 'LM Studio', baseUrl: 'http://127.0.0.1:1234/v1' },
   { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1' },
   { label: 'Groq', baseUrl: 'https://api.groq.com/openai/v1' },
   { label: 'vLLM', baseUrl: 'http://127.0.0.1:8000/v1' },
+];
+
+export const OPENAI_MODEL_PRESETS: { id: string; label: string }[] = [
+  { id: 'gpt-5.6-sol', label: 'gpt-5.6-sol (Flagship Reasoning)' },
+  { id: 'gpt-6.1-sol', label: 'gpt-6.1-sol (Frontier)' },
+  { id: 'gpt-6-luna', label: 'gpt-6-luna (Fast Reasoning)' },
+  { id: 'gpt-4o', label: 'gpt-4o (Vision)' },
+  { id: 'gpt-4o-mini', label: 'gpt-4o-mini (Fast Vision)' },
+  { id: 'o3-mini', label: 'o3-mini' },
 ];
 
 export const REASONER_SETTINGS_KEY = 'aids.objectReasoner.settings.v2';
@@ -105,6 +123,14 @@ export const DEFAULT_REASONER_MODEL = 'qwen3.5:9b-q4_K_M';
 export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
+export const GEMINI_MODEL_PRESETS: { id: string; label: string; desc: string }[] = [
+  { id: 'gemini-2.5-flash', label: 'gemini-2.5-flash', desc: 'Fast Multimodal (Recommended · Free tier)' },
+  { id: 'gemini-2.5-flash-lite', label: 'gemini-2.5-flash-lite', desc: 'Ultra-fast lightweight (Free tier)' },
+  { id: 'gemini-2.5-pro', label: 'gemini-2.5-pro', desc: 'Deep Reasoning (Free tier)' },
+  { id: 'gemini-flash-latest', label: 'gemini-flash-latest', desc: 'Always latest flash model' },
+  { id: 'gemini-pro-latest', label: 'gemini-pro-latest', desc: 'Always latest pro model' },
+];
+
 export function defaultReasonerSettings(): ReasonerSettings {
   return {
     provider: 'ollama',
@@ -112,7 +138,7 @@ export function defaultReasonerSettings(): ReasonerSettings {
       ollama: { baseUrl: DEFAULT_OLLAMA_URL, model: DEFAULT_REASONER_MODEL, apiKey: '' },
       // llama-server serves whatever GGUF it was started with; the model field is informational.
       llamacpp: { baseUrl: 'http://127.0.0.1:8080/v1', model: 'local', apiKey: '' },
-      openai: { baseUrl: OPENAI_COMPATIBLE_PRESETS[0].baseUrl, model: '', apiKey: '' },
+      openai: { baseUrl: OPENAI_COMPATIBLE_PRESETS[0].baseUrl, model: 'gpt-5.6-sol', apiKey: '' },
       gemini: { baseUrl: GEMINI_BASE_URL, model: DEFAULT_GEMINI_MODEL, apiKey: '' },
     },
   };
@@ -132,6 +158,11 @@ export function getReasonerSettings(): ReasonerSettings {
       const providers = { ...defaults.providers };
       for (const id of Object.keys(PROVIDERS) as ReasonerProvider[]) {
         providers[id] = { ...defaults.providers[id], ...(parsed.providers?.[id] ?? {}) };
+      }
+      // Migrate deprecated models (Gemini 1.5/2.0 series retired by Google) to gemini-2.5-flash
+      const deprecatedGeminiModels = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+      if (!providers.gemini.model || deprecatedGeminiModels.includes(providers.gemini.model)) {
+        providers.gemini.model = DEFAULT_GEMINI_MODEL;
       }
       return { provider, providers };
     }
@@ -153,13 +184,14 @@ export function saveReasonerSettings(settings: ReasonerSettings) {
 /** Active provider + its settings, flattened (what the generator uses). */
 export function getReasonerConfig() {
   const s = getReasonerSettings();
-  const p = s.providers[s.provider];
+  const provider = s.provider && s.provider in PROVIDERS ? s.provider : 'ollama';
+  const p = s.providers?.[provider] || { baseUrl: '', model: '', apiKey: '' };
   return {
-    provider: s.provider,
-    info: PROVIDERS[s.provider],
-    url: p.baseUrl.trim().replace(/\/+$/, ''),
-    model: p.model.trim(),
-    apiKey: p.apiKey.trim(),
+    provider,
+    info: PROVIDERS[provider] || PROVIDERS.ollama,
+    url: (p.baseUrl || '').trim().replace(/\/+$/, ''),
+    model: (p.model || '').trim(),
+    apiKey: (p.apiKey || '').trim(),
   };
 }
 
@@ -194,10 +226,10 @@ export class ObjectReasonerError extends Error {
 const vec3 = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 };
 const vec2 = { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 2 };
 
-/** JSON schema handed to reasoners for structured output. */
+/** JSON schema handed to reasoners for structured output. Declarative 3D recipe standard. */
 export const SCULPT_SPEC_JSON_SCHEMA = {
   type: 'object',
-  required: ['name', 'identity', 'route', 'rig', 'heightMeters', 'walker', 'materials', 'parts'],
+  required: ['name', 'route', 'heightMeters', 'parts'],
   properties: {
     name: { type: 'string' },
     identity: { type: 'string' },
@@ -234,7 +266,7 @@ export const SCULPT_SPEC_JSON_SCHEMA = {
     },
     materials: {
       type: 'array',
-      maxItems: 16,
+      maxItems: 32,
       items: {
         type: 'object',
         required: ['id', 'color', 'roughness', 'metalness'],
@@ -253,21 +285,23 @@ export const SCULPT_SPEC_JSON_SCHEMA = {
       maxItems: 60,
       items: {
         type: 'object',
-        required: ['id', 'shape', 'size', 'position', 'rotation', 'material'],
+        required: ['id', 'shape', 'size', 'position', 'rotation'],
         properties: {
           id: { type: 'string', minLength: 1 },
           parent: { type: 'string' },
-          shape: { type: 'string', enum: [...SCULPT_SHAPES] },
+          shape: { type: 'string', enum: [...SCULPT_SHAPES, 'box'] },
           size: vec3,
           position: vec3,
           rotation: vec3,
-          material: { type: 'string', minLength: 1 },
+          material: { type: 'string' },
+          color: { type: 'string' },
           roundness: { type: 'number' },
           taper: { type: 'number' },
           points: { type: 'array', items: vec3 },
           profile: { type: 'array', items: vec2 },
           outline: { type: 'array', items: vec2 },
           bevel: { type: 'number' },
+          mirror: { type: 'boolean' },
           mirrorX: { type: 'boolean' },
           bone: { type: 'string', enum: [...HUMANOID_BONES] },
           motion: {
@@ -301,16 +335,18 @@ export const SCULPT_PATCH_JSON_SCHEMA = {
         required: ['id'],
         properties: {
           id: { type: 'string' },
-          shape: { type: 'string', enum: [...SCULPT_SHAPES] },
+          shape: { type: 'string', enum: [...SCULPT_SHAPES, 'box'] },
           size: vec3,
           position: vec3,
           rotation: vec3,
           material: { type: 'string' },
+          color: { type: 'string' },
           roundness: { type: 'number' },
           taper: { type: 'number' },
           profile: { type: 'array', items: vec2 },
           outline: { type: 'array', items: vec2 },
           bevel: { type: 'number' },
+          mirror: { type: 'boolean' },
           mirrorX: { type: 'boolean' },
           bone: { type: 'string', enum: [...HUMANOID_BONES] },
         },
@@ -320,20 +356,22 @@ export const SCULPT_PATCH_JSON_SCHEMA = {
       type: 'array',
       items: {
         type: 'object',
-        required: ['id', 'shape', 'size', 'position', 'rotation', 'material'],
+        required: ['id', 'shape', 'size', 'position', 'rotation'],
         properties: {
           id: { type: 'string' },
           parent: { type: 'string' },
-          shape: { type: 'string', enum: [...SCULPT_SHAPES] },
+          shape: { type: 'string', enum: [...SCULPT_SHAPES, 'box'] },
           size: vec3,
           position: vec3,
           rotation: vec3,
           material: { type: 'string' },
+          color: { type: 'string' },
           roundness: { type: 'number' },
           taper: { type: 'number' },
           profile: { type: 'array', items: vec2 },
           outline: { type: 'array', items: vec2 },
           bevel: { type: 'number' },
+          mirror: { type: 'boolean' },
           mirrorX: { type: 'boolean' },
           bone: { type: 'string', enum: [...HUMANOID_BONES] },
         },
@@ -343,31 +381,73 @@ export const SCULPT_PATCH_JSON_SCHEMA = {
   },
 };
 
-export const OBJECT_REASONER_SYSTEM_PROMPT = `You are the 3D procedural reasoning stage of an AI film previs workstation. The user gives you a description, a reference image, or silhouette measurements. You decide how to construct the 3D figure using parametric shapes so it is instantly recognisable on set.
+export const OBJECT_REASONER_SYSTEM_PROMPT = `You are the Lead 3D Procedural Reasoning Stage of an AI Film Previs Workstation.
+Your mission is to sculpt ANY concept, prop, jewelry, vehicle, furniture, vessel, weapon, tech device, creature, or character as an authentic declarative recipe (SculptSpec) of soft, parametric 3D geometric parts.
+NEVER resort to primitive stacked cylinders, stepped cakes, or blocky pedestals. Every subject must exhibit believable physical anatomy, foundational support, and realistic PBR materials.
 
-Reason before building:
-1. Identity: what silhouette, proportions and parts make this object recognisable? Write them in "identity" (one or two sentences).
-2. Structure: identity-bearing masses first, then secondary parts. Every part must touch or overlap the part it attaches to - no floating gaps. Supports reach the ground.
-3. Shapes to use:
-   - "blob": box to ellipsoid via roundness (0 = sharp box, 0.3 = smooth box, 1 = ellipsoid/sphere). Use for organic torsos, heads, limbs, cushions, rocks.
-   - "lathe": revolved 2D profile curves for bottles, hats, vases, wheels, glasses, helmets. Profile is an array of [radius, height] pairs from 0 to 1.
-   - "extrude": 2D polygon outline (points between -0.5 and 0.5) extruded along depth with bevel. For shields, signage, armor plates, badges.
-   - "cylinder": with optional taper (1 = straight, 0.5 = narrower top).
-   - "cone", "torus", "tube", "capsule".
-4. Rigging: For humanoids or characters, tag parts with "bone" (Head, Chest, Spine, Hips, LeftArm, RightArm, LeftForeArm, RightForeArm, LeftHand, RightHand, LeftUpLeg, RightUpLeg, LeftLeg, RightLeg, LeftFoot, RightFoot) and set rig: "humanoid".
-5. Surface: realistic colours (#hex), roughness and metalness per material. Glass/screens may use opacity; lights may be emissive.
-6. Behaviour: add motion only where the real object moves (wheels spin, pendulums swing, flags bob).
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CATEGORY-SPECIFIC GEOMETRIC RULES & SPATIAL ANCHORS
+═══════════════════════════════════════════════════════════════════════════════
 
-Routing:
-- route "quadruped-walker": ANY real four-legged animal (cow, camel, dog, horse, goat, lion, elephant...). Fill "walker" and leave "parts" empty.
-- route "biped-walker": a generic human person. Set walker.female when appropriate. "parts" empty.
-- route "author": everything else (characters, creatures, robots, vehicles, buildings, props). Describe 10-60 parts. Still output "walker" with neutral values.
+1. HOLLOW & CIRCULAR OBJECTS (Rings, Tires, Bracelets, Torcs, Crowns, Tubes, Collars):
+   - STRICT ENFORCEMENT: NEVER use a solid cylinder or solid disc for a ring, band, or hollow loop!
+   - Must use "torus" or 3D swept "tube" with a central circular void.
+   - The primary finger/wrist hole MUST be hollow (inner hole preserved by torus geometry).
+   - For helical/coiled shapes (e.g. coiled snake ring): layer overlapping/angled torus coils or 3D points, adding sculptural head/tail accents.
+   - Example Ring Band Anchor:
+     * id: "ring_band_torus", shape: "torus", size: [0.022, 0.003, 0], position: [0, 0.015, 0], rotation: [90, 0, 0], material: "polished_gold"
 
-Coordinates for "author" parts: metres, Y up, ground at y=0, front faces +Z, centred on x=0.
-- position = centre in object space. rotation = degrees [x,y,z].
-- mirrorX = true duplicates a part (and its children) at -x. Give only the +x side for limbs, wings, ears, eyes.
-- parent = id of part it attaches to.
-- heightMeters = real total height of the object.`;
+2. VEHICLES, AUTOMOBILES & TRANSPORTS:
+   - HIERARCHY RULE: ALWAYS define the foundational underbody chassis/belly first at lowest Y.
+   - NEVER float parts disconnected in space.
+   - Structure: Chassis base -> sculpted aerodynamic hood/body -> greenhouse cockpit canopy -> front splitter & rear spoiler -> 4 alloy wheels with rubber tires.
+   - Symmetrical parts (wheels, rims, headlights, side mirrors): specify only left side with mirrorX: true.
+   - Ground contact: wheel bottoms sit firmly on the ground (Y = radius).
+
+3. FURNITURE, CHAIRS & APPLIANCES:
+   - GROUNDED BASE FIRST: For office/swivel chairs, define the 5-star caster base on the floor (Y ~0.06), vertical gas-lift cylinder (Y ~0.25), under-seat mechanism box, then waterfall seat cushion, mesh backrest, headrest, and bilateral armrests.
+   - For tables/sofas: 4 sturdy legs or base plinth first, followed by structural frame, tabletop or seat cushions.
+
+4. WEAPONS, SWORDS & TOOLS:
+   - ANATOMICAL ACCURACY:
+     * Blade: tapered double-edged blade using "box" with taper >0.3 or "extrude", with central fuller groove and piercing tip ("cone").
+     * Crossguard: central block with bilateral flared quillons (mirrorX: true) and quillon finials.
+     * Hilt: cylindrical or contoured grip with ribbed wrap texture.
+     * Pommel: heavy counterbalance wheel pommel at the base (Y ~0.04) with inlaid jewel/gem.
+
+5. VESSELS, BOTTLES, FLASKS & CONTAINERS:
+   - VOLUMETRIC TRANSITIONS:
+     * Indented punt base ("cylinder" with negative taper).
+     * Main cylindrical vessel body.
+     * Tapered graceful shoulder curve ("cylinder" with positive taper ~0.6 or "blob").
+     * Slender cylindrical neck.
+     * Toroidal lip collar ("torus" rotated [90, 0, 0]).
+     * Seal: foil capsule, natural cork stopper, or threaded cap.
+     * Brand: front paper label plate.
+
+6. MATERIAL & PBR CALIBRATION:
+   - Mirror metals (Gold, Chrome, High-Carbon Steel, Titanium): roughness 0.08 - 0.22, metalness 0.85 - 1.0.
+   - Translucent Glass & Gemstones (Wine bottles, emeralds, rubies): roughness 0.05 - 0.12, metalness 0.05 - 0.2, opacity 0.5 - 0.85.
+   - Matte organics (Leather, Wood, Fabric, Rubber, Mesh, Paper): roughness 0.65 - 0.9, metalness 0.0 - 0.05.
+   - Emissive accents (LED headlights, glowing indicators, plasma cores): set emissive: true.
+
+7. CONSUMER GOODS, PACKAGING, POUCHES, BOXES & EVERYDAY OBJECTS:
+   - SOLID CONTINUITY & ZERO FLOATING PIECES:
+     * For chip bags, snack packets, and coffee pouches: Model the core body as a puffed pillow hull ("blob" or rounded box). Top and bottom crimped seals ("box") MUST overlap the body's top and bottom surfaces directly. NEVER place seals or labels floating in the air with empty space!
+     * For simple geometric objects (books, boxes, phones, bricks, soap): Keep the model simple, solid, and tightly bounded (1 to 4 unified parts). Do NOT invent unnecessary disconnected parts!
+
+═══════════════════════════════════════════════════════════════════════════════
+PART GRAPH CONSTRAINTS
+═══════════════════════════════════════════════════════════════════════════════
+- PART COUNT PROPORTIONALITY:
+  * Simple everyday items, packaged food/goods (pack of chips, snack bag, cereal box, soap bar, can, book, smartphone, simple prop): MUST use between 1 and 4 tightly unified, intersecting parts. NEVER split a simple everyday package or box into disjointed floating pieces!
+  * Medium objects (chair, table, bottle, sword): 4 to 12 functional parts.
+  * Complex mechanical assemblies (vehicles, aircraft, robotic creatures): 10 to 35 parts.
+- PHYSICAL SOLIDITY & ZERO-GAP ENFORCEMENT:
+  * Every single part MUST physically touch and overlap its adjacent support structure or parent part.
+  * Units are METRES. Real-world scale is mandatory (e.g. chip bag ~0.25, ring ~0.035, car ~1.25, chair ~1.15, sword ~1.18, bottle ~0.32).
+  * Coordinates: +Y is UP, +Z is FORWARD, +X is LEFT. Floor is at Y = 0.
+- Output pure JSON strictly adhering to SCULPT_SPEC_JSON_SCHEMA.`;
 
 export const ENVIRONMENT_JSON_SCHEMA = {
   type: 'object',
@@ -447,6 +527,8 @@ export interface ReasonOptions {
   reviseSpec?: SculptSpec;
   /** Director revision instructions / feedback */
   revisionFeedback?: string;
+  /** Extracted color palette from reference image */
+  extractedPalette?: ExtractedPalette | Partial<CharacterVisualFeatures['palette']>;
 }
 
 /** Parses data URL or raw base64 into clean base64 string and mimeType */
@@ -476,17 +558,45 @@ export interface ProviderRequest {
 export function buildOllamaRequest(
   cfg: ReasonerConfig,
   prompt: string,
-  systemPrompt: string = OBJECT_REASONER_SYSTEM_PROMPT,
-  schema: any = PART_GRAPH_JSON_SCHEMA,
-  userPrefix: string = 'Object to build: ',
+  modeOrSystemPrompt: JsonMode | string = 'schema',
+  systemPromptOrSchema: any = OBJECT_REASONER_SYSTEM_PROMPT,
+  schemaOrPrefix: any = PART_GRAPH_JSON_SCHEMA,
+  userPrefixOrImage?: string,
   imageBase64?: string
 ): ProviderRequest {
+  let mode: JsonMode = 'schema';
+  let systemPrompt = OBJECT_REASONER_SYSTEM_PROMPT;
+  let schema = PART_GRAPH_JSON_SCHEMA;
+  let userPrefix = 'Object to build: ';
+  let imgBase64 = imageBase64;
+
+  if (modeOrSystemPrompt === 'schema' || modeOrSystemPrompt === 'object' || modeOrSystemPrompt === 'none') {
+    mode = modeOrSystemPrompt;
+    if (typeof systemPromptOrSchema === 'string') systemPrompt = systemPromptOrSchema;
+    if (schemaOrPrefix && typeof schemaOrPrefix === 'object') schema = schemaOrPrefix;
+    if (typeof userPrefixOrImage === 'string') {
+      if (userPrefixOrImage.startsWith('data:') || userPrefixOrImage.length > 50) {
+        imgBase64 = userPrefixOrImage;
+      } else {
+        userPrefix = userPrefixOrImage;
+      }
+    }
+  } else {
+    // Legacy signature: (cfg, prompt, systemPrompt, schema, userPrefix, imageBase64)
+    systemPrompt = modeOrSystemPrompt;
+    if (systemPromptOrSchema) schema = systemPromptOrSchema;
+    if (typeof schemaOrPrefix === 'string') userPrefix = schemaOrPrefix;
+    if (typeof userPrefixOrImage === 'string' && (userPrefixOrImage.startsWith('data:') || userPrefixOrImage.length > 50)) {
+      imgBase64 = userPrefixOrImage;
+    }
+  }
+
   const userMsg: Record<string, unknown> = {
     role: 'user',
     content: `${userPrefix}${prompt}`,
   };
-  if (imageBase64) {
-    const { base64 } = parseBase64Image(imageBase64);
+  if (imgBase64) {
+    const { base64 } = parseBase64Image(imgBase64);
     userMsg.images = [base64];
   }
   return {
@@ -495,12 +605,12 @@ export function buildOllamaRequest(
     body: {
       model: cfg.model,
       stream: false,
-      // Planning before emitting JSON is what keeps small local models from looping.
-      think: true,
-      format: schema,
+      // When in relaxed 'object' mode or when vision is active, disable thinking to prevent token exhaustion
+      think: mode === 'object' || Boolean(imgBase64) ? false : true,
+      format: mode === 'object' ? 'json' : schema,
       // Zero VRAM clash: immediately unload vision model from GPU (keep_alive: 0) so ComfyUI keeps 24GB VRAM!
-      keep_alive: imageBase64 ? 0 : '10m',
-      options: { temperature: 0.3, num_ctx: 16384, num_predict: 12000 },
+      keep_alive: imgBase64 ? 0 : '10m',
+      options: { temperature: 0.25, num_ctx: 8192, num_predict: 4096 },
       messages: [
         { role: 'system', content: systemPrompt },
         userMsg,
@@ -539,7 +649,7 @@ export function buildOpenAiRequest(
       { role: 'user', content: userContent },
     ],
     temperature: 0.3,
-    max_tokens: 12000,
+    max_tokens: 4096,
     stream: false,
   };
   if (cfg.model && !(cfg.provider === 'llamacpp' && cfg.model === 'local')) body.model = cfg.model;
@@ -553,6 +663,20 @@ export function buildOpenAiRequest(
     body.response_format = { type: 'json_object' };
   }
   return { url: `${cfg.url}/chat/completions`, headers, body };
+}
+
+/** Strips schema keywords unsupported by Google Gemini API (minItems, maxItems, minLength, maxLength) */
+export function cleanSchemaForGemini(schema: any): any {
+  if (!schema || typeof schema !== 'object') return schema;
+  if (Array.isArray(schema)) return schema.map(cleanSchemaForGemini);
+  const copy: Record<string, any> = {};
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === 'minItems' || k === 'maxItems' || k === 'minLength' || k === 'maxLength' || k === '$schema') {
+      continue;
+    }
+    copy[k] = cleanSchemaForGemini(v);
+  }
+  return copy;
 }
 
 export function buildGeminiRequest(
@@ -571,7 +695,7 @@ export function buildGeminiRequest(
     maxOutputTokens: 32768,
   };
   if (mode !== 'none') generationConfig.responseMimeType = 'application/json';
-  if (mode === 'schema') generationConfig.responseJsonSchema = schema;
+  if (mode === 'schema') generationConfig.responseJsonSchema = cleanSchemaForGemini(schema);
 
   const userParts: any[] = [{ text: `${userPrefix}${prompt}` }];
   if (imageBase64) {
@@ -598,13 +722,25 @@ export function buildGeminiRequest(
 /** Pull the JSON text out of a provider response, throwing on truncation/blocks. */
 export function extractResponseText(protocol: ProviderInfo['protocol'], body: any): string {
   if (protocol === 'ollama') {
-    if (body?.done_reason === 'length') throw new ObjectReasonerError('The model ran out of tokens before finishing the part graph.', 'invalid');
-    return body?.message?.content ?? '';
+    const content = body?.message?.content ?? '';
+    if (body?.done_reason === 'length') {
+      const parsed = parseModelJson(content) as any;
+      if (parsed && typeof parsed === 'object' && (Array.isArray(parsed.parts) || Array.isArray(parsed?.recipe?.parts))) {
+        return content;
+      }
+      throw new ObjectReasonerError('The model ran out of tokens before finishing the part graph.', 'invalid');
+    }
+    return content;
   }
   if (protocol === 'openai') {
     const choice = body?.choices?.[0];
-    if (choice?.finish_reason === 'length') throw new ObjectReasonerError('The model ran out of tokens before finishing the part graph.', 'invalid');
-    return choice?.message?.content ?? '';
+    const content = typeof choice?.message?.content === 'string' ? choice.message.content : '';
+    const reasoning = typeof choice?.message?.reasoning_content === 'string' ? choice.message.reasoning_content : '';
+    const resText = content.trim() ? content : reasoning;
+    if (choice?.finish_reason === 'length' && (!resText.includes('{') || !resText.includes('}'))) {
+      throw new ObjectReasonerError('The model ran out of tokens before finishing the part graph.', 'invalid');
+    }
+    return resText;
   }
   const blocked = body?.promptFeedback?.blockReason;
   if (blocked) throw new ObjectReasonerError(`Gemini blocked the prompt (${blocked}).`, 'model');
@@ -628,10 +764,17 @@ export function parseModelJson(text: string): unknown {
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
   if (start >= 0 && end > start) {
+    const candidate = cleaned.slice(start, end + 1);
     try {
-      return JSON.parse(cleaned.slice(start, end + 1));
+      return JSON.parse(candidate);
     } catch {
-      /* fall through */
+      // Lenient repair: remove trailing commas before } or ]
+      try {
+        const trailingCommasRemoved = candidate.replace(/,\s*([}\]])/g, '$1');
+        return JSON.parse(trailingCommasRemoved);
+      } catch {
+        /* fall through */
+      }
     }
   }
   throw new ObjectReasonerError('The model returned malformed JSON for the part graph.', 'invalid');
@@ -664,12 +807,28 @@ function providerError(cfg: ReasonerConfig, status: number, body: any): ObjectRe
 /* ------------------------------------------------------------------------------------------ */
 
 /**
- * In browser environment, calls to local services like Ollama (port 11434)
+ * In browser environment under the Vite dev server (port 5173), calls to local services like Ollama (port 11434)
  * or llama.cpp (port 8080) are rewritten to relative dev-server proxy paths to prevent CORS preflight blocks.
+ * In Electron desktop apps (file:// protocol or Electron user-agent) or production builds, connects directly to the server.
  */
 export function resolveWireUrl(url: string, provider: ReasonerProvider): string {
-  const isBrowser = typeof window !== 'undefined';
-  if (!isBrowser) return url;
+  if (typeof window === 'undefined') return url;
+
+  const loc = window.location;
+  if (!loc) return url;
+
+  const isFileProtocol = loc.protocol && loc.protocol.startsWith('file:');
+  const isElectron = typeof navigator !== 'undefined' && /electron/i.test(navigator.userAgent || '');
+  const isDevServer =
+    (loc.port === '5173' || Boolean((import.meta as any).env?.DEV)) &&
+    !isFileProtocol &&
+    !isElectron;
+
+  if (isFileProtocol && url.startsWith('/api/')) {
+    return `http://127.0.0.1:5173${url}`;
+  }
+
+  if (!isDevServer) return url;
 
   if (provider === 'ollama') {
     return url.replace(/^(?:https?:\/\/)?(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]):11434/i, '/api/ollama');
@@ -686,7 +845,8 @@ export function resolveWireUrl(url: string, provider: ReasonerProvider): string 
 
 function validateConfig(cfg: ReasonerConfig) {
   if (!cfg.url) throw new ObjectReasonerError(`${cfg.info.label}: base URL is empty. Open reasoner settings.`, 'config');
-  if (cfg.info.needsKey && !cfg.apiKey) {
+  const isOpenAiBrowser = cfg.provider === 'openai' && (cfg.url.startsWith('/api/openai') || cfg.url.includes('/api/openai'));
+  if (cfg.info.needsKey && !cfg.apiKey && !isOpenAiBrowser) {
     throw new ObjectReasonerError(`${cfg.info.label} needs an API key. Open reasoner settings to add one.`, 'config');
   }
   if ((cfg.provider === 'ollama' || cfg.provider === 'gemini') && !cfg.model) {
@@ -695,24 +855,62 @@ function validateConfig(cfg: ReasonerConfig) {
 }
 
 const isSchemaRejection = (status: number, body: any) =>
-  status === 400 && /schema|response_format|json|unknown name|invalid argument/i.test(errorText(body, status));
+  status === 400 &&
+  /schema|response_format|json|unknown name|invalid argument|grammar|gbnf|sampler|failed to parse/i.test(
+    errorText(body, status)
+  );
+
+function normalizeExtractedPalette(p?: ExtractedPalette | Partial<CharacterVisualFeatures['palette']>): {
+  primaryColor: string;
+  secondaryColor: string;
+  accentColor: string;
+  dominantColors: string[];
+} | null {
+  if (!p) return null;
+  const raw = p as any;
+  const primaryColor = raw.primaryColor || raw.primaryClothing || raw.leather || '#24150e';
+  const secondaryColor = raw.secondaryColor || raw.secondaryClothing || raw.metal || '#4a2c1b';
+  const accentColor = raw.accentColor || raw.weaponAccent || '#c69a38';
+  const dominantColors =
+    Array.isArray(raw.dominantColors) && raw.dominantColors.length > 0
+      ? raw.dominantColors
+      : [primaryColor, secondaryColor, accentColor];
+  return { primaryColor, secondaryColor, accentColor, dominantColors };
+}
 
 /** Ask the configured model to reason a prompt into a SculptSpec / PartGraph. Throws ObjectReasonerError on failure. */
 export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Promise<SculptSpec> {
   const cfg = opts.config ?? getReasonerConfig();
   validateConfig(cfg);
-  const timeoutMs = opts.timeoutMs ?? 240_000;
+  const timeoutMs = opts.timeoutMs ?? 120_000;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const onAbort = () => ctrl.abort();
   opts.signal?.addEventListener('abort', onAbort);
   const t0 = Date.now();
   const protocol = cfg.info.protocol;
+  const normPal = normalizeExtractedPalette(opts.extractedPalette);
 
   // Augment prompt with silhouette measurements and revision instructions if provided
   let augmentedPrompt = prompt;
+  if (opts.imageBase64) {
+    const isHuman = isHumanoidPrompt(prompt);
+    augmentedPrompt = isHuman
+      ? `Attached concept reference image of a character. Sculpt the character anatomy, costuming, hair, accessories, and gear into 15 to 45 soft parts with authentic sampled hex colors (#rrggbb). Set rig: "humanoid".\n\n${augmentedPrompt}`
+      : `Attached reference image of an object/prop/item. Sculpt its true physical parts, body, panels, and details into 5 to 30 soft volumetric parts with authentic sampled hex colors (#rrggbb). Set rig: "none". Do NOT output a humanoid figure.\n\n${augmentedPrompt}`;
+  }
   if (opts.silhouetteMeasurements) {
-    augmentedPrompt += `\n\nReference Image Geometric Silhouette Measurements:\n${opts.silhouetteMeasurements.promptDescription}`;
+    const ar = opts.silhouetteMeasurements.aspectRatio;
+    let shapeHint = '';
+    if (ar < 0.85) {
+      shapeHint = `\nPhysical Shape Analysis: Wide and shallow/flat object (aspect ratio ${ar}:1), such as a baking pan, roasting tray, dish, chassis, or flat container. Model its flat bottom base plate, perimeter raised walls/rim, and hollow interior cavity. Do NOT stack horizontal slices or cylinders.`;
+    } else if (ar > 1.8) {
+      shapeHint = `\nPhysical Shape Analysis: Tall, slender upright object (aspect ratio ${ar}:1), such as a bottle, column, staff, or tall vessel.`;
+    }
+    augmentedPrompt += `\n\nReference Image Geometric Silhouette Measurements:\n${opts.silhouetteMeasurements.promptDescription}${shapeHint}`;
+  }
+  if (normPal) {
+    augmentedPrompt += `\n\nReference Image Extracted Hex Colors (You MUST use these exact sampled hex values in materials and parts):\n- Primary Color: ${normPal.primaryColor}\n- Secondary Color: ${normPal.secondaryColor}\n- Accent Color: ${normPal.accentColor}\n- Dominant Palette Swatches: ${normPal.dominantColors.join(', ')}`;
   }
   if (opts.reviseSpec) {
     augmentedPrompt = `Existing Sculpt Spec to refine:\n${JSON.stringify(opts.reviseSpec, null, 2)}\n\nDirector Revision Instructions: ${opts.revisionFeedback || prompt || 'Refine proportions, parts, and silhouette alignment.'}\n\nReturn the revised SculptSpec or a SculptPatch with modifications.`;
@@ -723,7 +921,7 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
   const activeSchema = opts.reviseSpec ? SCULPT_SPEC_JSON_SCHEMA : SCULPT_SPEC_JSON_SCHEMA;
 
   // Servers differ in structured-output support: try the strict schema first, then relax.
-  const modes: JsonMode[] = protocol === 'ollama' ? ['schema'] : ['schema', 'object', 'none'];
+  const modes: JsonMode[] = protocol === 'ollama' ? ['schema', 'object'] : ['schema', 'object', 'none'];
   let text = '';
   try {
     for (let i = 0; i < modes.length; i++) {
@@ -732,6 +930,7 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
           ? buildOllamaRequest(
               cfg,
               augmentedPrompt,
+              modes[i],
               OBJECT_REASONER_SYSTEM_PROMPT,
               activeSchema,
               'Object to build: ',
@@ -778,8 +977,16 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
       }
       const body = await response.json().catch(() => ({}));
       if (response.ok) {
-        text = extractResponseText(protocol, body);
-        break;
+        try {
+          text = extractResponseText(protocol, body);
+          break;
+        } catch (extractErr) {
+          if (i < modes.length - 1) {
+            opts.onStage?.(`${cfg.info.label} output truncated or schema rejected; retrying with relaxed JSON mode...`);
+            continue;
+          }
+          throw extractErr;
+        }
       }
       if (i < modes.length - 1 && isSchemaRejection(response.status, body)) {
         opts.onStage?.(`${cfg.info.label} rejected strict JSON schema; retrying with relaxed JSON mode...`);
@@ -797,11 +1004,95 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
   if (opts.reviseSpec && raw && typeof raw === 'object' && ('set' in raw || 'add' in raw || 'remove' in raw)) {
     graph = applySculptPatch(opts.reviseSpec, raw);
   } else {
-    graph = sanitizeSculptSpec(raw, prompt);
+    const rawParts = (raw as any)?.parts ?? (raw as any)?.recipe?.parts;
+    const hasValidParts = Array.isArray(rawParts) && rawParts.length >= 3;
+    const isHuman = isHumanoidPrompt(prompt);
+    const isCharacterSemantic =
+      isHuman &&
+      raw &&
+      typeof raw === 'object' &&
+      ((raw as any).sculpt_layers ||
+        (raw as any).character_profile ||
+        (raw as any).palette ||
+        (raw as any).costume ||
+        (raw as any).equipment);
+
+    if (!hasValidParts && isCharacterSemantic) {
+      const features = extractCharacterFeaturesFromModelOutput(raw, prompt, opts.extractedPalette);
+      graph = compileCharacterToClaySculpt(features);
+    } else {
+      graph = sanitizeSculptSpec(raw, prompt);
+    }
   }
 
-  if (graph.route === 'author' && graph.parts.length < 3) {
-    throw new ObjectReasonerError('The model described too few parts to build a recognisable object.', 'invalid');
+  if (graph.parts.length === 0) {
+    if (isHumanoidPrompt(prompt)) {
+      const features = extractCharacterFeaturesFromModelOutput(raw, prompt, opts.extractedPalette);
+      graph = compileCharacterToClaySculpt(features);
+    } else if (opts.imageBase64 || opts.silhouetteMeasurements) {
+      graph = synthesizeRecipeFromImage({
+        name: prompt,
+        prompt,
+        metrics: opts.silhouetteMeasurements,
+        palette: opts.extractedPalette,
+      });
+    } else {
+      const curated = lookupSculptSpec(prompt);
+      if (curated && curated.parts && curated.parts.length > 0) {
+        graph = { ...curated, name: graph.name || curated.name };
+      } else {
+        graph = synthesizeRecipeFromImage({ name: prompt, prompt });
+      }
+    }
+  } else if (graph.route === 'author' && graph.parts.length < 3) {
+    if (isHumanoidPrompt(prompt)) {
+      const features = extractCharacterFeaturesFromModelOutput(raw, prompt, opts.extractedPalette);
+      graph = compileCharacterToClaySculpt(features);
+    } else if (opts.imageBase64 || opts.silhouetteMeasurements) {
+      graph = synthesizeRecipeFromImage({
+        name: prompt,
+        prompt,
+        metrics: opts.silhouetteMeasurements,
+        palette: opts.extractedPalette,
+      });
+    }
+  }
+
+  // If extracted palette is available and parts are uncolored or default clay, assign sampled palette colors
+  if (normPal && graph.parts && graph.parts.length > 0) {
+    const hasSpecificColors = graph.parts.some(
+      (p) => p.color && p.color.toLowerCase() !== '#e2ded5' && p.color.toLowerCase() !== '#9aa3ad'
+    );
+    if (!hasSpecificColors) {
+      const swatches = normPal.dominantColors;
+      graph.parts.forEach((p, idx) => {
+        p.color = idx === 0 ? normPal.primaryColor : swatches[idx % swatches.length];
+      });
+      if (graph.materials && graph.materials.length > 0) {
+        graph.materials[0].color = normPal.primaryColor;
+        if (graph.materials[1]) graph.materials[1].color = normPal.secondaryColor;
+        if (graph.materials[2]) graph.materials[2].color = normPal.accentColor;
+      }
+    }
+  }
+
+  // Geometric sanity check: if the reference silhouette was measured, prevent blind text-only model hallucinations
+  // from completely inverting vertical/horizontal proportions (e.g. turning a tall coffee pouch into a squat desk)
+  if (opts.silhouetteMeasurements && opts.silhouetteMeasurements.aspectRatio > 0 && !isHumanoidPrompt(prompt)) {
+    const refAR = opts.silhouetteMeasurements.aspectRatio;
+    const rootPart = graph.parts.find((p) => !p.parent) || graph.parts[0];
+    if (rootPart && rootPart.size && rootPart.size[0] > 0 && rootPart.size[1] > 0) {
+      const modelAR = rootPart.size[1] / rootPart.size[0];
+      const isSevereMismatch = (refAR >= 1.25 && modelAR <= 0.7) || (refAR <= 0.7 && modelAR >= 1.25);
+      if (isSevereMismatch) {
+        graph = synthesizeRecipeFromImage({
+          name: graph.name || prompt,
+          prompt,
+          metrics: opts.silhouetteMeasurements,
+          palette: opts.extractedPalette,
+        });
+      }
+    }
   }
   graph.source = {
     model: `${cfg.model && cfg.model !== 'local' ? cfg.model : 'llama.cpp GGUF'} (${cfg.info.label})`,
@@ -974,7 +1265,11 @@ export async function listReasonerModels(config: ReasonerConfig = getReasonerCon
   if (!r.ok) throw providerError(cfg, r.status, body);
 
   if (protocol === 'ollama') return (body.models ?? []).map((m: any) => m.name as string);
-  if (protocol === 'openai') return (body.data ?? []).map((m: any) => m.id as string).filter(Boolean);
+  if (protocol === 'openai') {
+    const fromData = (body.data ?? []).map((m: any) => m.id as string).filter(Boolean);
+    if (fromData.length > 0) return fromData;
+    return (body.models ?? []).map((m: any) => (m.id || m.name || m.model) as string).filter(Boolean);
+  }
   return (body.models ?? [])
     .filter((m: any) => (m.supportedGenerationMethods ?? []).includes('generateContent'))
     .map((m: any) => String(m.name).replace(/^models\//, ''))

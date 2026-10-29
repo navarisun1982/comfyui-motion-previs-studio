@@ -1,4 +1,5 @@
-import { Point2D, Point3D, TrajectoryKeyframe, CameraKeyframe } from '../types/shotspec';
+import * as THREE from 'three';
+import { Point2D, Point3D, TrajectoryKeyframe, CameraKeyframe, ActorPose } from '../types/shotspec';
 
 export interface TrajectoryData {
   startTimeSeconds?: number;
@@ -348,3 +349,274 @@ export function recordTrajectoryPositionAtTime(
     keyframes: currentKeyframes,
   };
 }
+
+/**
+ * Spherical linear interpolation between two 19-bone humanoid actor poses.
+ */
+export function slerpActorPoses(poseA: ActorPose, poseB: ActorPose, t: number): ActorPose {
+  const resultRotations: Record<string, [number, number, number, number]> = {};
+  const allBones = new Set([...Object.keys(poseA.rotations || {}), ...Object.keys(poseB.rotations || {})]);
+
+  const qA = new THREE.Quaternion();
+  const qB = new THREE.Quaternion();
+
+  for (const bName of allBones) {
+    const rotA = poseA.rotations?.[bName] || [0, 0, 0, 1];
+    const rotB = poseB.rotations?.[bName] || [0, 0, 0, 1];
+    qA.set(rotA[0], rotA[1], rotA[2], rotA[3]);
+    qB.set(rotB[0], rotB[1], rotB[2], rotB[3]);
+    qA.slerp(qB, t);
+    resultRotations[bName] = [qA.x, qA.y, qA.z, qA.w];
+  }
+
+  let hipsOffset: [number, number, number] | undefined;
+  if (poseA.hipsOffset || poseB.hipsOffset) {
+    const offA = poseA.hipsOffset || [0, 0, 0];
+    const offB = poseB.hipsOffset || [0, 0, 0];
+    hipsOffset = [
+      offA[0] + (offB[0] - offA[0]) * t,
+      offA[1] + (offB[1] - offA[1]) * t,
+      offA[2] + (offB[2] - offA[2]) * t,
+    ];
+  }
+
+  return {
+    rotations: resultRotations,
+    hipsOffset,
+  };
+}
+
+export interface InterpolatedPoseResult {
+  pose?: ActorPose;
+  posePreset?: string;
+  gait?: 'auto' | 'walk' | 'run' | 'sneak' | 'idle' | 'none';
+  motionClip?: string;
+  clipProgress?: number;
+}
+
+/**
+ * Calculates smoothly interpolated bone pose for an actor along the timeline.
+ * If claymationFps is provided (e.g. 12), time is quantized to stepped stop-motion intervals.
+ */
+export function interpolateActorPoseAtTime(
+  trajectory: TrajectoryData,
+  basePose: ActorPose | undefined,
+  time: number,
+  duration: number,
+  options?: { claymationFps?: number }
+): InterpolatedPoseResult {
+  const safeDuration = duration > 0 ? duration : 4.0;
+  let evalTime = Math.max(0, Math.min(safeDuration, time));
+
+  // If stop-motion claymation cadence is active, quantize time to discrete steps
+  if (options?.claymationFps && options.claymationFps > 0) {
+    const step = 1 / options.claymationFps;
+    evalTime = Math.floor(evalTime / step) * step;
+  }
+
+  // Evaluate active motionClip and its normalized [0..1] progress across contiguous keyframes
+  const clipKfs = (trajectory.keyframes || [])
+    .filter((k) => k.motionClip !== undefined)
+    .sort((a, b) => a.time - b.time);
+  let activeMotionClip: string | undefined;
+  let activeClipProgress: number | undefined;
+
+  if (clipKfs.length > 0) {
+    // Find the clip segment spanning evalTime
+    for (let i = 0; i < clipKfs.length; i++) {
+      const kf = clipKfs[i];
+      if (evalTime >= kf.time - 0.05) {
+        activeMotionClip = kf.motionClip;
+      }
+    }
+    if (!activeMotionClip && evalTime < clipKfs[0].time) {
+      activeMotionClip = clipKfs[0].motionClip;
+    }
+    if (activeMotionClip) {
+      const matching = clipKfs.filter((k) => k.motionClip === activeMotionClip);
+      if (matching.length >= 2) {
+        const segStart = matching[0].time;
+        const segEnd = matching[matching.length - 1].time;
+        const span = Math.max(0.1, segEnd - segStart);
+        activeClipProgress = Math.max(0, Math.min(1, (evalTime - segStart) / span));
+      } else {
+        activeClipProgress = safeDuration > 0 ? Math.max(0, Math.min(1, evalTime / safeDuration)) : 0;
+      }
+    }
+  }
+
+  const kfs = (trajectory.keyframes || [])
+    .filter((k) => k.pose !== undefined || k.posePreset !== undefined || k.gait !== undefined)
+    .sort((a, b) => a.time - b.time);
+
+  if (kfs.length === 0) {
+    return { pose: basePose, motionClip: activeMotionClip, clipProgress: activeClipProgress };
+  }
+
+  if (kfs.length === 1) {
+    return {
+      pose: kfs[0].pose || basePose,
+      posePreset: kfs[0].posePreset,
+      gait: kfs[0].gait,
+      motionClip: activeMotionClip,
+      clipProgress: activeClipProgress,
+    };
+  }
+
+  // Before first pose keyframe: blend from basePose if at time > 0, or hold first
+  if (evalTime <= kfs[0].time) {
+    if (basePose && kfs[0].pose && kfs[0].time > 0) {
+      const ratio = evalTime / kfs[0].time;
+      return {
+        pose: slerpActorPoses(basePose, kfs[0].pose, ratio),
+        posePreset: ratio >= 0.5 ? kfs[0].posePreset : undefined,
+        gait: kfs[0].gait,
+        motionClip: activeMotionClip,
+        clipProgress: activeClipProgress,
+      };
+    }
+    return {
+      pose: kfs[0].pose || basePose,
+      posePreset: kfs[0].posePreset,
+      gait: kfs[0].gait,
+      motionClip: activeMotionClip,
+      clipProgress: activeClipProgress,
+    };
+  }
+
+  // After last pose keyframe: hold last pose
+  if (evalTime >= kfs[kfs.length - 1].time) {
+    const last = kfs[kfs.length - 1];
+    return {
+      pose: last.pose || basePose,
+      posePreset: last.posePreset,
+      gait: last.gait,
+      motionClip: activeMotionClip,
+      clipProgress: activeClipProgress,
+    };
+  }
+
+  // Between two pose keyframes: SLERP bone quaternions
+  for (let i = 0; i < kfs.length - 1; i++) {
+    const kA = kfs[i];
+    const kB = kfs[i + 1];
+    if (evalTime >= kA.time && evalTime <= kB.time) {
+      const segSpan = kB.time - kA.time;
+      const t = segSpan > 0 ? (evalTime - kA.time) / segSpan : 0;
+      const poseA = kA.pose || basePose;
+      const poseB = kB.pose || basePose;
+      if (!poseA)
+        return {
+          pose: poseB,
+          posePreset: kB.posePreset,
+          gait: kB.gait,
+          motionClip: activeMotionClip,
+          clipProgress: activeClipProgress,
+        };
+      if (!poseB)
+        return {
+          pose: poseA,
+          posePreset: kA.posePreset,
+          gait: kA.gait,
+          motionClip: activeMotionClip,
+          clipProgress: activeClipProgress,
+        };
+
+      return {
+        pose: slerpActorPoses(poseA, poseB, t),
+        posePreset: t > 0.5 ? kB.posePreset : kA.posePreset,
+        gait: t > 0.5 ? kB.gait : kA.gait,
+        motionClip: activeMotionClip,
+        clipProgress: activeClipProgress,
+      };
+    }
+  }
+
+  return { pose: basePose, motionClip: activeMotionClip, clipProgress: activeClipProgress };
+}
+
+/**
+ * Calculates interpolated 3D orientation (Yaw, Pitch, Roll) for props, vehicles, or non-human objects.
+ */
+export function interpolateObjectRotationAtTime(
+  trajectory: TrajectoryData,
+  baseRotation: Point3D | undefined,
+  time: number,
+  duration: number
+): Point3D {
+  const safeDuration = duration > 0 ? duration : 4.0;
+  const clampedTime = Math.max(0, Math.min(safeDuration, time));
+  const kfs = (trajectory.keyframes || [])
+    .filter((k) => k.rotation !== undefined)
+    .sort((a, b) => a.time - b.time);
+
+  const defaultRot: Point3D = baseRotation || { x: 0, y: 0, z: 0 };
+  if (kfs.length === 0) return defaultRot;
+  if (kfs.length === 1) return kfs[0].rotation || defaultRot;
+  if (clampedTime <= kfs[0].time) return kfs[0].rotation || defaultRot;
+  if (clampedTime >= kfs[kfs.length - 1].time) return kfs[kfs.length - 1].rotation || defaultRot;
+
+  for (let i = 0; i < kfs.length - 1; i++) {
+    const kA = kfs[i];
+    const kB = kfs[i + 1];
+    if (clampedTime >= kA.time && clampedTime <= kB.time) {
+      const segSpan = kB.time - kA.time;
+      const t = segSpan > 0 ? (clampedTime - kA.time) / segSpan : 0;
+      const rotA = kA.rotation || defaultRot;
+      const rotB = kB.rotation || defaultRot;
+      return {
+        x: rotA.x + (rotB.x - rotA.x) * t,
+        y: rotA.y + (rotB.y - rotA.y) * t,
+        z: (rotA.z ?? 0) + ((rotB.z ?? 0) - (rotA.z ?? 0)) * t,
+      };
+    }
+  }
+
+  return defaultRot;
+}
+
+/**
+ * Records an actor pose into the trajectory at time t. If an existing keyframe is near t, updates it.
+ */
+export function recordTrajectoryPoseAtTime(
+  trajectory: TrajectoryData,
+  time: number,
+  duration: number,
+  pose?: ActorPose,
+  posePreset?: string,
+  gait?: 'auto' | 'walk' | 'run' | 'sneak' | 'idle' | 'none'
+): TrajectoryData {
+  const safeDuration = duration > 0 ? duration : 4.0;
+  const clampedTime = Math.max(0, Math.min(safeDuration, time));
+  const currentKeyframes = [...(trajectory.keyframes || [])];
+  const existingIdx = currentKeyframes.findIndex((k) => Math.abs(k.time - clampedTime) <= 0.25);
+
+  const currentPos = interpolateTrajectoryPosition(trajectory, clampedTime, safeDuration);
+
+  if (existingIdx >= 0) {
+    currentKeyframes[existingIdx] = {
+      ...currentKeyframes[existingIdx],
+      time: clampedTime,
+      pose: pose ?? currentKeyframes[existingIdx].pose,
+      posePreset: posePreset ?? currentKeyframes[existingIdx].posePreset,
+      gait: gait ?? currentKeyframes[existingIdx].gait,
+    };
+  } else {
+    currentKeyframes.push({
+      id: `kf_pose_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      time: Number(clampedTime.toFixed(2)),
+      position: currentPos,
+      pose,
+      posePreset,
+      gait,
+    });
+  }
+
+  currentKeyframes.sort((a, b) => a.time - b.time);
+  return {
+    ...trajectory,
+    startTimeSeconds: trajectory.startTimeSeconds ?? 0,
+    keyframes: currentKeyframes,
+  };
+}
+

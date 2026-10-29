@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import {
   Sparkles,
@@ -16,7 +16,10 @@ import {
   ChevronUp,
   Image as ImageIcon,
   Zap,
+  Settings,
+  AlertTriangle,
 } from 'lucide-react';
+import { ReasonerSettingsPanel } from './ReasonerSettingsPanel';
 import {
   SculptSpec,
   buildSculpt,
@@ -25,6 +28,7 @@ import {
 import {
   SilhouetteMask,
   SilhouetteMetrics,
+  ExtractedPalette,
   extractMaskFromImageUrl,
   generateMaskDataUrl,
   renderSculptSilhouette,
@@ -38,6 +42,8 @@ import {
 } from '../services/objectReasoner';
 import { useShotStore } from '../stores/useShotStore';
 import { useAssetLibraryStore, Asset3DItem } from '../stores/useAssetLibraryStore';
+import { createSkinnedCharacterFromConcept, type HumanoidRig } from '../engine/kinematics';
+import { synthesizeRecipeFromImage, isHumanoidPrompt } from '../engine/procedural3D/imageToRecipe';
 
 export interface AIGenerator3DProps {
   isOpen: boolean;
@@ -62,6 +68,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(initialImageUrl || null);
   const [referenceMask, setReferenceMask] = useState<SilhouetteMask | null>(null);
   const [referenceMetrics, setReferenceMetrics] = useState<SilhouetteMetrics | null>(null);
+  const [referencePalette, setReferencePalette] = useState<ExtractedPalette | null>(null);
   const [maskPreviewUrl, setMaskPreviewUrl] = useState<string | null>(null);
   const [showMaskOverlay, setShowMaskOverlay] = useState(false);
 
@@ -71,8 +78,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
 
-  // Resulting 3D Spec
+  // Resulting 3D Spec & Rig
   const [sculpt, setSculpt] = useState<SculptSpec | null>(null);
+  const [characterRig, setCharacterRig] = useState<HumanoidRig | null>(null);
+  const [displayMode, setDisplayMode] = useState<'skinned' | 'parametric'>('parametric');
   const [currentIoU, setCurrentIoU] = useState<number | null>(null);
   const [isWireframe, setIsWireframe] = useState(false);
   const [showPartList, setShowPartList] = useState(false);
@@ -81,6 +90,11 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   const [revisionFeedback, setRevisionFeedback] = useState('');
   const [isRefining, setIsRefining] = useState(false);
   const [appliedSuccess, setAppliedSuccess] = useState(false);
+  const [showReasonerSettings, setShowReasonerSettings] = useState(false);
+  const [reasonerRev, setReasonerRev] = useState(0);
+
+  const cfg = useMemo(() => getReasonerConfig(), [reasonerRev]);
+  const reasonerDesc = useMemo(() => describeReasoner(cfg), [cfg]);
 
   // 3D Canvas Mount Ref
   const canvasMountRef = useRef<HTMLDivElement>(null);
@@ -92,6 +106,8 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   const isDraggingRef = useRef(false);
   const prevMouseRef = useRef({ x: 0, y: 0 });
   const orbitRef = useRef({ theta: 0.35, phi: 0.28, radius: 4.5 });
+  const targetLookAtRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 1.0, 0));
+  const updateCameraRef = useRef<(() => void) | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -118,12 +134,43 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   // Process reference image to extract silhouette & geometry metrics
   const processImageForSilhouette = async (url: string) => {
     try {
-      const { mask, metrics, canvasDataUrl } = await extractMaskFromImageUrl(url, 512);
+      const { mask, metrics, palette, canvasDataUrl } = await extractMaskFromImageUrl(url, 512);
       setReferenceMask(mask);
       setReferenceMetrics(metrics);
+      setReferencePalette(palette);
       const preview = generateMaskDataUrl(mask, [6, 182, 212, 230]);
       setMaskPreviewUrl(preview);
       setReferenceImageUrl(canvasDataUrl);
+
+      // Instantly synthesize a 3D procedural sculpt matching the reference image
+      const cleanPrompt = (prompt || name || '').trim();
+      const initialSculpt = synthesizeRecipeFromImage({
+        name: cleanPrompt || '3D Object',
+        prompt: cleanPrompt,
+        metrics,
+        palette,
+      });
+      setSculpt(initialSculpt);
+      if (!name && initialSculpt.name && initialSculpt.name !== '3D Object' && initialSculpt.name !== 'Sculpted Prop') {
+        setName(initialSculpt.name);
+      }
+      setDisplayMode('parametric');
+
+      const initialIoU = evaluateSilhouetteMatch(initialSculpt, mask);
+      setCurrentIoU(initialIoU);
+
+      // Only attempt to build a skinned character rig IF the user explicitly requested a humanoid character
+      if (isHumanoidPrompt(cleanPrompt)) {
+        try {
+          const rig = await createSkinnedCharacterFromConcept(canvasDataUrl, cleanPrompt);
+          setCharacterRig(rig);
+          setDisplayMode('skinned');
+        } catch (rigErr) {
+          console.warn('Could not auto-generate skinned rig from concept:', rigErr);
+        }
+      } else {
+        setCharacterRig(null);
+      }
     } catch (err) {
       console.warn('Could not extract silhouette from image:', err);
     }
@@ -212,12 +259,14 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     // Camera update helper
     const updateCamera = () => {
       const { theta, phi, radius } = orbitRef.current;
-      const x = radius * Math.sin(phi) * Math.sin(theta);
-      const y = radius * Math.cos(phi);
-      const z = radius * Math.sin(phi) * Math.cos(theta);
+      const target = targetLookAtRef.current;
+      const x = target.x + radius * Math.sin(phi) * Math.sin(theta);
+      const y = target.y + radius * Math.cos(phi);
+      const z = target.z + radius * Math.sin(phi) * Math.cos(theta);
       camera.position.set(x, Math.max(0.2, y), z);
-      camera.lookAt(0, 0.9, 0);
+      camera.lookAt(target);
     };
+    updateCameraRef.current = updateCamera;
     updateCamera();
 
     // Mouse Drag Orbit
@@ -296,6 +345,30 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       if ((child as any).geometry) (child as any).geometry.dispose();
     }
 
+    // If skinned rig mode is active and characterRig is loaded, display it
+    if (displayMode === 'skinned' && characterRig) {
+      characterRig.root.traverse((c) => {
+        if ((c as THREE.Mesh).isMesh) {
+          const m = c as THREE.Mesh;
+          m.castShadow = true;
+          m.receiveShadow = true;
+          if (isWireframe && (m.material as any)) {
+            (m.material as any).wireframe = true;
+          }
+        }
+      });
+      group.add(characterRig.root);
+
+      const box = new THREE.Box3().setFromObject(characterRig.root);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z, 1.0);
+      orbitRef.current.radius = maxDim * 1.5;
+      targetLookAtRef.current.copy(center);
+      updateCameraRef.current?.();
+      return;
+    }
+
     if (!sculpt) return;
 
     try {
@@ -314,13 +387,16 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
       // Center model and adjust orbit distance to fit object height
       const box = new THREE.Box3().setFromObject(kit.group);
+      const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z, 1.0);
-      orbitRef.current.radius = maxDim * 2.2;
+      orbitRef.current.radius = maxDim * 2.0;
+      targetLookAtRef.current.copy(center);
+      updateCameraRef.current?.();
     } catch (err) {
       console.error('Failed to construct 3D mesh from sculpt spec:', err);
     }
-  }, [sculpt, isWireframe]);
+  }, [sculpt, characterRig, displayMode, isWireframe]);
 
   // Execute initial generation
   const handleGenerate = async () => {
@@ -334,18 +410,39 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     setGenerationError(null);
     setGenerationStage('Connecting to procedural 3D reasoner...');
 
+    const inferredHint = referenceMetrics
+      ? referenceMetrics.aspectRatio < 0.85
+        ? 'shallow container or tray with perimeter rim'
+        : referenceMetrics.aspectRatio > 1.8
+          ? 'slender bottle, cylinder, or upright container'
+          : 'volumetric prop or container'
+      : 'reference object';
+
+    const effectivePrompt = cleanPrompt || (referenceImageUrl ? inferredHint : '3d object');
+    const isHumanoid = isHumanoidPrompt(effectivePrompt);
+    const reasonerPrompt = referenceImageUrl
+      ? isHumanoid
+        ? `Sculpt the character in the attached reference image (${effectivePrompt}) as a parametric 3D recipe with anatomical proportions, clothing, gear, and sampled image colors.`
+        : `Sculpt the prop/object in the attached reference image (${effectivePrompt}) as a clean parametric 3D recipe with accurate primitives (blobs, boxes, cylinders, cones, lathes), parts, and sampled image colors.`
+      : effectivePrompt;
+
     try {
-      const generated = await reasonSculpt(cleanPrompt || 'character figure', {
+      const generated = await reasonSculpt(reasonerPrompt, {
         imageBase64: referenceImageUrl || undefined,
         silhouetteMeasurements: referenceMetrics || undefined,
+        extractedPalette: referencePalette || undefined,
+        timeoutMs: 120_000,
         onStage: (s) => setGenerationStage(s),
       });
 
       setSculpt(generated);
-      setName(generated.name || cleanPrompt);
+      setName(generated.name || cleanPrompt || '3D Object');
 
       if (cleanPrompt) {
         registerSculptSpec(cleanPrompt, generated);
+      }
+      if (effectivePrompt) {
+        registerSculptSpec(effectivePrompt, generated);
       }
 
       // Calculate silhouette IoU match if reference mask is loaded
@@ -355,11 +452,85 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       } else {
         setCurrentIoU(null);
       }
+
+      // If humanoid character prompt, build the skinned rig with UV projection & 3D gear
+      const isHumanoidSubject = generated.rig === 'humanoid' || isHumanoidPrompt(effectivePrompt);
+      if (isHumanoidSubject) {
+        setGenerationStage('Projecting concept art UVs & mounting 3D gear on humanoid rig...');
+        try {
+          const rig = await createSkinnedCharacterFromConcept(
+            referenceImageUrl || '',
+            effectivePrompt,
+            { rawModelOutput: generated }
+          );
+          setCharacterRig(rig);
+          setDisplayMode('skinned');
+        } catch (rigErr) {
+          console.warn('Could not build skinned character rig:', rigErr);
+          setDisplayMode('parametric');
+        }
+      } else {
+        setCharacterRig(null);
+        setDisplayMode('parametric');
+      }
     } catch (err) {
-      const msg = err instanceof ObjectReasonerError ? err.message : (err as Error)?.message || 'Generation failed';
+      let msg = err instanceof ObjectReasonerError ? err.message : (err as Error)?.message || 'Generation failed';
+      if (msg.includes('did not answer within')) {
+        msg += ' (Tip: Heavy local models like 26B/31B can time out when VRAM is tight or competing with ComfyUI. Switch to a lighter model like qwen3.5:9b or Gemini in Reasoner Settings, or generate procedurally below.)';
+      }
+      // Graceful procedural recovery: synthesize authentic procedural geometric recipe from recognized topology
+      // Always synthesize a high-fidelity 3D proxy whether from image or text prompt so the 3D stage is never empty
+      try {
+        const fallbackSculpt = synthesizeRecipeFromImage({
+          name: cleanPrompt || '3D Object',
+          prompt: cleanPrompt || effectivePrompt,
+          metrics: referenceMetrics || undefined,
+          palette: referencePalette || undefined,
+        });
+        if (fallbackSculpt && fallbackSculpt.parts && fallbackSculpt.parts.length > 0) {
+          setSculpt(fallbackSculpt);
+          setName(fallbackSculpt.name || cleanPrompt || '3D Object');
+          if (cleanPrompt) registerSculptSpec(cleanPrompt, fallbackSculpt);
+        }
+      } catch (synthErr) {
+        console.warn('Procedural fallback synthesis failed:', synthErr);
+      }
       setGenerationError(msg);
     } finally {
       setIsGenerating(false);
+      setGenerationStage('');
+    }
+  };
+
+  // Instant offline procedural 3D figure generation (0ms, no LLM required)
+  const handleInstantProceduralGenerate = () => {
+    const cleanPrompt = prompt.trim();
+    const effectivePrompt = cleanPrompt || (referenceImageUrl ? 'reference object' : '3D Object');
+    setGenerationError(null);
+    setGenerationStage('Synthesizing instant procedural 3D proxy...');
+    try {
+      const fallbackSculpt = synthesizeRecipeFromImage({
+        name: cleanPrompt || '3D Object',
+        prompt: cleanPrompt || effectivePrompt,
+        metrics: referenceMetrics || undefined,
+        palette: referencePalette || undefined,
+      });
+      if (fallbackSculpt && fallbackSculpt.parts && fallbackSculpt.parts.length > 0) {
+        setSculpt(fallbackSculpt);
+        setName(fallbackSculpt.name || cleanPrompt || '3D Object');
+        if (cleanPrompt) registerSculptSpec(cleanPrompt, fallbackSculpt);
+      }
+      if (referenceMask && fallbackSculpt) {
+        const iou = evaluateSilhouetteMatch(fallbackSculpt, referenceMask);
+        setCurrentIoU(iou);
+      } else {
+        setCurrentIoU(null);
+      }
+      setCharacterRig(null);
+      setDisplayMode('parametric');
+    } catch (err: any) {
+      setGenerationError(err?.message || 'Procedural generation failed');
+    } finally {
       setGenerationStage('');
     }
   };
@@ -380,6 +551,8 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         revisionFeedback: cleanFeedback,
         imageBase64: referenceImageUrl || undefined,
         silhouetteMeasurements: referenceMetrics || undefined,
+        extractedPalette: referencePalette || undefined,
+        timeoutMs: 120_000,
         onStage: (s) => setGenerationStage(s),
       });
 
@@ -391,7 +564,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         setCurrentIoU(iou);
       }
     } catch (err) {
-      const msg = err instanceof ObjectReasonerError ? err.message : (err as Error)?.message || 'Refinement failed';
+      let msg = err instanceof ObjectReasonerError ? err.message : (err as Error)?.message || 'Refinement failed';
+      if (msg.includes('did not answer within')) {
+        msg += ' (Tip: Heavy local models like 26B/31B can time out when VRAM is tight or competing with ComfyUI. Switch to a lighter model like qwen3.5:9b or Gemini in Reasoner Settings, or generate procedurally below.)';
+      }
       setGenerationError(msg);
     } finally {
       setIsRefining(false);
@@ -414,6 +590,8 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         revisionFeedback: autoFeedback,
         imageBase64: referenceImageUrl || undefined,
         silhouetteMeasurements: referenceMetrics,
+        extractedPalette: referencePalette || undefined,
+        timeoutMs: 120_000,
         onStage: (s) => setGenerationStage(s),
       });
 
@@ -434,16 +612,20 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
   // Add created actor to active previs scene
   const handleAddToScene = () => {
-    if (!sculpt) return;
+    if (!sculpt && !characterRig) return;
 
-    const actorName = sculpt.name || name || '3D Character';
+    const actorName = sculpt?.name || name || '3D Object';
     const actorToken = prompt || actorName;
-    const kind = sculpt.route === 'quadruped-walker' ? 'creature' : sculpt.rig === 'humanoid' ? 'human' : 'prop';
+    const isHumanoid = sculpt?.rig === 'humanoid' || (displayMode === 'skinned' && !!characterRig);
+    const kind = sculpt?.route === 'quadruped-walker' ? 'creature' : isHumanoid ? 'human' : 'prop';
+
+    // If using skinned character rig, do not pass blocky sculpt so StagePrevis3D renders the high-fidelity skinned character
+    const passSculpt = displayMode === 'skinned' && characterRig ? undefined : (sculpt || undefined);
 
     addActor(actorName, kind as any, actorToken, {
       conceptImageUrl: referenceImageUrl || undefined,
-      sculpt,
-      partGraph: sculpt,
+      sculpt: passSculpt,
+      partGraph: passSculpt,
     });
 
     setAppliedSuccess(true);
@@ -487,12 +669,24 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
   if (!isOpen) return null;
 
-  const cfg = getReasonerConfig();
-  const reasonerDesc = describeReasoner(cfg);
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200">
       <div className="relative w-full max-w-5xl h-[88vh] max-h-[860px] bg-[#0c0e15] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-200 font-sans">
+        {/* Reasoner Settings Overlay */}
+        {showReasonerSettings && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6 overflow-y-auto">
+            <div className="w-full max-w-xl">
+              <ReasonerSettingsPanel
+                onClose={() => setShowReasonerSettings(false)}
+                onSaved={() => {
+                  setShowReasonerSettings(false);
+                  setReasonerRev((v) => v + 1);
+                }}
+              />
+            </div>
+          </div>
+        )}
+
         {/* Header Bar */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-[#121622] shrink-0">
           <div className="flex items-center gap-3">
@@ -515,9 +709,16 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="text-[11px] font-mono text-slate-400 bg-white/5 px-2.5 py-1 rounded border border-white/10">
-              Reasoner: <span className="text-cyan-300 font-semibold">{reasonerDesc}</span>
-            </span>
+            <button
+              type="button"
+              onClick={() => setShowReasonerSettings(true)}
+              className="flex items-center gap-1.5 text-[11px] font-mono text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded border border-white/10 hover:border-white/25 transition-all"
+              title="Click to change Reasoner engine or model"
+            >
+              <span className="text-slate-400">Reasoner:</span>
+              <span className="text-cyan-300 font-semibold">{reasonerDesc}</span>
+              <Settings className="h-3 w-3 text-slate-400" />
+            </button>
             <button
               onClick={onClose}
               className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
@@ -571,7 +772,31 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     className="w-full h-full object-contain"
                   />
 
-                  {/* Mask Overlay Controls */}
+                  {/* Extracted Palette Swatches & Mask Overlay Controls */}
+                  <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/80 backdrop-blur-md px-2 py-1 rounded-full border border-white/10">
+                    {referencePalette ? (
+                      <>
+                        <div
+                          className="h-3 w-3 rounded-full border border-white/30"
+                          style={{ backgroundColor: referencePalette.primaryColor }}
+                          title={`Primary: ${referencePalette.primaryColor}`}
+                        />
+                        <div
+                          className="h-3 w-3 rounded-full border border-white/30"
+                          style={{ backgroundColor: referencePalette.secondaryColor }}
+                          title={`Secondary: ${referencePalette.secondaryColor}`}
+                        />
+                        <div
+                          className="h-3 w-3 rounded-full border border-white/30"
+                          style={{ backgroundColor: referencePalette.accentColor }}
+                          title={`Accent: ${referencePalette.accentColor}`}
+                        />
+                      </>
+                    ) : (
+                      <span className="text-[9px] font-mono text-slate-400">Sampling...</span>
+                    )}
+                  </div>
+
                   <div className="absolute top-2 right-2 flex items-center gap-1.5">
                     {maskPreviewUrl && (
                       <button
@@ -642,6 +867,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
               {/* Quick Suggestion Chips */}
               <div className="flex flex-wrap gap-1 pt-1">
                 {[
+                  'Tribal Archer Female',
                   'Vintage Armored Scout',
                   'Brass Telescope',
                   'Stone Fireplace',
@@ -683,6 +909,18 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
               )}
             </button>
 
+            {/* Quick Instant Procedural Action */}
+            <button
+              type="button"
+              onClick={handleInstantProceduralGenerate}
+              disabled={isGenerating || (!prompt.trim() && !referenceImageUrl)}
+              className="w-full py-1.5 px-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-cyan-300 hover:text-cyan-200 text-[11px] font-mono flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40"
+              title="Instantly construct an authentic multi-part 3D model using the local geometric engine (no LLM, 0ms)"
+            >
+              <Zap className="h-3 w-3 text-cyan-400" />
+              <span>Instant Procedural 3D (0ms · No LLM)</span>
+            </button>
+
             {/* Active Stage or Error Status */}
             {generationStage && (
               <div className="px-3 py-2 rounded-lg bg-blue-950/40 border border-blue-500/30 text-[11px] font-mono text-blue-300 flex items-center gap-2 animate-pulse">
@@ -691,8 +929,34 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
               </div>
             )}
             {generationError && (
-              <div className="px-3 py-2 rounded-lg bg-rose-950/40 border border-rose-500/30 text-[11px] font-mono text-rose-300">
-                ⚠️ {generationError}
+              <div className="px-3 py-2.5 rounded-lg bg-rose-950/50 border border-rose-500/40 text-[11px] font-mono text-rose-300 space-y-2">
+                <div className="flex items-start gap-1.5">
+                  <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div>{generationError}</div>
+                    {sculpt && (
+                      <div className="text-[10px] text-emerald-300 mt-1">
+                        ✓ <strong>Procedural 3D proxy loaded:</strong> A full multi-part 3D model is active in the preview stage.
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-rose-500/20">
+                  <button
+                    type="button"
+                    onClick={() => setShowReasonerSettings(true)}
+                    className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-[10px] font-mono transition-colors"
+                  >
+                    ⚙️ Change Reasoner Model
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleInstantProceduralGenerate}
+                    className="px-2 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 text-[10px] font-mono transition-colors"
+                  >
+                    ⚡ Re-synthesize Procedurally (0ms)
+                  </button>
+                </div>
               </div>
             )}
 
@@ -760,16 +1024,46 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     <span>{Math.round(currentIoU * 100)}% Silhouette Match</span>
                   </div>
                 )}
-                {sculpt && (
+                {characterRig && displayMode === 'skinned' ? (
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-950/80 backdrop-blur-md border border-emerald-500/40 text-[10px] font-mono text-emerald-300 font-bold flex items-center gap-1.5 shadow-md">
+                    <span>✨</span>
+                    <span>Skinned 3D (Sculpted Previs)</span>
+                  </span>
+                ) : sculpt ? (
                   <span className="px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md border border-white/10 text-[10px] font-mono text-slate-300">
                     {sculpt.parts.length} parts · {sculpt.heightMeters.toFixed(2)}m tall ·{' '}
                     {sculpt.rig === 'humanoid' ? 'Rigged (Humanoid)' : 'Static'}
                   </span>
-                )}
+                ) : null}
               </div>
 
-              {/* Wireframe and HUD toggles */}
+              {/* View mode toggle, Wireframe, and HUD toggles */}
               <div className="pointer-events-auto flex items-center gap-1.5">
+                {characterRig && (
+                  <div className="flex items-center bg-black/60 rounded-lg p-0.5 border border-white/15 backdrop-blur-md text-[10px] font-mono">
+                    <button
+                      onClick={() => setDisplayMode('skinned')}
+                      className={`px-2 py-0.5 rounded transition-all ${
+                        displayMode === 'skinned'
+                          ? 'bg-emerald-500 text-black font-bold'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Skinned 3D
+                    </button>
+                    <button
+                      onClick={() => setDisplayMode('parametric')}
+                      className={`px-2 py-0.5 rounded transition-all ${
+                        displayMode === 'parametric'
+                          ? 'bg-amber-500 text-black font-bold'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Parametric
+                    </button>
+                  </div>
+                )}
+
                 <button
                   onClick={() => setIsWireframe(!isWireframe)}
                   className={`px-2.5 py-1 rounded-lg backdrop-blur-md text-[10px] font-mono border transition-all flex items-center gap-1 ${
@@ -804,7 +1098,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
             <div ref={canvasMountRef} className="flex-1 w-full h-full cursor-grab active:cursor-grabbing relative" />
 
             {/* Instructions Overlay (When empty) */}
-            {!sculpt && !isGenerating && (
+            {!sculpt && !characterRig && !isGenerating && (
               <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center pointer-events-none">
                 <div className="h-16 w-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-500 mb-3">
                   <Box className="h-8 w-8" />

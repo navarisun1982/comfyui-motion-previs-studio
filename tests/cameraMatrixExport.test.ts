@@ -4,7 +4,6 @@ import {
   lookAtToMatrix4,
   exportCameraPoseBundle,
   exportCameraExtrinsicsJson,
-  exportBlenderCameraScript,
 } from '../src/engine/cameraMatrixExport';
 import { createDefaultShotSpec } from '../src/types/shotspec';
 
@@ -67,8 +66,5 @@ describe('Proposal 5: Camera Matrix Extrinsics Export', () => {
     expect(parsed.shotId).toBe('shot-test-matrix');
     expect(parsed.frameCount).toBe(72);
 
-    const script = exportBlenderCameraScript(shot);
-    expect(script).toContain('bpy.context.scene');
-    expect(script).toContain('cam_obj.matrix_world');
   });
 });

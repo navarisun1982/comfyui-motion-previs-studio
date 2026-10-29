@@ -115,10 +115,11 @@ export function solveTwoBoneIK(input: TwoBoneIKInput): TwoBoneIKResult {
  * based on its child joint's rest-position vector, and writes directly into `bone.quaternion`.
  */
 function orientBoneToward(bone: THREE.Bone, childBone: THREE.Bone, targetWorldPos: THREE.Vector3): void {
+  bone.updateMatrixWorld(true);
   const currentWorldPos = new THREE.Vector3();
   bone.getWorldPosition(currentWorldPos);
 
-  // The rest direction of this bone is the direction toward its child in rest pose
+  // Direction toward child bone in bone-local coordinates
   const restAxis = childBone.position.clone().normalize();
   if (restAxis.lengthSq() < 0.0001) return;
 
@@ -135,8 +136,13 @@ function orientBoneToward(bone: THREE.Bone, childBone: THREE.Bone, targetWorldPo
   const invParentQuat = parentWorldQuat.clone().invert();
   const localDir = worldDir.clone().applyQuaternion(invParentQuat).normalize();
 
-  // Set bone's local quaternion
-  bone.quaternion.setFromUnitVectors(restAxis, localDir);
+  // Current direction toward child bone in parent coordinate space (respects Mixamo/FBX bind restRotation)
+  const currentParentDir = restAxis.clone().applyQuaternion(bone.quaternion).normalize();
+  if (currentParentDir.lengthSq() < 0.0001) return;
+
+  // Premultiply delta rotation in parent space so bind-pose roll is preserved
+  const deltaQuat = new THREE.Quaternion().setFromUnitVectors(currentParentDir, localDir);
+  bone.quaternion.premultiply(deltaQuat);
   bone.updateMatrixWorld(true);
 }
 
@@ -154,29 +160,29 @@ export const LIMB_DEFINITIONS: Record<LimbIdentifier, LimbBones> = {
     root: 'LeftArm',
     mid: 'LeftForeArm',
     end: 'LeftHand',
-    // Elbow points backwards and slightly outward
-    defaultPoleOffset: new THREE.Vector3(-0.3, 0, -1.0),
+    // Elbow points outward (+X), downward (-Y), and backward (-Z)
+    defaultPoleOffset: new THREE.Vector3(0.45, -0.5, -0.8),
   },
   rightArm: {
     root: 'RightArm',
     mid: 'RightForeArm',
     end: 'RightHand',
-    // Elbow points backwards and slightly outward
-    defaultPoleOffset: new THREE.Vector3(0.3, 0, -1.0),
+    // Elbow points outward (-X), downward (-Y), and backward (-Z)
+    defaultPoleOffset: new THREE.Vector3(-0.45, -0.5, -0.8),
   },
   leftLeg: {
     root: 'LeftUpLeg',
     mid: 'LeftLeg',
     end: 'LeftFoot',
-    // Knee points forwards
-    defaultPoleOffset: new THREE.Vector3(0, 0, 1.0),
+    // Knee points forwards and slightly outward
+    defaultPoleOffset: new THREE.Vector3(0.06, 0, 1.0),
   },
   rightLeg: {
     root: 'RightUpLeg',
     mid: 'RightLeg',
     end: 'RightFoot',
-    // Knee points forwards
-    defaultPoleOffset: new THREE.Vector3(0, 0, 1.0),
+    // Knee points forwards and slightly outward
+    defaultPoleOffset: new THREE.Vector3(-0.06, 0, 1.0),
   },
 };
 
@@ -197,12 +203,26 @@ export function solveLimbIK(
 
   if (!rootBone || !midBone || !endBone) return null;
 
-  // Determine pole target in world space
+  if (rig.root.parent) {
+    rig.root.parent.updateMatrixWorld(true);
+  }
+
+  // Reset limb bones to their canonical rest rotations before solving to prevent roll drift
+  const rootRestRot = rig.restRotations.get(def.root);
+  const midRestRot = rig.restRotations.get(def.mid);
+  if (rootRestRot) rootBone.quaternion.copy(rootRestRot);
+  if (midRestRot) midBone.quaternion.copy(midRestRot);
+  rig.root.updateMatrixWorld(true);
+
+  // Determine pole target in world space (rotated by character's facing orientation)
   let poleTarget = customPoleWorldPos;
   if (!poleTarget) {
     const rootPos = new THREE.Vector3();
     rootBone.getWorldPosition(rootPos);
-    poleTarget = rootPos.clone().add(def.defaultPoleOffset.clone().multiplyScalar(rig.height));
+    const rootWorldQuat = new THREE.Quaternion();
+    rig.root.getWorldQuaternion(rootWorldQuat);
+    const rotatedPoleOffset = def.defaultPoleOffset.clone().multiplyScalar(rig.height).applyQuaternion(rootWorldQuat);
+    poleTarget = rootPos.clone().add(rotatedPoleOffset);
   }
 
   return solveTwoBoneIK({
@@ -223,6 +243,15 @@ export function solveLookAt(rig: HumanoidRig, lookAtWorldPos: THREE.Vector3): vo
   const neckBone = rig.bones.get('Neck');
   if (!headBone || !neckBone) return;
 
+  if (rig.root.parent) {
+    rig.root.parent.updateMatrixWorld(true);
+  }
+
+  const neckRest = rig.restRotations.get('Neck');
+  const headRest = rig.restRotations.get('Head');
+  if (neckRest) neckBone.quaternion.copy(neckRest);
+  if (headRest) headBone.quaternion.copy(headRest);
+
   rig.root.updateMatrixWorld(true);
   const headWorldPos = new THREE.Vector3();
   headBone.getWorldPosition(headWorldPos);
@@ -230,22 +259,25 @@ export function solveLookAt(rig: HumanoidRig, lookAtWorldPos: THREE.Vector3): vo
   const lookDir = lookAtWorldPos.clone().sub(headWorldPos).normalize();
   if (lookDir.lengthSq() < 0.0001) return;
 
-  const parent = headBone.parent;
-  if (!parent) return;
-
+  const parent = neckBone.parent || rig.root;
+  parent.updateMatrixWorld(true);
   const parentWorldQuat = new THREE.Quaternion();
   parent.getWorldQuaternion(parentWorldQuat);
   const invParentQuat = parentWorldQuat.clone().invert();
   const localLookDir = lookDir.clone().applyQuaternion(invParentQuat).normalize();
 
-  // Standard forward for humanoid head is +Z
-  const forwardAxis = new THREE.Vector3(0, 0, 1);
-  const targetQuat = new THREE.Quaternion().setFromUnitVectors(forwardAxis, localLookDir);
+  // Compute anatomical yaw and pitch (clamped to human cervical limits, zero roll)
+  const rawYaw = Math.atan2(localLookDir.x, Math.max(0.05, localLookDir.z));
+  const rawPitch = Math.atan2(-localLookDir.y, Math.sqrt(localLookDir.x * localLookDir.x + localLookDir.z * localLookDir.z));
+  const clampedYaw = THREE.MathUtils.clamp(rawYaw, -0.95, 0.95);
+  const clampedPitch = THREE.MathUtils.clamp(rawPitch, -0.6, 0.6);
 
   // Distribute rotation: 35% on Neck, 65% on Head for natural cervical spine flexion
-  const identity = new THREE.Quaternion();
-  neckBone.quaternion.slerpQuaternions(identity, targetQuat, 0.35);
-  headBone.quaternion.slerpQuaternions(identity, targetQuat, 0.65);
+  const neckDelta = new THREE.Quaternion().setFromEuler(new THREE.Euler(clampedPitch * 0.35, clampedYaw * 0.35, 0, 'YXZ'));
+  const headDelta = new THREE.Quaternion().setFromEuler(new THREE.Euler(clampedPitch * 0.65, clampedYaw * 0.65, 0, 'YXZ'));
+
+  neckBone.quaternion.multiply(neckDelta);
+  headBone.quaternion.multiply(headDelta);
 
   neckBone.updateMatrixWorld(true);
   headBone.updateMatrixWorld(true);

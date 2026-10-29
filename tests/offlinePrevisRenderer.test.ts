@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { invertDepthCanvas, muxFramesToMp4, renderOfflinePrevisPasses } from '../src/engine/offlinePrevisRenderer';
+import { createLinearDepthMaterial, invertDepthCanvas, muxFramesToMp4, renderOfflinePrevisPasses } from '../src/engine/offlinePrevisRenderer';
 import * as THREE from 'three';
 
 beforeAll(() => {
@@ -52,6 +52,29 @@ beforeAll(() => {
 });
 
 describe('offlinePrevisRenderer', () => {
+  describe('createLinearDepthMaterial', () => {
+    it('creates a MeshDepthMaterial configured with linear depth uniforms and shader hooks', () => {
+      const mat = createLinearDepthMaterial(1.0, 50.0);
+      expect(mat).toBeInstanceOf(THREE.MeshDepthMaterial);
+      expect(typeof mat.onBeforeCompile).toBe('function');
+      expect(typeof mat.customProgramCacheKey).toBe('function');
+      expect(mat.customProgramCacheKey()).toContain('50');
+
+      // Test onBeforeCompile hook
+      const shader = {
+        uniforms: {} as any,
+        vertexShader: '#include <common>\n#include <project_vertex>',
+        fragmentShader: '',
+      };
+      mat.onBeforeCompile(shader as any, {} as any);
+
+      expect(shader.uniforms.depthNear?.value).toBe(1.0);
+      expect(shader.uniforms.depthFar?.value).toBe(50.0);
+      expect(shader.vertexShader).toContain('vViewZ = -mvPosition.z');
+      expect(shader.fragmentShader).toContain('clamp((depthFar - vViewZ) / (depthFar - depthNear)');
+    });
+  });
+
   describe('invertDepthCanvas', () => {
     it('inverts depth map values so near geometry is white and far is dark', () => {
       const width = 2;

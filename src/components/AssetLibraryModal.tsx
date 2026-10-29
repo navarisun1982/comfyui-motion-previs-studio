@@ -6,8 +6,8 @@ import {
   Asset3DItem,
 } from '../stores/useAssetLibraryStore';
 import { useShotStore } from '../stores/useShotStore';
-import { useComfyStore } from '../stores/useComfyStore';
 import { describeReasoner } from '../services/objectReasoner';
+import { ReasonerSettingsPanel } from './ReasonerSettingsPanel';
 import {
   X,
   Search,
@@ -85,9 +85,7 @@ export const AssetLibraryModal: React.FC = () => {
   const [showGenerator, setShowGenerator] = useState(false);
   const [showAiStudio, setShowAiStudio] = useState(false);
   const [studioInitialPrompt, setStudioInitialPrompt] = useState<string>('');
-  const openSettings = useComfyStore((s) => s.openSettings);
-  // Subscribing re-renders this modal when settings close, so the label reflects a new provider.
-  useComfyStore((s) => s.isSettingsOpen);
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const reasonerLabel = describeReasoner();
   const [genPrompt, setGenPrompt] = useState('');
   const [genCategory, setGenCategory] = useState<AssetCategory>('props');
@@ -297,26 +295,28 @@ export const AssetLibraryModal: React.FC = () => {
             {/* AI 3D Generator Studio Button */}
             <button
               onClick={() => {
-                setStudioInitialPrompt('');
+                setStudioInitialPrompt(genPrompt || searchQuery || '');
                 setShowAiStudio(true);
               }}
               className="flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold bg-gradient-to-r from-amber-500 via-indigo-600 to-cyan-500 text-white hover:brightness-110 shadow-md shadow-indigo-600/30 transition-all font-mono"
-              title="Open Concept-to-3D Studio with Reference Image Silhouette Alignment"
+              title="Open Concept-to-3D Studio with Reference Image Silhouette Alignment & Multi-Pass Sculpting"
             >
               <Sparkles className="h-4 w-4 text-amber-300" />
               <span>✨ Concept-to-3D Studio</span>
             </button>
 
-            {/* Quick Generator Toggle Button */}
+            {/* Quick Text-to-3D Bar Toggle Button */}
             <button
               onClick={() => setShowGenerator(!showGenerator)}
-              className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold font-mono transition-all ${
                 showGenerator
                   ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/30'
                   : 'bg-white/10 text-white hover:bg-white/15 border border-white/10'
               }`}
+              title="Toggle inline Quick Text-to-3D prompt generator"
             >
-              <span>Quick Prompt</span>
+              <Zap className="h-3.5 w-3.5 text-amber-300" />
+              <span>Quick Text-to-3D</span>
             </button>
 
             {/* Multi-Select Toggle Button */}
@@ -355,23 +355,39 @@ export const AssetLibraryModal: React.FC = () => {
         {showGenerator && (
           <div className="border-b border-amber-500/30 bg-gradient-to-r from-[#171424] via-[#121524] to-[#171424] p-5 animate-in slide-in-from-top duration-300">
             <form onSubmit={handleGenerateSubmit} className="max-w-4xl mx-auto space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-amber-400 font-bold text-sm flex items-center gap-1.5 font-display">
-                    <Sparkles className="h-4 w-4 text-amber-400" />
-                    AI 3D Model Generation Pipeline
+                    <Zap className="h-4 w-4 text-amber-400" />
+                    Quick Text-to-3D Generator
+                  </span>
+                  <span className="text-[11px] font-mono text-slate-400 hidden sm:inline">
+                    (For reference images &amp; multi-angle sculpting, open Concept-to-3D Studio)
                   </span>
                 </div>
-                <button
-                  type="button"
-                  id="reasoner-settings-toggle"
-                  onClick={() => openSettings('llm')}
-                  title="Change the LLM provider (opens Studio Settings)"
-                  className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] font-mono text-slate-400 hover:text-white hover:border-white/25 transition-all"
-                >
-                  <Settings2 className="h-3.5 w-3.5" />
-                  Reasoner: {reasonerLabel}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStudioInitialPrompt(genPrompt);
+                      setShowAiStudio(true);
+                    }}
+                    className="flex items-center gap-1 rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-2.5 py-1 text-[11px] font-mono text-indigo-200 hover:bg-indigo-500/25 hover:text-white transition-all"
+                  >
+                    <Sparkles className="h-3 w-3 text-amber-300" />
+                    <span>Open Concept-to-3D Studio</span>
+                  </button>
+                  <button
+                    type="button"
+                    id="reasoner-settings-toggle"
+                    onClick={() => setShowSettingsModal(true)}
+                    title="Change the LLM provider (opens Studio Settings)"
+                    className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] font-mono text-slate-400 hover:text-white hover:border-white/25 transition-all"
+                  >
+                    <Settings2 className="h-3.5 w-3.5" />
+                    Reasoner: {reasonerLabel}
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2">
@@ -842,6 +858,15 @@ export const AssetLibraryModal: React.FC = () => {
         onClose={() => setShowAiStudio(false)}
         initialPrompt={studioInitialPrompt}
       />
+
+      {/* Embedded Studio Reasoner Settings Modal */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-white/10 bg-[#0e111a] p-6 shadow-2xl">
+            <ReasonerSettingsPanel onClose={() => setShowSettingsModal(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

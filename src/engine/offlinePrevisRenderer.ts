@@ -149,6 +149,49 @@ export async function muxFramesToMp4(
 }
 
 /**
+ * Creates a true metric linear depth override material for ControlNet / MiDaS / DepthAnything passes.
+ * Near geometry is mapped to 1.0 (white), distant geometry to 0.0 (dark), and background is 0.0 (black).
+ * Supports standard meshes, skinned meshes, and instanced meshes with no non-linear perspective warping.
+ */
+export function createLinearDepthMaterial(near: number = 0.5, far: number = 60.0): THREE.MeshDepthMaterial {
+  const mat = new THREE.MeshDepthMaterial({
+    depthPacking: THREE.BasicDepthPacking,
+  });
+
+  mat.customProgramCacheKey = () => `ControlNetLinearDepthMaterial_${near}_${far}`;
+
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.depthNear = { value: near };
+    shader.uniforms.depthFar = { value: far };
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `#include <common>
+varying float vViewZ;`
+    );
+
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <project_vertex>',
+      `#include <project_vertex>
+vViewZ = -mvPosition.z;`
+    );
+
+    shader.fragmentShader = `
+uniform float depthNear;
+uniform float depthFar;
+varying float vViewZ;
+
+void main() {
+  float d = clamp((depthFar - vViewZ) / (depthFar - depthNear), 0.0, 1.0);
+  gl_FragColor = vec4(vec3(d), 1.0);
+}
+`;
+  };
+
+  return mat;
+}
+
+/**
  * Inverts a depth canvas so near geometry is white and distant geometry is dark
  * (standard ControlNet & IC-LoRA depth convention).
  */
@@ -217,10 +260,10 @@ export async function renderOfflinePrevisPasses(
   const depthFrames: HTMLCanvasElement[] = [];
   const openposeFrames: HTMLCanvasElement[] = [];
 
-  // Temporary depth override material
-  const depthMaterial = new THREE.MeshDepthMaterial({
-    depthPacking: THREE.BasicDepthPacking,
-  });
+  // True metric linear depth override material (Near = 1.0 White, Far = 0.0 Black, Background = Black)
+  const depthFar = Math.min(Math.max(camera.far * 0.1, 40.0), 80.0);
+  const depthNear = Math.max(camera.near, 0.4);
+  const depthMaterial = createLinearDepthMaterial(depthNear, depthFar);
 
   const prevOverride = scene.overrideMaterial;
   const prevBackground = scene.background;
@@ -258,34 +301,39 @@ export async function renderOfflinePrevisPasses(
         rgbFrames.push(frameCanvas);
       }
 
-      // --- Pass 2: Inverted Depth Map ---
+      // --- Pass 2: Volumetric Linear Depth Map ---
       if (shouldRenderDepth) {
         scene.overrideMaterial = depthMaterial;
         scene.background = new THREE.Color(0x000000);
         renderer.render(scene, camera);
 
-        const rawDepthCanvas = document.createElement('canvas');
-        rawDepthCanvas.width = width;
-        rawDepthCanvas.height = height;
-        const depthCtx = rawDepthCanvas.getContext('2d');
+        const depthCanvas = document.createElement('canvas');
+        depthCanvas.width = width;
+        depthCanvas.height = height;
+        const depthCtx = depthCanvas.getContext('2d');
         if (depthCtx) {
           depthCtx.drawImage(renderer.domElement, 0, 0, width, height);
         }
-
-        const invertedDepthCanvas = document.createElement('canvas');
-        invertDepthCanvas(rawDepthCanvas, invertedDepthCanvas, width, height);
-        depthFrames.push(invertedDepthCanvas);
+        depthFrames.push(depthCanvas);
       }
 
       // --- Pass 3: ControlNet OpenPose Skeleton Pass ---
       if (shouldRenderOpenpose) {
-        const activeRigs: HumanoidRig[] = options.humanoidRigs ? [...options.humanoidRigs] : [];
-        if (!options.humanoidRigs) {
+        const activeRigs: HumanoidRig[] = options.humanoidRigs && options.humanoidRigs.length > 0
+          ? [...options.humanoidRigs]
+          : [];
+
+        if (activeRigs.length === 0) {
           scene.traverse((obj) => {
             if (obj.userData?.rig && !activeRigs.includes(obj.userData.rig)) {
               activeRigs.push(obj.userData.rig);
             }
           });
+        }
+
+        scene.updateMatrixWorld(true);
+        for (const rig of activeRigs) {
+          rig.root.updateMatrixWorld(true);
         }
 
         const openposeCanvas = document.createElement('canvas');

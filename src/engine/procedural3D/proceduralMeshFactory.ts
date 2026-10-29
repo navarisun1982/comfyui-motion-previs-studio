@@ -17,9 +17,9 @@ export interface ProceduralMeshOptions {
 
 /**
  * Universal Procedural Actor Factory.
- * Grounded in the object-reasoning specification.
- * Replaces ad-hoc string regex cascades with probabilistic BM25 token matching,
- * sub-word root stemming, query expansion, and first-principles morphometric synthesis.
+ * Grounded in the declarative SculptSpec object-reasoning specification.
+ * Synthesizes and builds authentic, parametric geometric parts (blob, box, cylinder, lathe, extrude, tube)
+ * with tactile PBR materials, replacing distorted legacy box-cutting kits.
  */
 export function createProceduralActorMesh(options: ProceduralMeshOptions): THREE.Group {
   const {
@@ -40,7 +40,7 @@ export function createProceduralActorMesh(options: ProceduralMeshOptions): THREE
   const activeSculpt = sculpt || (partGraph ? partGraph : null);
   const reasoned = activeSculpt || lookupSculptSpec(tokenPrompt) || lookupSculptSpec(name);
 
-  // 3. Otherwise resolve curated / quick-add items through the kit catalog.
+  // 3. Otherwise resolve curated / quick-add items through the archetype catalog.
   const resolution = reasoned
     ? null
     : resolveObjectArchetype(`${name} ${tokenPrompt}`, category);
@@ -49,7 +49,7 @@ export function createProceduralActorMesh(options: ProceduralMeshOptions): THREE
   const kit = reasoned ? buildSculpt(reasoned) : resolution!.build(palette);
   const root = kit.group;
 
-  // 4. Ghost Wireframe Mode for viewpoint cameras and stage alignment
+  // 5. Ghost Wireframe Mode for viewpoint cameras and stage alignment
   if (isGhostWireframe) {
     const ghostMat = new THREE.MeshBasicMaterial({
       color: 0x06b6d4,
@@ -66,12 +66,11 @@ export function createProceduralActorMesh(options: ProceduralMeshOptions): THREE
     });
   }
 
-  // 5. Attach Authoritative Physical Kinematics Hook & 3Dviz Reasoning Trace
-  if (kit.update) {
-    root.userData.update = kit.update;
-  }
+  // 6. Attach Authoritative Physical Kinematics Hook & 3Dviz Reasoning Trace
+  root.userData.update = kit.update || ((_dt: number) => {});
   root.userData.reasoningTrace = resolution?.reasoningTrace;
   root.userData.reasonedGraph = !!reasoned;
+  root.userData.sculptSpec = reasoned || null;
 
   return root;
 }

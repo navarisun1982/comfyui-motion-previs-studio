@@ -1,7 +1,7 @@
 import React from 'react';
 import { useShotStore } from '../stores/useShotStore';
 import { FocalLength, CameraMovementType, CameraAngle, ShotType, MovementSpeed } from '../types/shotspec';
-import { Camera, Compass, Move, Aperture, Video, Gauge } from 'lucide-react';
+import { Camera, Compass, Move, Aperture, Video, Gauge, Target } from 'lucide-react';
 
 const FOCAL_LENGTHS: { value: FocalLength; label: string; fov: string; note: string; feeling: string }[] = [
   { value: '18mm', label: '18mm', fov: '100°', note: 'Ultra-wide angle', feeling: 'Vast scale & deep perspective. Swallows subjects in massive environments.' },
@@ -52,9 +52,18 @@ const SHOT_SIZES: { value: ShotType; label: string }[] = [
 ];
 
 export const CameraDeck: React.FC = () => {
-  const { shot, setFocalLength, setCameraMovement, setCameraAngle, setShotType } = useShotStore();
+  const {
+    shot,
+    setFocalLength,
+    setCameraMovement,
+    setCameraAngle,
+    setShotType,
+    selectedActorId,
+    focusCameraOnSubject,
+  } = useShotStore();
   const currentMovement = shot.camera.movement.type;
   const currentSpeed = shot.camera.movement.speed;
+  const selectedActor = shot.actors.find((a) => a.id === selectedActorId);
 
   const currentLensInfo = FOCAL_LENGTHS.find((l) => l.value === shot.camera.lens.focalLength);
   const currentAngleInfo = ANGLES.find((a) => a.value === shot.camera.angle);
@@ -166,6 +175,27 @@ export const CameraDeck: React.FC = () => {
             );
           })}
         </div>
+      </div>
+
+      {/* Subject Tracking & Target Focus */}
+      <div className="flex flex-col gap-2 rounded-lg border border-director-border/60 bg-director-panel/40 p-2.5">
+        <div className="flex items-center justify-between">
+          <label className="flex items-center gap-1.5 font-mono text-[11px] text-slate-300">
+            <Target className="h-3.5 w-3.5 text-cyan-400" />
+            Subject Focus & Tracking
+          </label>
+          <span className="font-mono text-[10px] text-slate-400">
+            {selectedActor ? selectedActor.name : 'Scene Center'}
+          </span>
+        </div>
+        <button
+          onClick={() => focusCameraOnSubject(selectedActorId !== '__camera__' ? selectedActorId : undefined)}
+          className="flex items-center justify-center gap-1.5 rounded-md py-1.5 px-2 bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 hover:text-white border border-cyan-500/40 font-mono text-[10px] font-semibold transition-all shadow-sm active:scale-95"
+          title="Lock camera target directly onto active subject"
+        >
+          <Target className="h-3 w-3 text-cyan-400" />
+          <span>Focus Camera on {selectedActor ? selectedActor.name : 'Primary Subject'}</span>
+        </button>
       </div>
 
       {/* Angle & Framing Grid */}

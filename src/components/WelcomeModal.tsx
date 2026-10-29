@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import {
   Clapperboard,
   Box,
-  Layers,
-  Zap,
+  Download,
   X,
   Sparkles,
   ArrowRight,
@@ -14,7 +13,7 @@ import { safeGetItem, safeSetItem, STORAGE_KEYS } from '../services/storage';
 interface WelcomeModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onOpenWorkspace?: (mode: 'previs' | 'vfx' | 'diffusion') => void;
+  onOpenWorkspace?: (mode: 'previs' | 'export') => void;
 }
 
 export const WelcomeModal: React.FC<WelcomeModalProps> = ({
@@ -23,7 +22,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   onOpenWorkspace,
 }) => {
   const [dontShowAgain, setDontShowAgain] = useState<boolean>(() =>
-    safeGetItem<boolean>(STORAGE_KEYS.WELCOME_DISMISSED, false)
+    safeGetItem<boolean>(STORAGE_KEYS.WELCOME_DISMISSED, true)
   );
 
   if (!isOpen) return null;
@@ -48,7 +47,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     >
       <div className="relative w-full max-w-2xl rounded-2xl border border-white/15 bg-gradient-to-b from-[#131722] via-[#0d0f17] to-[#08090d] shadow-2xl overflow-hidden text-slate-200">
         {/* Top Accent Gradient Bar */}
-        <div className="h-1.5 w-full bg-gradient-to-r from-blue-500 via-indigo-500 via-emerald-500 to-amber-500" />
+        <div className="h-1.5 w-full bg-gradient-to-r from-blue-500 via-indigo-500 to-amber-500" />
 
         {/* Close Button */}
         <button
@@ -80,71 +79,49 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
             </div>
           </div>
 
-          {/* Core 3 Workflows */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {/* Core Workflows */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* Directing Stage */}
             <div
               onClick={() => {
                 onOpenWorkspace?.('previs');
                 handleDismiss();
               }}
-              className="group cursor-pointer rounded-xl border border-white/10 bg-white/[0.02] p-3.5 hover:border-blue-500/50 hover:bg-blue-500/5 transition-all"
+              className="group cursor-pointer rounded-xl border border-white/10 bg-white/[0.02] p-4 hover:border-blue-500/50 hover:bg-blue-500/5 transition-all"
             >
               <div className="flex items-center justify-between mb-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/20 text-blue-400 border border-blue-500/30 group-hover:scale-105 transition-transform">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/20 text-blue-400 border border-blue-500/30 group-hover:scale-105 transition-transform">
                   <Box className="h-4 w-4" />
                 </div>
                 <ArrowRight className="h-3.5 w-3.5 text-slate-500 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all" />
               </div>
-              <h3 className="font-display text-xs font-bold text-white group-hover:text-blue-300">
+              <h3 className="font-display text-sm font-bold text-white group-hover:text-blue-300">
                 1. 3D Directing Stage
               </h3>
-              <p className="font-sans text-[11px] text-slate-400 mt-1 leading-relaxed">
-                Direct actors on the 3D stage, manipulate camera trajectories, set focal lengths, and preview volumetric lighting in real time.
+              <p className="font-sans text-xs text-slate-400 mt-1.5 leading-relaxed">
+                Direct actors on the 3D stage, manipulate camera trajectories, set focal lengths, preview volumetric lighting, and render previs MP4s directly.
               </p>
             </div>
 
-            {/* VFX Plate Solver */}
+            {/* Previs Export Deck */}
             <div
               onClick={() => {
-                onOpenWorkspace?.('vfx');
+                onOpenWorkspace?.('export');
                 handleDismiss();
               }}
-              className="group cursor-pointer rounded-xl border border-white/10 bg-white/[0.02] p-3.5 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all"
+              className="group cursor-pointer rounded-xl border border-white/10 bg-white/[0.02] p-4 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all"
             >
               <div className="flex items-center justify-between mb-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 group-hover:scale-105 transition-transform">
-                  <Layers className="h-4 w-4" />
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 group-hover:scale-105 transition-transform">
+                  <Download className="h-4 w-4" />
                 </div>
                 <ArrowRight className="h-3.5 w-3.5 text-slate-500 group-hover:text-emerald-400 group-hover:translate-x-0.5 transition-all" />
               </div>
-              <h3 className="font-display text-xs font-bold text-white group-hover:text-emerald-300">
-                2. VFX Plate Solver
+              <h3 className="font-display text-sm font-bold text-white group-hover:text-emerald-300">
+                2. Previs Export Deck
               </h3>
-              <p className="font-sans text-[11px] text-slate-400 mt-1 leading-relaxed">
-                Import reference video footage, compute multi-pass CV (depth, optical motion, line edge), and lock real camera movement.
-              </p>
-            </div>
-
-            {/* ComfyUI Studio */}
-            <div
-              onClick={() => {
-                onOpenWorkspace?.('diffusion');
-                handleDismiss();
-              }}
-              className="group cursor-pointer rounded-xl border border-white/10 bg-white/[0.02] p-3.5 hover:border-amber-500/50 hover:bg-amber-500/5 transition-all"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 group-hover:scale-105 transition-transform">
-                  <Zap className="h-4 w-4 fill-current" />
-                </div>
-                <ArrowRight className="h-3.5 w-3.5 text-slate-500 group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all" />
-              </div>
-              <h3 className="font-display text-xs font-bold text-white group-hover:text-amber-300">
-                3. ComfyUI Diffusion
-              </h3>
-              <p className="font-sans text-[11px] text-slate-400 mt-1 leading-relaxed">
-                Dispatch verified prompt bundles and camera conditioning directly to local open-weights engines (LTX-2.5 22B & MiniMax H3).
+              <p className="font-sans text-xs text-slate-400 mt-1.5 leading-relaxed">
+                Export multi-pass reference videos (RGB, OpenPose, Depth) and compile camera trajectory packages for LTX-2.5, MiniMax H3, and Seedance.
               </p>
             </div>
           </div>

@@ -8,17 +8,19 @@
  * and nothing here matches object names — whatever the spec describes is what gets built.
  */
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { ProceduralKitResult, QuadrupedMorphology } from './proceduralKits';
-import { createQuadrupedWalker, createBipedWalker } from './proceduralKits';
-import { createStandardPalette } from './craftForms';
+import { createQuadrupedWalker } from './proceduralKits';
 import { safeGetItem, safeSetItem, safeRemoveItem } from '../../services/storage';
 import { CURATED_SCULPT_SPECS } from './curatedSculpts';
+import { cutSculptGeometry, CutterTarget } from './sculptCsg';
+import { createTactileClayMaterial, applyPartGradient, PartGradient } from './clayMaterial';
+import { compileCharacterToClaySculpt, createDefaultCharacterFeatures } from './characterClayCompiler';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
 export type Vec3 = [number, number, number];
 export type Vec2 = [number, number];
 
-export const SCULPT_SHAPES = ['blob', 'capsule', 'cylinder', 'cone', 'torus', 'tube', 'lathe', 'extrude'] as const;
+export const SCULPT_SHAPES = ['blob', 'box', 'capsule', 'cylinder', 'cone', 'torus', 'tube', 'lathe', 'extrude'] as const;
 export type SculptShape = (typeof SCULPT_SHAPES)[number];
 
 export const MOTION_TYPES = ['none', 'spin', 'swing', 'bob'] as const;
@@ -66,6 +68,8 @@ export interface SculptMotion {
 export interface SculptPart {
   id: string;
   parent?: string;
+  /** CSG operation: "subtract" (carve out) or "intersect". Cutters cut parent geometry. */
+  op?: 'subtract' | 'intersect';
   shape: SculptShape;
   /** Bounding size [width, height, depth] in object units. torus: [outerDiameter, tubeDiameter, 0]; tube: [diameter, 0, 0]. */
   size: Vec3;
@@ -74,9 +78,11 @@ export interface SculptPart {
   /** Degrees, XYZ order. */
   rotation: Vec3;
   material: string;
+  /** Optional hex color directly on part */
+  color?: string;
   /** blob only: 0 = sharp box, 1 = full ellipsoid. */
   roundness?: number;
-  /** cylinder only: top diameter as a fraction of the bottom diameter. */
+  /** cylinder or blob taper. */
   taper?: number;
   /** tube only: object-space control points. */
   points?: Vec3[];
@@ -91,6 +97,8 @@ export interface SculptPart {
   motion?: SculptMotion;
   /** Humanoid bone this part rigidly follows (rig === 'humanoid'). Mirrored copies swap Left/Right. */
   bone?: HumanoidBone;
+  /** Linear vertex color gradient */
+  gradient?: PartGradient;
 }
 
 export interface WalkerSpec {
@@ -183,22 +191,37 @@ function safeColor(c: unknown, fallback = '#9aa3ad'): string {
 }
 
 /**
- * One-way converter for the legacy v1 PartGraph shape vocabulary.
- * box -> blob (roundness 0.24, matching the old 0.12 rounded-box radius), ellipsoid -> blob (roundness 1).
- * Everything else (cylinder/cone/capsule/torus/tube, parenting, mirroring, motion, walker routes) maps 1:1.
+ * Converter for legacy v1 PartGraph and recipe envelopes.
+ * Maps box -> box, ellipsoid -> blob (roundness 1), mirror -> mirrorX,
+ * and extracts recipe envelopes ({ recipe: { parts: [...] } }).
  */
 export function partGraphToSculptSpec(raw: any): any {
   if (!raw || typeof raw !== 'object') return raw;
-  if (raw.version === 2) return raw;
+  // Support recipe envelope format ({ recipe: { parts: [...] } })
+  const source =
+    raw.recipe && typeof raw.recipe === 'object' && Array.isArray(raw.recipe.parts)
+      ? { ...raw.recipe, ...raw, parts: raw.recipe.parts }
+      : raw;
+
+  if (source.version === 2) return source;
   return {
-    ...raw,
+    ...source,
     version: 2,
-    ...(raw.rig ? { rig: raw.rig } : {}),
-    parts: (Array.isArray(raw.parts) ? raw.parts : []).map((p: any) => {
+    ...(source.rig ? { rig: source.rig } : {}),
+    parts: (Array.isArray(source.parts) ? source.parts : []).map((p: any) => {
       if (!p || typeof p !== 'object') return p;
-      if (p.shape === 'box') return { ...p, shape: 'blob', roundness: 0.24 };
-      if (p.shape === 'ellipsoid') return { ...p, shape: 'blob', roundness: 1 };
-      return p;
+      const res = { ...p };
+      if (p.shape === 'box') {
+        res.shape = 'blob';
+        res.roundness = p.roundness !== undefined ? p.roundness : 0.24;
+      } else if (p.shape === 'ellipsoid') {
+        res.shape = 'blob';
+        res.roundness = 1;
+      }
+      if (p.mirror && !p.mirrorX) {
+        res.mirrorX = true;
+      }
+      return res;
     }),
   };
 }
@@ -206,7 +229,7 @@ export function partGraphToSculptSpec(raw: any): any {
 function sanitizePart(p: any, index: number): SculptPart | null {
   if (!p || typeof p !== 'object') return null;
   // Legacy shape names are accepted from any source (old storage, older prompts, model drift).
-  if (p.shape === 'box') p = { roundness: 0.24, ...p, shape: 'blob' };
+  if (p.shape === 'box') p = { roundness: p.roundness !== undefined ? p.roundness : 0.24, ...p, shape: 'blob' };
   else if (p.shape === 'ellipsoid') p = { roundness: 1, ...p, shape: 'blob' };
   else if (p.shape === 'sphere') p = { roundness: 1, ...p, shape: 'blob' };
   const shape: SculptShape = SCULPT_SHAPES.includes(p.shape) ? p.shape : 'blob';
@@ -221,21 +244,47 @@ function sanitizePart(p: any, index: number): SculptPart | null {
   const motionType: MotionType = MOTION_TYPES.includes(p?.motion?.type) ? p.motion.type : 'none';
   const bone: HumanoidBone | undefined = HUMANOID_BONES.includes(p.bone) ? p.bone : undefined;
 
-  return {
+  // Support native color field: generate an explicit material identifier if omitted
+  const color = typeof p.color === 'string' ? safeColor(p.color) : undefined;
+  const material = typeof p.material === 'string' && p.material ? p.material : color ? `col_${color.replace(/[^a-zA-Z0-9]/g, '')}` : '';
+
+  // Support CSG operation
+  const op: 'subtract' | 'intersect' | undefined =
+    p.op === 'subtract' || p.op === 'intersect' ? p.op : undefined;
+
+  // Support linear gradient
+  let gradient: PartGradient | undefined = undefined;
+  if (p.gradient && typeof p.gradient === 'object') {
+    const gCol = typeof p.gradient.color === 'string' ? safeColor(p.gradient.color) : undefined;
+    const gAxis = ['x', 'y', 'z'].includes(p.gradient.axis) ? p.gradient.axis : 'y';
+    if (gCol) {
+      gradient = {
+        color: gCol,
+        axis: gAxis,
+        from: clamp(finite(p.gradient.from, 0), -1, 1),
+        to: clamp(finite(p.gradient.to, 1), -1, 1),
+      };
+    }
+  }
+
+  const partObj: SculptPart = {
     id,
     parent: typeof p.parent === 'string' && p.parent ? p.parent : undefined,
+    op,
+    gradient,
     shape,
     size: vec(p.size, [0.2, 0.2, 0.2], 0, 60).map((s) => Math.max(s, 0.002)) as Vec3,
     position: vec(p.position, [0, 0, 0]),
     rotation: vec(p.rotation, [0, 0, 0], -720, 720),
-    material: typeof p.material === 'string' ? p.material : '',
+    material,
+    color,
     roundness: shape === 'blob' ? clamp(finite(p.roundness, 0.3), 0, 1) : undefined,
-    taper: p.taper === undefined ? undefined : clamp(finite(p.taper, 1), 0, 4),
+    taper: p.taper === undefined ? undefined : clamp(finite(p.taper, 1), -1, 4),
     points: points && points.length >= 2 ? points : undefined,
     profile: profile.length >= 2 ? profile : undefined,
     outline: outline.length >= 3 ? outline : undefined,
     bevel: shape === 'extrude' && p.bevel !== undefined ? clamp(finite(p.bevel, 0.08), 0, 0.5) : undefined,
-    mirrorX: !!p.mirrorX,
+    mirrorX: !!p.mirrorX || !!p.mirror,
     motion:
       motionType === 'none'
         ? undefined
@@ -247,6 +296,7 @@ function sanitizePart(p: any, index: number): SculptPart | null {
           },
     bone,
   };
+  return partObj;
 }
 
 export function sanitizeSculptSpec(rawIn: any, fallbackName = 'Object'): SculptSpec {
@@ -258,15 +308,34 @@ export function sanitizeSculptSpec(rawIn: any, fallbackName = 'Object'): SculptS
     .map((m: any) => ({
       id: String(m.id),
       color: safeColor(m.color),
-      roughness: clamp(finite(m.roughness, 0.6), 0, 1),
-      metalness: clamp(finite(m.metalness, 0), 0, 1),
+      roughness: clamp(finite(m.roughness, 0.65), 0, 1),
+      metalness: clamp(finite(m.metalness, 0.05), 0, 1),
       emissive: !!m.emissive,
       opacity: m.opacity === undefined ? undefined : clamp(finite(m.opacity, 1), 0.05, 1),
     }));
 
+  // Auto-synthesise tactile clay materials from part colors if not explicitly defined
+  const materialIds = new Set(materials.map((m) => m.id));
+  const rawPartsList = Array.isArray(raw?.parts) ? raw.parts : [];
+  for (const p of rawPartsList) {
+    if (p && typeof p.color === 'string') {
+      const col = safeColor(p.color);
+      const matId = typeof p.material === 'string' && p.material ? p.material : `col_${col.replace(/[^a-zA-Z0-9]/g, '')}`;
+      if (!materialIds.has(matId)) {
+        materials.push({
+          id: matId,
+          color: col,
+          roughness: 0.65,
+          metalness: 0.05,
+        });
+        materialIds.add(matId);
+      }
+    }
+  }
+
   const ids = new Set<string>();
   const parts: SculptPart[] = [];
-  for (const p of Array.isArray(raw?.parts) ? raw.parts : []) {
+  for (const p of rawPartsList) {
     if (parts.length >= MAX_PARTS) break;
     const part = sanitizePart(p, parts.length);
     if (!part) continue;
@@ -391,15 +460,41 @@ export function applySculptPatch(spec: SculptSpec, patchRaw: any): SculptSpec {
 
 const DEG = Math.PI / 180;
 
-/** blob: a unit rounded box scaled to size. roundness 1 makes the corner radius 0.5 => an ellipsoid. */
-function blobGeometry(w: number, h: number, d: number, roundness: number): THREE.BufferGeometry {
-  const r = clamp(roundness, 0, 1) * 0.5;
-  // Thin parts with a negligible absolute radius stay crisp boxes.
-  if (r * Math.min(w, h, d) < 0.002) return new THREE.BoxGeometry(w, h, d);
-  const segments = r > 0.35 ? 8 : r > 0.15 ? 5 : 3;
-  const g = new RoundedBoxGeometry(1, 1, 1, segments, r);
-  g.scale(w, h, d);
-  return g;
+const BLOB_TAPER = 0.6;
+const blobExponent = (roundness: number) => 16 - 14 * clamp(roundness, 0, 1);
+
+function taperScale(taper: number, t: number, strength: number): number {
+  if (taper > 0) return 1 - taper * strength * ((t + 1) / 2);
+  if (taper < 0) return 1 + taper * strength * ((1 - t) / 2);
+  return 1;
+}
+
+export function createSuperellipsoidGeometry(
+  size: [number, number, number],
+  roundness = 0.3,
+  taper = 0
+): THREE.BufferGeometry {
+  const [w, h, d] = size;
+  const [a, b, c] = [w / 2, h / 2, d / 2];
+  const r = clamp(roundness, 0, 1);
+  const p = blobExponent(r);
+  const geometry = new THREE.SphereGeometry(1, 48, 36);
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < position.count; i += 1) {
+    v.fromBufferAttribute(position, i);
+    const s = Math.abs(v.x) ** p + Math.abs(v.y) ** p + Math.abs(v.z) ** p;
+    v.multiplyScalar(s > 0 ? s ** (-1 / p) : 0);
+    const k = taperScale(taper, v.y, BLOB_TAPER);
+    position.setXYZ(i, v.x * a * k, v.y * b, v.z * c * k);
+  }
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+/** blob: superellipsoid with continuous height tapering (|x/a|^p + |y/b|^p + |z/c|^p = 1) */
+function blobGeometry(part: SculptPart): THREE.BufferGeometry {
+  return createSuperellipsoidGeometry(part.size, part.roundness ?? 0.3, part.taper ?? 0);
 }
 
 function latheGeometry(part: SculptPart): THREE.BufferGeometry {
@@ -434,7 +529,12 @@ export function geometryForPart(part: SculptPart): THREE.BufferGeometry {
   const [w, h, d] = part.size;
   switch (part.shape) {
     case 'blob':
-      return blobGeometry(w, h, d, part.roundness ?? 0.3);
+      return blobGeometry(part);
+    case 'box': {
+      const bevel = (part.roundness ?? 0.06) * Math.min(w, h, d) * 0.5;
+      if (bevel <= 0.0005) return new THREE.BoxGeometry(w, h, d);
+      return new RoundedBoxGeometry(w, h, d, 4, bevel);
+    }
     case 'cylinder': {
       const taper = part.taper ?? 1;
       const g = new THREE.CylinderGeometry(0.5 * taper, 0.5, 1, 28);
@@ -471,19 +571,15 @@ export function geometryForPart(part: SculptPart): THREE.BufferGeometry {
   }
 }
 
-function materialFor(m: SculptMaterial | undefined): THREE.Material {
-  if (!m) return new THREE.MeshStandardMaterial({ color: '#9aa3ad', roughness: 0.6, metalness: 0.1 });
-  const mat = new THREE.MeshStandardMaterial({ color: m.color, roughness: m.roughness, metalness: m.metalness });
-  if (m.emissive) {
-    mat.emissive = new THREE.Color(m.color);
-    mat.emissiveIntensity = 2.5;
-  }
-  if (m.opacity !== undefined && m.opacity < 1) {
-    mat.transparent = true;
-    mat.opacity = m.opacity;
-    mat.depthWrite = false;
-  }
-  return mat;
+function materialFor(m: SculptMaterial | undefined, size?: Vec3): THREE.Material {
+  if (!m) return createTactileClayMaterial({ color: '#9aa3ad', roughness: 0.82, metalness: 0.05, size });
+  return createTactileClayMaterial({
+    material: m.id,
+    color: m.color,
+    roughness: m.roughness,
+    metalness: m.metalness,
+    size,
+  });
 }
 
 interface Animator {
@@ -498,9 +594,19 @@ function buildAuthored(spec: SculptSpec): { group: THREE.Group; animators: Anima
   const root = new THREE.Group();
   const materials = new Map<string, THREE.Material>();
   for (const m of spec.materials) materials.set(m.id, materialFor(m));
-  const fallbackMat = materialFor(undefined);
+
+  // Group cutters by parent and non-cutters into scene graph children
+  const cuttersByParent = new Map<string, SculptPart[]>();
   const children = new Map<string | undefined, SculptPart[]>();
   for (const p of spec.parts) {
+    if (p.op) {
+      if (p.parent) {
+        const list = cuttersByParent.get(p.parent) ?? [];
+        list.push(p);
+        cuttersByParent.set(p.parent, list);
+      }
+      continue;
+    }
     const list = children.get(p.parent) ?? [];
     list.push(p);
     children.set(p.parent, list);
@@ -521,7 +627,63 @@ function buildAuthored(spec: SculptSpec): { group: THREE.Group; animators: Anima
       if (part.shape === 'tube') source = { ...part, points: part.points?.map((p) => [-p[0], p[1], p[2]] as Vec3) };
       else if (part.shape === 'extrude') source = { ...part, outline: part.outline?.map(([x, y]) => [-x, y] as Vec2) };
     }
-    const mesh = new THREE.Mesh(geometryForPart(source), materials.get(part.material) ?? fallbackMat);
+
+    let geom = geometryForPart(source);
+
+    // Apply CSG cutters if any cutter parts target this parent
+    const myCutters = cuttersByParent.get(part.id);
+    if (myCutters && myCutters.length > 0) {
+      const parentEuler = new THREE.Euler(part.rotation[0] * DEG, part.rotation[1] * DEG * mirror, part.rotation[2] * DEG * mirror);
+      const parentMatrix = new THREE.Matrix4().compose(
+        world,
+        new THREE.Quaternion().setFromEuler(parentEuler),
+        new THREE.Vector3(1, 1, 1)
+      );
+
+      const cutterTargets: (CutterTarget & { sourcePart: SculptPart })[] = myCutters.map((c) => {
+        const cWorld = new THREE.Vector3(c.position[0] * mirror, c.position[1], c.position[2]);
+        const cEuler = new THREE.Euler(c.rotation[0] * DEG, c.rotation[1] * DEG * mirror, c.rotation[2] * DEG * mirror);
+        const cMatrix = new THREE.Matrix4().compose(
+          cWorld,
+          new THREE.Quaternion().setFromEuler(cEuler),
+          new THREE.Vector3(1, 1, 1)
+        );
+        return {
+          id: c.id,
+          parent: part.id,
+          op: c.op,
+          matrix: cMatrix,
+          sourcePart: c,
+        };
+      });
+
+      geom = cutSculptGeometry(
+        geom,
+        { id: part.id, matrix: parentMatrix },
+        cutterTargets,
+        (ct: any) => {
+          let cSource: SculptPart = ct.sourcePart;
+          if (mirror === -1) {
+            if (cSource.shape === 'tube') cSource = { ...cSource, points: cSource.points?.map((pt) => [-pt[0], pt[1], pt[2]] as Vec3) };
+            else if (cSource.shape === 'extrude') cSource = { ...cSource, outline: cSource.outline?.map(([x, y]) => [-x, y] as Vec2) };
+          }
+          return geometryForPart(cSource);
+        }
+      );
+    }
+
+    const partMat = materials.get(part.material) || createTactileClayMaterial({
+      color: part.color,
+      roughness: 0.82,
+      metalness: 0.05,
+      size: part.size,
+    });
+
+    if (part.gradient) {
+      applyPartGradient(geom, partMat, part.color || '#ded8c8', part.gradient, part.size);
+    }
+
+    const mesh = new THREE.Mesh(geom, partMat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     if (part.shape === 'tube') {
@@ -568,42 +730,93 @@ export function repairAttachments(root: THREE.Object3D, tolerance = 0.005): numb
     if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh);
   });
   if (meshes.length < 2) return 0;
-  const boxes = meshes.map((m) => new THREE.Box3().setFromObject(m));
-  const touches = (a: THREE.Box3, b: THREE.Box3) => a.clone().expandByScalar(tolerance).intersectsBox(b);
-  let moved = 0;
 
-  for (let i = 0; i < meshes.length; i++) {
-    const a = boxes[i];
-    if (boxes.some((b, j) => j !== i && touches(a, b))) continue;
-    let best = -1;
-    let bestGap = Infinity;
-    let delta = new THREE.Vector3();
-    for (let j = 0; j < meshes.length; j++) {
-      if (j === i) continue;
-      const b = boxes[j];
-      const d = new THREE.Vector3(
-        a.max.x < b.min.x ? b.min.x - a.max.x : a.min.x > b.max.x ? b.max.x - a.min.x : 0,
-        a.max.y < b.min.y ? b.min.y - a.max.y : a.min.y > b.max.y ? b.max.y - a.min.y : 0,
-        a.max.z < b.min.z ? b.min.z - a.max.z : a.min.z > b.max.z ? b.max.z - a.min.z : 0
-      );
-      const gap = d.length();
-      if (gap < bestGap) {
-        bestGap = gap;
-        best = j;
-        delta = d;
+  let boxes = meshes.map((m) => new THREE.Box3().setFromObject(m));
+  const touches = (a: THREE.Box3, b: THREE.Box3) => a.clone().expandByScalar(tolerance).intersectsBox(b);
+
+  // 1. Identify primary anchor mesh (largest bounding volume, e.g. main body/hull)
+  let anchorIdx = 0;
+  let maxVol = 0;
+  for (let i = 0; i < boxes.length; i++) {
+    const s = boxes[i].getSize(new THREE.Vector3());
+    const vol = s.x * s.y * s.z;
+    if (vol > maxVol) {
+      maxVol = vol;
+      anchorIdx = i;
+    }
+  }
+
+  // 2. Identify the connected component reachable from the anchor
+  const getConnected = (): Set<number> => {
+    const connected = new Set<number>([anchorIdx]);
+    let added = true;
+    while (added) {
+      added = false;
+      for (let i = 0; i < meshes.length; i++) {
+        if (connected.has(i)) continue;
+        for (const c of connected) {
+          if (touches(boxes[i], boxes[c])) {
+            connected.add(i);
+            added = true;
+            break;
+          }
+        }
       }
     }
-    if (best < 0 || !Number.isFinite(bestGap)) continue;
-    const overlap = delta.clone().normalize().multiplyScalar(Math.min(0.01, bestGap * 0.1));
-    const worldShift = delta.add(overlap);
-    const pivot = meshes[i].parent ?? meshes[i];
-    const parentInv = new THREE.Matrix4().copy((pivot.parent ?? root).matrixWorld).invert();
-    const localShift = worldShift.clone().transformDirection(parentInv).multiplyScalar(worldShift.length());
+    return connected;
+  };
+
+  let connected = getConnected();
+  let moved = 0;
+
+  // 3. Iteratively snap disconnected floating islands to the connected assembly
+  for (let pass = 0; pass < meshes.length; pass++) {
+    if (connected.size === meshes.length) break;
+
+    let bestDisconnected = -1;
+    let bestGap = Infinity;
+    let bestDelta = new THREE.Vector3();
+
+    for (let i = 0; i < meshes.length; i++) {
+      if (connected.has(i)) continue;
+      const a = boxes[i];
+      for (const c of connected) {
+        const b = boxes[c];
+        const d = new THREE.Vector3(
+          a.max.x < b.min.x ? b.min.x - a.max.x : a.min.x > b.max.x ? b.max.x - a.min.x : 0,
+          a.max.y < b.min.y ? b.min.y - a.max.y : a.min.y > b.max.y ? b.max.y - a.min.y : 0,
+          a.max.z < b.min.z ? b.min.z - a.max.z : a.min.z > b.max.z ? b.max.z - a.min.z : 0
+        );
+        const gap = d.length();
+        if (gap < bestGap) {
+          bestGap = gap;
+          bestDisconnected = i;
+          bestDelta = d;
+        }
+      }
+    }
+
+    if (bestDisconnected < 0 || !Number.isFinite(bestGap)) break;
+
+    const overlapDist = Math.max(0.002, Math.min(0.01, bestGap * 0.15));
+    const overlap = bestDelta.clone().normalize().multiplyScalar(overlapDist);
+    const worldShift = bestDelta.clone().add(overlap);
+
+    const pivot = meshes[bestDisconnected].parent ?? meshes[bestDisconnected];
+    const parent = pivot.parent ?? root;
+    const parentInv = new THREE.Matrix4().copy(parent.matrixWorld).invert();
+    // Transform displacement vector cleanly from world space into parent local coordinates
+    const localShift = worldShift.clone().applyMatrix4(parentInv).sub(new THREE.Vector3().applyMatrix4(parentInv));
+
     pivot.position.add(localShift);
     pivot.updateMatrixWorld(true);
-    boxes[i] = new THREE.Box3().setFromObject(meshes[i]);
+    root.updateMatrixWorld(true);
+
+    boxes = meshes.map((m) => new THREE.Box3().setFromObject(m));
+    connected = getConnected();
     moved++;
   }
+
   return moved;
 }
 
@@ -648,11 +861,18 @@ export function buildSculpt(spec: SculptSpec): ProceduralKitResult {
     group.userData.sculptSpec = spec;
     return { ...kit, group };
   }
-  if (spec.route === 'biped-walker') {
-    const kit = createBipedWalker(createStandardPalette(), !!spec.walker?.female);
-    const group = normalizeToStage(kit.group, spec.heightMeters);
-    group.userData.sculptSpec = spec;
-    return { ...kit, group };
+  if (spec.route === 'biped-walker' && (!spec.parts || spec.parts.length === 0)) {
+    const compiled = compileCharacterToClaySculpt(
+      createDefaultCharacterFeatures({
+        name: spec.name || 'Parametric Biped',
+        gender: spec.walker?.female ? 'female' : 'male',
+        heightMeters: spec.heightMeters,
+      })
+    );
+    const { group: inner } = buildAuthored(compiled);
+    const group = normalizeToStage(inner, spec.heightMeters);
+    group.userData.sculptSpec = compiled;
+    return { group, update: undefined };
   }
 
   const { group: inner, animators } = buildAuthored(spec);
@@ -737,27 +957,86 @@ export function lookupSculptSpec(prompt?: string): SculptSpec | undefined {
 
 const curatedCache = new Map<string, SculptSpec>();
 
+function getCachedCurated(key: string): SculptSpec | undefined {
+  const raw = CURATED_SCULPT_SPECS[key];
+  if (!raw) return undefined;
+  let cached = curatedCache.get(key);
+  if (!cached) {
+    cached = sanitizeSculptSpec(raw, key);
+    curatedCache.set(key, cached);
+  }
+  return cached;
+}
+
 export function lookupCuratedSculptSpec(idOrPrompt?: string): SculptSpec | undefined {
   if (!idOrPrompt || !idOrPrompt.trim()) return undefined;
   const key = sculptKey(idOrPrompt);
-  const lower = idOrPrompt.toLowerCase();
-  let id: string | undefined;
-  if (
-    key === 'rustic stone fireplace' ||
-    key === 'fireplace' ||
-    key === 'stone fireplace' ||
-    key === 'hearth' ||
-    /\b(fireplace|hearth|fire\s*box|chimney\s*piece|mantelpiece)\b/i.test(lower)
-  ) {
-    id = 'rustic stone fireplace';
+  const lower = idOrPrompt.toLowerCase().trim();
+
+  // 1. Direct match in CURATED_SCULPT_SPECS
+  if (CURATED_SCULPT_SPECS[idOrPrompt]) return getCachedCurated(idOrPrompt);
+  if (CURATED_SCULPT_SPECS[key]) return getCachedCurated(key);
+  if (CURATED_SCULPT_SPECS[lower]) return getCachedCurated(lower);
+
+  // 2. Specific curated model keywords (distinctive multi-word or special names)
+  let matchedKey: string | undefined;
+
+  if (/(fireplace|hearth|fire\s*box|chimney\s*piece|mantelpiece|مدفأة|موقد)/i.test(lower)) {
+    matchedKey = 'rustic stone fireplace';
+  } else if (/(tribal\s*archer|archer\s*female|tribal_archer_female)/i.test(lower)) {
+    matchedKey = 'tribal archer female';
+  } else if (/(nerd\s*turtle|nerdturtle)/i.test(lower)) {
+    matchedKey = 'nerd turtle';
+  } else if (/(snorlax|sleeping\s*monster)/i.test(lower)) {
+    matchedKey = 'snorlax';
+  } else if (/(yatai|yatai\s*stall|japanese\s*food\s*cart)/i.test(lower)) {
+    matchedKey = 'yatai stall';
+  } else if (/(treasure\s*chest|صندوق\s*كنز)/i.test(lower)) {
+    matchedKey = 'treasure chest';
+  } else if (/(perfume\s*bottle|قارورة\s*عطر)/i.test(lower)) {
+    matchedKey = 'perfume bottle';
+  } else if (/(espresso\s*bag|roasted\s*coffee\s*beans\s*pouch)/i.test(lower)) {
+    matchedKey = 'espresso bag';
+  } else if (/(ancient\s*stone\s*obelisk|monolith\s*pillar|مسلة\s*حجرية)/i.test(lower)) {
+    matchedKey = 'ancient stone obelisk';
+  } else if (/(tactical\s*hover\s*drone|military\s*recon\s*drone)/i.test(lower)) {
+    matchedKey = 'tactical hover drone';
+  } else if (/(knight\s*shield|crusader\s*shield|درع\s*فارس)/i.test(lower)) {
+    matchedKey = 'knight shield';
+  } else if (/(coiled\s*snake\s*ring|snake\s*ring|serpent\s*ring|خاتم\s*ذهبي\s*مفرغ|خاتم\s*أفعى|خاتم)/i.test(lower)) {
+    matchedKey = 'coiled snake ring';
+  } else if (/(sports\s*car|supercar|سيارة\s*رياضية)/i.test(lower)) {
+    matchedKey = 'sports car';
+  } else if (/(office\s*chair|كرسي\s*مكتب)/i.test(lower)) {
+    matchedKey = 'office chair';
+  } else if (/(forged\s*longsword|سيف\s*مطروق|سيف\s*طويل)/i.test(lower)) {
+    matchedKey = 'forged longsword';
+  } else if (/(glass\s*wine\s*bottle|wine\s*bottle|زجاجة\s*نبيذ|قارورة)/i.test(lower)) {
+    matchedKey = 'glass wine bottle';
+  } else if (/(cyberpunk\s*hover\s*car|flying\s*police\s*cruiser)/i.test(lower)) {
+    matchedKey = 'cyberpunk hover car';
+  } else if (/(attack\s*helicopter\s*gunship|military\s*chopper)/i.test(lower)) {
+    matchedKey = 'attack helicopter gunship';
+  } else if (/(steampunk\s*airship\s*zeppelin|flying\s*dirigible)/i.test(lower)) {
+    matchedKey = 'steampunk airship zeppelin';
+  } else if (/(camera|dslr|nikon|canon|sony\s*camera|digital\s*camera|vintage\s*camera|كاميرا|آلة\s*تصوير)/i.test(lower)) {
+    matchedKey = 'professional dslr camera';
   }
-  if (!id || !CURATED_SCULPT_SPECS[id]) return undefined;
-  let r = curatedCache.get(id);
-  if (!r) {
-    r = sanitizeSculptSpec(CURATED_SCULPT_SPECS[id], id);
-    curatedCache.set(id, r);
+
+  // 3. Fallback scan of all CURATED_SCULPT_SPECS keys (exact match against catalog key)
+  if (!matchedKey) {
+    for (const catalogKey of Object.keys(CURATED_SCULPT_SPECS)) {
+      if (lower === catalogKey || key === catalogKey) {
+        matchedKey = catalogKey;
+        break;
+      }
+    }
   }
-  return r;
+
+  if (matchedKey && CURATED_SCULPT_SPECS[matchedKey]) {
+    return getCachedCurated(matchedKey);
+  }
+  return undefined;
 }
 
 export function removeSculptSpec(prompt: string) {

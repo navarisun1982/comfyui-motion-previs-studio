@@ -23,6 +23,8 @@ This document is the **operational manual** for any AI agent session working on 
 5. **No Fake Success**: There is **no mock engine**. Never simulate, fabricate, or mislabel outputs (videos, CV passes, analysis results, project info). If something cannot run (e.g. ComfyUI offline), say so plainly and offer a real alternative (e.g. export package).
 6. **Dependencies**: The only approved new runtime dependency is `mp4-muxer` (S4). Anything else needs explicit user approval.
 7. **Documentation Maintenance**: After each stage, update [TASKS.md](file:///e:/work/Comfy%20AI%20Director/TASKS.md) and [PROGRESS.md](file:///e:/work/Comfy%20AI%20Director/PROGRESS.md). Historical logs live in `docs/archive/`.
+8. **Arabic Typography & RTL Flow**: Always present Arabic responses and directorial feedback with RTL (Right-to-Left) alignment in mind, wrapping pure Arabic blocks in `<div dir="rtl">` where beneficial to prevent bidirectional punctuation and code block distortion.
+9. **No Unapproved Removal of Existing Functions or UI Controls (MANDATORY)**: **NEVER** remove, hide, or omit any existing function, feature, or UI control without explicit user permission or asking the user directly beforehand that a proposed action will result in removing or hiding things.
 
 ---
 

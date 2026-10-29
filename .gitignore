@@ -24,5 +24,11 @@ Thumbs.db
 *.tsbuildinfo
 coverage/
 
-# Dev probe outputs (scripts/dev/probe_reasoner.ts)
+# Dev probe outputs & ad-hoc scratch scripts
 scripts/**/out_*.json
+scripts/dev/*.cjs
+scripts/dev/*.ps1
+scripts/dev/*.txt
+scripts/*.ps1
+test_gallery.html
+scratch/

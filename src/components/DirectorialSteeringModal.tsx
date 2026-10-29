@@ -2,7 +2,6 @@ import React from 'react';
 import { ShotRevisionV2, DirectorialSteeringPatch } from '../pipeline/revisionTypes';
 import { useShotStore } from '../stores/useShotStore';
 import { useQueueStore } from '../stores/useQueueStore';
-import { useComfyStore } from '../stores/useComfyStore';
 import { QualityProfile, GenerationMode } from '../pipeline/templateTypes';
 import {
   Wand2,
@@ -29,11 +28,10 @@ export const DirectorialSteeringModal: React.FC<DirectorialSteeringModalProps> =
   currentProfile = 'final',
   currentMode = 't2v',
   onClose,
-  onNotice,
+  onNotice: _onNotice,
 }) => {
   const { shot, loadShot, previsVideoBlob } = useShotStore();
   const { enqueueBatch } = useQueueStore();
-  const { connectionStatus } = useComfyStore();
 
   const handleApplyToActiveShot = () => {
     const currentSeed = shot.seed ?? 42;
@@ -46,14 +44,6 @@ export const DirectorialSteeringModal: React.FC<DirectorialSteeringModalProps> =
   };
 
   const handleApplyAndQueue = () => {
-    if (connectionStatus !== 'connected') {
-      onNotice?.({
-        type: 'warn',
-        message: 'ComfyUI is offline. Connect to http://127.0.0.1:8188 before queuing a steered take.',
-      });
-      return;
-    }
-
     // Apply to shot
     const currentSeed = shot.seed ?? 42;
     const newSeed = patch.suggestedSeedOffset

@@ -135,7 +135,7 @@ export const CURATED_3D_ASSETS: Asset3DItem[] = [
     kind: 'building',
     icon: '🚪',
     tokenPrompt: 'a heavy timber castle gate flanked by stone buttresses and iron drop portcullis',
-    scale: 2.6,
+    scale: 1.2,
     source: 'curated',
   },
   {
@@ -146,7 +146,7 @@ export const CURATED_3D_ASSETS: Asset3DItem[] = [
     kind: 'building',
     icon: '💨',
     tokenPrompt: 'a traditional octagonal windmill with large canvas sail arms',
-    scale: 2.5,
+    scale: 1.0,
     source: 'curated',
   },
   {
@@ -157,7 +157,7 @@ export const CURATED_3D_ASSETS: Asset3DItem[] = [
     kind: 'building',
     icon: '🏢',
     tokenPrompt: 'a monumental modern skyscraper tower with reflective glass facade',
-    scale: 4.0,
+    scale: 1.5,
     source: 'curated',
   },
   {
@@ -168,7 +168,7 @@ export const CURATED_3D_ASSETS: Asset3DItem[] = [
     kind: 'building',
     icon: '🏛️',
     tokenPrompt: 'a classical marble temple portico with fluted Doric columns and triangular pediment',
-    scale: 2.5,
+    scale: 1.2,
     source: 'curated',
   },
   {

@@ -4,6 +4,7 @@ import { Users, Trash2, Clock, UserCheck, Bookmark, BookmarkPlus, Box, Activity 
 import { registerModelFile } from '../services/modelStorage';
 import { preloadGltfModels } from '../engine/gltfModelLoader';
 import { POSE_PRESETS } from '../engine/kinematics';
+import { interpolateTrajectoryPosition } from '../engine/trajectoryMath';
 
 export const ActorBlocking: React.FC = () => {
   const {
@@ -15,6 +16,9 @@ export const ActorBlocking: React.FC = () => {
     addToCastPool,
     removeFromCastPool,
     importFromCastPool,
+    applyDirectorialMotion,
+    updateActorPositionAtTime,
+    currentTime,
   } = useShotStore();
 
   return (
@@ -85,8 +89,14 @@ export const ActorBlocking: React.FC = () => {
       </div>
 
       <div className="flex flex-col gap-3">
-        {shot.actors.map((actor, idx) => (
-          <div key={actor.id} className="glass-card rounded-lg p-3 flex flex-col gap-2.5">
+        {shot.actors.map((actor, idx) => {
+          const currentPos = interpolateTrajectoryPosition(
+            actor.trajectory,
+            currentTime,
+            shot.durationSeconds || 4.0
+          );
+          return (
+            <div key={actor.id} className="glass-card rounded-lg p-3 flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400/20 text-emerald-300 font-mono text-[10px] font-bold">
@@ -214,131 +224,231 @@ export const ActorBlocking: React.FC = () => {
             )}
 
             {/* Action / Movement Prompt */}
-            <div className="flex flex-col gap-1">
-              <label className="font-mono text-[10px] text-slate-400">Action & Performance Prompt</label>
+            <div className="flex flex-col gap-1.5">
+              <label className="font-mono text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                <Activity className="h-3 w-3 text-emerald-400" />
+                Action & Directorial Movement Prompt
+              </label>
               <textarea
                 value={actor.actionDescription}
                 onChange={(e) => updateActor(actor.id, { actionDescription: e.target.value })}
                 rows={2}
-                placeholder="e.g. steps out from the shadows, looks up cautiously into the rain"
+                placeholder="e.g. walk to 2.5, 3.0 then sit down in chair / يمشي إلى 3, 2 ثم يجلس"
                 className="glass-control rounded p-2 text-slate-200 text-xs resize-none"
               />
+              <button
+                type="button"
+                onClick={() => applyDirectorialMotion(actor.id, actor.actionDescription || 'stands still')}
+                className="w-full py-1.5 px-3 rounded bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:via-teal-500 hover:to-cyan-500 text-white font-mono text-[10px] font-bold flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-950/40 transition-all border border-emerald-400/40 cursor-pointer active:scale-[0.99]"
+                title="Compile natural language prompt into kinematic motion keyframes with foot-grounding lock"
+              >
+                <Activity className="h-3.5 w-3.5 text-emerald-200" />
+                <span>⚡ Compile Kinematic Motion</span>
+              </button>
             </div>
 
-            {/* 3D Spatial Coordinates on Soundstage */}
+            {/* 3D Spatial Coordinates on Soundstage (Complete 3-Axis: X, Elevation Y, Depth Z) */}
             <div className="flex flex-col gap-1.5 pt-1.5 border-t border-director-border/50 font-mono text-[10px]">
               <div className="flex items-center justify-between text-slate-400">
-                <span>Soundstage Position:</span>
+                <div className="flex items-center gap-1.5">
+                  <span>Stage Position @ {currentTime.toFixed(1)}s:</span>
+                  {currentTime > 0.15 && (
+                    <span className="px-1 py-0.2 rounded bg-cyan-500/20 text-cyan-300 text-[8px] font-bold border border-cyan-500/40">
+                      KEYFRAME
+                    </span>
+                  )}
+                </div>
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() =>
-                      updateActor(actor.id, {
-                        trajectory: {
-                          ...actor.trajectory,
-                          startPosition: { x: 50, y: 50 },
-                          endPosition: { x: 50, y: 50 },
-                        },
-                      })
+                      updateActorPositionAtTime(
+                        actor.id,
+                        currentTime,
+                        { x: 50, y: 50, z: currentPos.z ?? 0 },
+                        shot.durationSeconds || 4.0,
+                        currentTime <= 0.15 ? 'base' : 'keyframe'
+                      )
                     }
-                    className="px-1.5 py-0.2 rounded bg-white/5 hover:bg-white/10 text-[9px] text-slate-300"
+                    className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[9px] text-slate-300 transition-all cursor-pointer"
+                    title="Center Stage"
                   >
                     Center
                   </button>
                   <button
                     type="button"
                     onClick={() =>
-                      updateActor(actor.id, {
-                        trajectory: {
-                          ...actor.trajectory,
-                          startPosition: { x: 25, y: 50 },
-                          endPosition: { x: 25, y: 50 },
-                        },
-                      })
+                      updateActorPositionAtTime(
+                        actor.id,
+                        currentTime,
+                        { x: 25, y: currentPos.y, z: currentPos.z ?? 0 },
+                        shot.durationSeconds || 4.0,
+                        currentTime <= 0.15 ? 'base' : 'keyframe'
+                      )
                     }
-                    className="px-1.5 py-0.2 rounded bg-white/5 hover:bg-white/10 text-[9px] text-slate-300"
+                    className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[9px] text-slate-300 transition-all cursor-pointer"
+                    title="Stage Left"
                   >
                     Left
                   </button>
                   <button
                     type="button"
                     onClick={() =>
-                      updateActor(actor.id, {
-                        trajectory: {
-                          ...actor.trajectory,
-                          startPosition: { x: 75, y: 50 },
-                          endPosition: { x: 75, y: 50 },
-                        },
-                      })
+                      updateActorPositionAtTime(
+                        actor.id,
+                        currentTime,
+                        { x: 75, y: currentPos.y, z: currentPos.z ?? 0 },
+                        shot.durationSeconds || 4.0,
+                        currentTime <= 0.15 ? 'base' : 'keyframe'
+                      )
                     }
-                    className="px-1.5 py-0.2 rounded bg-white/5 hover:bg-white/10 text-[9px] text-slate-300"
+                    className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[9px] text-slate-300 transition-all cursor-pointer"
+                    title="Stage Right"
                   >
                     Right
                   </button>
                   <button
                     type="button"
                     onClick={() =>
-                      updateActor(actor.id, {
-                        trajectory: {
-                          ...actor.trajectory,
-                          startPosition: { x: 50, y: 80 },
-                          endPosition: { x: 50, y: 80 },
-                        },
-                      })
+                      updateActorPositionAtTime(
+                        actor.id,
+                        currentTime,
+                        { x: currentPos.x, y: 25, z: currentPos.z ?? 0 },
+                        shot.durationSeconds || 4.0,
+                        currentTime <= 0.15 ? 'base' : 'keyframe'
+                      )
                     }
-                    className="px-1.5 py-0.2 rounded bg-white/5 hover:bg-white/10 text-[9px] text-slate-300"
+                    className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[9px] text-slate-300 transition-all cursor-pointer"
+                    title="Deep Stage (Upstage)"
                   >
                     Deep
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateActorPositionAtTime(
+                        actor.id,
+                        currentTime,
+                        { x: currentPos.x, y: 75, z: currentPos.z ?? 0 },
+                        shot.durationSeconds || 4.0,
+                        currentTime <= 0.15 ? 'base' : 'keyframe'
+                      )
+                    }
+                    className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[9px] text-slate-300 transition-all cursor-pointer"
+                    title="Fore Stage (Downstage)"
+                  >
+                    Fore
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateActorPositionAtTime(
+                        actor.id,
+                        currentTime,
+                        { x: currentPos.x, y: currentPos.y, z: 12 },
+                        shot.durationSeconds || 4.0,
+                        currentTime <= 0.15 ? 'base' : 'keyframe'
+                      )
+                    }
+                    className="px-1.5 py-0.5 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-[9px] transition-all border border-amber-500/20 cursor-pointer"
+                    title="Lift off floor"
+                  >
+                    Float
                   </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-slate-400">
+              <div className="grid grid-cols-3 gap-2 text-slate-400">
+                {/* Stage X Slider */}
                 <div className="space-y-0.5">
                   <div className="flex justify-between">
-                    <span>Stage X</span>
-                    <span className="text-emerald-400 font-bold">{Math.round(actor.trajectory.startPosition.x)}</span>
+                    <span className="text-cyan-300 font-medium">Stage X</span>
+                    <span className="text-cyan-400 font-bold">{Math.round(currentPos.x)}</span>
                   </div>
                   <input
                     type="range"
-                    min={10}
-                    max={90}
-                    value={actor.trajectory.startPosition.x}
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={currentPos.x}
                     onChange={(e) => {
                       const val = Number(e.target.value);
-                      updateActor(actor.id, {
-                        trajectory: {
-                          ...actor.trajectory,
-                          startPosition: { ...actor.trajectory.startPosition, x: val },
-                          endPosition: { ...actor.trajectory.endPosition, x: val },
+                      updateActorPositionAtTime(
+                        actor.id,
+                        currentTime,
+                        {
+                          x: val,
+                          y: currentPos.y,
+                          z: currentPos.z ?? 0,
                         },
-                      });
+                        shot.durationSeconds || 4.0,
+                        currentTime <= 0.15 ? 'base' : 'keyframe'
+                      );
                     }}
-                    className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-emerald-500"
+                    className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-cyan-400"
+                    title="Stage Lateral X (Left ↔ Right)"
                   />
                 </div>
 
+                {/* Elevation Y Slider (Vertical / Height) */}
                 <div className="space-y-0.5">
                   <div className="flex justify-between">
-                    <span>Depth Z</span>
-                    <span className="text-emerald-400 font-bold">{Math.round(actor.trajectory.startPosition.y)}</span>
+                    <span className="text-amber-300 font-medium">Height Y</span>
+                    <span className="text-amber-400 font-bold">{Math.round(currentPos.z ?? 0)}</span>
                   </div>
                   <input
                     type="range"
-                    min={10}
-                    max={90}
-                    value={actor.trajectory.startPosition.y}
+                    min={0}
+                    max={50}
+                    step={0.5}
+                    value={currentPos.z ?? 0}
                     onChange={(e) => {
                       const val = Number(e.target.value);
-                      updateActor(actor.id, {
-                        trajectory: {
-                          ...actor.trajectory,
-                          startPosition: { ...actor.trajectory.startPosition, y: val },
-                          endPosition: { ...actor.trajectory.endPosition, y: val },
+                      updateActorPositionAtTime(
+                        actor.id,
+                        currentTime,
+                        {
+                          x: currentPos.x,
+                          y: currentPos.y,
+                          z: val,
                         },
-                      });
+                        shot.durationSeconds || 4.0,
+                        currentTime <= 0.15 ? 'base' : 'keyframe'
+                      );
+                    }}
+                    className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-amber-400"
+                    title="Elevation Y (Floor ↔ Sky)"
+                  />
+                </div>
+
+                {/* Depth Z Slider */}
+                <div className="space-y-0.5">
+                  <div className="flex justify-between">
+                    <span className="text-emerald-300 font-medium">Depth Z</span>
+                    <span className="text-emerald-400 font-bold">{Math.round(currentPos.y)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={currentPos.y}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      updateActorPositionAtTime(
+                        actor.id,
+                        currentTime,
+                        {
+                          x: currentPos.x,
+                          y: val,
+                          z: currentPos.z ?? 0,
+                        },
+                        shot.durationSeconds || 4.0,
+                        currentTime <= 0.15 ? 'base' : 'keyframe'
+                      );
                     }}
                     className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-emerald-500"
+                    title="Stage Depth Z (Fore ↔ Deep)"
                   />
                 </div>
               </div>
@@ -371,7 +481,8 @@ export const ActorBlocking: React.FC = () => {
               </div>
             </div>
           </div>
-        ))}
+        );
+      })}
       </div>
     </div>
   );

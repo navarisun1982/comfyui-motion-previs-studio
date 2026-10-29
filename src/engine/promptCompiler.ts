@@ -155,23 +155,34 @@ export function buildTemporalTimeline(shot: ShotSpec): TemporalPromptBeat[] {
       const endPos = actor.trajectory?.endPosition ?? { x: 50, y: 50 };
       const hasDisplacement = Math.abs(startPos.x - endPos.x) > 3 || Math.abs(startPos.y - endPos.y) > 3;
 
+      const kfs = (actor.trajectory?.keyframes || []).filter((k) => k.posePreset || k.cueLabel);
+      const openCue = kfs.find((k) => k.time <= t1);
+      const midCue = kfs.find((k) => k.time > t1 && k.time <= t2);
+      const closeCue = kfs.find((k) => k.time > t2);
+
+      const openPoseStr = openCue ? ` in ${openCue.cueLabel || `${openCue.posePreset?.replace(/-/g, ' ')} pose`}` : '';
+      const midPoseStr = midCue ? `, transitioning posture into ${midCue.cueLabel || `${midCue.posePreset?.replace(/-/g, ' ')} pose`}` : '';
+      const closePoseStr = closeCue ? `, settling into ${closeCue.cueLabel || `${closeCue.posePreset?.replace(/-/g, ' ')} pose`}` : '';
+
+      const socketStr = actor.socketToBone ? ` (attached to bone ${actor.socketToBone.boneName})` : '';
+
       if (phase === 'open') {
         if (actStart > t1) {
-          return `${actor.name} holds initial stance at stage coordinates (${startPos.x}%, ${startPos.y}%), awaiting action cue`;
+          return `${actor.name}${socketStr} holds initial stance${openPoseStr} at stage coordinates (${startPos.x}%, ${startPos.y}%), awaiting action cue`;
         }
-        return `${actor.name} initiates action: ${actor.actionDescription} from mark (${startPos.x}%, ${startPos.y}%)`;
+        return `${actor.name}${socketStr} initiates action${openPoseStr}: ${actor.actionDescription} from mark (${startPos.x}%, ${startPos.y}%)`;
       }
       if (phase === 'mid') {
         if (hasDisplacement) {
-          return `${actor.name} advances in continuous physical movement across the stage toward (${endPos.x}%, ${endPos.y}%), physical dynamics and attire shifting with locomotion`;
+          return `${actor.name}${socketStr} advances in continuous physical movement across the stage toward (${endPos.x}%, ${endPos.y}%)${midPoseStr}, physical dynamics and attire shifting with locomotion`;
         }
-        return `${actor.name} performs active physical gestures: ${actor.actionDescription}`;
+        return `${actor.name}${socketStr} performs active physical gestures: ${actor.actionDescription}${midPoseStr}`;
       }
       // close
       if (hasDisplacement) {
-        return `${actor.name} reaches target mark (${endPos.x}%, ${endPos.y}%), settling posture and holding eyeline`;
+        return `${actor.name}${socketStr} reaches target mark (${endPos.x}%, ${endPos.y}%)${closePoseStr}, settling posture and holding eyeline`;
       }
-      return `${actor.name} resolves action, holding steady presence in final frame`;
+      return `${actor.name}${socketStr} resolves action${closePoseStr}, holding steady presence in final frame`;
     }).join('; ');
   };
 
@@ -237,7 +248,9 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
     `In the scene, ${subjectText}.`,
     envText ? `Setting: ${envText}.` : '',
     `${shot.sceneDescription.trim()}.`,
-    `Atmospheric environment under ${lightInfo}, with volumetric light bounce, natural motion cadence at 24fps, and physical depth.`,
+    shot.claymationMode
+      ? `Authentic stop-motion claymation aesthetic, handcrafted malleable clay surface textures, subtle fingerprint imperfections, animated on-twos at ${shot.claymationFps || 12}fps motion cadence.`
+      : `Atmospheric environment under ${lightInfo}, with volumetric light bounce, natural motion cadence at 24fps, and physical depth.`,
     narrativeProgression,
   ].filter(Boolean).join(' ');
 
@@ -247,15 +260,17 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
     positivePrompt,
     negativePrompt,
     cameraDirectives: `${angleInfo}. ${cameraMove}. Shot on ${lensInfo}.`,
-    actorDirectives: shot.actors.map((a) => `${a.token} (${a.actionDescription})`).join('; '),
+    actorDirectives: shot.actors.map((a) => `${a.token} (${a.actionDescription}${a.socketToBone ? `; attached to bone ${a.socketToBone.boneName}` : ''})`).join('; '),
     lightingDirectives: `Lighting: ${lightInfo}.`,
-    styleDirectives: 'Cinematic film aesthetic, 24fps motion cadence, natural shutter angle, high dynamic range.',
+    styleDirectives: shot.claymationMode
+      ? `Stop-motion claymation aesthetic, handcrafted clay textures, ${shot.claymationFps || 12}fps on-twos motion cadence.`
+      : 'Cinematic film aesthetic, 24fps motion cadence, natural shutter angle, high dynamic range.',
     temporalBeats: timeline,
     modelPromptParadigm: 'ltx-continuous-narrative',
     technicalMetadata: {
       targetModel: 'ltx-2.5',
       duration: shot.durationSeconds,
-      fps: shot.frameRate,
+      fps: shot.claymationMode ? (shot.claymationFps || 12) : shot.frameRate,
       focalLength: shot.camera.lens.focalLength,
       aspectRatio: shot.aspectRatio,
     },
@@ -295,7 +310,9 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     `[Timeline Choreography]: ${timelineString}.`,
     `[Scene Environment]: ${shot.environment?.promptDescription || shot.sceneDescription.trim()}${envText ? ` (${envText})` : ''}, rich material textures and atmospheric depth.`,
     `[Lighting & Atmosphere]: ${lightInfo}.`,
-    `[Cinematic Style & Gear]: Shot on Arri Alexa 65 with ${lensInfo}, 24fps motion cadence, natural 180-degree shutter angle, lifelike character physics and optical photorealism.`,
+    shot.claymationMode
+      ? `[Cinematic Style & Gear]: Authentic stop-motion claymation aesthetic, handcrafted malleable clay surface textures, tactile fingerprint imperfections, animated on-twos at ${shot.claymationFps || 12}fps motion cadence.`
+      : `[Cinematic Style & Gear]: Shot on Arri Alexa 65 with ${lensInfo}, 24fps motion cadence, natural 180-degree shutter angle, lifelike character physics and optical photorealism.`,
   ].filter(Boolean).join(' ');
 
   const negativePrompt = shot.negativePrompt || 'blurry, low quality, deformed limbs, floating artifacts, jerky camera, unnatural motion, digital noise, oversaturated, morphing';
@@ -306,13 +323,15 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     cameraDirectives: `${angleInfo}. ${cameraMove}. Shot on ${lensInfo}.`,
     actorDirectives: subjectBlocks || 'None',
     lightingDirectives: `Lighting: ${lightInfo}.`,
-    styleDirectives: 'Arri Alexa 65, cinematic realism, 24fps motion cadence, 180-degree shutter.',
+    styleDirectives: shot.claymationMode
+      ? `Stop-motion claymation aesthetic, handcrafted clay textures, ${shot.claymationFps || 12}fps motion cadence.`
+      : 'Arri Alexa 65, cinematic realism, 24fps motion cadence, 180-degree shutter.',
     temporalBeats: timeline,
     modelPromptParadigm: 'minimax-structured-cinematic',
     technicalMetadata: {
       targetModel: 'MiniMax H3 / Hailuo',
       duration: shot.durationSeconds,
-      fps: shot.frameRate,
+      fps: shot.claymationMode ? (shot.claymationFps || 12) : shot.frameRate,
       focalLength: shot.camera.lens.focalLength,
       aspectRatio: shot.aspectRatio,
     },
@@ -343,7 +362,8 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
     const scalePrefix = scale >= 2.0 ? 'towering scale ' : scale >= 1.4 ? 'large scale ' : scale <= 0.5 ? 'miniature scale ' : '';
     const start = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
     const end = actor.trajectory?.endPosition ?? { x: 50, y: 50 };
-    return `${scalePrefix}${actor.token} [Stage Vector: (${start.x}%, ${start.y}%) -> (${end.x}%, ${end.y}%)], performing: ${actor.actionDescription}, attire aerodynamic drape and physical mass responding to acceleration`;
+    const socketPart = actor.socketToBone ? ` [Socketed: Bone ${actor.socketToBone.boneName}]` : '';
+    return `${scalePrefix}${actor.token}${socketPart} [Stage Vector: (${start.x}%, ${start.y}%) -> (${end.x}%, ${end.y}%)], performing: ${actor.actionDescription}, attire aerodynamic drape and physical mass responding to acceleration`;
   }).join('; ');
 
   // Chronological cue beats
@@ -354,7 +374,9 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
     subjectBlocks ? `[Subject Dynamics & Aerodynamic Physics]: ${subjectBlocks}.` : '',
     `[Temporal Cue Timetable]: ${timelineString}.`,
     `[Atmospheric Space & Volumetric Lighting]: ${lightInfo}, volumetric shadow falloff, spatial air density, scene environment: ${shot.environment?.promptDescription || shot.sceneDescription.trim()}${envText ? ` (${envText})` : ''}.`,
-    `[Render & Motion Profile]: Optical photorealism, 24fps motion matrix coherence, natural 180-degree optical shutter angle, rich texture fidelity.`,
+    shot.claymationMode
+      ? `[Render & Motion Profile]: Stop-motion claymation aesthetic, handcrafted tactile clay micro-textures, ${shot.claymationFps || 12}fps on-twos motion cadence.`
+      : `[Render & Motion Profile]: Optical photorealism, 24fps motion matrix coherence, natural 180-degree optical shutter angle, rich texture fidelity.`,
   ].filter(Boolean).join(' ');
 
   const negativePrompt = shot.negativePrompt || 'floating artifacts, frame tearing, flickering geometry, unnatural jerky acceleration, low resolution, warped proportions, morphing hands, plastic textures, watermark';
@@ -365,13 +387,15 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
     cameraDirectives: `${angleInfo}. ${cameraMove}. 3D delta: (${dx}, ${dy}, dz: ${dz}). Shot on ${lensInfo}.`,
     actorDirectives: subjectBlocks || 'None',
     lightingDirectives: `Lighting: ${lightInfo}.`,
-    styleDirectives: 'Seedance 2.0 Motion Matrix, 24fps cinema cadence, optical shutter, spatial depth coherence.',
+    styleDirectives: shot.claymationMode
+      ? `Stop-motion claymation aesthetic, handcrafted clay textures, ${shot.claymationFps || 12}fps on-twos motion cadence.`
+      : 'Seedance 2.0 Motion Matrix, 24fps cinema cadence, optical shutter, spatial depth coherence.',
     temporalBeats: timeline,
     modelPromptParadigm: 'seedance-motion-matrix',
     technicalMetadata: {
       targetModel: 'Seedance 2.0',
       duration: shot.durationSeconds,
-      fps: shot.frameRate,
+      fps: shot.claymationMode ? (shot.claymationFps || 12) : shot.frameRate,
       focalLength: shot.camera.lens.focalLength,
       aspectRatio: shot.aspectRatio,
       cameraDelta: { dx, dy, dz },

@@ -1,7 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { useLogStore, LogCategory, LogEntry } from '../stores/useLogStore';
 import { useShotStore } from '../stores/useShotStore';
-import { useComfyStore } from '../stores/useComfyStore';
 import {
   Terminal,
   Trash2,
@@ -10,7 +9,6 @@ import {
   ChevronDown,
   Maximize2,
   Minimize2,
-  Activity,
   Layers,
   Check,
 } from 'lucide-react';
@@ -30,9 +28,8 @@ export const InAppDebugger: React.FC = () => {
   } = useLogStore();
 
   const { shot } = useShotStore();
-  const { systemStats, activeJob, connectionStatus } = useComfyStore();
 
-  const [activeTab, setActiveTab] = useState<'console' | 'shotspec' | 'comfy'>('console');
+  const [activeTab, setActiveTab] = useState<'console' | 'shotspec'>('console');
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
@@ -140,17 +137,6 @@ export const InAppDebugger: React.FC = () => {
             >
               <Layers className="h-3 w-3" />
               ShotSpec State
-            </button>
-            <button
-              onClick={() => setActiveTab('comfy')}
-              className={`rounded px-2 py-0.5 text-[11px] transition-all flex items-center gap-1 ${
-                activeTab === 'comfy'
-                  ? 'bg-emerald-400 text-director-darkest font-bold'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Activity className="h-3 w-3" />
-              ComfyUI Pipeline
             </button>
           </div>
         </div>
@@ -306,38 +292,6 @@ export const InAppDebugger: React.FC = () => {
           <pre className="text-slate-200 leading-relaxed whitespace-pre-wrap">
             {JSON.stringify(shot, null, 2)}
           </pre>
-        </div>
-      )}
-
-      {/* Tab 3: ComfyUI Pipeline Traffic */}
-      {activeTab === 'comfy' && (
-        <div className="flex flex-1 flex-col gap-3 p-4 overflow-y-auto font-mono text-xs text-slate-300">
-          <div className="grid grid-cols-3 gap-3">
-            <div className="glass-card rounded-lg p-3">
-              <span className="text-[10px] text-slate-400">Connection Status:</span>
-              <p className="font-bold text-white text-sm mt-1 capitalize">{connectionStatus}</p>
-            </div>
-            <div className="glass-card rounded-lg p-3">
-              <span className="text-[10px] text-slate-400">GPU VRAM:</span>
-              <p className="font-bold text-emerald-400 text-sm mt-1">
-                {systemStats ? `${systemStats.vramFreeGb}GB / ${systemStats.vramTotalGb}GB` : 'N/A'}
-              </p>
-            </div>
-            <div className="glass-card rounded-lg p-3">
-              <span className="text-[10px] text-slate-400">Active Job Status:</span>
-              <p className="font-bold text-director-gold text-sm mt-1">
-                {activeJob ? `${activeJob.status.toUpperCase()} (${activeJob.progress}%)` : 'IDLE'}
-              </p>
-            </div>
-          </div>
-
-          {activeJob && (
-            <div className="glass-card rounded-lg p-3 flex flex-col gap-1.5">
-              <span className="font-bold text-director-cyan">Current Pipeline Node:</span>
-              <p className="text-xs text-white">{activeJob.currentNodeTitle}</p>
-              <span className="text-[10px] text-slate-400">Prompt ID: {activeJob.promptId}</span>
-            </div>
-          )}
         </div>
       )}
     </div>

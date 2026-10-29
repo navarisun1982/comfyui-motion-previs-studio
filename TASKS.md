@@ -19,8 +19,190 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
 | S9 Closed-loop steering | `stage/09-closed-loop-steering` | ✅ merged to master (`fc9865c`) | Optical-flow-driven compensatory patches, prompt auto-correction, IC-LoRA modulation, steering modal, lineage tracking |
 | S10 Sequence / Assembly | `stage/10-sequence` | ✅ merged to master (`16d714f`) | Multi-shot timeline, sequential playback, continuity & 180° rule checking, OTIO/EDL/FCPXML NLE exporters |
 | S11 Parametric 3D Sculpt & Character Rigging | `stage/11-parametric-sculpt-engine` | 🟢 Complete (Phases 1, 2, 3 verified) | Parametric 3D primitives, silhouette matching, AI 3D generator, humanoid skeleton, analytic 2-bone IK, procedural locomotion, OpenPose previs pass |
+| S12 Standalone Previs Studio | `stage/12-standalone-previs` | 🟢 Complete (Phases 1–8 verified) | Decouple from live ComfyUI server; PrevisExportDeck; Multi-Cue Bone Posing, 12fps Claymation, Image-to-Recipe, Deterministic Kinematics Motion Skills, Greybox/Standees Scene Blocking, OpenAI OAuth & Full UI/UX Audit Remediation |
 
-## S11 Phase 3 checklist (Procedural Locomotion & ControlNet OpenPose Previs Bridge)
+## S12 Phase 8 checklist (Full UI/UX Audit Remediation & Zero-Duplicate Studio Architecture)
+
+- [x] **Unified Center 3D Viewport & Exposed Stage Toolbar (`src/components/StagePrevis3D.tsx`, `src/components/MotionPrevisStage.tsx`)**:
+  - Replaced dual-mounted `StagePrevis3D` instances with a single unified `StagePrevis3D` instance (`Split`, `Viewfinder`, `3D Stage`, and CSS `flex-row-reverse` `Swap`), cutting WebGL scenes/renderers in half (from 4 canvases to 2) and eliminating context destruction on swap.
+  - Exposed the unified Top 3D Stage & Viewport Control Toolbar (`Split`, `Viewfinder`, `3D Stage`, `Swap`, Aspect Ratio `16:9 / 2.39:1 / 9:16 / 1:1`, `Base Pos` vs `Keyframe @ Time`, `Center (F)`, `Aim Camera`, `Iso / Top / Eye`, `Grid`, `3x3`, `Labels`, `FK Gizmos / IK Targets`, `🏺 12fps Clay`, `Import .GLB`).
+  - Replaced ~900 lines of overlapping floating canvas HUDs with a sleek Top-Left Contextual Bar on the 3D Soundstage (`FK / IK` mode switch, `Rot / Move`, `Ground Feet`, `+ Pose Cue`, and active Bone `-15°/+15°` X/Y/Z nudges + `Reset`).
+  - Replaced duplicate Soundstage Placement bars and unwired Audio Volume/Mute sliders with a compact 1-line Stage Cast & Environment Strip and restored `Shot Duration (1s–10s)` in the Transport Bar.
+- [x] **Reorganized Right Inspector Deck & Shot Bible (`src/components/PrevisParametersDeck.tsx`, `src/components/ShotBible.tsx`)**:
+  - Added persistent top Shot Slate & Target Engine Header (editable Shot Name, Shot Duration `1s–10s` stepper, and Target Engine pills `LTX-2.5` / `MiniMax H3` / `Seedance 2.0`).
+  - Upgraded Camera tab with FOV degrees (`100°` to `18°`), Optical Impact callouts, `extreme-wide` framing, Angle Psychology callouts, and all 17 categorized camera movements (`Rack Focus`, `Handheld Subtle`, `Whip Pan`, `Crash Zoom`, `FPV Dive`, `Orbit Counter-Clockwise`). Removed unwired fake local-state `Camera Smoothing` and `Stabilization` controls.
+  - Upgraded Cast tab by merging 3 duplicate "Add Object" sections into 1 unified card, restoring the **Scene Cast Pool** (`sceneCastPool`), surfacing `🦶 Ground Feet`, `🎬 + Pose Cue`, `↺ Reset`, **AI Acting Beats**, and **Prop Bone Socketing** (`RightHand`, `LeftHand`, `Head`, `Chest`, `Spine`, `Hips`), and removing unwired fake local-state `Foot Lock`, `Ground Lock`, and `Motion Smoothing` checkboxes.
+  - Restored **Editable Negative Prompt** (`setNegativePrompt`) in the Light/Script tab.
+  - Added explicit **Rename (`✎`)** buttons and inline renaming to both **Scenes** and **Shots** in `ShotBible.tsx`.
+- [x] **Unified Render, Prompt & Export Studio (`src/components/PrevisExportDeck.tsx`, `src/App.tsx`, `src/components/AssetLibraryModal.tsx`)**:
+  - Merged the standalone `App.tsx` Prompt Inspector Modal into `PrevisExportDeck.tsx` (AI Prompt Reasoner `"Direct & Polish with AI"`, Stage Timeline & Choreography Beats `Beat I / II / III`, Editable Negative Prompt, 4×4 Camera Extrinsics `c2w / w2c` JSON export, and Full Production Pack download).
+  - Clarified `AssetLibraryModal.tsx` header actions (`✨ Concept-to-3D Studio` vs `⚡ Quick Text-to-3D`).
+- [x] **Verification**:
+  - Vitest suite: 46/46 suites passed (373/373 tests green).
+  - Production build: `npm run build` passing with zero errors.
+
+## S12 Phase 7 checklist (OpenAI / ChatGPT Browser Sign-In & Reasoning Gateway)
+
+- [x] **OpenAI OAuth 2.0 PKCE Browser Sign-In Engine (`src/server/openaiAuthService.cjs`)**:
+  - Implemented PKCE authorization code flow with public client ID `app_EMoamEEZ73f0CkXaXp7hrann` and loopback redirect URI `http://localhost:1455/auth/callback`.
+  - Added loopback HTTP callback server on port 1455 with HTML completion UI.
+  - Added token auto-refresh before expiration via `https://auth.openai.com/oauth/token`.
+  - Added bidirectional token synchronization with `~/.codex/auth.json` and `~/.config/cozyclay/codex-auth.json`.
+- [x] **Vite Dev Server Proxy Gateway (`src/server/openaiAuthPlugin.ts`, `vite.config.ts`)**:
+  - Registered `/api/openai/auth/status`, `/api/openai/auth/login`, `/api/openai/auth/logout`.
+  - Registered `/api/openai/chat/completions` with SSE stream buffering and conversion to ChatGPT Codex responses wire format.
+- [x] **Client Service & UI Panel (`src/services/openaiAuth.ts`, `src/components/ReasonerSettingsPanel.tsx`)**:
+  - Replaced manual API key requirement with high-aesthetic OpenAI / ChatGPT account card.
+  - Displayed live account status, user email, and plan tier (`Plus / Pro` / `PROLITE`).
+  - Added one-click model switching between `GPT-5.6 Sol (Flagship Reasoning)`, `GPT-6.1 Sol`, and `GPT-6 Luna`.
+  - Retained collapsible advanced settings for manual API keys and custom endpoints (LM Studio, OpenRouter, Groq).
+- [x] **Verification**:
+  - Vitest suite: 46/46 suites passed (373/373 tests green).
+  - Production build: `npm run build` passing with zero errors.
+  - Verified live in browser with real 3D recipe generation test passed.
+
+## S12 Phase 5 checklist (Kinematics Motion Skills & Greybox/Standees Scene Blocking)
+
+- [x] **Deterministic Kinematics Compiler (`src/engine/kinematics/motionSkills.ts`, `src/engine/kinematics/motionCompiler.ts`)**:
+  - Implemented 7 declarative motion skills: `walkTo`, `sitInSeat`, `reachGrip`, `standIdle`, `talkGesture`, `hitReaction`, `exitCar`.
+  - Built pre-calculated deterministic `skillPaths` map ensuring perfect frame-by-frame trajectory continuity without tick boundary bugs.
+  - Enforced strict Foot-Grounding Locks (stance vs swing phase, $Y \ge 0$, anti-sliding).
+  - Defined canonical `STANDARD_ACTOR_POSES` (`standing_neutral`, `sitting`, `sitting_chair`, `talking_expressive`) mapping bone quaternions.
+- [x] **Bilingual Directorial Motion Decomposer (`src/engine/kinematics/directorialMotionDecomposer.ts`)**:
+  - Parses natural language directorial commands in English and Arabic (`و(يجلس|يمشي|يقف...)`) into timed motion skills.
+  - Coordinate comma protection preventing multi-decimal numbers (`2.5, 3.0`) from premature clause splitting.
+  - Scene entity resolution: resolves targets (chairs, tables, props) by name and position.
+- [x] **Store & UI Integration (`src/stores/useShotStore.ts`, `src/components/ActorBlocking.tsx`)**:
+  - Added `applyDirectorialMotion(actorId, prompt)` updating keyframes, endPosition, pose, and IK targets.
+  - Added interactive "⚡ Compile Motion" button above the prompt textarea in `ActorBlocking.tsx`.
+- [x] **Greybox Primitives & 2D Standees Staging Engine (`src/engine/staging/greyboxPrimitives.ts`, `src/engine/staging/cutoutMeshFactory.ts`, `src/engine/staging/subjectMeshFactory.ts`)**:
+  - Dedicated Greybox Primitive engine (`cube`, `box`, `sphere`, `capsule`, `cylinder`, `cone`, `plane`) with base grounded at $y = 0$, positive Y height, and PBR matte clay materials.
+  - 2D Cutout Standees & Backdrops (`cutout`, `standee`, `backdrop`) as vertical cards with alpha testing (`alphaTest: 0.15`), derived width ($height \times aspect$), shadows, and pedestal floor brackets.
+  - Integrated into `subjectMeshFactory.ts` with instant detection, bypassing false humanoid or prop fallback loops.
+- [x] **Quick-Add Previs Staging UI (`src/components/PrevisParametersDeck.tsx`, `src/components/MotionPrevisStage.tsx`)**:
+  - Added one-click quick add buttons (`+👤 Character`, `+🖼️ Standee`, `+⬛ Cube`, `+🏛️ Cylinder`, `+📐 Plane`) to Staging Deck and top stage toolbar.
+- [x] **Verification & Unit Tests**:
+  - Unit test suite `tests/motionSkills.test.ts` (12/12 tests passing).
+  - Unit test suite `tests/previsPrimitivesAndCutouts.test.ts` (8/8 tests passing).
+  - All 45 test suites, 379/379 tests passing (`npm test`).
+  - Production build: `npm run build` passing with zero TypeScript and bundle errors.
+
+## S12 Phase 6 checklist (Independent Cue Keyframe Positioning & Timeline Animation)
+
+- [x] **Store Playhead Synchronization (`src/stores/useShotStore.ts`, `src/components/MotionPrevisStage.tsx`)**:
+  - Added global `currentTime` and `isPlaying` state to `useShotStore` so all decks (Stage Deck, Actor Blocking, Parameters Deck) react to current scrub time.
+  - Linked `MotionPrevisStage` playback and scrubber directly into `useShotStore.setCurrentTime` and `setIsPlaying`.
+- [x] **Independent Keyframe Recording (`src/stores/useShotStore.ts`)**:
+  - Refactored `updateActorPositionAtTime`: when modifying position at $t > 0.15$s or keyframe mode, directly calls `recordTrajectoryPositionAtTime` to record timestamped keyframes without globally shifting base positions or modifying intermediate cues.
+- [x] **Per-Cue Slider & Preset Binding (`src/components/PrevisParametersDeck.tsx`, `src/components/ActorBlocking.tsx`)**:
+  - Subscribed sliders and presets to interpolated position at `currentTime` (`interpolateTrajectoryPosition`).
+  - Replaced hardcoded `0` time in `ActorBlocking.tsx` with active `currentTime`, allowing users to position characters independently at Cue 1, Cue 2, Cue 3, etc.
+  - Added visual `KEYFRAME` badges in parameter decks when scrubbing past the base start time.
+- [x] **Verification**:
+  - Vitest test suite 45/45 passing (379 tests green).
+  - Production build `npm run build` passing with zero TypeScript or Vite bundle errors.
+
+## S12 Phase 4 checklist (Truthful Image-to-3D Object Recipe Engine & Brand Neutralization)
+
+- [x] **Truthful Image-to-Recipe 3D Synthesis (`src/engine/procedural3D/imageToRecipe.ts`)**:
+  - Implemented pure declarative recipe generation from reference image metrics and color palette.
+  - Added `isHumanoidPrompt`: strictly discriminates everyday props, food, bags of chips, bottles, vehicles, and furniture from humanoid characters.
+  - Implemented `buildBagOfChipsRecipe`: builds authentic puffed snack pouch (`blob`, `roundness: 0.65`, `taper: 0.04`), top and bottom crimp seals (`box`), front flavor label, and accent chips with colors sampled from the image.
+  - Implemented `buildBottleRecipe` & `buildBoxPropRecipe` with beveled rounded corners and procedural details.
+  - Implemented `buildUniversalSilhouetteSlicesRecipe`: stacks smooth volumetric clay slices matching the 10-band silhouette width profile and dominant image colors for unclassified props.
+- [x] **AIGenerator3D Integration (`src/components/AIGenerator3D.tsx`)**:
+  - Removed hardcoded humanoid fallback in image processing (`createSkinnedCharacterFromConcept` is no longer called for props/objects).
+  - Default `displayMode` set to `'parametric'` for clean PBR tactile object inspection.
+  - `handleAddToScene` correctly assigns `kind = 'prop'` and passes `sculpt` to `StagePrevis3D`.
+- [x] **Complete Brand Neutralization**:
+  - Scrubbed all reference brand names across types, comments, material cache keys, and log strings in the entire codebase.
+- [x] **Verification & Unit Tests**:
+  - Unit test suite `tests/imageToRecipe.test.ts` (9/9 tests passing).
+  - All 41 test suites, 311/311 tests passing (`npm test`).
+  - Production build: `npm run build` passing with zero TypeScript and bundle errors.
+
+## S12 Phase 3 checklist (Multi-Cue Posing, 12fps Stop-Motion & Bone Socketing)
+
+- [x] **Multi-Cue Humanoid Bone Posing (`src/engine/trajectoryMath.ts`, `src/types/shotspec.ts`, `src/stores/useShotStore.ts`)**:
+  - Added quaternion SLERP interpolation across all 19 standard humanoid bones and root positional offsets.
+  - Added `pose`, `posePreset`, `gait`, and `cueLabel` to `TrajectoryKeyframeSchema`.
+  - Added store actions `recordActorPoseAtTime`, `updateActorRotationAtTime`, `socketActorToBone`, `unsocketActor`, `setClaymationMode`.
+- [x] **Stop-Motion Physics (12fps On-Twos)**:
+  - Quantized temporal sampling to 12fps cadence (`Math.floor(t / (1/fps)) * (1/fps)`) in trajectory evaluation.
+  - Added stage toolbar toggle `🏺 Claymation (12fps)` with tactile stop-motion visual rhythm.
+  - Prompt compiler automatically injects tactile claymation aesthetics, thumbprint micro-textures, and stop-motion cadence modifiers.
+- [x] **AI Directorial Acting Beats (`src/services/aiActingDirector.ts`)**:
+  - Implemented `generateActingCuesFromPrompt` querying local LLMs or Gemini with automatic rule-based parsing fallback.
+  - Parses natural language prompts with timestamped cues (e.g., `0s stand, 1.5s draw bow, 3s kneel`) into timed keyframes and cinematic presets.
+- [x] **3D Object / Prop Manipulation & Bone Socketing (`StagePrevis3D.tsx`, `trajectoryMath.ts`)**:
+  - Non-humanoid actor Deck for 3D Pitch / Yaw / Roll orientation keyframing.
+  - Two-pass scene evaluation in `syncPositions(t)`: Pass 1 updates character roots, poses, and gaits; Pass 2 attaches socketed props directly to parent bones in world space.
+- [x] **Cinematic Posing Presets (`src/engine/kinematics/posePresets.ts`)**:
+  - Added `aim-bow`, `combat-ready`, `dramatic-lunge`, `hero-kneel`, `defensive-block`.
+- [x] **Verification & Unit Tests**:
+  - Unit test suite `tests/actorPoseInterpolation.test.ts` (5/5 tests passing).
+  - Unit test suite `tests/actingAndClaymation.test.ts` (6/6 tests passing).
+  - All 40 test suites, 302/302 tests passing (`npm run test`).
+  - Production build: `npm run build` passing with zero TypeScript and bundle errors.
+
+## S12 Phase 2 checklist (Modular Decomposition — No Big Bulks of Code)
+
+- [x] **Character Dresser Isolation (`src/engine/kinematics/characterDresser.ts`)**:
+  - Isolated costume layers, sculpted hair, circlet, facial profile, equipment (recurve bow, quiver, arrows), and boots into dedicated `characterDresser.ts`
+  - Re-exported cleanly from `characterTextureProjector.ts` and `kinematics/index.ts` maintaining 100% backwards compatibility
+- [x] **Staging Textures Extraction (`src/engine/staging/stageTextures.ts`)**:
+  - Extracted procedural PBR running-bond terracotta brick canvas texture generator
+  - Extracted procedural polished hardwood parquet floor texture generator
+- [x] **Environment Builder Engine (`src/engine/staging/environmentBuilder.ts`)**:
+  - Modularized `applyGroundSurface` (asphalt, concrete, cobblestone, sand dunes, grass, metal grate, wood parquet, studio floor)
+  - Modularized `buildPerimeterEnvironment` (Urban Cityscape with neon crowns, Sci-Fi Orbital Bay with bulkheads, Medieval Castle Courtyard, Redwood Forest Clearing, Sahara Desert, Interior Hearth/Cabin with window and fireplace, Soundstage Studio)
+  - Cleanly decoupled ~450 lines of procedural environment meshes from `StagePrevis3D.tsx`
+- [x] **Stage Gizmo & Overlay Helpers (`src/components/stage/stageGizmoHelpers.ts`)**:
+  - Extracted `disposeObject3D`, `createSpriteBanner`, `createBaseRing`, and `createIKHandleGizmo`
+- [x] **Subject Mesh Factory (`src/engine/staging/subjectMeshFactory.ts`)**:
+  - Extracted universal semantic procedural 3D subject/prop mesh factory supporting both positional parameter signatures and `CreateSubjectMeshOptions`
+  - Integrated GLB model caching, procedural primitives, and skinned humanoid rigs with organic deformation
+  - Decoupled 270 lines of subject mesh construction from `StagePrevis3D.tsx`
+- [x] **Viewfinder Overlays & Frustum HUD (`src/components/stage/StageViewfinderOverlays.tsx`)**:
+  - Extracted `updateFrustumGeometry` (3D camera frustum wireframe generation) and `<StageViewfinderOverlays />`
+  - Encapsulated active VFX reference badge watermarks, actor choreography bounding boxes, camera-only flight callouts, rule of thirds grid, and optical crosshair
+  - Reduced `StagePrevis3D.tsx` total lines from 4,321 to 3,338 (>980 lines decomposed)
+- [x] **Multi-Pass Video Selection & Batch Downloads (`PrevisExportDeck.tsx`, `useShotStore.ts`, `StagePrevis3D.tsx`)**:
+  - Added `previsDepthUrl` and `previsDepthBlob` state and `setPrevisDepth` action to `useShotStore`
+  - Added pass mode selector (`All Passes`, `RGB Only`, `OpenPose Only`, `Depth Only`) defaulting to `all`
+  - Added interactive multi-pass tab switcher: `🎥 RGB Plate`, `🦴 OpenPose`, `🌐 Depth` with active pass indicators
+  - Added primary "Download Active Pass MP4" and "Download All Passes" batch downloader
+- [x] **Non-MP4 Exporter Elimination**:
+  - Deleted obsolete `pipelineExporters.ts` and `tests/pipelineExporters.test.ts` (Blender .py, Runway JSON, Kling JSON, ComfyUI workflow JSON, Seedance pack JSON)
+  - Removed `exportBlenderCameraScript` from `cameraMatrixExport.ts` and updated tests
+  - Streamlined `PrevisParametersDeck.tsx` by replacing the legacy "Target Pipeline" grid with a clean "Previs Video & Export Deck" navigation card
+- [x] **Legacy Text & Prop Cleanups**:
+  - Removed outdated "DIFFUSE SHOT IN COMFYUI" reference from `TakesGrid.tsx` empty-state
+  - Replaced legacy `onDirectShotWithComfy` callback with `onOpenExportDeck`
+- [x] **Verification & Unit Tests**:
+  - Added unit test suite `tests/subjectMeshFactory.test.ts` (5 tests covering positional args, options object, primitives, ghost wireframe, and banner visibility)
+  - 38 test suites, 287/287 tests passing (`npm run test`)
+  - Production build: `npm run build` passing with zero TypeScript and bundle errors (Vite build ~11.7s)
+
+## S12 Phase 1 checklist (Decouple ComfyUI Server & Wire Previs Export Deck)
+
+- [x] **Previs Export Deck Integration (`src/components/PrevisExportDeck.tsx`, `App.tsx`)**:
+  - Wired `PrevisExportDeck` into main studio mode switcher (`previs` | `vfx` | `export` | `sequence`)
+  - Elevated 1-click in-engine WebGL reference video rendering (`mp4-muxer` 24fps) with instant video player preview and direct MP4 download
+  - Integrated tailored prompt cards for LTX-2.5, MiniMax H3, and Seedance 2.0 with 1-click copy for positive/negative prompts
+  - Export 4x4 camera keyframe transform matrices for external 3D/VFX workflows
+- [x] **ComfyUI Coupling Elimination**:
+  - Removed `ComfyUI Studio` header tab, `Comfy offline` status button, and `ComfyConnectionModal`
+  - Replaced header settings with clean AI Reasoner provider display and preferences modal
+  - Deleted legacy `ComfyConnectionModal.tsx` and `ComfyExecutionPanel.tsx`
+  - Removed ComfyUI connection blocks from `TakesGrid.tsx`, `DirectorialSteeringModal.tsx`, `AssetLibraryModal.tsx`, and `InAppDebugger.tsx`
+  - Removed `useComfyStore` from production bundle (`dist/`)
+- [x] **Sculpted 3D Character Styling & Silhouette Refinement**:
+  - Replaced 2D photo texture UV projection on skinned mannequin with smooth studio PBR maquette materials
+  - Modeled rich 3D hair (crown, bangs, bun, braids), circlet, facial features, linen cowl/scarf, cuirass, quiver, bow, and boots
+- [x] **Verification**:
+  - 37 test suites, 281/281 tests passing (`npm run test`)
+  - Production build: `npm run build` passing with zero TypeScript and bundle errors
 
 - [x] Trajectory-Synchronized Procedural Locomotion / Gait Engine (`src/engine/kinematics/gaitEngine.ts`):
   - Procedural gaits (`walk`, `run`, `sneak`, `idle`, `auto`, `none`) driving limbs with $<0.02\text{ ms}$ evaluation time and zero GPU VRAM impact
@@ -382,4 +564,19 @@ Pre-remediation history: [docs/archive/TASKS_pre_remediation.md](docs/archive/TA
   - 31 test files, 215/215 tests passing (`npm run test`)
   - Production build: `npm run build` completed with zero TypeScript errors and bundle generated cleanly
   - In-browser UI verified via subagent with recording `verify_gltf_import_1792789985216.webp`
+
+## Decoupling & Streamlining: Previs Export Deck Restored & Sequence Assembly Removed
+
+- [x] **Previs Export Deck Restored (`src/components/PrevisExportDeck.tsx`)**:
+  - Fully restored `PrevisExportDeck.tsx` containing multi-pass video rendering (RGB, OpenPose, Volumetric Depth) and model prompt compilers (LTX-2.5, MiniMax H3, Seedance).
+  - Added `'export'` workspace mode and the "Previs Export Deck" top header navigation tab in `App.tsx`.
+  - Added direct "Open Previs Export Deck ▶" navigation button in the footer of `PrevisParametersDeck.tsx`.
+  - Updated `WelcomeModal.tsx` workflow cards to feature "1. 3D Directing Stage" and "2. Previs Export Deck".
+- [x] **Sequence Assembly Removal**:
+  - Removed `SequenceTimelineDeck.tsx`, `SequenceContinuityModal.tsx`, `SequenceExportModal.tsx`, `useSequenceStore.ts`, `timecodeMath.ts`, `sequenceExporters.ts`, `sequenceContinuityEngine.ts`, `sequenceTypes.ts`, and `tests/sequenceAssembly.test.ts`.
+  - Removed `'sequence'` workspace mode and all sequence timeline triggers from `App.tsx` and `ShotBible.tsx`.
+- [x] **Verification**:
+  - Vitest suite: All 46 test files (373 tests) passing green (`npm test`).
+  - Production build: `npm run build` compiled with zero TypeScript or bundler errors.
+  - Verified live in browser with screenshot artifacts.
 

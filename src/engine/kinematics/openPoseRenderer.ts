@@ -26,28 +26,63 @@ export interface OpenPoseLimbDef {
   color: string;
 }
 
+export const OPENPOSE_KEYPOINT_COLORS: Record<string, string> = {
+  Nose: 'rgb(255, 0, 0)',
+  Neck: 'rgb(255, 85, 0)',
+  RightShoulder: 'rgb(255, 128, 0)',
+  RightArm: 'rgb(255, 170, 0)',
+  RightForeArm: 'rgb(255, 255, 0)',
+  RightHand: 'rgb(170, 255, 0)',
+  LeftShoulder: 'rgb(85, 255, 0)',
+  LeftArm: 'rgb(0, 255, 0)',
+  LeftForeArm: 'rgb(0, 255, 170)',
+  LeftHand: 'rgb(0, 255, 255)',
+  RightUpLeg: 'rgb(0, 170, 255)',
+  RightLeg: 'rgb(0, 85, 255)',
+  RightFoot: 'rgb(0, 0, 255)',
+  LeftUpLeg: 'rgb(85, 0, 255)',
+  LeftLeg: 'rgb(170, 0, 255)',
+  LeftFoot: 'rgb(255, 0, 255)',
+  RightEye: 'rgb(255, 0, 170)',
+  LeftEye: 'rgb(170, 0, 255)',
+  RightEar: 'rgb(255, 0, 85)',
+  LeftEar: 'rgb(255, 85, 0)',
+  Chest: 'rgb(85, 0, 255)',
+  Hips: 'rgb(170, 0, 255)',
+  Spine: 'rgb(128, 0, 255)',
+  Head: 'rgb(255, 0, 0)',
+};
+
 export const OPENPOSE_LIMBS: OpenPoseLimbDef[] = [
-  // Head & Spine
+  // Face & Head
   { from: 'Nose', to: 'Neck', color: 'rgb(0, 0, 255)' },
+  { from: 'Nose', to: 'RightEye', color: 'rgb(255, 0, 255)' },
+  { from: 'RightEye', to: 'RightEar', color: 'rgb(255, 0, 170)' },
+  { from: 'Nose', to: 'LeftEye', color: 'rgb(170, 0, 255)' },
+  { from: 'LeftEye', to: 'LeftEar', color: 'rgb(255, 0, 85)' },
+
+  // Spine & Torso
   { from: 'Neck', to: 'Chest', color: 'rgb(85, 0, 255)' },
   { from: 'Chest', to: 'Hips', color: 'rgb(170, 0, 255)' },
 
-  // Right Arm
-  { from: 'Chest', to: 'RightShoulder', color: 'rgb(255, 0, 0)' },
+  // Right Arm (Collarbone -> UpperArm -> Elbow/ForeArm -> Hand)
+  { from: 'Neck', to: 'RightShoulder', color: 'rgb(255, 0, 0)' },
   { from: 'RightShoulder', to: 'RightArm', color: 'rgb(255, 85, 0)' },
-  { from: 'RightArm', to: 'RightHand', color: 'rgb(255, 170, 0)' },
+  { from: 'RightArm', to: 'RightForeArm', color: 'rgb(255, 170, 0)' },
+  { from: 'RightForeArm', to: 'RightHand', color: 'rgb(255, 255, 0)' },
 
-  // Left Arm
-  { from: 'Chest', to: 'LeftShoulder', color: 'rgb(0, 255, 0)' },
+  // Left Arm (Collarbone -> UpperArm -> Elbow/ForeArm -> Hand)
+  { from: 'Neck', to: 'LeftShoulder', color: 'rgb(0, 255, 0)' },
   { from: 'LeftShoulder', to: 'LeftArm', color: 'rgb(0, 255, 85)' },
-  { from: 'LeftArm', to: 'LeftHand', color: 'rgb(0, 255, 170)' },
+  { from: 'LeftArm', to: 'LeftForeArm', color: 'rgb(0, 255, 170)' },
+  { from: 'LeftForeArm', to: 'LeftHand', color: 'rgb(0, 255, 255)' },
 
-  // Right Leg
+  // Right Leg (Hips -> UpperLeg -> Knee/Leg -> Ankle/Foot)
   { from: 'Hips', to: 'RightUpLeg', color: 'rgb(255, 255, 0)' },
   { from: 'RightUpLeg', to: 'RightLeg', color: 'rgb(170, 255, 0)' },
   { from: 'RightLeg', to: 'RightFoot', color: 'rgb(85, 255, 0)' },
 
-  // Left Leg
+  // Left Leg (Hips -> UpperLeg -> Knee/Leg -> Ankle/Foot)
   { from: 'Hips', to: 'LeftUpLeg', color: 'rgb(0, 255, 255)' },
   { from: 'LeftUpLeg', to: 'LeftLeg', color: 'rgb(0, 170, 255)' },
   { from: 'LeftLeg', to: 'LeftFoot', color: 'rgb(0, 85, 255)' },
@@ -63,6 +98,9 @@ export function extractOpenPoseKeypoints(
   height: number
 ): Map<string, OpenPoseKeypoint> {
   const result = new Map<string, OpenPoseKeypoint>();
+
+  // Ensure rig world matrices are up-to-date
+  rig.root.updateMatrixWorld(true);
 
   const camPos = new THREE.Vector3();
   const camDir = new THREE.Vector3();
@@ -97,24 +135,38 @@ export function extractOpenPoseKeypoints(
     });
   }
 
-  // Derive "Nose" from Head position offset forward
+  // Derive facial keypoints (Nose, RightEye, LeftEye, RightEar, LeftEar) from Head bone
   const headBone = rig.bones.get('Head');
   if (headBone) {
     const headPos = new THREE.Vector3();
     headBone.getWorldPosition(headPos);
     const headRot = new THREE.Quaternion();
     headBone.getWorldQuaternion(headRot);
+    const h = rig.height || 5.06;
 
-    // Forward face offset
-    const forwardOffset = new THREE.Vector3(0, 0.04 * rig.height, 0.08 * rig.height).applyQuaternion(headRot);
-    const noseWorldPos = headPos.clone().add(forwardOffset);
-    const noseScreen = projectPoint(noseWorldPos);
-    result.set('Nose', {
-      name: 'Nose',
-      x: noseScreen.x,
-      y: noseScreen.y,
-      visible: noseScreen.visible,
-    });
+    const noseOffset = new THREE.Vector3(0, 0.04 * h, 0.09 * h).applyQuaternion(headRot);
+    const rEyeOffset = new THREE.Vector3(-0.03 * h, 0.06 * h, 0.075 * h).applyQuaternion(headRot);
+    const lEyeOffset = new THREE.Vector3(0.03 * h, 0.06 * h, 0.075 * h).applyQuaternion(headRot);
+    const rEarOffset = new THREE.Vector3(-0.07 * h, 0.045 * h, -0.01 * h).applyQuaternion(headRot);
+    const lEarOffset = new THREE.Vector3(0.07 * h, 0.045 * h, -0.01 * h).applyQuaternion(headRot);
+
+    const facePoints: Array<{ name: string; pos: THREE.Vector3 }> = [
+      { name: 'Nose', pos: headPos.clone().add(noseOffset) },
+      { name: 'RightEye', pos: headPos.clone().add(rEyeOffset) },
+      { name: 'LeftEye', pos: headPos.clone().add(lEyeOffset) },
+      { name: 'RightEar', pos: headPos.clone().add(rEarOffset) },
+      { name: 'LeftEar', pos: headPos.clone().add(lEarOffset) },
+    ];
+
+    for (const fp of facePoints) {
+      const screen = projectPoint(fp.pos);
+      result.set(fp.name, {
+        name: fp.name,
+        x: screen.x,
+        y: screen.y,
+        visible: screen.visible,
+      });
+    }
   }
 
   return result;
@@ -163,10 +215,11 @@ export function renderOpenPoseCanvas(
       }
     }
 
-    // 3. Draw joint dots
+    // 3. Draw color-coded joint dots matching ControlNet OpenPose specification
     for (const kp of keypoints.values()) {
       if (kp.visible) {
-        ctx.fillStyle = '#ffffff';
+        const dotColor = OPENPOSE_KEYPOINT_COLORS[kp.name] || 'rgb(255, 255, 255)';
+        ctx.fillStyle = dotColor;
         ctx.beginPath();
         ctx.arc(kp.x, kp.y, jointRadius, 0, 2 * Math.PI);
         ctx.fill();

@@ -3,7 +3,6 @@ import { ShotRevisionV2, DirectorialSteeringPatch } from '../pipeline/revisionTy
 import { useHistoryStore } from '../stores/useHistoryStore';
 import { useShotStore } from '../stores/useShotStore';
 import { useQueueStore } from '../stores/useQueueStore';
-import { useComfyStore } from '../stores/useComfyStore';
 import { QualityProfile, GenerationMode } from '../pipeline/templateTypes';
 import { TakeComparisonModal } from './TakeComparisonModal';
 import { DirectorialSteeringModal } from './DirectorialSteeringModal';
@@ -41,7 +40,6 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
 }) => {
   const { shot, compiledPrompt, previsVideoBlob, previsVideoUrl, setTakeAsActivePlate } = useShotStore();
   const { revisions, toggleCircledTake, deleteRevision, setTakeMotionFidelity } = useHistoryStore();
-  const { connectionStatus } = useComfyStore();
   const { items: queueItems, enqueueBatch, cancelItem, clearQueue } = useQueueStore();
 
   const [batchCount, setBatchCount] = useState<number>(3);
@@ -75,13 +73,6 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
 
   // Trigger batch generation
   const handleEnqueueTakes = () => {
-    if (connectionStatus !== 'connected') {
-      const msg =
-        'Local ComfyUI server is offline or unreachable on http://127.0.0.1:8188. Connect ComfyUI before queuing takes.';
-      onNotice?.({ type: 'warn', message: msg });
-      return;
-    }
-
     const engine = shot.targetModel === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5';
     const mode = currentMode;
 
@@ -295,7 +286,7 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
         <button
           onClick={handleEnqueueTakes}
           className="flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-110 text-white font-mono text-xs font-bold px-4 py-2 transition-all shadow-md active:scale-95 cursor-pointer"
-          title={`Queue ${batchCount} take(s) in ComfyUI`}
+          title={`Queue ${batchCount} take(s)`}
         >
           <Plus className="h-4 w-4" />
           <span>Queue {batchCount} Take{batchCount > 1 ? 's' : ''}</span>
@@ -376,7 +367,7 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
             No Generated Takes Yet for this Shot
           </p>
           <p className="text-[11px] max-w-sm mt-1">
-            Click <strong>&quot;DIFFUSE SHOT IN COMFYUI&quot;</strong> or <strong>&quot;Queue Takes&quot;</strong> above to generate takes with varying seeds and settings.
+            Click <strong>&quot;Queue Takes&quot;</strong> above to generate takes with varying seeds and settings.
           </p>
         </div>
       ) : (

@@ -102,21 +102,6 @@ export type VfxReference = z.infer<typeof VfxReferenceSchema>;
 export const SubjectKindSchema = z.string().default('human');
 export type SubjectKind = string;
 
-export const TrajectoryKeyframeSchema = z.object({
-  id: z.string(),
-  time: z.number().min(0),
-  position: Point2DSchema,
-});
-export type TrajectoryKeyframe = z.infer<typeof TrajectoryKeyframeSchema>;
-
-export const CameraKeyframeSchema = z.object({
-  id: z.string(),
-  time: z.number().min(0),
-  position: Point3DSchema,
-  lookAt: Point2DSchema.optional(),
-});
-export type CameraKeyframe = z.infer<typeof CameraKeyframeSchema>;
-
 export const IKTargetSchema = z.object({
   position: z.tuple([z.number(), z.number(), z.number()]),
   pole: z.tuple([z.number(), z.number(), z.number()]).optional(),
@@ -130,6 +115,27 @@ export const ActorPoseSchema = z.object({
 });
 export type ActorPose = z.infer<typeof ActorPoseSchema>;
 
+export const TrajectoryKeyframeSchema = z.object({
+  id: z.string(),
+  time: z.number().min(0),
+  position: Point2DSchema,
+  pose: ActorPoseSchema.optional(),
+  posePreset: z.string().optional(),
+  gait: z.enum(['auto', 'walk', 'run', 'sneak', 'idle', 'none']).optional(),
+  motionClip: z.string().optional(),
+  rotation: Point3DSchema.optional(),
+  cueLabel: z.string().optional(),
+});
+export type TrajectoryKeyframe = z.infer<typeof TrajectoryKeyframeSchema>;
+
+export const CameraKeyframeSchema = z.object({
+  id: z.string(),
+  time: z.number().min(0),
+  position: Point3DSchema,
+  lookAt: Point2DSchema.optional(),
+});
+export type CameraKeyframe = z.infer<typeof CameraKeyframeSchema>;
+
 export const ActorIKTargetsSchema = z.object({
   leftHand: IKTargetSchema.optional(),
   rightHand: IKTargetSchema.optional(),
@@ -138,6 +144,14 @@ export const ActorIKTargetsSchema = z.object({
   headLookAt: z.tuple([z.number(), z.number(), z.number()]).optional(),
 });
 export type ActorIKTargets = z.infer<typeof ActorIKTargetsSchema>;
+
+export const ActorSocketSchema = z.object({
+  targetActorId: z.string(),
+  boneName: z.string(),
+  offset: Point3DSchema.optional(),
+  rotationOffset: Point3DSchema.optional(),
+});
+export type ActorSocket = z.infer<typeof ActorSocketSchema>;
 
 export const ActorSchema = z.object({
   id: z.string(),
@@ -160,6 +174,10 @@ export const ActorSchema = z.object({
   pose: ActorPoseSchema.optional(),
   ikTargets: ActorIKTargetsSchema.optional(),
   gait: z.enum(['auto', 'walk', 'run', 'sneak', 'idle', 'none']).default('auto').optional(),
+  motionClip: z.string().optional(),
+  rotation: Point3DSchema.optional(),
+  socketToBone: ActorSocketSchema.optional(),
+  color: z.string().optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 export type ActorGait = 'auto' | 'walk' | 'run' | 'sneak' | 'idle' | 'none';
@@ -185,6 +203,16 @@ export const LightingDirectionSchema = z.enum([
 ]);
 export type LightingDirection = z.infer<typeof LightingDirectionSchema>;
 
+export const StageLightSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  position: Point3DSchema.default({ x: 82, y: 50, z: 55 }),
+  color: z.string().default('#eab308'),
+  intensity: z.number().min(0).max(10).default(2.2),
+  enabled: z.boolean().default(true),
+});
+export type StageLight = z.infer<typeof StageLightSchema>;
+
 export const TargetModelSchema = z.enum(['ltx-2.5', 'minimax-h3', 'seedance']);
 export type TargetModel = z.infer<typeof TargetModelSchema>;
 
@@ -207,6 +235,8 @@ export const ShotSpecSchema = z.object({
   aspectRatio: AspectRatioSchema.default('16:9'),
   durationSeconds: z.number().min(1.0).max(15.0).default(4.0),
   frameRate: z.number().int().min(12).max(60).default(24),
+  claymationMode: z.boolean().default(false).optional(),
+  claymationFps: z.number().int().min(6).max(24).default(12).optional(),
 
   // Reference Frame
   referenceImage: z.object({
@@ -224,6 +254,7 @@ export const ShotSpecSchema = z.object({
     }),
     shotType: ShotTypeSchema.default('medium'),
     angle: CameraAngleSchema.default('eye-level'),
+    color: z.string().optional(),
     movement: z.object({
       type: CameraMovementTypeSchema.default('dolly-in'),
       speed: MovementSpeedSchema.default('slow-cinematic'),
@@ -255,6 +286,7 @@ export const ShotSpecSchema = z.object({
     style: LightingStyleSchema.default('cinematic-natural'),
     direction: LightingDirectionSchema.default('side-key'),
     contrast: z.enum(['soft', 'balanced', 'high-contrast']).default('balanced'),
+    lights: z.array(StageLightSchema).optional(),
   }),
 
   // Scene Environment (Filming Location & Physical Setting)

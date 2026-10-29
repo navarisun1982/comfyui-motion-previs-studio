@@ -3,6 +3,7 @@ import {
   buildGeminiRequest,
   buildOllamaRequest,
   buildOpenAiRequest,
+  cleanSchemaForGemini,
   extractResponseText,
   getReasonerConfig,
   getReasonerSettings,
@@ -56,12 +57,13 @@ describe('reasoner settings', () => {
     expect(getReasonerSettings().providers.ollama.model).toBe('gemma4:26b');
   });
 
-  it('keeps per-provider settings when switching providers', () => {
+  it('keeps per-provider settings and migrates deprecated Gemini models', () => {
     setReasonerConfig({ provider: 'gemini', apiKey: 'k1', model: 'gemini-2.5-flash' });
     setReasonerConfig({ provider: 'llamacpp', url: 'http://127.0.0.1:9090/v1/' });
     const s = getReasonerSettings();
     expect(s.provider).toBe('llamacpp');
     expect(s.providers.gemini.apiKey).toBe('k1');
+    expect(s.providers.gemini.model).toBe('gemini-2.5-flash');
     expect(getReasonerConfig().url).toBe('http://127.0.0.1:9090/v1');
   });
 });
@@ -99,7 +101,7 @@ describe('request builders', () => {
     expect(r.headers['x-goog-api-key']).toBe('AIza');
     const gc = r.body.generationConfig as any;
     expect(gc.responseMimeType).toBe('application/json');
-    expect(gc.responseJsonSchema).toBe(PART_GRAPH_JSON_SCHEMA);
+    expect(gc.responseJsonSchema).toEqual(cleanSchemaForGemini(PART_GRAPH_JSON_SCHEMA));
     expect((buildGeminiRequest(cfg('gemini', { apiKey: 'k' }), 'x', 'object').body.generationConfig as any).responseJsonSchema).toBeUndefined();
   });
 
@@ -281,6 +283,37 @@ describe('reasonObject transport', () => {
         expect(resolveWireUrl('https://api.openai.com/v1', 'openai')).toBe('https://api.openai.com/v1');
       } finally {
         (globalThis as any).window = originalWindow;
+      }
+    });
+
+    it('keeps raw URLs in Electron desktop app or file:// protocol builds', () => {
+      const originalWindow = globalThis.window;
+      const originalUserAgent = globalThis.navigator?.userAgent;
+      try {
+        // file:// protocol simulation (e.g. Electron production loadFile)
+        (globalThis as any).window = {
+          location: { port: '', protocol: 'file:' },
+        };
+        try {
+          Object.defineProperty(globalThis.navigator, 'userAgent', {
+            value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Electron/32.0.0',
+            configurable: true,
+          });
+        } catch {}
+
+        expect(resolveWireUrl('http://127.0.0.1:11434/api/tags', 'ollama')).toBe('http://127.0.0.1:11434/api/tags');
+        expect(resolveWireUrl('http://127.0.0.1:11434/api/chat', 'ollama')).toBe('http://127.0.0.1:11434/api/chat');
+        expect(resolveWireUrl('http://127.0.0.1:8080/v1/models', 'llamacpp')).toBe('http://127.0.0.1:8080/v1/models');
+      } finally {
+        (globalThis as any).window = originalWindow;
+        if (originalUserAgent !== undefined) {
+          try {
+            Object.defineProperty(globalThis.navigator, 'userAgent', {
+              value: originalUserAgent,
+              configurable: true,
+            });
+          } catch {}
+        }
       }
     });
   });

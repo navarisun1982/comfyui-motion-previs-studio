@@ -162,15 +162,21 @@ function createWindow() {
       fs.watch(distDir, { recursive: true }, () => {
         if (reloadTimeout) clearTimeout(reloadTimeout);
         reloadTimeout = setTimeout(() => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
+          if (mainWindow && !mainWindow.isDestroyed() && fs.existsSync(prodPath)) {
             mainWindow.webContents.reloadIgnoringCache();
           }
-        }, 600);
+        }, 1200);
       });
     } catch {
       // ignore
     }
   }
+
+  mainWindow.webContents.on('did-fail-load', (_event, _errorCode, _errorDescription, validatedURL) => {
+    if (validatedURL && validatedURL.startsWith(devUrl) && fs.existsSync(prodPath)) {
+      mainWindow.loadFile(prodPath);
+    }
+  });
 
   checkDevServer().then((isDevRunning) => {
     if (isDevRunning) {
@@ -197,11 +203,30 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // Tighten CORS header injection strictly to local ComfyUI endpoints
+  const localDaemonUrls = [
+    'http://127.0.0.1:8188/*',
+    'http://localhost:8188/*',
+    'http://127.0.0.1:11434/*',
+    'http://localhost:11434/*',
+    'http://127.0.0.1:8080/*',
+    'http://localhost:8080/*',
+  ];
+
+  // Prevent sending 'null' or 'file://' origin to local daemon services like Ollama (which rejects null origin with HTTP 403)
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: localDaemonUrls },
+    (details, callback) => {
+      const headers = { ...details.requestHeaders };
+      if (!headers['Origin'] || headers['Origin'] === 'null' || headers['Origin'].startsWith('file:')) {
+        headers['Origin'] = 'http://127.0.0.1';
+      }
+      callback({ requestHeaders: headers });
+    }
+  );
+
+  // Inject CORS headers for local previs & reasoning daemons (ComfyUI, Ollama, llama.cpp)
   session.defaultSession.webRequest.onHeadersReceived(
-    {
-      urls: ['http://127.0.0.1:8188/*', 'http://localhost:8188/*'],
-    },
+    { urls: localDaemonUrls },
     (details, callback) => {
       callback({
         responseHeaders: {

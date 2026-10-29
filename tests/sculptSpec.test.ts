@@ -293,4 +293,156 @@ describe('Stage factory uses reasoned sculpts', () => {
     expect(countMeshes(mesh)).toBeGreaterThanOrEqual(10);
     expect(typeof mesh.userData.update).toBe('function');
   });
+
+  it('resolves curated Tribal Archer Female with 25 parts, clothing, quiver and bow', () => {
+    const archer = lookupSculptSpec('tribal archer female');
+    expect(archer).toBeDefined();
+    expect(archer?.name).toBe('Tribal Archer Female');
+    expect(archer?.parts.length).toBeGreaterThanOrEqual(25);
+    expect(archer?.rig).toBe('humanoid');
+
+    const byAlias = lookupSculptSpec('tribal_archer_female');
+    expect(byAlias).toBeDefined();
+    expect(byAlias?.name).toBe('Tribal Archer Female');
+
+    const kit = buildSculpt(archer!);
+    expect(countMeshes(kit.group)).toBeGreaterThanOrEqual(25);
+    expect(kit.group.getObjectByName('quiver')).toBeDefined();
+    expect(kit.group.getObjectByName('recurve_bow')).toBeDefined();
+    expect(kit.group.getObjectByName('head')).toBeDefined();
+  });
 });
+
+describe('Envelope recipe format compatibility', () => {
+  it('parses envelope format with direct part colors and mirror flags', () => {
+    const envelopeData = {
+      recipe: {
+        version: 1,
+        name: 'Clay Scout',
+        heightMeters: 1.8,
+        parts: [
+          { id: 'torso', shape: 'blob', size: [0.4, 0.5, 0.25], position: [0, 1.2, 0], color: '#3a6b8c', roundness: 0.5 },
+          { id: 'shoulder_pad', parent: 'torso', shape: 'blob', size: [0.15, 0.12, 0.15], position: [0.25, 1.45, 0], color: '#8b4513', mirror: true },
+        ],
+      },
+    };
+
+    const spec = partGraphToSculptSpec(envelopeData);
+    expect(spec.version).toBe(2);
+    expect(spec.name).toBe('Clay Scout');
+    expect(spec.parts[0].color).toBe('#3a6b8c');
+    expect(spec.parts[1].mirrorX).toBe(true);
+
+    const sanitized = sanitizeSculptSpec(spec);
+    // Materials auto-synthesized from part colors
+    expect(sanitized.materials.length).toBeGreaterThanOrEqual(2);
+    expect(sanitized.materials.some((m) => m.color === '#3a6b8c')).toBe(true);
+    expect(sanitized.materials.some((m) => m.color === '#8b4513')).toBe(true);
+
+    const kit = buildSculpt(sanitized);
+    // 1 torso + 2 shoulder pads (mirrored) = 3 meshes
+    expect(countMeshes(kit.group)).toBe(3);
+  });
+
+  it('never discards authored parts even if route is biped-walker', () => {
+    const hybrid = sanitizeSculptSpec({
+      name: 'Custom Archer',
+      route: 'biped-walker',
+      heightMeters: 1.75,
+      parts: [
+        { id: 'tunic', shape: 'blob', size: [0.4, 0.5, 0.25], position: [0, 1.2, 0], color: '#ded8c8' },
+        { id: 'arm', shape: 'blob', size: [0.1, 0.4, 0.1], position: [0.25, 1.1, 0], color: '#e8c4a2', mirrorX: true },
+      ],
+    });
+
+    const kit = buildSculpt(hybrid);
+    // Authored parts (1 tunic + 2 arms) should be built, NOT the 20-box generic walker
+    expect(kit.group.getObjectByName('tunic')).toBeDefined();
+    expect(kit.group.getObjectByName('arm')).toBeDefined();
+    expect(kit.group.getObjectByName('arm_mirror')).toBeDefined();
+    expect(countMeshes(kit.group)).toBe(3);
+  });
+
+  it('deforms superellipsoid with directional vertical height tapering', () => {
+    const taperedTop = geometryForPart(part({ shape: 'blob', size: [1, 2, 1], taper: 0.8, roundness: 0.5 }));
+    const taperedBottom = geometryForPart(part({ shape: 'blob', size: [1, 2, 1], taper: -0.8, roundness: 0.5 }));
+
+    const posTop = taperedTop.getAttribute('position');
+    const posBottom = taperedBottom.getAttribute('position');
+
+    // Find radius near the top (y ~ +0.8) vs bottom (y ~ -0.8)
+    let topRadiusAtTop = 0, topRadiusAtBottom = 0;
+    for (let i = 0; i < posTop.count; i++) {
+      const y = posTop.getY(i);
+      const r = Math.hypot(posTop.getX(i), posTop.getZ(i));
+      if (y > 0.7) topRadiusAtTop = Math.max(topRadiusAtTop, r);
+      if (y < -0.7) topRadiusAtBottom = Math.max(topRadiusAtBottom, r);
+    }
+
+    // Positive taper narrows the top
+    expect(topRadiusAtTop).toBeLessThan(topRadiusAtBottom);
+
+    let bottomRadiusAtTop = 0, bottomRadiusAtBottom = 0;
+    for (let i = 0; i < posBottom.count; i++) {
+      const y = posBottom.getY(i);
+      const r = Math.hypot(posBottom.getX(i), posBottom.getZ(i));
+      if (y > 0.7) bottomRadiusAtTop = Math.max(bottomRadiusAtTop, r);
+      if (y < -0.7) bottomRadiusAtBottom = Math.max(bottomRadiusAtBottom, r);
+    }
+
+    // Negative taper narrows the bottom
+    expect(bottomRadiusAtBottom).toBeLessThan(bottomRadiusAtTop);
+  });
+
+  it('applies CSG boolean cutter subtraction to carve openings without drawing cutter', () => {
+    const wallWithArch = sanitizeSculptSpec({
+      name: 'Arch Wall',
+      route: 'author',
+      heightMeters: 2,
+      parts: [
+        { id: 'wall', shape: 'blob', size: [2, 2, 0.4], position: [0, 1, 0], roundness: 0.1 },
+        { id: 'doorway_cut', parent: 'wall', op: 'subtract', shape: 'cylinder', size: [0.8, 1.6, 0.6], position: [0, 0.8, 0] },
+      ],
+    });
+
+    const kit = buildSculpt(wallWithArch);
+    // Cutter doorway_cut must NOT be added to scene graph as a drawn mesh
+    expect(kit.group.getObjectByName('doorway_cut')).toBeUndefined();
+    // Wall must be drawn
+    const wallPivot = kit.group.getObjectByName('wall');
+    expect(wallPivot).toBeDefined();
+    const wallMesh = wallPivot?.children.find((c) => (c as THREE.Mesh).isMesh) as THREE.Mesh;
+    expect(wallMesh).toBeDefined();
+    expect(wallMesh.geometry).toBeDefined();
+  });
+
+  it('applies linear color gradient to vertices', () => {
+    const ombreRobes = sanitizeSculptSpec({
+      name: 'Ombre Robe',
+      route: 'author',
+      heightMeters: 1.5,
+      parts: [
+        {
+          id: 'skirt',
+          shape: 'blob',
+          size: [0.6, 1.2, 0.6],
+          position: [0, 0.6, 0],
+          color: '#ffffff',
+          gradient: { color: '#000000', axis: 'y', from: 0, to: 1 },
+        },
+      ],
+    });
+
+    const kit = buildSculpt(ombreRobes);
+    const skirtPivot = kit.group.getObjectByName('skirt');
+    expect(skirtPivot).toBeDefined();
+    const skirtMesh = skirtPivot?.children.find((c) => (c as THREE.Mesh).isMesh) as THREE.Mesh;
+    expect(skirtMesh).toBeDefined();
+    const colorAttr = skirtMesh.geometry.getAttribute('color');
+    expect(colorAttr).toBeDefined();
+    expect(colorAttr.count).toBeGreaterThan(0);
+    expect((skirtMesh.material as any).vertexColors).toBe(true);
+  });
+});
+
+

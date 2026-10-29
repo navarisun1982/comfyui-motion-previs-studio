@@ -3,7 +3,6 @@ import { EngineId, GenerationMode, QualityProfile } from './templateTypes';
 import { defaultJobRunner, ActiveJobHandle, ExecuteJobOptions } from './jobRunner';
 import { DirectorialSteeringPatch } from './revisionTypes';
 import { useHistoryStore } from '../stores/useHistoryStore';
-import { useComfyStore } from '../stores/useComfyStore';
 import { logger } from '../stores/useLogStore';
 
 export interface QueueItem {
@@ -260,8 +259,6 @@ export class GenerationQueueManager {
     nextItem.currentNodeTitle = 'Initiating ComfyUI pipeline...';
     this.notify();
 
-    const comfyStore = useComfyStore.getState();
-
     try {
       const resolvedShot: ShotSpec = nextItem.shotSpec
         ? { ...nextItem.shotSpec, seed: nextItem.seed, version: nextItem.takeNumber }
@@ -290,7 +287,6 @@ export class GenerationQueueManager {
         onProgress: (pct, nodeTitle) => {
           nextItem.progress = pct;
           nextItem.currentNodeTitle = nodeTitle;
-          comfyStore.updateJobProgress(pct, nodeTitle);
           this.notify();
         },
         onSuccess: (revisionId, videoUrl, filename) => {
@@ -300,7 +296,6 @@ export class GenerationQueueManager {
           nextItem.outputVideoUrl = videoUrl;
           nextItem.outputFilename = filename;
           nextItem.completedAt = Date.now();
-          comfyStore.setJobCompleted(videoUrl, filename);
 
           // If this take was steered from a previous take, record lineage on the created revision
           if (nextItem.steeredFromTakeId || nextItem.steeringPatch) {
@@ -328,7 +323,6 @@ export class GenerationQueueManager {
           nextItem.status = 'failed';
           nextItem.error = err.message;
           nextItem.completedAt = Date.now();
-          comfyStore.setJobFailed(err.message);
           this.activeHandle = null;
           this.isProcessing = false;
           this.notify();
@@ -352,7 +346,6 @@ export class GenerationQueueManager {
       nextItem.status = 'failed';
       nextItem.error = msg;
       nextItem.completedAt = Date.now();
-      comfyStore.setJobFailed(msg);
       this.activeHandle = null;
       this.isProcessing = false;
       this.notify();
