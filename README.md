@@ -6,6 +6,8 @@
 
 **ComfyUI Motion Previs Studio** is a real-time **3D Motion Previsualization & Camera Blocking Studio** designed for filmmakers, VFX supervisors, and AI video directors. Instead of guessing text prompts for camera movement, character blocking, and lens framing, you direct actors, cameras, sets, and lights inside an interactive 3D soundstage — and export deterministic **24fps MP4 previs**, **OpenPose skeletal passes**, **Depth maps**, **4×4 camera matrices**, and **ComfyUI workflow bundles** for **LTX-2.5 (22B Distilled INT8)**, **MiniMax H3**, **Seedance**, and **any video model that accepts video reference**.
 
+- 🧠 **Local Reasoning & Vision Models + Cloud AI**: Work **100% locally** with **Ollama** / **LM Studio** reasoning & vision models (e.g., `Qwen2.5-VL`, `LLaVA`, `Llama-3.2-Vision`, `DeepSeek-R1`, `Qwen-2.5-Coder`) — or connect **Google Gemini** and **OpenAI** directly from the in-app Settings panel for AI 3D sculpting, image-to-3D vision analysis, natural-language character acting, and directorial prompt polishing.
+
 ---
 
 ## 📸 Visual Feature Tour & Screenshots
@@ -21,10 +23,10 @@
 ### 2. 3D Character Control Panel (2026 Inspector Architecture)
 ![3D Character Control Panel](docs/screenshots/02-character-control-panel.png)
 - **Ready-Made Motion Studio**: One-click procedural biomechanical animations across **Move / Jump** (`Walk Forward`, `Run / Sprint`, `Jump / Leap`, `Sneak / Stealth`, `Back Up / Retreat`), **Fight / Action** (`Sword Slash`, `Dodge / Roll`, `Martial Combo`, `Aim & Fire`), and **Act / Emote** (`Wave / Greet`, `Heroic Taunt`, `Look Around`, `Victory Cheer`, `Talk / Dialogue`).
-- **Auto / Move / Spot Execution Modes**: Automatically calculate floor travel paths or lock actions in-place with automatic character heading alignment and foot grounding.
-- **Natural-Language Acting Director**: Type stage directions (e.g., `"walks slowly from 30 to 48 then waves"`) to synthesize multi-cue keyframe trajectories and skeletal poses.
-- **Appearance, Procedural 3D & Rigging**:
-  - Edit 3D look by text prompt or attach custom `.GLB` 3D assets.
+- **Auto / Move / Spot Execution Modes & Action Cycles (`1x`–`5x`)**: Automatically calculate floor travel paths or lock actions in-place, define exact **Action Cycles (`1x`–`5x`)** across the shot duration so gestures play naturally without robotic looping, and dial in **Facing Direction (`Body Yaw`)** (`Face Cam`, `3/4 Left`, `Profile`, `OTS Back`).
+- **Natural-Language Acting Director**: Type stage directions (e.g., `"walks slowly from 30 to 48 then waves"`) to synthesize multi-cue keyframe trajectories and skeletal poses using local or cloud reasoning models.
+- **Appearance, Procedural 3D & Vision-to-3D Rigging**:
+  - Edit 3D look by text prompt, generate 3D props from reference images using **Vision models**, or attach custom `.GLB` 3D assets.
   - Interactive **FK/IK Bone Manipulation** right in the 3D viewport (`Pose Bones` mode) + **Socket to Character Bone** (attach props like swords, lanterns, or relics directly to `Right Hand`, `Left Hand`, `Head`, or `Spine`).
 
 ### 3. Camera & Lens Optics Deck — Close-Ups, OTS & Dynamic Trajectories
@@ -78,9 +80,16 @@ Or if you already ran `npm run build`:
 npm run start:desktop
 ```
 
-### 5. Optional: Configure AI Reasoner & ComfyUI
-- Click the **Settings / AI Reasoner** button in the top header bar (or create a `.env` file from `.env.example`) to configure an optional LLM provider (OpenAI, Gemini, Anthropic, or local Ollama/OpenAI-compatible endpoint) for natural-language 3D sculpting and scene decomposition.
-- All motion presets, 3D character rigging, camera optics, lighting, and offline MP4/OpenPose/Depth rendering work **out of the box with zero API keys required**.
+### 5. Configure AI Reasoning & Vision Models (Local Ollama, Google Gemini, OpenAI)
+Click the **Settings (`⚙ Settings • Ollama / Gemini / OpenAI`)** button in the top-right header bar to switch between local and cloud AI providers at any time:
+
+| Provider Mode | Supported Models | Capabilities Unlocked |
+| :--- | :--- | :--- |
+| **Local Reasoning & Vision (`Ollama` / Local Endpoint)** | `qwen2.5-vl`, `llava`, `llama3.2-vision`, `deepseek-r1`, `qwen2.5`, `llama3.3` (`http://localhost:11434`) | **100% local & private** text-to-3D procedural sculpting, **Vision image-to-3D** reference parsing, natural-language character choreography, set synthesis, and prompt polishing. |
+| **Google Gemini** | `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash` | High-speed multimodal vision-to-3D object decomposition, complex spatial stage blocking, and engine-specific prompt directing. |
+| **OpenAI** | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, `o3-mini` | Multimodal vision reference analysis, structured 3D part-graph reasoning, and cinematic prompt compilation. |
+
+- All motion presets, Action Cycles (`1x`–`5x`), 3D character rigging, camera optics, lighting, and offline MP4/OpenPose/Depth rendering also work **out of the box with zero API keys required**.
 
 ---
 
