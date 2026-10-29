@@ -460,7 +460,7 @@ export class ComfyClient {
     }
   }
 
-  async fetchLatestCompletedOutput(maxItems = 10): Promise<{
+  async fetchLatestCompletedOutput(maxItems = 15): Promise<{
     promptId: string;
     filename: string;
     videoUrl: string;
@@ -473,13 +473,24 @@ export class ComfyClient {
       const res = await fetch(`${this.baseUrl}/history?max_items=${maxItems}`);
       if (!res.ok) return null;
       const data = (await res.json()) as Record<string, Record<string, unknown>>;
-      const entries = Object.entries(data).reverse();
-      for (const [promptId, item] of entries) {
-        const outputs = item.outputs as Record<string, Record<string, unknown>> | undefined;
-        if (!outputs) continue;
-        for (const nodeOut of Object.values(outputs)) {
-          const v = this.extractVideoOutput(nodeOut);
-          if (v) {
+      const entries = Object.entries(data).sort((a, b) => {
+        const qa = Array.isArray(a[1]?.prompt) ? Number(a[1].prompt[0] ?? 0) : 0;
+        const qb = Array.isArray(b[1]?.prompt) ? Number(b[1].prompt[0] ?? 0) : 0;
+        return qb - qa;
+      });
+
+      // Pass 1: Prefer studio renders (Node 145 or cmpvs_ / mmh3_ prefix)
+      for (const preferStudioOnly of [true, false]) {
+        for (const [promptId, item] of entries) {
+          const outputs = item.outputs as Record<string, Record<string, unknown>> | undefined;
+          if (!outputs) continue;
+          for (const [nodeId, nodeOut] of Object.entries(outputs)) {
+            const v = this.extractVideoOutput(nodeOut);
+            if (!v) continue;
+            const isStudioRender =
+              nodeId === '145' || v.filename.startsWith('cmpvs_') || v.filename.startsWith('mmh3_');
+            if (preferStudioOnly && !isStudioRender) continue;
+
             const gifMeta = Array.isArray(nodeOut.gifs) && nodeOut.gifs[0] ? (nodeOut.gifs[0] as Record<string, unknown>) : null;
             const metadata = gifMeta?.metadata as Record<string, number> | undefined;
             return {

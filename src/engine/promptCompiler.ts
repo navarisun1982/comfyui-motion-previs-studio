@@ -144,6 +144,18 @@ export function buildTemporalTimeline(shot: ShotSpec): TemporalPromptBeat[] {
     return `Camera smoothly decelerates, settling into the final composition and locking focus`;
   };
 
+  // Helper to convert 0-100 stage coordinates into natural screen-space descriptions (avoids raw % numbers that diffusion models render as text)
+  const describeStagePosition = (pos: { x: number; y: number }): string => {
+    const horiz = pos.x < 40 ? 'screen-left' : pos.x > 60 ? 'screen-right' : 'center-frame';
+    const depth = pos.y < 42 ? 'background' : pos.y > 62 ? 'foreground' : 'midground';
+    return `${horiz} ${depth}`;
+  };
+
+  const cleanCueText = (raw?: string): string => {
+    if (!raw) return '';
+    return raw.replace(/^[^\w\s<>()-]+\s*/u, '').trim().toLowerCase();
+  };
+
   // Helper for actor phase
   const getActorPhase = (phase: 'open' | 'mid' | 'close') => {
     if (!shot.actors || shot.actors.length === 0) {
@@ -154,35 +166,40 @@ export function buildTemporalTimeline(shot: ShotSpec): TemporalPromptBeat[] {
       const startPos = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
       const endPos = actor.trajectory?.endPosition ?? { x: 50, y: 50 };
       const hasDisplacement = Math.abs(startPos.x - endPos.x) > 3 || Math.abs(startPos.y - endPos.y) > 3;
+      const startZone = describeStagePosition(startPos);
+      const endZone = describeStagePosition(endPos);
 
       const kfs = (actor.trajectory?.keyframes || []).filter((k) => k.posePreset || k.cueLabel);
       const openCue = kfs.find((k) => k.time <= t1);
       const midCue = kfs.find((k) => k.time > t1 && k.time <= t2);
       const closeCue = kfs.find((k) => k.time > t2);
 
-      const openPoseStr = openCue ? ` in ${openCue.cueLabel || `${openCue.posePreset?.replace(/-/g, ' ')} pose`}` : '';
-      const midPoseStr = midCue ? `, transitioning posture into ${midCue.cueLabel || `${midCue.posePreset?.replace(/-/g, ' ')} pose`}` : '';
-      const closePoseStr = closeCue ? `, settling into ${closeCue.cueLabel || `${closeCue.posePreset?.replace(/-/g, ' ')} pose`}` : '';
+      const openPoseStr = openCue ? ` (${cleanCueText(openCue.cueLabel) || `${openCue.posePreset?.replace(/-/g, ' ')} pose`})` : '';
+      const midPoseStr = midCue ? `, transitioning into ${cleanCueText(midCue.cueLabel) || `${midCue.posePreset?.replace(/-/g, ' ')} pose`}` : '';
+      const closePoseStr = closeCue ? `, settling into ${cleanCueText(closeCue.cueLabel) || `${closeCue.posePreset?.replace(/-/g, ' ')} pose`}` : '';
 
       const socketStr = actor.socketToBone ? ` (attached to bone ${actor.socketToBone.boneName})` : '';
 
       if (phase === 'open') {
         if (actStart > t1) {
-          return `${actor.name}${socketStr} holds initial stance${openPoseStr} at stage coordinates (${startPos.x}%, ${startPos.y}%), awaiting action cue`;
+          return `${actor.name}${socketStr} holds initial position in the ${startZone}${openPoseStr}`;
         }
-        return `${actor.name}${socketStr} initiates action${openPoseStr}: ${actor.actionDescription} from mark (${startPos.x}%, ${startPos.y}%)`;
+        if (hasDisplacement) {
+          return `${actor.name}${socketStr} begins in the ${startZone} and initiates movement${openPoseStr}: ${actor.actionDescription}`;
+        }
+        return `${actor.name}${socketStr} remains positioned in the ${startZone}: ${actor.actionDescription}`;
       }
       if (phase === 'mid') {
         if (hasDisplacement) {
-          return `${actor.name}${socketStr} advances in continuous physical movement across the stage toward (${endPos.x}%, ${endPos.y}%)${midPoseStr}, physical dynamics and attire shifting with locomotion`;
+          return `${actor.name}${socketStr} advances continuously from the ${startZone} toward the ${endZone}${midPoseStr}, natural cloth and body dynamics shifting with locomotion`;
         }
-        return `${actor.name}${socketStr} performs active physical gestures: ${actor.actionDescription}${midPoseStr}`;
+        return `${actor.name}${socketStr} stays anchored in the ${startZone} (${actor.actionDescription})`;
       }
       // close
       if (hasDisplacement) {
-        return `${actor.name}${socketStr} reaches target mark (${endPos.x}%, ${endPos.y}%)${closePoseStr}, settling posture and holding eyeline`;
+        return `${actor.name}${socketStr} arrives in the ${endZone}${closePoseStr}, settling posture and holding eyeline toward the camera`;
       }
-      return `${actor.name}${socketStr} resolves action${closePoseStr}, holding steady presence in final frame`;
+      return `${actor.name}${socketStr} holds steady presence in the ${startZone} through the final frame`;
     }).join('; ');
   };
 
@@ -298,22 +315,42 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
   // Build up to 3 actor subject definitions (<Subject 1..3>) + <Subject 4> environment
   const subjectDefLines: string[] = [];
   const retentionLines: string[] = [];
+  const proxySpatialAnchors: string[] = [];
 
   for (let i = 0; i < 3; i++) {
     const actor = shot.actors[i];
     const subjIdx = i + 1;
     if (actor) {
       const hex = (actor.color || defaultPalette[i]).toUpperCase();
+      const startPos = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
+      const horizZone = startPos.x < 40 ? 'screen-left' : startPos.x > 60 ? 'screen-right' : 'center-frame';
+      const isHuman =
+        actor.kind === 'character' ||
+        actor.kind === 'human' ||
+        /agent|man|woman|person|operative|detective|guard|hero|runner|character/i.test(`${actor.name} ${actor.token}`);
+
       const scale = actor.scale ?? 1.0;
       const scalePrefix =
         scale >= 2.0 ? 'towering, massive ' : scale >= 1.4 ? 'large, prominent ' : scale <= 0.4 ? 'miniature, tiny ' : scale <= 0.7 ? 'small ' : '';
       const socketNote = actor.socketToBone ? ` (carrying prop attached to bone ${actor.socketToBone.boneName})` : '';
-      subjectDefLines.push(
-        `<Subject ${subjIdx}> is ${actor.name}, defined by <picture ${subjIdx}>: ${scalePrefix}${actor.token}${socketNote}, performing ${actor.actionDescription}. Preserve the same identity across all angles. Replaces the ${hex} previz figure; the color is an identification cue, not surface skin/paint.`
-      );
-      retentionLines.push(
-        `<Subject ${subjIdx}> (appears in [Shot 1]): ${actor.kind === 'character' ? 'fully_preserved - facial identity, hair, and wardrobe from <picture ' + subjIdx + '>' : 'attribute_transfer - retain previz spatial role and trajectory from <picture ' + subjIdx + '>'}.`
-      );
+
+      proxySpatialAnchors.push(`<Subject ${subjIdx}> (${actor.name}) replaces the ${hex} proxy in the ${horizZone}`);
+
+      if (isHuman) {
+        subjectDefLines.push(
+          `<Subject ${subjIdx}> is ${actor.name}, defined by <picture ${subjIdx}>: ${scalePrefix}${actor.token}${socketNote}, ${actor.actionDescription}. Preserve the exact facial identity, hair, and wardrobe across all angles. Replaces the ${hex} 3D mannequin figure in the ${horizZone} of <Video 1>; the ${hex} color is an identification cue, not skin or clothing color.`
+        );
+        retentionLines.push(
+          `<Subject ${subjIdx}> (appears in [Shot 1]): fully_preserved - retain facial identity, hair, and wardrobe from <picture ${subjIdx}> while following the exact ${horizZone} trajectory of the ${hex} figure in <Video 1>.`
+        );
+      } else {
+        subjectDefLines.push(
+          `<Subject ${subjIdx}> is ${actor.name}, defined by <picture ${subjIdx}>: ${scalePrefix}${actor.token} positioned on the ${horizZone} (${actor.actionDescription}). Replaces the ${hex} 3D proxy object on the ${horizZone} of <Video 1>; keep it strictly on the ${horizZone} as shown in <Video 1>, and replace the ${hex} proxy tint with realistic materials from <picture ${subjIdx}>.`
+        );
+        retentionLines.push(
+          `<Subject ${subjIdx}> (appears in [Shot 1]): attribute_transfer - strictly retain the ${horizZone} position, scale, and orientation from <Video 1>, rendered with the realistic appearance of <picture ${subjIdx}>.`
+        );
+      }
     } else {
       subjectDefLines.push(
         `<Subject ${subjIdx}> is an auxiliary scene element defined by <picture ${subjIdx}>, preserving natural material fidelity within the shot.`
@@ -326,17 +363,17 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
 
   const envDesc = `${shot.environment?.promptDescription || shot.sceneDescription.trim()}${envText ? ` (${envText})` : ''}`;
   subjectDefLines.push(
-    `<Subject 4> is the [Scene Environment]: ${envDesc}, replacing the dark-slate #334155 previz architecture blocks presented by <picture 4>, with rich material textures and atmospheric depth.`
+    `<Subject 4> is the [Scene Environment]: ${envDesc}, replacing the dark-slate #334155 previz architecture blocks presented by <picture 4>, while preserving the open spatial width and ground plane layout of <Video 1>.`
   );
   retentionLines.push(
-    `<Subject 4> (appears in [Shot 1]): attribute_transfer - preserve spatial layout and architectural relationships while replacing proxy geometry with realistic architecture from <picture 4>.`
+    `<Subject 4> (appears in [Shot 1]): attribute_transfer - preserve the wide spatial layout and ground-plane relationships of <Video 1> while applying the realistic surface textures and lighting atmosphere from <picture 4>.`
   );
 
   subjectDefLines.push(
-    `<Video 1> is the supplied 3D previz reference video. Reference only the animated 3D camera movement, spatial layout, and character blocking. Exclude any proxy wireframe or helper artifacts.`
+    `<Video 1> is the supplied 3D previz reference video. Reference the animated 3D camera movement, perspective, and exact left-to-right spatial blocking (${proxySpatialAnchors.join('; ')}). Exclude any flat proxy shading or helper artifacts.`
   );
   retentionLines.push(
-    `<Video 1> ([Shot 1] motion and blocking reference): partially_preserved - retain the continuous 3D camera trajectory, focal framing, and subject blocking across the ${shot.durationSeconds.toFixed(1)}-second duration.`
+    `<Video 1> ([Shot 1] motion and blocking reference): partially_preserved - strictly retain the continuous 3D camera trajectory, left-to-right subject arrangement, and locomotion timing across the ${shot.durationSeconds.toFixed(1)}-second duration.`
   );
 
   // Subject micro-acting summary for metadata

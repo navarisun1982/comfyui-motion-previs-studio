@@ -287,13 +287,22 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       }
 
       // 2. Queue job via JobRunner using minimax_h3_ref2va (mode: 'control')
+      // Always ensure a valid MiniMax H3 Ref2VA multi-subject prompt is bound to Node 138
+      const minimaxCompiled = getAdapter('minimax-h3').compilePrompt(shot);
+      const effectiveMinimaxPrompt =
+        activeEngineTab === 'minimax-h3' &&
+        displayPositivePrompt.includes('subject_definitions:') &&
+        !displayPositivePrompt.includes('from mark (')
+          ? displayPositivePrompt
+          : minimaxCompiled.positivePrompt;
+
       setComfyStatusText('Step 3/3: Binding minimax_h3_ref2va (SolAttn + 8-Step Turbo LoRA) & queuing in ComfyUI...');
       await defaultJobRunner.run({
         shot,
         engine: 'minimax-h3',
         mode: 'control',
         profile: selectedResolution === '1080p' ? 'final' : 'draft',
-        prompt: displayPositivePrompt,
+        prompt: effectiveMinimaxPrompt,
         negative: displayNegativePrompt,
         seed: Math.max(0, Math.floor(comfySeed)),
         promptSource: 'compiled',
@@ -355,9 +364,15 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   // Compile deterministic fallback for active tab
   const activeAdapter = getAdapter(activeEngineTab);
   const deterministicPrompt = activeAdapter.compilePrompt(shot);
-  const displayPositivePrompt = compiledPrompt?.positivePrompt || deterministicPrompt.positivePrompt;
+  const isCompiledMatchingEngine =
+    compiledPrompt?.positivePrompt &&
+    !compiledPrompt.positivePrompt.includes('from mark (') &&
+    (activeEngineTab !== 'minimax-h3' || compiledPrompt.positivePrompt.includes('subject_definitions:'));
+  const displayPositivePrompt = isCompiledMatchingEngine
+    ? compiledPrompt.positivePrompt
+    : deterministicPrompt.positivePrompt;
   const displayNegativePrompt = shot.negativePrompt ?? compiledPrompt?.negativePrompt ?? deterministicPrompt.negativePrompt ?? '';
-  const temporalBeats = compiledPrompt?.temporalBeats || deterministicPrompt.temporalBeats || [];
+  const temporalBeats = deterministicPrompt.temporalBeats || compiledPrompt?.temporalBeats || [];
   const poseBundle = exportCameraPoseBundle(shot);
 
   const handleSelectEngine = (engineId: 'ltx-2.5' | 'minimax-h3' | 'seedance') => {
@@ -944,7 +959,11 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                     : mappedActor
                     ? `${mappedActor.kind === 'human' || mappedActor.kind === 'character' ? '👤 Character' : `📦 ${mappedActor.kind || 'Object'}`}: ${mappedActor.name}`
                     : `🖼️ Custom Reference ${idx + 1}`;
-                const thumbUrl = refImageThumbs[idx];
+                const thumbUrl =
+                  refImageThumbs[idx] ||
+                  (comfyOnline && refImageNames[idx]?.trim()
+                    ? defaultComfyClient.getViewUrl(refImageNames[idx].trim(), '', 'input')
+                    : null);
 
                 return (
                   <div
