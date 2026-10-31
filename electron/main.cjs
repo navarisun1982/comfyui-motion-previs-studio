@@ -1,9 +1,29 @@
-const { app, BrowserWindow, Menu, nativeTheme, shell, session, screen } = require('electron');
+const { app, BrowserWindow, Menu, nativeTheme, shell, session, screen, nativeImage } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
 
 const APP_TITLE = 'ComfyUI Motion Previs Studio';
+
+// Set a unique Windows AppUserModelID so Windows 11 Taskbar displays our custom .ico
+// instead of grouping under the generic electron.exe blue atom icon.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.comfyui.motion-previs-studio');
+}
+
+function resolveAppIconPath() {
+  const candidates = [
+    path.join(__dirname, '../public/logo.ico'),
+    path.join(__dirname, '../dist/logo.ico'),
+    path.join(__dirname, '../Assets/logo.ico'),
+    path.join(__dirname, '../public/logo.png'),
+    path.join(__dirname, '../Assets/logo.png'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return undefined;
+}
 
 // Pin the userData directory to the pre-rename folder. Electron derives it from
 // package.json productName/name, so renaming the package would otherwise start
@@ -200,6 +220,8 @@ nativeTheme.themeSource = 'dark';
 
 function createWindow() {
   const windowState = loadWindowState();
+  const iconPath = resolveAppIconPath();
+  const appIcon = iconPath ? nativeImage.createFromPath(iconPath) : undefined;
 
   mainWindow = new BrowserWindow({
     width: windowState.width,
@@ -209,6 +231,7 @@ function createWindow() {
     minWidth: 1024,
     minHeight: 680,
     title: APP_TITLE,
+    icon: appIcon || iconPath,
     backgroundColor: '#08090C',
     autoHideMenuBar: true,
     show: false,
@@ -218,6 +241,10 @@ function createWindow() {
       webSecurity: false,
     },
   });
+
+  if (appIcon && !appIcon.isEmpty()) {
+    mainWindow.setIcon(appIcon);
+  }
 
   if (windowState.isMaximized) {
     mainWindow.maximize();
@@ -363,7 +390,7 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       startLocalProxyServer();
-  createWindow();
+      createWindow();
     }
   });
 });

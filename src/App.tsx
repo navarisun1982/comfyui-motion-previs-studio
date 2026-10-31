@@ -14,7 +14,6 @@ import {
   subscribeAppUpdateStatus,
 } from './services/appUpdater';
 import {
-  Clapperboard,
   GitCompare,
   Sparkles,
   Settings,
@@ -202,12 +201,14 @@ export default function App() {
           </button>
 
           <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-[#6658F5] to-[#4A3DE0] text-white font-black shadow-[0_2px_8px_rgba(102,88,245,0.45)] border border-[#8E84FF]/40">
-              <Clapperboard className="h-4 w-4" />
-            </div>
+            <img
+              src="./logo.png"
+              alt="ComfyUI Motion Previs Studio"
+              className="h-7 w-7 object-contain drop-shadow-[0_2px_8px_rgba(217,70,239,0.45)]"
+            />
             <div className="flex items-center gap-1.5">
               <span className="font-display font-bold text-xs tracking-wide text-[#F0F3FA]">
-                <span className="text-[#18B8D8]">ComfyUI</span> Motion Previs Studio
+                <span className="text-[#E879F9]">ComfyUI</span> Motion Previs Studio
               </span>
             </div>
           </div>

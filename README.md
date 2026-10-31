@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/screenshots/github-banner.png" alt="ComfyUI Motion Previs Studio — Previsualize 3D Scenes for AI Filmmaking" width="100%" />
+</p>
+
 # ComfyUI Motion Previs Studio — Cinematic Command Center 2026
 
 > **"Direct the Shot, Not the Prompt."**  
