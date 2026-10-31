@@ -583,7 +583,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
               )}
             </div>
 
-            {isMotionSectionOpen && (
+            {(isMotionSectionOpen || activeSubTab === 'motion') && (
               <div className="pt-0.5">
                 {/* Step 1: Connected Category Folder Tabs (Humanoid) */}
                 {isHumanoid && (
@@ -1034,7 +1034,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
               </div>
             </div>
 
-            {isTimingSectionOpen && (
+            {(isTimingSectionOpen || activeSubTab === 'timing') && (
               <>
                 {/* Row 1.5: Motion Action Cycles Along Duration (1x – 6x) */}
                 <div className="flex items-center justify-between gap-2 rounded-lg bg-[#111622] border border-white/[0.06] px-2.5 py-1.5">
@@ -1216,7 +1216,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
               </span>
             </button>
 
-            {isFineTuneOpen && (
+            {(isFineTuneOpen || activeSubTab === 'look' || activeSubTab === 'rig') && (
               <div className="p-2.5 space-y-2.5 border-t border-white/[0.06]">
                 {/* SUB-TAB 3: LOOK, .GLB & COLOR SWATCHES */}
                 <div className={activeSubTab === 'look' || activeSubTab === 'all' ? 'space-y-2.5' : 'hidden'}>

@@ -175,5 +175,41 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     fireEvent.click(getByText('Attach'));
     expect(props.onSocketActorToBone).toHaveBeenCalledWith('actor-test-1', 'actor-test-2', 'RightHand');
   });
+
+  it('switches cleanly across all 5 Zero-Scroll sub-tabs (Motion, Timing, Look/Ref, Rig/XYZ, All) with 100% feature parity', () => {
+    const props = createProps({
+      isFineTuneOpen: false,
+      isMotionSectionOpen: false,
+      isTimingSectionOpen: false,
+    });
+    const { getByRole, getByText } = render(<CharacterControlCard {...props} />);
+
+    // Default tab is Motion — Ready-Made Motions are visible even if isMotionSectionOpen was false
+    expect(getByRole('tab', { name: /Motion/i }).getAttribute('aria-selected')).toBe('true');
+    expect(getByText('Walk Forward')).toBeTruthy();
+
+    // Switch to Timing tab
+    fireEvent.click(getByRole('tab', { name: /Timing/i }));
+    expect(getByRole('tab', { name: /Timing/i }).getAttribute('aria-selected')).toBe('true');
+    expect(getByText('Action Cycles')).toBeTruthy();
+    expect(getByText('Direct')).toBeTruthy();
+
+    // Switch to Look/Ref tab
+    fireEvent.click(getByRole('tab', { name: /Look\/Ref/i }));
+    expect(getByRole('tab', { name: /Look\/Ref/i }).getAttribute('aria-selected')).toBe('true');
+    expect(getByText('ComfyUI Reference Image')).toBeTruthy();
+    expect(getByText('Edit 3D Look by Prompt')).toBeTruthy();
+    expect(getByText('Target Color (Scene ID)')).toBeTruthy();
+
+    // Switch to Rig/XYZ tab
+    fireEvent.click(getByRole('tab', { name: /Rig\/XYZ/i }));
+    expect(getByRole('tab', { name: /Rig\/XYZ/i }).getAttribute('aria-selected')).toBe('true');
+    expect(getByText('3D Object Scale')).toBeTruthy();
+    expect(getByText('Socket to Character Bone')).toBeTruthy();
+
+    // Switch to All tab
+    fireEvent.click(getByRole('tab', { name: /All/i }));
+    expect(getByRole('tab', { name: /All/i }).getAttribute('aria-selected')).toBe('true');
+  });
 });
 
