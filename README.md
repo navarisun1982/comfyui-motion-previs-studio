@@ -85,19 +85,21 @@ git clone https://github.com/navarisun1982/comfyui-motion-previs-studio.git
 cd comfyui-motion-previs-studio
 ```
 
-### 2. Install Dependencies
+### 2. ⚡ One-Click Launch on Windows (`start_studio.bat` / `run.bat`)
+On Windows, you do not even need to open a terminal — simply **double-click [`start_studio.bat`](start_studio.bat)** (for Browser Mode) or **[`run.bat`](run.bat)** (for Native Electron Desktop Window):
+- **Auto-Installs Dependencies**: Automatically runs `npm install` on first launch if `node_modules` is not yet installed.
+- **Branded Studio Logo Icon (`Assets/logo.ico`)**: Automatically applies our official 3D Node-Cube icon (`Assets/logo.ico`) to the launcher console window & taskbar, and creates a branded **`ComfyUI Motion Previs Studio`** shortcut carrying our logo on your **Windows Desktop** and inside the project folder (you can also run **[`create_desktop_shortcut.bat`](create_desktop_shortcut.bat)** at any time to recreate the branded shortcut).
+- **Auto-Opens Studio**: Starts the local server and opens **`http://127.0.0.1:5173`** (or launches the native Electron Desktop app when using `run.bat` or `start_studio.bat --desktop`).
+
+### 3. Manual CLI Setup (Windows / macOS / Linux)
 ```bash
+# Install dependencies
 npm install
-```
 
-### 3. Run in Development Mode (Browser)
-```bash
+# Run in Browser Mode (http://localhost:5173)
 npm run dev
-```
-Open **`http://localhost:5173`** in Chrome or Edge.
 
-### 4. Run as a Native Desktop App (Electron)
-```bash
+# Or run as a Native Desktop App (Electron)
 npm run desktop
 ```
 Or if you already ran `npm run build`:

@@ -30,6 +30,8 @@ scripts/dev/*.cjs
 scripts/dev/*.ps1
 scripts/dev/*.txt
 scripts/*.ps1
+!scripts/setup-launcher-icon.ps1
+*.lnk
 test_gallery.html
 demo_scene_construction_*.mp4
 demo_full_pipeline_*.mp4
