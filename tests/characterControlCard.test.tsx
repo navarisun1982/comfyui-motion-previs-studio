@@ -3,6 +3,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import { CharacterControlCard } from '../src/components/CharacterControlCard';
 import { Actor } from '../src/types/shotspec';
+import { compileReadyMadeMotionKeyframes, findReadyMadeMotionById } from '../src/engine/kinematics';
+import { useShotStore } from '../src/stores/useShotStore';
 
 const mockActor: Actor = {
   id: 'actor-test-1',
@@ -210,6 +212,60 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     // Switch to All tab
     fireEvent.click(getByRole('tab', { name: /All/i }));
     expect(getByRole('tab', { name: /All/i }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('genuinely repeats Ready-Made Motions and custom directed actions when Action Cycles is 2x or 3x', () => {
+    const jumpClip = findReadyMadeMotionById('human-jump-leap')!;
+    expect(jumpClip).toBeDefined();
+
+    // 3x cycles of Jump / Leap across 0..6s should produce 36 intervals (37 keyframes) with 3 distinct airborne elevation peaks (z > 10)
+    const compiled3x = compileReadyMadeMotionKeyframes(mockActor, jumpClip.id, {
+      startTimeSec: 0,
+      endTimeSec: 6,
+      startPosition: { x: 47, y: 44, z: 0 },
+      motionCycles: 3,
+    });
+    expect(compiled3x.keyframes.length).toBe(37);
+
+    // Verify peak airborne height happens inside each of the 3 cycles (around t ≈ 1.0s, 3.0s, 5.0s) and lands (z ≈ 0) at cycle boundaries (t = 0s, 2s, 4s, 6s)
+    const zAt0 = compiled3x.keyframes.find((k) => Math.abs(k.time - 0) < 0.05)?.position.z ?? -1;
+    const zAt1 = compiled3x.keyframes.find((k) => Math.abs(k.time - 1) < 0.1)?.position.z ?? 0;
+    const zAt2 = compiled3x.keyframes.find((k) => Math.abs(k.time - 2) < 0.05)?.position.z ?? -1;
+    const zAt3 = compiled3x.keyframes.find((k) => Math.abs(k.time - 3) < 0.1)?.position.z ?? 0;
+    const zAt4 = compiled3x.keyframes.find((k) => Math.abs(k.time - 4) < 0.05)?.position.z ?? -1;
+    const zAt5 = compiled3x.keyframes.find((k) => Math.abs(k.time - 5) < 0.1)?.position.z ?? 0;
+    const zAt6 = compiled3x.keyframes.find((k) => Math.abs(k.time - 6) < 0.05)?.position.z ?? -1;
+
+    expect(zAt0).toBe(0);
+    expect(zAt1).toBeGreaterThan(12);
+    expect(zAt2).toBe(0);
+    expect(zAt3).toBeGreaterThan(12);
+    expect(zAt4).toBe(0);
+    expect(zAt5).toBeGreaterThan(12);
+    expect(zAt6).toBe(0);
+
+    // Also verify applyDirectorialMotion preserves Ready-Made Motion & motionCycles when Direct is clicked on a Ready-Made Motion phrase
+    const store = useShotStore.getState();
+    const firstActorId = store.shot.actors[0].id;
+    store.applyReadyMadeMotion(firstActorId, 'human-jump-leap', {
+      startTimeSec: 0,
+      endTimeSec: 6,
+      motionCycles: 3,
+    });
+    const afterReady = useShotStore.getState().shot.actors.find((a) => a.id === firstActorId)!;
+    expect(afterReady.motionClip).toBe('human-jump-leap');
+    expect(afterReady.motionCycles).toBe(3);
+
+    // Clicking Direct with the Ready-Made phrase keeps motionClip and 3x cycles (37 keyframes)
+    store.applyDirectorialMotion(firstActorId, afterReady.actionDescription, {
+      startTimeSec: 0,
+      endTimeSec: 6,
+      motionCycles: 3,
+    });
+    const afterDirect = useShotStore.getState().shot.actors.find((a) => a.id === firstActorId)!;
+    expect(afterDirect.motionClip).toBe('human-jump-leap');
+    expect(afterDirect.motionCycles).toBe(3);
+    expect(afterDirect.trajectory.keyframes?.length).toBe(37);
   });
 });
 

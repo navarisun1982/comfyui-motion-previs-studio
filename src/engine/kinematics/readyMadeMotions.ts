@@ -621,148 +621,174 @@ export function compileReadyMadeMotionKeyframes(
     }
   }
 
-  const numSamples = 12;
+  const samplesPerCycle = 12;
+  const numSamples = safeCycles * samplesPerCycle;
   const keyframes: TrajectoryKeyframe[] = [];
   let finalPos: Point2D = { x: destX, y: destY, z: startZ };
   let finalRot: Point3D = { ...baseRot };
 
   for (let i = 0; i <= numSamples; i++) {
-    const u = i / numSamples; // 0..1 normalized progress through the cue
+    const u = i / numSamples; // 0..1 normalized progress through the entire cue window
     const t = Number((winStart + u * dur).toFixed(2));
 
-    // Smooth ease-in-out or specialized progress curve
-    const smoothU = u * u * (3 - 2 * u);
-    let curX = startX + (destX - startX) * smoothU;
-    let curY = startY + (destY - startY) * smoothU;
+    // Per-cycle progress (0..1 within each of the `safeCycles` repetitions)
+    const rawCyclePos = u * safeCycles;
+    const cycleIdx = i === numSamples ? safeCycles - 1 : Math.min(safeCycles - 1, Math.floor(rawCyclePos));
+    const cycleU = i === numSamples ? 1.0 : rawCyclePos - cycleIdx;
+    const smoothCycleU = cycleU * cycleU * (3 - 2 * cycleU);
+
+    // Stage floor progression segmented across `safeCycles` repetitions
+    const cycStartX = startX + ((destX - startX) * cycleIdx) / safeCycles;
+    const cycStartY = startY + ((destY - startY) * cycleIdx) / safeCycles;
+    const cycEndX = startX + ((destX - startX) * (cycleIdx + 1)) / safeCycles;
+    const cycEndY = startY + ((destY - startY) * (cycleIdx + 1)) / safeCycles;
+
+    let curX = cycStartX + (cycEndX - cycStartX) * smoothCycleU;
+    let curY = cycStartY + (cycEndY - cycStartY) * smoothCycleU;
     let curZ = startZ;
 
     let rotX = baseRot.x;
     let rotY = baseRot.y;
     let rotZ = baseRot.z;
 
-    // Special elevation (Z) & orientation curves by clip ID
+    // Special elevation (Z) & orientation curves by clip ID (repeated per cycle `cycleU`)
     switch (clip.id) {
       case 'human-jump-leap': {
-        // Crouch [0..0.22], Airborne parabola [0.22..0.78], Landing [0.78..1.0]
-        if (u > 0.2 && u < 0.82) {
-          const airU = (u - 0.2) / 0.62;
+        // Crouch [0..0.22], Airborne parabola [0.22..0.82], Landing [0.82..1.0] per cycle
+        if (cycleU > 0.2 && cycleU < 0.82) {
+          const airU = (cycleU - 0.2) / 0.62;
           curZ = startZ + Math.sin(airU * Math.PI) * 14;
-          curX = startX + (destX - startX) * airU;
-          curY = startY + (destY - startY) * airU;
-        } else if (u <= 0.2) {
-          curX = startX;
-          curY = startY;
+          curX = cycStartX + (cycEndX - cycStartX) * airU;
+          curY = cycStartY + (cycEndY - cycStartY) * airU;
+        } else if (cycleU <= 0.2) {
+          curX = cycStartX;
+          curY = cycStartY;
         } else {
-          curX = destX;
-          curY = destY;
+          curX = cycEndX;
+          curY = cycEndY;
         }
         break;
       }
 
+      case 'human-dodge-weave': {
+        const sideSign = startX > 55 ? -1 : 1;
+        const weaveLat = Math.sin(cycleU * Math.PI) * 6 * sideSign;
+        curX = cycStartX + (cycEndX - cycStartX) * smoothCycleU + (shouldTravel ? 0 : weaveLat);
+        curY = cycStartY + (cycEndY - cycStartY) * smoothCycleU;
+        break;
+      }
+
+      case 'human-hit-stagger': {
+        const staggerU = cycleU < 0.7 ? Math.sin((cycleU / 0.7) * (Math.PI / 2)) : 1.0;
+        curX = cycStartX + (cycEndX - cycStartX) * staggerU;
+        curY = cycStartY + (cycEndY - cycStartY) * staggerU;
+        break;
+      }
+
       case 'quad-pounce-leap': {
-        if (u > 0.22 && u < 0.85) {
-          const airU = (u - 0.22) / 0.63;
+        if (cycleU > 0.22 && cycleU < 0.85) {
+          const airU = (cycleU - 0.22) / 0.63;
           curZ = startZ + Math.sin(airU * Math.PI) * 16;
           // Pitch up on launch (-24 deg), pitch down on landing (+22 deg)
           rotX = Math.cos(airU * Math.PI) * -24;
-          curX = startX + (destX - startX) * airU;
-          curY = startY + (destY - startY) * airU;
-        } else if (u <= 0.22) {
+          curX = cycStartX + (cycEndX - cycStartX) * airU;
+          curY = cycStartY + (cycEndY - cycStartY) * airU;
+        } else if (cycleU <= 0.22) {
           rotX = 10; // coil crouch
-          curX = startX;
-          curY = startY;
+          curX = cycStartX;
+          curY = cycStartY;
         } else {
           rotX = 0;
-          curX = destX;
-          curY = destY;
+          curX = cycEndX;
+          curY = cycEndY;
         }
         break;
       }
 
       case 'quad-gallop-charge': {
-        const boundPhase = Math.sin(u * Math.PI * 6);
+        const boundPhase = Math.sin(cycleU * Math.PI * 6);
         curZ = startZ + Math.max(0, boundPhase) * 3.5;
         rotX = boundPhase * -9;
         break;
       }
 
       case 'veh-accel-launch': {
-        const accelU = Math.pow(u, 1.7);
-        curX = startX + (destX - startX) * accelU;
-        curY = startY + (destY - startY) * accelU;
+        const accelU = Math.pow(cycleU, 1.7);
+        curX = cycStartX + (cycEndX - cycStartX) * accelU;
+        curY = cycStartY + (cycEndY - cycStartY) * accelU;
         // Rear squat nose-up (-9 deg) during peak acceleration
-        rotX = Math.sin(u * Math.PI) * -9;
+        rotX = Math.sin(cycleU * Math.PI) * -9;
         break;
       }
 
       case 'veh-hard-brake': {
-        const decelU = 1 - Math.pow(1 - u, 2.2);
-        curX = startX + (destX - startX) * decelU;
-        curY = startY + (destY - startY) * decelU;
-        // Nose dive pitch (+13 deg) between u=0.35 and u=0.85, then settle
-        if (u > 0.25 && u < 0.9) {
-          rotX = Math.sin(((u - 0.25) / 0.65) * Math.PI) * 13;
+        const decelU = 1 - Math.pow(1 - cycleU, 2.2);
+        curX = cycStartX + (cycEndX - cycStartX) * decelU;
+        curY = cycStartY + (cycEndY - cycStartY) * decelU;
+        // Nose dive pitch (+13 deg) between cycleU=0.25 and cycleU=0.90, then settle
+        if (cycleU > 0.25 && cycleU < 0.9) {
+          rotX = Math.sin(((cycleU - 0.25) / 0.65) * Math.PI) * 13;
         }
         break;
       }
 
       case 'veh-drift-turn': {
         const turnSign = destX >= startX ? 1 : -1;
-        curX = startX + (destX - startX) * Math.pow(u, 1.3);
-        curY = startY + (destY - startY) * u;
-        rotY = baseRot.y + turnSign * smoothU * 55;
-        rotZ = -turnSign * Math.sin(u * Math.PI) * 11;
+        curX = cycStartX + (cycEndX - cycStartX) * Math.pow(cycleU, 1.3);
+        curY = cycStartY + (cycEndY - cycStartY) * cycleU;
+        rotY = baseRot.y + turnSign * (cycleIdx + smoothCycleU) * (55 / safeCycles);
+        rotZ = -turnSign * Math.sin(cycleU * Math.PI) * 11;
         break;
       }
 
       case 'air-hover-bob': {
         const baseAirZ = Math.max(15, startZ);
-        curZ = baseAirZ + Math.sin(u * Math.PI * 2) * 3.5;
-        rotZ = Math.sin(u * Math.PI * 2) * 5;
-        rotX = Math.cos(u * Math.PI * 2) * 3;
+        curZ = baseAirZ + Math.sin(cycleU * Math.PI * 2) * 3.5;
+        rotZ = Math.sin(cycleU * Math.PI * 2) * 5;
+        rotX = Math.cos(cycleU * Math.PI * 2) * 3;
         break;
       }
 
       case 'air-swoop-flyby': {
         const baseAirZ = Math.max(18, startZ);
-        curZ = baseAirZ - Math.sin(u * Math.PI) * 6;
-        rotZ = Math.sin(u * Math.PI) * -32;
+        curZ = baseAirZ - Math.sin(cycleU * Math.PI) * 6;
+        rotZ = Math.sin(cycleU * Math.PI) * -32;
         rotX = 8;
         break;
       }
 
       case 'air-takeoff-climb': {
-        const climbU = Math.pow(u, 1.5);
+        const climbU = Math.pow(cycleU, 1.5);
         curZ = startZ + climbU * 26;
-        rotX = -Math.sin(u * Math.PI) * 22;
+        rotX = -Math.sin(cycleU * Math.PI) * 22;
         break;
       }
 
       case 'air-dive-attack': {
         const highZ = Math.max(28, startZ);
-        curZ = highZ - smoothU * 20;
-        rotX = u < 0.7 ? 28 * Math.sin((u / 0.7) * Math.PI) : 0;
+        curZ = highZ - smoothCycleU * 20;
+        rotX = cycleU < 0.7 ? 28 * Math.sin((cycleU / 0.7) * Math.PI) : 0;
         break;
       }
 
       case 'prop-slash-swing': {
-        const slashWave = Math.sin(u * Math.PI * 2);
+        const slashWave = Math.sin(cycleU * Math.PI * 2);
         rotX = baseRot.x + slashWave * 55;
         rotY = baseRot.y + slashWave * 75;
-        rotZ = baseRot.z + Math.cos(u * Math.PI * 2) * 35;
+        rotZ = baseRot.z + Math.cos(cycleU * Math.PI * 2) * 35;
         break;
       }
 
       case 'prop-float-spin': {
         const floatZ = Math.max(10, startZ);
-        curZ = floatZ + Math.sin(u * Math.PI * 2) * 3;
-        rotY = baseRot.y + u * 360;
-        rotZ = 15 * Math.sin(u * Math.PI * 2);
+        curZ = floatZ + Math.sin(cycleU * Math.PI * 2) * 3;
+        rotY = baseRot.y + u * 360 * safeCycles;
+        rotZ = 15 * Math.sin(cycleU * Math.PI * 2);
         break;
       }
 
       case 'prop-recoil-kick': {
-        const kick = Math.abs(Math.sin(u * Math.PI * 3));
+        const kick = Math.abs(Math.sin(cycleU * Math.PI * 3));
         rotX = baseRot.x - kick * 28;
         curZ = startZ + kick * 2;
         break;
@@ -770,16 +796,16 @@ export function compileReadyMadeMotionKeyframes(
 
       case 'prop-drop-bounce': {
         const dropStartZ = Math.max(20, startZ || 22);
-        if (u < 0.45) {
-          const fallU = u / 0.45;
+        if (cycleU < 0.45) {
+          const fallU = cycleU / 0.45;
           curZ = dropStartZ * (1 - fallU * fallU);
-          rotX = baseRot.x + u * 140;
-        } else if (u < 0.75) {
-          const b1 = (u - 0.45) / 0.3;
+          rotX = baseRot.x + cycleU * 140;
+        } else if (cycleU < 0.75) {
+          const b1 = (cycleU - 0.45) / 0.3;
           curZ = Math.sin(b1 * Math.PI) * 6.5;
           rotX = baseRot.x + 85;
         } else {
-          const b2 = (u - 0.75) / 0.25;
+          const b2 = (cycleU - 0.75) / 0.25;
           curZ = Math.sin(b2 * Math.PI) * 2.0;
           rotX = baseRot.x + 90;
         }
@@ -787,29 +813,35 @@ export function compileReadyMadeMotionKeyframes(
       }
 
       case 'env-swing-open': {
-        rotY = baseRot.y + smoothU * 90;
+        const swingU = safeCycles > 1 && cycleIdx < safeCycles - 1 ? Math.sin(cycleU * Math.PI) : smoothCycleU;
+        rotY = baseRot.y + swingU * 90;
         break;
       }
 
       case 'env-quake-shake': {
-        const decay = 1 - u * 0.5;
-        rotZ = Math.sin(u * Math.PI * 10) * 9 * decay;
-        rotX = Math.cos(u * Math.PI * 8) * 6 * decay;
+        const decay = 1 - cycleU * 0.5;
+        rotZ = Math.sin(cycleU * Math.PI * 10) * 9 * decay;
+        rotX = Math.cos(cycleU * Math.PI * 8) * 6 * decay;
         break;
       }
 
       case 'env-fall-topple': {
-        const toppleU = Math.min(1, Math.pow(u / 0.75, 2));
-        rotZ = baseRot.z + toppleU * 90;
-        if (u > 0.75) {
-          const bounceU = (u - 0.75) / 0.25;
-          rotZ = baseRot.z + 90 - Math.sin(bounceU * Math.PI) * 8;
+        if (safeCycles > 1 && cycleIdx < safeCycles - 1) {
+          const cycleTopple = Math.sin(cycleU * Math.PI);
+          rotZ = baseRot.z + cycleTopple * 90;
+        } else {
+          const toppleU = Math.min(1, Math.pow(cycleU / 0.75, 2));
+          rotZ = baseRot.z + toppleU * 90;
+          if (cycleU > 0.75) {
+            const bounceU = (cycleU - 0.75) / 0.25;
+            rotZ = baseRot.z + 90 - Math.sin(bounceU * Math.PI) * 8;
+          }
         }
         break;
       }
 
       case 'env-turntable-spin': {
-        rotY = baseRot.y + u * 360;
+        rotY = baseRot.y + u * 360 * safeCycles;
         break;
       }
 
@@ -973,37 +1005,6 @@ export function evaluateReadyMadeHumanoidClip(
     return 1.0;
   };
 
-  // Continuous locomotion clips delegate to evaluateGait with tailored frequency/speed
-  if (clipId === 'human-walk-forward' || clipId === 'human-back-retreat') {
-    evaluateGait(rig, timeSeconds, {
-      gait: 'walk',
-      speed: 1.5,
-      strideEnvelope: computeLocomotionEnvelope(clipProgress01),
-    });
-    return true;
-  }
-  if (clipId === 'human-run-sprint') {
-    evaluateGait(rig, timeSeconds, {
-      gait: 'run',
-      speed: 2.8,
-      frequencyScale: 1.05,
-      strideEnvelope: computeLocomotionEnvelope(clipProgress01),
-    });
-    return true;
-  }
-  if (clipId === 'human-sneak-prowl') {
-    evaluateGait(rig, timeSeconds, {
-      gait: 'sneak',
-      speed: 1.0,
-      strideEnvelope: computeLocomotionEnvelope(clipProgress01),
-    });
-    return true;
-  }
-  if (clipId === 'human-idle-breathe') {
-    evaluateGait(rig, timeSeconds, { gait: 'idle', speed: 0 });
-    return true;
-  }
-
   // Phase in [0..1] per cycle across `motionCycles` repetitions within the active window
   const safeCycles = Math.max(1, Math.min(20, Math.round(motionCycles || 1)));
   const rawProgress =
@@ -1013,6 +1014,39 @@ export function evaluateReadyMadeHumanoidClip(
   const scaledProgress = rawProgress * safeCycles;
   const u = scaledProgress >= safeCycles ? 1.0 : scaledProgress % 1.0;
   const cycleEnvelope = Math.sin(u * Math.PI);
+
+  // Continuous locomotion clips delegate to evaluateGait with cycle-aware frequency/stride envelope
+  if (clipId === 'human-walk-forward' || clipId === 'human-back-retreat') {
+    evaluateGait(rig, timeSeconds, {
+      gait: 'walk',
+      speed: 1.5,
+      frequencyScale: safeCycles > 1 ? 1.0 + (safeCycles - 1) * 0.35 : 1.0,
+      strideEnvelope: computeLocomotionEnvelope(safeCycles > 1 ? u : clipProgress01),
+    });
+    return true;
+  }
+  if (clipId === 'human-run-sprint') {
+    evaluateGait(rig, timeSeconds, {
+      gait: 'run',
+      speed: 2.8,
+      frequencyScale: 1.05 * (safeCycles > 1 ? 1.0 + (safeCycles - 1) * 0.35 : 1.0),
+      strideEnvelope: computeLocomotionEnvelope(safeCycles > 1 ? u : clipProgress01),
+    });
+    return true;
+  }
+  if (clipId === 'human-sneak-prowl') {
+    evaluateGait(rig, timeSeconds, {
+      gait: 'sneak',
+      speed: 1.0,
+      frequencyScale: safeCycles > 1 ? 1.0 + (safeCycles - 1) * 0.35 : 1.0,
+      strideEnvelope: computeLocomotionEnvelope(safeCycles > 1 ? u : clipProgress01),
+    });
+    return true;
+  }
+  if (clipId === 'human-idle-breathe') {
+    evaluateGait(rig, timeSeconds * (safeCycles > 1 ? safeCycles : 1), { gait: 'idle', speed: 0 });
+    return true;
+  }
 
   switch (clipId) {
     case 'human-jump-leap': {
@@ -1261,13 +1295,17 @@ export function evaluateReadyMadeHumanoidClip(
     }
 
     case 'human-sit-down': {
-      // Smoothly transition from standing to seated-chair
-      if (u > 0.85) {
+      // On the final cycle end, hold seated-chair; on earlier cycles when safeCycles > 1, sit down & rise back up per cycle
+      const isFinalCycleEnd = scaledProgress >= safeCycles - 0.15;
+      if (isFinalCycleEnd && u > 0.85) {
         applyPosePreset(rig, 'seated-chair');
         return true;
       }
       resetToRest();
-      const sitEase = u * u * (3 - 2 * u);
+      const sitEase =
+        safeCycles > 1 && scaledProgress < safeCycles - 1
+          ? Math.sin(u * Math.PI)
+          : u * u * (3 - 2 * u);
       setHipsOffsetAndTilt(0, -0.20 * sitEase, -0.06 * sitEase, 0.08 * (1 - sitEase), 0, 0);
       setChestTilt(0.14 * Math.sin(u * Math.PI), 0, 0);
 
@@ -1322,8 +1360,11 @@ export function evaluateReadyMadeHumanoidClip(
 export function evaluateReadyMadeObjectClip(
   mesh: THREE.Object3D,
   clipId: string,
-  timeSeconds: number
+  timeSeconds: number,
+  motionCycles: number = 1
 ): void {
+  const safeCycles = Math.max(1, Math.min(20, Math.round(motionCycles || 1)));
+  const cycleMultiplier = safeCycles > 1 ? 1 + (safeCycles - 1) * 0.5 : 1;
   const isQuadMove =
     clipId === 'quad-trot-forward' ||
     clipId === 'quad-gallop-charge' ||
@@ -1336,7 +1377,7 @@ export function evaluateReadyMadeObjectClip(
     clipId === 'veh-hard-brake' ||
     clipId === 'veh-drift-turn';
 
-  const freq = isQuadGallop ? 11.0 : clipId === 'quad-stalk-prowl' ? 4.0 : 7.5;
+  const freq = (isQuadGallop ? 11.0 : clipId === 'quad-stalk-prowl' ? 4.0 : 7.5) * cycleMultiplier;
   const phase = timeSeconds * freq;
 
   mesh.traverse((child) => {

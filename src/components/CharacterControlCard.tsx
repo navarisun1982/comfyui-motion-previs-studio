@@ -105,7 +105,14 @@ export interface CharacterControlCardProps {
       motionCycles?: number;
     }
   ) => void;
-  onDirectCustomAction: (actor: Actor, actionText: string, safeStart: number, safeEnd: number, cueDuration: number) => Promise<void>;
+  onDirectCustomAction: (
+    actor: Actor,
+    actionText: string,
+    safeStart: number,
+    safeEnd: number,
+    cueDuration: number,
+    motionCycles?: number
+  ) => Promise<void>;
   onRefineObjectByPrompt: (actor: Actor) => Promise<void>;
   onAttachGlbFile: (actorId: string, file: File) => Promise<void>;
   onSocketActorToBone: (actorId: string, targetActorId: string, bone: HumanoidBone) => void;
@@ -971,7 +978,17 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
-                    onClick={() => onUpdateMotionWindow(actor.id, { start: 0, end: shotDur })}
+                    onClick={() => {
+                      onUpdateMotionWindow(actor.id, { start: 0, end: shotDur });
+                      if (actor.motionClip) {
+                        onApplyReadyMadeMotion(actor.id, actor.motionClip, {
+                          startTimeSec: 0,
+                          endTimeSec: shotDur,
+                          travelMode,
+                          motionCycles: actor.motionCycles ?? 1,
+                        });
+                      }
+                    }}
                     className="px-2 py-0.5 rounded-md bg-[#141926] hover:bg-[#1c2334] text-[10px] font-medium text-slate-300 hover:text-white border border-white/[0.08]"
                     title={`Span full shot duration (0s – ${shotDur}s)`}
                   >
@@ -982,6 +999,14 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                     onClick={() => {
                       const playheadStart = Math.min(shotDur - 0.5, Number(currentTime.toFixed(1)));
                       onUpdateMotionWindow(actor.id, { start: playheadStart, end: shotDur });
+                      if (actor.motionClip) {
+                        onApplyReadyMadeMotion(actor.id, actor.motionClip, {
+                          startTimeSec: playheadStart,
+                          endTimeSec: shotDur,
+                          travelMode,
+                          motionCycles: actor.motionCycles ?? 1,
+                        });
+                      }
                     }}
                     className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-[10px] font-semibold text-amber-300 border border-amber-500/35"
                     title="Set start time to current playhead position"
@@ -1005,10 +1030,19 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                     aria-label="Start time in seconds"
                     onChange={(e) => {
                       const nextStart = Math.max(0, Math.min(shotDur - 0.5, Number(e.target.value) || 0));
+                      const nextEnd = Math.max(nextStart + 0.5, safeEnd);
                       onUpdateMotionWindow(actor.id, {
                         start: nextStart,
-                        end: Math.max(nextStart + 0.5, safeEnd),
+                        end: nextEnd,
                       });
+                      if (actor.motionClip) {
+                        onApplyReadyMadeMotion(actor.id, actor.motionClip, {
+                          startTimeSec: nextStart,
+                          endTimeSec: nextEnd,
+                          travelMode,
+                          motionCycles: actor.motionCycles ?? 1,
+                        });
+                      }
                     }}
                     className="w-12 rounded-md bg-[#131824] border border-white/[0.1] px-1.5 py-0.5 text-center text-emerald-300 font-bold focus:outline-none focus:border-emerald-400"
                   />
@@ -1026,6 +1060,14 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         start: safeStart,
                         end: nextEnd,
                       });
+                      if (actor.motionClip) {
+                        onApplyReadyMadeMotion(actor.id, actor.motionClip, {
+                          startTimeSec: safeStart,
+                          endTimeSec: nextEnd,
+                          travelMode,
+                          motionCycles: actor.motionCycles ?? 1,
+                        });
+                      }
                     }}
                     className="w-12 rounded-md bg-[#131824] border border-white/[0.1] px-1.5 py-0.5 text-center text-cyan-300 font-bold focus:outline-none focus:border-cyan-400"
                   />
@@ -1063,6 +1105,9 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                                 travelMode,
                                 motionCycles: cyc,
                               });
+                            } else {
+                              const actionText = (actor.actionDescription || 'walk forward').trim();
+                              onDirectCustomAction(actor, actionText, safeStart, safeEnd, cueDuration, cyc);
                             }
                           }}
                           className={`px-2 py-0.5 rounded-md font-bold transition-all border ${
@@ -1091,7 +1136,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         if (e.key === 'Enter' && generatingActingId !== actor.id) {
                           e.preventDefault();
                           const actionText = (actor.actionDescription || 'walk forward').trim();
-                          onDirectCustomAction(actor, actionText, safeStart, safeEnd, cueDuration);
+                          onDirectCustomAction(actor, actionText, safeStart, safeEnd, cueDuration, actor.motionCycles ?? 1);
                         }
                       }}
                       placeholder="Direct action (e.g. walk to right, sit down)..."
@@ -1112,7 +1157,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                     disabled={generatingActingId === actor.id}
                     onClick={() => {
                       const actionText = (actor.actionDescription || 'walk forward').trim();
-                      onDirectCustomAction(actor, actionText, safeStart, safeEnd, cueDuration);
+                      onDirectCustomAction(actor, actionText, safeStart, safeEnd, cueDuration, actor.motionCycles ?? 1);
                     }}
                     className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[11px] font-semibold shadow-sm border border-emerald-400/40 shrink-0 cursor-pointer"
                     title={`Compile action into stage trajectory & pose keyframes (${safeStart.toFixed(1)}s → ${safeEnd.toFixed(1)}s)`}

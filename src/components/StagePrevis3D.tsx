@@ -1951,7 +1951,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
               mesh.userData.rig,
               activeMotionClip,
               t,
-              currentPoseResult?.clipProgress,
+              currentPoseResult?.clipProgress ?? (liveDur > 0 ? Math.max(0, Math.min(1, t / liveDur)) : 0),
               isTravelingOnFloor,
               currentPoseResult?.motionCycles ?? actor.motionCycles ?? 1
             );
@@ -2019,7 +2019,12 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           const currentPoseResult = interpolateActorPoseAtTime(actor.trajectory, actor.pose, t, liveDur, clayOpt);
           const activeObjClip = currentPoseResult?.motionClip || actor.motionClip;
           if (activeObjClip) {
-            evaluateReadyMadeObjectClip(mesh, activeObjClip, t);
+            evaluateReadyMadeObjectClip(
+              mesh,
+              activeObjClip,
+              t,
+              currentPoseResult?.motionCycles ?? actor.motionCycles ?? 1
+            );
           } else if (actor.posePreset) {
             applyNonHumanMeshPoseArticulation(mesh, actor.posePreset);
           }

@@ -41,7 +41,7 @@ import { getAdapter } from '../adapters';
 import { ValidationReport, CompiledPromptBundle } from '../adapters/types';
 import { logger } from './useLogStore';
 import { recordTrajectoryPositionAtTime, interpolateTrajectoryPosition, recordTrajectoryPoseAtTime } from '../engine/trajectoryMath';
-import { decomposeDirectorialMotion, compileMotionPlan, compileReadyMadeMotionKeyframes } from '../engine/kinematics';
+import { decomposeDirectorialMotion, compileMotionPlan, compileReadyMadeMotionKeyframes, findReadyMadeMotionById, READY_MADE_MOTIONS } from '../engine/kinematics';
 import { STORAGE_KEYS, safeGetItem, safeSetItem, sanitizeShotForStorage } from '../services/storage';
 
 export type PrevisRendererFn = (
@@ -110,7 +110,7 @@ interface ShotState {
   updateActorRotationAtTime: (actorId: string, time: number, rotation: Point3D, duration?: number) => void;
   socketActorToBone: (propActorId: string, targetActorId: string, boneName: string, offset?: Point3D, rotationOffset?: Point3D) => void;
   unsocketActor: (propActorId: string) => void;
-  applyDirectorialMotion: (actorId: string, prompt: string, options?: { startTimeSec?: number; endTimeSec?: number }) => void;
+  applyDirectorialMotion: (actorId: string, prompt: string, options?: { startTimeSec?: number; endTimeSec?: number; motionCycles?: number }) => void;
   applyReadyMadeMotion: (actorId: string, clipId: string, options?: { startTimeSec?: number; endTimeSec?: number; travelMode?: 'auto' | 'travel' | 'in-place'; motionCycles?: number }) => void;
   setClaymationMode: (enabled: boolean, fps?: number) => void;
   stagingMoveMode: 'base' | 'keyframe';
@@ -1148,6 +1148,31 @@ export const useShotStore = create<ShotState>((set, get) => {
       const winStart = Math.max(0, Math.min(shotDur - 0.2, options?.startTimeSec ?? 0));
       const winEnd = Math.max(winStart + 0.2, Math.min(shotDur, options?.endTimeSec ?? shotDur));
       const winDuration = winEnd - winStart;
+      const safeCycles = Math.max(1, Math.min(20, Math.round(options?.motionCycles ?? target.motionCycles ?? 1)));
+
+      // If the prompt matches the actor's active Ready-Made Motion or a catalog Ready-Made Motion phrase,
+      // delegate directly to applyReadyMadeMotion so the Ready-Made clip and its cycle repetitions are preserved!
+      const normalizedPrompt = prompt.trim().toLowerCase();
+      const activeReadyClip = target.motionClip ? findReadyMadeMotionById(target.motionClip) : undefined;
+      const matchedReadyClip =
+        activeReadyClip &&
+        (activeReadyClip.promptPhrase.trim().toLowerCase() === normalizedPrompt ||
+          activeReadyClip.name.trim().toLowerCase() === normalizedPrompt)
+          ? activeReadyClip
+          : READY_MADE_MOTIONS.find(
+              (m) =>
+                m.promptPhrase.trim().toLowerCase() === normalizedPrompt ||
+                m.name.trim().toLowerCase() === normalizedPrompt
+            );
+
+      if (matchedReadyClip) {
+        get().applyReadyMadeMotion(actorId, matchedReadyClip.id, {
+          startTimeSec: winStart,
+          endTimeSec: winEnd,
+          motionCycles: safeCycles,
+        });
+        return;
+      }
 
       // Sample actor's position at winStart so chained cues (e.g. 0-3s then 3-6s) continue seamlessly from where the previous cue ended
       const startCoord =
@@ -1168,38 +1193,69 @@ export const useShotStore = create<ShotState>((set, get) => {
           kind: a.kind,
         }));
 
-      const plan = decomposeDirectorialMotion(prompt, {
-        actorName: target.name,
-        startPosition: startPos,
-        actors: otherActors,
-      });
+      const cycleDur = Math.max(0.2, winDuration / safeCycles);
+      const shiftedKeyframes: NonNullable<Actor['trajectory']['keyframes']> = [];
+      let cycleStartPos: [number, number] = [...startPos];
+      let firstCycleFrames: ReturnType<typeof compileMotionPlan>['frames'] = [];
+      let totalSkillsCount = 0;
 
-      // Scale skill timings proportionally to fill the requested [winStart, winEnd] duration window
-      const timeScale = plan.totalDurationSec > 0 ? winDuration / plan.totalDurationSec : 1;
-      const scaledPlan = {
-        ...plan,
-        totalDurationSec: winDuration,
-        skills: plan.skills.map((s) => ({
-          ...s,
-          startTimeSec: Number((s.startTimeSec * timeScale).toFixed(3)),
-          durationSec: Number(((s.durationSec ?? 2.0) * timeScale).toFixed(3)),
-        })),
-      };
+      for (let c = 0; c < safeCycles; c++) {
+        const cycleWinStart = winStart + c * cycleDur;
+        const plan = decomposeDirectorialMotion(prompt, {
+          actorName: target.name,
+          startPosition: cycleStartPos,
+          actors: otherActors,
+        });
+        totalSkillsCount = plan.skills.length;
 
-      const compiled = compileMotionPlan(scaledPlan, {
-        startPosition: startPos,
-        startHeadingDeg: 0,
-        shotDurationSec: winDuration,
-      });
+        const timeScale = plan.totalDurationSec > 0 ? cycleDur / plan.totalDurationSec : 1;
+        const scaledPlan = {
+          ...plan,
+          totalDurationSec: cycleDur,
+          skills: plan.skills.map((s) => ({
+            ...s,
+            startTimeSec: Number((s.startTimeSec * timeScale).toFixed(3)),
+            durationSec: Number(((s.durationSec ?? 2.0) * timeScale).toFixed(3)),
+          })),
+        };
 
-      const shiftedKeyframes = compiled.keyframes.map((kf) => ({
-        ...kf,
-        time: Number((kf.time + winStart).toFixed(2)),
-        position: {
-          ...kf.position,
-          z: startCoord.z ?? target.trajectory.startPosition.z ?? 0,
-        },
-      }));
+        const compiled = compileMotionPlan(scaledPlan, {
+          startPosition: cycleStartPos,
+          startHeadingDeg: 0,
+          shotDurationSec: cycleDur,
+        });
+        if (c === 0) {
+          firstCycleFrames = compiled.frames;
+        }
+
+        compiled.keyframes.forEach((kf, idx) => {
+          // Avoid duplicate boundary keyframes between consecutive cycles
+          if (c > 0 && idx === 0) return;
+          const shiftedTime = Number((kf.time + cycleWinStart).toFixed(2));
+          shiftedKeyframes.push({
+            ...kf,
+            id: `${kf.id}-cyc${c}`,
+            time: shiftedTime,
+            motionClip: undefined,
+            motionCycles: safeCycles,
+            position: {
+              ...kf.position,
+              z: startCoord.z ?? target.trajectory.startPosition.z ?? 0,
+            },
+          });
+        });
+
+        if (compiled.keyframes.length > 0) {
+          const lastKf = compiled.keyframes[compiled.keyframes.length - 1];
+          const movedDist = Math.hypot(
+            lastKf.position.x - cycleStartPos[0],
+            lastKf.position.y - cycleStartPos[1]
+          );
+          if (movedDist > 1.5) {
+            cycleStartPos = [lastKf.position.x, lastKf.position.y];
+          }
+        }
+      }
 
       // Preserve existing keyframes outside [winStart, winEnd] so multi-segment cues can be built sequentially
       const preservedKeyframes = (target.trajectory.keyframes || []).filter(
@@ -1257,16 +1313,18 @@ export const useShotStore = create<ShotState>((set, get) => {
           ? {
               ...a,
               actionDescription: prompt,
+              motionClip: undefined,
+              motionCycles: safeCycles,
               gait: detectedGait,
               posePreset: detectedPosePreset,
               trajectory: updatedTrajectory,
-              pose: compiled.frames.length > 0 ? compiled.frames[0].pose : a.pose,
-              ikTargets: compiled.frames.length > 0 ? compiled.frames[0].ikTargets : a.ikTargets,
+              pose: firstCycleFrames.length > 0 ? firstCycleFrames[0].pose : a.pose,
+              ikTargets: firstCycleFrames.length > 0 ? firstCycleFrames[0].ikTargets : a.ikTargets,
             }
           : a
       );
 
-      logger.action(`Applied directorial motion plan to "${target.name}" (${plan.skills.length} skills compiled into ${compiled.keyframes.length} keyframes)`);
+      logger.action(`Applied directorial motion plan to "${target.name}" (${totalSkillsCount} skills × ${safeCycles}x cycles compiled into ${shiftedKeyframes.length} keyframes)`);
       const updated: ShotSpec = { ...shot, actors: updatedActors };
       commitShot(updated, { currentTime: winStart, isPlaying: true });
       if (typeof window !== 'undefined') {

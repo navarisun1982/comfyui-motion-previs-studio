@@ -1151,10 +1151,12 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                         onApplyReadyMadeMotion={(id, clipId, opts) =>
                           applyReadyMadeMotion(id, clipId, opts)
                         }
-                        onDirectCustomAction={async (act, actionText, safeStart, safeEnd, cueDuration) => {
+                        onDirectCustomAction={async (act, actionText, safeStart, safeEnd, cueDuration, overrideCycles) => {
+                          const effectiveCycles = Math.max(1, Math.min(20, Math.round(overrideCycles ?? act.motionCycles ?? 1)));
                           applyDirectorialMotion(act.id, actionText, {
                             startTimeSec: safeStart,
                             endTimeSec: safeEnd,
+                            motionCycles: effectiveCycles,
                           });
                           useShotStore.setState({ currentTime: safeStart, isPlaying: true });
                           window.dispatchEvent(
@@ -1162,12 +1164,20 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                               detail: { time: safeStart, play: true },
                             })
                           );
-                          if (!act.kind || act.kind === 'human' || act.kind === 'character') {
+                          const latestAfterApply = useShotStore
+                            .getState()
+                            .shot.actors.find((a) => a.id === act.id);
+                          // Only run LLM acting cue augmentation when it's a custom prompt (not a Ready-Made Motion clip)
+                          if (
+                            !latestAfterApply?.motionClip &&
+                            (!act.kind || act.kind === 'human' || act.kind === 'character')
+                          ) {
                             setGeneratingActingId(act.id);
                             try {
+                              const singleCycleDur = Math.max(0.2, cueDuration / effectiveCycles);
                               const cues = await generateActingCuesFromPrompt(
                                 actionText,
-                                cueDuration,
+                                singleCycleDur,
                                 act.name,
                                 shot.sceneDescription
                               );
@@ -1175,28 +1185,31 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                                 .getState()
                                 .shot.actors.find((a) => a.id === act.id);
                               const baseGait = latestActor?.gait;
-                              cues.forEach((cue) => {
-                                const effectiveGait =
-                                  cue.gait && cue.gait !== 'none'
-                                    ? cue.gait
-                                    : baseGait === 'walk' || baseGait === 'run' || baseGait === 'sneak'
-                                    ? baseGait
-                                    : cue.gait;
-                                const effectivePosePreset =
-                                  effectiveGait === 'walk' || effectiveGait === 'run' || effectiveGait === 'sneak'
-                                    ? undefined
-                                    : cue.posePreset;
-                                if (effectivePosePreset || (effectiveGait && effectiveGait !== 'none')) {
-                                  recordActorPoseAtTime(
-                                    act.id,
-                                    Math.min(shotDur, safeStart + cue.time),
-                                    undefined,
-                                    effectivePosePreset,
-                                    effectiveGait,
-                                    shotDur
-                                  );
-                                }
-                              });
+                              for (let c = 0; c < effectiveCycles; c++) {
+                                const cycleOffset = c * singleCycleDur;
+                                cues.forEach((cue) => {
+                                  const effectiveGait =
+                                    cue.gait && cue.gait !== 'none'
+                                      ? cue.gait
+                                      : baseGait === 'walk' || baseGait === 'run' || baseGait === 'sneak'
+                                      ? baseGait
+                                      : cue.gait;
+                                  const effectivePosePreset =
+                                    effectiveGait === 'walk' || effectiveGait === 'run' || effectiveGait === 'sneak'
+                                      ? undefined
+                                      : cue.posePreset;
+                                  if (effectivePosePreset || (effectiveGait && effectiveGait !== 'none')) {
+                                    recordActorPoseAtTime(
+                                      act.id,
+                                      Math.min(shotDur, safeStart + cycleOffset + cue.time),
+                                      undefined,
+                                      effectivePosePreset,
+                                      effectiveGait,
+                                      shotDur
+                                    );
+                                  }
+                                });
+                              }
                             } catch {
                               // Deterministic motion plan already applied
                             } finally {
