@@ -891,13 +891,19 @@ export async function reasonObject(prompt: string, opts: ReasonOptions = {}): Pr
   const protocol = cfg.info.protocol;
   const normPal = normalizeExtractedPalette(opts.extractedPalette);
 
-  // Augment prompt with silhouette measurements and revision instructions if provided
+  // Augment prompt with CozyClay 12-row outline span measurements and revision instructions if provided
   let augmentedPrompt = prompt;
   if (opts.imageBase64) {
     const isHuman = isHumanoidPrompt(prompt);
+    const cozyRules = `COZYCLAY RECIPE RULES:
+- First use the measured 12-row reference outline below (where each slice y=0..1 from head top down gives horizontal filled spans [startX, endX] as fractions of height from horizontal centre).
+- Place every part's world position [x, y, z] and size [w, h, d] directly on those measured landmarks in metres (floor y=0, front +z, subject's left +x, mirrorX: true reflects across x=0).
+- Note: part positions in SculptSpec are object-space world coordinates (not relative offsets).
+- For organic clay forms (body, head, limbs, clothing, creatures), use shape: "blob" with high roundness (0.75 to 1.0 = smooth ellipsoid) and taper (-1 to 1).`;
+
     augmentedPrompt = isHuman
-      ? `Attached concept reference image of a character. Sculpt the character anatomy, costuming, hair, accessories, and gear into 15 to 45 soft parts with authentic sampled hex colors (#rrggbb). Set rig: "humanoid".\n\n${augmentedPrompt}`
-      : `Attached reference image of an object/prop/item. Sculpt its true physical parts, body, panels, and details into 5 to 30 soft volumetric parts with authentic sampled hex colors (#rrggbb). Set rig: "none". Do NOT output a humanoid figure.\n\n${augmentedPrompt}`;
+      ? `Attached concept reference image of a character. Sculpt the character anatomy, costuming, hair, accessories, and gear into 15 to 45 soft clay parts with authentic sampled hex colors (#rrggbb). Set rig: "humanoid".\n${cozyRules}\n\n${augmentedPrompt}`
+      : `Attached reference image of a subject/object/prop. Sculpt its true physical parts, body, limbs/panels, and details into 8 to 35 soft volumetric parts with authentic sampled hex colors (#rrggbb).\n${cozyRules}\n\n${augmentedPrompt}`;
   }
   if (opts.silhouetteMeasurements) {
     const ar = opts.silhouetteMeasurements.aspectRatio;

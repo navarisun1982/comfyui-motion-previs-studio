@@ -816,6 +816,92 @@ export function buildUniversalSilhouetteSlicesRecipe(
 }
 
 /**
+ * CozyClay 12-Slice Silhouette Hull Tracer:
+ * Traces the 12 horizontal outline slices (`metrics.outline.rows`) directly into soft clay `blob` parts,
+ * faithfully preserving separated left/right limbs, head, torso, legs, and sampled local colors.
+ */
+export function buildCozyClaySilhouetteTraceRecipe(opts: ImageToRecipeOptions): SculptSpec | null {
+  const { name = 'Clay Figure', prompt = '', metrics, palette, defaultHeight } = opts;
+  const outline = metrics?.outline;
+  if (!outline || !Array.isArray(outline.rows) || outline.rows.length === 0) {
+    return null;
+  }
+
+  const isHuman = isHumanoidPrompt(`${name} ${prompt}`);
+  const fullHeight = defaultHeight || (isHuman ? 1.75 : metrics && metrics.aspectRatio > 1.3 ? 1.2 : 0.45);
+  const { primaryColor, secondaryColor, accentColor, dominantColors } = resolveColors(palette);
+
+  const numRows = outline.rows.length;
+  const sliceH = Number(((fullHeight / numRows) * 1.32).toFixed(3));
+  const parts: SculptPart[] = [];
+
+  outline.rows.forEach((slice, rowIdx) => {
+    // slice.y is 0 at head top, 1 at feet bottom. Convert to world Y (0 at floor, fullHeight at top)
+    const centerY = Number(((1 - slice.y) * fullHeight).toFixed(3));
+    if (!Array.isArray(slice.spans) || slice.spans.length === 0) return;
+
+    slice.spans.forEach((span, spanIdx) => {
+      const [startX, endX] = span;
+      const spanW = Math.max(0.03, Number(((endX - startX) * fullHeight).toFixed(3)));
+      const centerX = Number((((startX + endX) / 2) * fullHeight).toFixed(3));
+      // Depth proportional to span width, slightly slimmer on limbs/extrema
+      const isLimbSpan = slice.spans.length > 1;
+      const spanD = Math.max(0.03, Number((spanW * (isLimbSpan ? 0.85 : 0.72)).toFixed(3)));
+
+      const localColor =
+        slice.spanColors?.[spanIdx] ||
+        dominantColors[(rowIdx + spanIdx) % Math.max(1, dominantColors.length)] ||
+        primaryColor;
+
+      // Determine humanoid bone tag when applicable
+      let bone: any = undefined;
+      if (isHuman) {
+        if (slice.y < 0.18) bone = 'Head';
+        else if (slice.y < 0.38) {
+          bone = isLimbSpan ? (centerX > 0 ? 'LeftArm' : 'RightArm') : 'Chest';
+        } else if (slice.y < 0.56) {
+          bone = isLimbSpan ? (centerX > 0 ? 'LeftForeArm' : 'RightForeArm') : 'Spine';
+        } else if (slice.y < 0.78) {
+          bone = isLimbSpan ? (centerX > 0 ? 'LeftUpLeg' : 'RightUpLeg') : 'Hips';
+        } else {
+          bone = centerX > 0.02 ? 'LeftFoot' : centerX < -0.02 ? 'RightFoot' : 'Hips';
+        }
+      }
+
+      parts.push({
+        id: `slice_${rowIdx + 1}_${spanIdx + 1}`,
+        shape: 'blob',
+        size: [spanW, sliceH, spanD],
+        position: [centerX, centerY, 0],
+        rotation: [0, 0, 0],
+        material: 'mat_clay_primary',
+        color: localColor,
+        roundness: 0.9, // Smooth organic ellipsoid in our engine (roundness=1 is ellipsoid)
+        taper: rowIdx === 0 ? 0.25 : rowIdx === numRows - 1 ? -0.15 : 0,
+        ...(bone ? { bone } : {}),
+      });
+    });
+  });
+
+  if (parts.length === 0) return null;
+
+  return {
+    version: 2,
+    route: 'author',
+    rig: isHuman ? 'humanoid' : 'none',
+    name: name && name !== '3D Object' && name !== 'reference object' ? name : isHuman ? 'Sculpted Character' : 'Sculpted Clay Figure',
+    heightMeters: fullHeight,
+    identity: `CozyClay 12-slice silhouette trace (${parts.length} parts, aspect ratio ${metrics?.aspectRatio ?? 1}:1).`,
+    materials: [
+      { id: 'mat_clay_primary', color: primaryColor, roughness: 0.68, metalness: 0.05 },
+      { id: 'mat_clay_secondary', color: secondaryColor, roughness: 0.65, metalness: 0.08 },
+      { id: 'mat_clay_accent', color: accentColor, roughness: 0.55, metalness: 0.12 },
+    ],
+    parts,
+  };
+}
+
+/**
  * Main entry point: First recognizes the physical & geometric topology of ANY shape,
  * then constructs its authentic 3D parts without category-specific hardcoding.
  */
@@ -831,15 +917,7 @@ export function synthesizeRecipeFromImage(opts: ImageToRecipeOptions): SculptSpe
     /\b(coffee|espresso|bean|beans|roast|pouch|stand-up pouch)\b/i.test(cleanPrompt) ||
     /(قهوة|بن|كيس قهوة|كيس بن|حبوب بن|شاي|بهارات)/.test(cleanPrompt);
 
-  const isPouchGeometry =
-    metrics &&
-    metrics.aspectRatio >= 1.3 &&
-    metrics.aspectRatio <= 2.8 &&
-    Array.isArray(metrics.widthProfile) &&
-    metrics.widthProfile.length >= 5 &&
-    metrics.widthProfile[metrics.widthProfile.length - 1] <= 0.82 * Math.max(...metrics.widthProfile);
-
-  if (isCoffeePrompt || isPouchGeometry) {
+  if (isCoffeePrompt) {
     return buildCoffeePouchRecipe(name || 'Coffee Pouch', metrics, palette, defaultHeight || 0.28);
   }
 
@@ -852,7 +930,34 @@ export function synthesizeRecipeFromImage(opts: ImageToRecipeOptions): SculptSpe
     return curated;
   }
 
-  // 2. UNIVERSAL FIRST-PRINCIPLES SHAPE RECOGNITION & RECONSTRUCTION
+  // 3. CozyClay 12-Slice Silhouette Hull Tracer when reference outline spans are measured from an uploaded image
+  const hasMeasuredOutline =
+    metrics?.outline &&
+    Array.isArray(metrics.outline.rows) &&
+    metrics.outline.rows.length >= 6;
+
+  if (hasMeasuredOutline) {
+    const traced = buildCozyClaySilhouetteTraceRecipe(opts);
+    if (traced) return traced;
+  }
+
+  // Legacy stand-up pouch fallback when only synthetic 10-band widthProfile is passed (no 12-row outline)
+  const isLegacyPouchGeometry =
+    !hasMeasuredOutline &&
+    !isHumanoidPrompt(cleanPrompt) &&
+    metrics &&
+    metrics.aspectRatio >= 1.3 &&
+    metrics.aspectRatio <= 2.8 &&
+    metrics.widthProfile.length >= 8 &&
+    metrics.widthProfile[metrics.widthProfile.length - 1] <
+      Math.max(...metrics.widthProfile.slice(2, 7)) * 0.82 &&
+    metrics.widthProfile[0] >= 0.75;
+
+  if (isLegacyPouchGeometry) {
+    return buildCoffeePouchRecipe(name || 'Coffee Pouch', metrics, palette, defaultHeight || 0.28);
+  }
+
+  // 4. UNIVERSAL FIRST-PRINCIPLES SHAPE RECOGNITION & RECONSTRUCTION
   // Analyzes the visual/geometric topology (aspect ratio, central void, cavity, rotational symmetry,
   // bounding envelope, surface optical properties) and constructs the 3D model directly from it.
   return synthesizeUniversalProceduralShape(opts);

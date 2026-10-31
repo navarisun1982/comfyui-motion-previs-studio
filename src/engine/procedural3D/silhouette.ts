@@ -8,13 +8,46 @@
  * 4. computeSilhouetteIoU: calculates true Intersection-over-Union (0..1) between two masks.
  */
 import * as THREE from 'three';
-import { SculptSpec, buildSculpt } from './sculptSpec';
+import { SculptSpec, buildSculpt, applySculptPatch } from './sculptSpec';
 
 export interface SilhouetteMask {
   width: number;
   height: number;
   /** 1 for foreground, 0 for background. Length = width * height. */
   data: Uint8Array;
+}
+
+/**
+ * CozyClay-compatible horizontal slice measurement.
+ * y: fraction of height from head top (0..1)
+ * spans: filled horizontal runs [startX, endX] as fractions of height from horizontal centre (+ toward image right)
+ * spanColors: sampled hex color for each span when RGBA is available
+ */
+export interface OutlineSlice {
+  y: number;
+  spans: [number, number][];
+  spanColors?: string[];
+}
+
+export interface ReferenceOutline {
+  widthToHeight: number;
+  rows: OutlineSlice[];
+  box: { left: number; top: number; width: number; height: number; aspect: number };
+}
+
+export interface SculptCompareReport {
+  iou: number;
+  missingFraction: number;
+  extraFraction: number;
+  widthToHeight: { reference: number; sculpt: number; delta: number };
+  missingByBand: { top: number; middle: number; bottom: number };
+  extraByPart: { id: string; fraction: number }[];
+  view: { yaw: number; elevation: number };
+}
+
+export interface SculptCompareResult {
+  report: SculptCompareReport;
+  sheetDataUrl: string;
 }
 
 export interface SilhouetteMetrics {
@@ -24,6 +57,8 @@ export interface SilhouetteMetrics {
   /** 10 normalized width measurements from bottom (0 = base/feet) to top (9 = head/crown). */
   widthProfile: number[];
   promptDescription: string;
+  /** CozyClay 12-row horizontal outline span measurements */
+  outline?: ReferenceOutline;
 }
 
 /**
@@ -238,9 +273,124 @@ export function extractMaskFromRgba(
 }
 
 /**
- * Measures the silhouette: aspect ratio, center of mass, and 10-band vertical width profile.
+ * CozyClay `measureReferenceOutline`:
+ * Measures the reference outline in pixels for the agent's first draft: the subject's
+ * width:height and, for `rows` (default 12) horizontal slices from the head top down,
+ * the filled spans across that slice.
+ * - x is a fraction of the subject's height from its horizontal centre (+ toward image right = subject's own left in front view).
+ * - y is a fraction of height from the top (0 = head top, 1 = feet/bottom).
+ * Also samples average hex color per span if `rgba` is provided.
  */
-export function measureSilhouette(mask: SilhouetteMask): SilhouetteMetrics {
+export function measureReferenceOutline(
+  mask: SilhouetteMask,
+  options: { rows?: number; rgba?: Uint8ClampedArray | Uint8Array } = {}
+): ReferenceOutline {
+  const rows = options.rows ?? 12;
+  const rgba = options.rgba;
+  const { width, height, data } = mask;
+
+  let top = height,
+    bottom = -1,
+    left = width,
+    right = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (!data[y * width + x]) continue;
+      if (y < top) top = y;
+      if (y > bottom) bottom = y;
+      if (x < left) left = x;
+      if (x > right) right = x;
+    }
+  }
+
+  if (bottom < 0 || right < left) {
+    return {
+      widthToHeight: 1.0,
+      rows: [],
+      box: { left: 0, top: 0, width: 1, height: 1, aspect: 1 },
+    };
+  }
+
+  const h = Math.max(1, bottom - top + 1);
+  const centre = (left + right + 1) / 2;
+  const round = (val: number) => Math.round(val * 100) / 100;
+  const slices: OutlineSlice[] = [];
+
+  for (let i = 0; i < rows; i++) {
+    const y = Math.min(bottom, Math.round(top + ((i + 0.5) / rows) * h));
+    const spans: [number, number][] = [];
+    const spanColors: string[] = [];
+    let start = -1;
+
+    for (let x = 0; x <= width; x++) {
+      const on = x < width && data[y * width + x] === 1;
+      if (on && start < 0) start = x;
+      if (!on && start >= 0) {
+        if (x - start >= 2) {
+          spans.push([round((start - centre) / h), round((x - centre) / h)]);
+          if (rgba) {
+            let sr = 0,
+              sg = 0,
+              sb = 0,
+              cnt = 0;
+            // Sample a 3-row window around y inside [start, x) for stable span color
+            for (let sy = Math.max(top, y - 2); sy <= Math.min(bottom, y + 2); sy++) {
+              for (let sx = start; sx < x; sx++) {
+                if (data[sy * width + sx] === 1) {
+                  const pIdx = (sy * width + sx) * 4;
+                  sr += rgba[pIdx];
+                  sg += rgba[pIdx + 1];
+                  sb += rgba[pIdx + 2];
+                  cnt++;
+                }
+              }
+            }
+            if (cnt > 0) {
+              const hex = `#${Math.round(sr / cnt)
+                .toString(16)
+                .padStart(2, '0')}${Math.round(sg / cnt)
+                .toString(16)
+                .padStart(2, '0')}${Math.round(sb / cnt)
+                .toString(16)
+                .padStart(2, '0')}`;
+              spanColors.push(hex);
+            }
+          }
+        }
+        start = -1;
+      }
+    }
+
+    slices.push({
+      y: round((y - top) / h),
+      spans,
+      ...(spanColors.length > 0 ? { spanColors } : {}),
+    });
+  }
+
+  const box = {
+    left: left / Math.max(1, width),
+    top: top / Math.max(1, height),
+    width: (right - left + 1) / Math.max(1, width),
+    height: h / Math.max(1, height),
+    aspect: height / Math.max(1, width),
+  };
+
+  return {
+    widthToHeight: round((right - left + 1) / h),
+    rows: slices,
+    box,
+  };
+}
+
+/**
+ * Measures the silhouette: aspect ratio, center of mass, 10-band vertical width profile,
+ * and CozyClay 12-row horizontal outline spans.
+ */
+export function measureSilhouette(
+  mask: SilhouetteMask,
+  rgba?: Uint8ClampedArray | Uint8Array
+): SilhouetteMetrics {
   const { width, height, data } = mask;
   let minX = width,
     maxX = -1,
@@ -308,9 +458,17 @@ export function measureSilhouette(mask: SilhouetteMask): SilhouetteMetrics {
     widthProfile.push(Number((maxWidthInBand / Math.max(boundW, 1)).toFixed(2)));
   }
 
-  const promptDescription = `Reference silhouette aspect ratio (height:width) is ${aspectRatio}:1. Relative width from base to crown across 10 bands: [${widthProfile.join(
+  const outline = measureReferenceOutline(mask, { rows: 12, rgba });
+  const compactOutlineForPrompt = {
+    widthToHeight: outline.widthToHeight,
+    rows: outline.rows.map((r) => ({ y: r.y, spans: r.spans })),
+  };
+
+  const promptDescription = `Reference silhouette aspect ratio (height:width) is ${aspectRatio}:1 (widthToHeight: ${outline.widthToHeight}). Relative width from base to crown across 10 bands: [${widthProfile.join(
     ', '
-  )}]. Center of mass: [${cx}, ${cy}].`;
+  )}]. Center of mass: [${cx}, ${cy}]. The harness measured the reference outline in pixels (front view; x is a fraction of the subject's height from its centre, + toward image right = the subject's own left; y is a fraction of height from the head top; spans are the filled runs across each slice): ${JSON.stringify(
+    compactOutlineForPrompt
+  )}. Put parts on these measurements.`;
 
   return {
     aspectRatio,
@@ -318,6 +476,7 @@ export function measureSilhouette(mask: SilhouetteMask): SilhouetteMetrics {
     centerOfMass: [cx, cy],
     widthProfile,
     promptDescription,
+    outline,
   };
 }
 
@@ -716,7 +875,7 @@ export async function extractMaskFromImageUrl(
       ctx.drawImage(img, 0, 0, w, h);
       const imgData = ctx.getImageData(0, 0, w, h);
       const mask = extractMaskFromRgba(imgData.data, w, h);
-      const metrics = measureSilhouette(mask);
+      const metrics = measureSilhouette(mask, imgData.data);
       const palette = extractPaletteFromRgba(imgData.data, w, h, mask);
       resolve({ mask, metrics, palette, canvasDataUrl: canvas.toDataURL('image/png') });
     };
@@ -755,5 +914,327 @@ export function generateMaskDataUrl(
   }
   ctx.putImageData(imgData, 0, 0);
   return canvas.toDataURL('image/png');
+}
+
+/**
+ * CozyClay `compareSculptToReference` & `scoreSculptAgainstReference`:
+ * Compares a SculptSpec's orthographic silhouette against the reference mask,
+ * searching horizontal offset to maximize overlap, computing `missingByBand` (top/middle/bottom),
+ * `extraByPart`, and generating a side-by-side comparison sheet Data URL:
+ * - Grey = Both (Matched)
+ * - Red = Missing (Reference has pixels, Sculpt does not)
+ * - Blue = Extra (Sculpt sticks out where Reference is empty)
+ */
+export function compareSculptToReference(
+  spec: SculptSpec,
+  refMask: SilhouetteMask,
+  resolution = 128
+): SculptCompareResult {
+  const refMetrics = measureSilhouette(refMask);
+  const normRef = normalizeMask(refMask, refMetrics.bounds, resolution);
+
+  // Render sculpt silhouette and per-part ownership on the same canonical grid
+  const kit = buildSculpt(spec);
+  kit.group.updateMatrixWorld(true);
+  const worldBox = new THREE.Box3().setFromObject(kit.group);
+  const worldSize = worldBox.getSize(new THREE.Vector3());
+  const worldMin = worldBox.min;
+
+  // Fit height to resolution, scale X proportionally to world aspect vs reference aspect
+  const scaleY = resolution / Math.max(worldSize.y, 1e-4);
+  const refAspect = Math.max(refMetrics.bounds.maxX - refMetrics.bounds.minX + 1, 1) /
+    Math.max(refMetrics.bounds.maxY - refMetrics.bounds.minY + 1, 1);
+  const scaleX = scaleY / Math.max(refAspect, 0.15);
+
+  const meshBoxes: { id: string; px0: number; px1: number; py0: number; py1: number }[] = [];
+  kit.group.traverse((c) => {
+    if ((c as THREE.Mesh).isMesh) {
+      const m = c as THREE.Mesh;
+      const mBox = new THREE.Box3().setFromObject(m);
+      if (mBox.isEmpty()) return;
+      const partId = m.parent?.userData?.sculptPartId || m.parent?.name || m.name || 'part';
+      const cxWorld = (worldBox.min.x + worldBox.max.x) / 2;
+      const px0 = Math.floor(resolution / 2 + (mBox.min.x - cxWorld) * scaleX);
+      const px1 = Math.ceil(resolution / 2 + (mBox.max.x - cxWorld) * scaleX);
+      const py0 = Math.floor(resolution - (mBox.max.y - worldMin.y) * scaleY);
+      const py1 = Math.ceil(resolution - (mBox.min.y - worldMin.y) * scaleY);
+      meshBoxes.push({ id: partId, px0, px1, py0, py1 });
+    }
+  });
+
+  const rasterizeShift = (shiftX: number) => {
+    const sil = new Uint8Array(resolution * resolution);
+    const owner = new Array<string>(resolution * resolution).fill('');
+    for (const mb of meshBoxes) {
+      const xStart = Math.max(0, mb.px0 + shiftX);
+      const xEnd = Math.min(resolution, mb.px1 + shiftX);
+      const yStart = Math.max(0, mb.py0);
+      const yEnd = Math.min(resolution, mb.py1);
+      for (let y = yStart; y < yEnd; y++) {
+        for (let x = xStart; x < xEnd; x++) {
+          const idx = y * resolution + x;
+          sil[idx] = 1;
+          owner[idx] = mb.id;
+        }
+      }
+    }
+    return { sil, owner };
+  };
+
+  const overlapScore = (sil: Uint8Array) => {
+    let both = 0,
+      union = 0;
+    for (let i = 0; i < sil.length; i++) {
+      if (normRef[i] && sil[i]) both++;
+      if (normRef[i] || sil[i]) union++;
+    }
+    return both / Math.max(1, union);
+  };
+
+  // Search horizontal shift (-16..+16) like CozyClay so a slightly off-center limb doesn't penalize the whole body
+  let bestShift = 0;
+  let bestRaster = rasterizeShift(0);
+  let bestScore = overlapScore(bestRaster.sil);
+  for (const shift of [-12, -8, -4, -2, 2, 4, 8, 12]) {
+    const cand = rasterizeShift(shift);
+    const s = overlapScore(cand.sil);
+    if (s > bestScore) {
+      bestScore = s;
+      bestShift = shift;
+      bestRaster = cand;
+    }
+  }
+  void bestShift;
+
+  const { sil, owner } = bestRaster;
+  let both = 0,
+    missing = 0,
+    extra = 0;
+  const extraByPartMap = new Map<string, number>();
+  const bandMissing = [0, 0, 0];
+  const bandHeight = resolution / 3;
+
+  for (let i = 0; i < normRef.length; i++) {
+    const r = normRef[i];
+    const s = sil[i];
+    if (r && s) {
+      both++;
+    } else if (r) {
+      missing++;
+      const y = Math.floor(i / resolution);
+      const bIdx = Math.min(2, Math.max(0, Math.floor(y / bandHeight)));
+      bandMissing[bIdx]++;
+    } else if (s) {
+      extra++;
+      const pId = owner[i] || 'body';
+      extraByPartMap.set(pId, (extraByPartMap.get(pId) ?? 0) + 1);
+    }
+  }
+
+  const area = Math.max(1, both + missing);
+  const round = (v: number) => Number(v.toFixed(3));
+  const sculptAspect = worldSize.x / Math.max(worldSize.y, 1e-4);
+
+  const report: SculptCompareReport = {
+    iou: round(both / Math.max(1, both + missing + extra)),
+    missingFraction: round(missing / area),
+    extraFraction: round(extra / area),
+    widthToHeight: {
+      reference: round(refAspect),
+      sculpt: round(sculptAspect),
+      delta: round(sculptAspect - refAspect),
+    },
+    missingByBand: {
+      top: round(bandMissing[0] / area),
+      middle: round(bandMissing[1] / area),
+      bottom: round(bandMissing[2] / area),
+    },
+    extraByPart: [...extraByPartMap.entries()]
+      .map(([id, px]) => ({ id, fraction: round(px / area) }))
+      .filter((row) => row.fraction >= 0.005)
+      .sort((a, b) => b.fraction - a.fraction)
+      .slice(0, 6),
+    view: { yaw: 0, elevation: 0 },
+  };
+
+  // Build side-by-side comparison sheet Data URL (Reference Mask | Overlay: Grey=Both, Red=Missing, Blue=Extra)
+  let sheetDataUrl = '';
+  if (typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas');
+    canvas.width = resolution * 2;
+    canvas.height = resolution;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      const imgData = ctx.createImageData(resolution * 2, resolution);
+      for (let y = 0; y < resolution; y++) {
+        for (let x = 0; x < resolution; x++) {
+          const i = y * resolution + x;
+          const leftIdx = (y * resolution * 2 + x) * 4;
+          const rightIdx = leftIdx + resolution * 4;
+
+          // Left half: Reference silhouette on dark slate
+          const isRef = normRef[i] === 1;
+          imgData.data[leftIdx] = isRef ? 6 : 15;
+          imgData.data[leftIdx + 1] = isRef ? 182 : 23;
+          imgData.data[leftIdx + 2] = isRef ? 212 : 42;
+          imgData.data[leftIdx + 3] = 255;
+
+          // Right half: CozyClay overlay (Grey=Both [190,190,190], Red=Missing [220,40,40], Blue=Extra [40,90,220])
+          const isSil = sil[i] === 1;
+          const col =
+            isRef && isSil
+              ? [190, 190, 190]
+              : isRef
+                ? [220, 40, 40]
+                : isSil
+                  ? [40, 90, 220]
+                  : [15, 23, 42];
+          imgData.data[rightIdx] = col[0];
+          imgData.data[rightIdx + 1] = col[1];
+          imgData.data[rightIdx + 2] = col[2];
+          imgData.data[rightIdx + 3] = 255;
+        }
+      }
+      ctx.putImageData(imgData, 0, 0);
+      sheetDataUrl = canvas.toDataURL('image/png');
+    }
+  }
+
+  return { report, sheetDataUrl };
+}
+
+/**
+ * CozyClay `scoreSculptAgainstReference` with candidate race:
+ * Generates 4–6 targeted geometric candidate patches based on `missingByBand` and `extraByPart`,
+ * scores all of them in <50ms, and returns the winning SculptSpec + comparison report + candidate leaderboard.
+ */
+export function runCozyClayCandidateRefinement(
+  spec: SculptSpec,
+  refMask: SilhouetteMask
+): {
+  bestSpec: SculptSpec;
+  bestComparison: SculptCompareResult;
+  candidates: { label: string; iou: number; delta: number }[];
+} {
+  const baseline = compareSculptToReference(spec, refMask);
+  const { report } = baseline;
+
+  const candidatePatches: { label: string; patch: any }[] = [];
+
+  // Candidate 1: Match overall width-to-height ratio
+  if (Math.abs(report.widthToHeight.delta) > 0.03) {
+    const widthScale = Math.max(0.65, Math.min(1.45, report.widthToHeight.reference / Math.max(report.widthToHeight.sculpt, 0.1)));
+    candidatePatches.push({
+      label: `Scale horizontal width ×${widthScale.toFixed(2)}`,
+      patch: {
+        set: spec.parts.map((p) => ({
+          id: p.id,
+          size: [Number((p.size[0] * widthScale).toFixed(3)), p.size[1], Number((p.size[2] * widthScale).toFixed(3))],
+          position: [Number((p.position[0] * widthScale).toFixed(3)), p.position[1], p.position[2]],
+        })),
+      },
+    });
+  }
+
+  // Candidate 2: Trim biggest protruding part (`extraByPart`)
+  if (report.extraByPart.length > 0) {
+    const worstPart = report.extraByPart[0];
+    const target = spec.parts.find((p) => p.id === worstPart.id);
+    if (target) {
+      candidatePatches.push({
+        label: `Trim protruding ${target.id} (-18%)`,
+        patch: {
+          set: [
+            {
+              id: target.id,
+              size: [
+                Number((target.size[0] * 0.82).toFixed(3)),
+                Number((target.size[1] * 0.88).toFixed(3)),
+                Number((target.size[2] * 0.82).toFixed(3)),
+              ],
+            },
+          ],
+        },
+      });
+    }
+  }
+
+  // Candidate 3: Expand band with highest missing fraction (top, middle, or bottom)
+  const h = spec.heightMeters || 1.0;
+  const { top, middle, bottom } = report.missingByBand;
+  if (top >= middle && top >= bottom && top > 0.02) {
+    candidatePatches.push({
+      label: 'Widen upper crown / head band (+18%)',
+      patch: {
+        set: spec.parts
+          .filter((p) => p.position[1] >= h * 0.62)
+          .map((p) => ({
+            id: p.id,
+            size: [Number((p.size[0] * 1.18).toFixed(3)), Number((p.size[1] * 1.1).toFixed(3)), p.size[2]],
+          })),
+      },
+    });
+  } else if (middle >= top && middle >= bottom && middle > 0.02) {
+    candidatePatches.push({
+      label: 'Expand torso / middle silhouette (+18%)',
+      patch: {
+        set: spec.parts
+          .filter((p) => p.position[1] >= h * 0.3 && p.position[1] < h * 0.68)
+          .map((p) => ({
+            id: p.id,
+            size: [Number((p.size[0] * 1.18).toFixed(3)), p.size[1], Number((p.size[2] * 1.15).toFixed(3))],
+          })),
+      },
+    });
+  } else if (bottom > 0.02) {
+    candidatePatches.push({
+      label: 'Expand lower base / skirt / legs (+18%)',
+      patch: {
+        set: spec.parts
+          .filter((p) => p.position[1] < h * 0.38)
+          .map((p) => ({
+            id: p.id,
+            size: [Number((p.size[0] * 1.18).toFixed(3)), p.size[1], Number((p.size[2] * 1.15).toFixed(3))],
+          })),
+      },
+    });
+  }
+
+  // Candidate 4: Soften organic roundness across all blob parts (CozyClay roundness <= 0.15)
+  candidatePatches.push({
+    label: 'Soften organic clay roundness (0.12)',
+    patch: {
+      set: spec.parts
+        .filter((p) => p.shape === 'blob')
+        .map((p) => ({
+          id: p.id,
+          roundness: Math.min(p.roundness ?? 0.12, 0.12),
+        })),
+    },
+  });
+
+  let bestSpec = spec;
+  let bestComparison = baseline;
+  const leaderboard: { label: string; iou: number; delta: number }[] = [
+    { label: 'Initial Draft', iou: baseline.report.iou, delta: 0 },
+  ];
+
+  for (const cand of candidatePatches) {
+    try {
+      const patched = applySculptPatch(spec, cand.patch);
+      const comp = compareSculptToReference(patched, refMask);
+      const delta = Number((comp.report.iou - baseline.report.iou).toFixed(3));
+      leaderboard.push({ label: cand.label, iou: comp.report.iou, delta });
+      if (comp.report.iou > bestComparison.report.iou) {
+        bestSpec = patched;
+        bestComparison = comp;
+      }
+    } catch {
+      // Ignore invalid candidate patch
+    }
+  }
+
+  leaderboard.sort((a, b) => b.iou - a.iou);
+  return { bestSpec, bestComparison, candidates: leaderboard };
 }
 

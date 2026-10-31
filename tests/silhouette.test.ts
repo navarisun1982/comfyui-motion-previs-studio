@@ -2,10 +2,16 @@ import { describe, it, expect } from 'vitest';
 import {
   extractMaskFromRgba,
   measureSilhouette,
+  measureReferenceOutline,
   computeSilhouetteIoU,
   renderSculptSilhouette,
+  compareSculptToReference,
+  runCozyClayCandidateRefinement,
 } from '../src/engine/procedural3D/silhouette';
 import { sanitizeSculptSpec } from '../src/engine/procedural3D/sculptSpec';
+import {
+  synthesizeRecipeFromImage,
+} from '../src/engine/procedural3D/imageToRecipe';
 
 describe('Silhouette mask extraction & measurement', () => {
   it('extracts foreground from RGBA with transparent alpha channel', () => {
@@ -136,6 +142,60 @@ describe('Silhouette mask extraction & measurement', () => {
     expect(cleanMetrics.bounds.maxY).toBe(14);
     // Aspect ratio is 12 / 4 = 3.0:1 (true vertical proportion)
     expect(cleanMetrics.aspectRatio).toBe(3.0);
+  });
+
+  it('measures 12-row CozyClay reference outline spans and traces a faithful 3D clay sculpt without Coffee Pouch misclassification', () => {
+    // Create a 40x60 humanoid silhouette (head, torso with separated left/right arms, separated legs)
+    const width = 40;
+    const height = 60;
+    const data = new Uint8Array(width * height);
+
+    // Head (y=4..12, x=16..23)
+    for (let y = 4; y <= 12; y++) {
+      for (let x = 16; x <= 23; x++) data[y * width + x] = 1;
+    }
+    // Torso (y=13..34, x=14..25) + separated left arm (x=8..11) + separated right arm/bow (x=28..32)
+    for (let y = 13; y <= 34; y++) {
+      for (let x = 14; x <= 25; x++) data[y * width + x] = 1;
+      if (y >= 16 && y <= 28) {
+        for (let x = 8; x <= 11; x++) data[y * width + x] = 1;
+        for (let x = 28; x <= 32; x++) data[y * width + x] = 1;
+      }
+    }
+    // Separated legs (y=35..54, left leg x=14..18, right leg x=21..25)
+    for (let y = 35; y <= 54; y++) {
+      for (let x = 14; x <= 18; x++) data[y * width + x] = 1;
+      for (let x = 21; x <= 25; x++) data[y * width + x] = 1;
+    }
+
+    const mask = { width, height, data };
+    const outline = measureReferenceOutline(mask, { rows: 12 });
+    expect(outline.rows).toHaveLength(12);
+    // Mid-torso rows should capture multiple horizontal spans (left arm, torso, right arm)
+    const multiSpanRows = outline.rows.filter((r) => r.spans.length >= 2);
+    expect(multiSpanRows.length).toBeGreaterThanOrEqual(3);
+
+    const metrics = measureSilhouette(mask);
+    expect(metrics.outline).toBeDefined();
+    expect(metrics.promptDescription).toContain('The harness measured the reference outline in pixels');
+
+    // Synthesize from image metrics without a text prompt (previously triggered the 1.3..2.8 Coffee Pouch trap!)
+    const recipe = synthesizeRecipeFromImage({
+      name: 'Reference Character',
+      prompt: 'reference figure',
+      metrics,
+    });
+
+    expect(recipe.name).not.toContain('Coffee');
+    expect(recipe.parts.length).toBeGreaterThanOrEqual(12);
+
+    // Run CozyClay comparison & candidate race
+    const comp = compareSculptToReference(recipe, mask, 96);
+    expect(comp.report.iou).toBeGreaterThan(0.65);
+
+    const race = runCozyClayCandidateRefinement(recipe, mask);
+    expect(race.bestComparison.report.iou).toBeGreaterThanOrEqual(comp.report.iou);
+    expect(race.candidates.length).toBeGreaterThanOrEqual(4);
   });
 });
 
