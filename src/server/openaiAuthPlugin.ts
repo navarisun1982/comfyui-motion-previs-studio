@@ -75,6 +75,49 @@ function getAppUpdateService() {
   return require('./appUpdateService.cjs');
 }
 
+function attachLocalWorkflowMiddleware(middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void }) {
+  const fs = require('fs');
+  const path = require('path');
+  middlewares.use((req, res, next) => {
+    const rawUrl = req.url || '';
+    if (!rawUrl.startsWith('/api/local-workflow')) {
+      next();
+      return;
+    }
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    try {
+      const parsedUrl = new URL(rawUrl, 'http://127.0.0.1:5173');
+      let filePath = (parsedUrl.searchParams.get('path') || '').trim();
+      // Strip surrounding quotes if user used "Copy as path" in Windows Explorer
+      filePath = filePath.replace(/^["']+|["']+$/g, '');
+      if (filePath.toLowerCase().startsWith('file:///')) {
+        filePath = decodeURIComponent(filePath.replace(/^file:\/\/\//i, ''));
+      } else if (filePath.toLowerCase().startsWith('file://')) {
+        filePath = decodeURIComponent(filePath.replace(/^file:\/\//i, ''));
+      }
+      if (!filePath || !fs.existsSync(filePath)) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: `Local workflow file not found at: ${filePath}` }));
+        return;
+      }
+      const resolved = path.resolve(filePath);
+      const rawContent = fs.readFileSync(resolved, 'utf-8');
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(rawContent);
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err?.message || 'Failed to read local workflow file' }));
+    }
+  });
+}
+
 function attachAppUpdateMiddleware(middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void }) {
   middlewares.use(async (req, res, next) => {
     const rawUrl = req.url || '';
@@ -137,10 +180,12 @@ export function openaiAuthPlugin(): Plugin {
     name: 'openai-auth-plugin',
     configurePreviewServer(server) {
       attachComfyMiddleware(server.middlewares);
+      attachLocalWorkflowMiddleware(server.middlewares);
       attachAppUpdateMiddleware(server.middlewares);
     },
     configureServer(server) {
       attachComfyMiddleware(server.middlewares);
+      attachLocalWorkflowMiddleware(server.middlewares);
       attachAppUpdateMiddleware(server.middlewares);
       server.middlewares.use(async (req, res, next) => {
         const rawUrl = req.url || '';

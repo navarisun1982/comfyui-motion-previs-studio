@@ -144,9 +144,20 @@ Download the official MiniMax H3 weights from **[🤗 Comfy-Org/MiniMax-H3 on Hu
 | **Audio VAE (FP32)** | [`minimax_h3_audio_vae_fp32.safetensors`](https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors) | `ComfyUI/models/vae/` |
 
 #### Step D — Render Directly from the Studio
-1. Ensure ComfyUI is running at `http://127.0.0.1:8188` and verify the green **`● Comfy`** pill in the studio's top header bar (or click **`⚙ Settings`** → **Test / Reconnect**).
+1. Ensure ComfyUI is running at `http://127.0.0.1:8188` and verify the green **`● Comfy`** pill in the studio's top header bar (or click **`⚙ Settings`** → **ComfyUI & Workflows** → **Test & Connect ComfyUI**).
 2. In **Directing Mode**, upload a **ComfyUI Reference Image** on any character, vehicle, prop, or set.
 3. Switch to **Render, Prompt & Export** and click **`⚡ Render in ComfyUI (MiniMax H3)`** — the studio automatically renders your 24fps 3D Previs MP4, uploads all reference assets, runs the workflow, and streams the final MP4+Audio result into the **Side-by-Side Sync** player.
+
+#### Step E — Using Your Own Custom Local ComfyUI Workflow (Local URL / Local `.JSON`)
+If you have your own custom MiniMax / Video-to-Video workflow on your machine instead of the built-in `Stubelius_Ultimate_H3.json`, open **`⚙ Settings` → `ComfyUI & Workflows`** (or the **Render, Prompt & Export** deck) and switch **ComfyUI Workflow Source** to **`🖥️ Local Workflow URL / .JSON`**:
+1. **Method 1 — Directly from Your Local ComfyUI Server (`127.0.0.1:8188`)**:
+   - In ComfyUI, press `Ctrl+S` to save your workflow (stored in `ComfyUI/user/default/workflows/`).
+   - Click **`Scan Local ComfyUI`** in the Studio to list all saved workflows on `127.0.0.1:8188` and load yours with 1 click, OR paste its local ComfyUI URL (`http://127.0.0.1:8188/api/userdata/workflows%2Fyour_workflow.json` or simply `your_workflow.json`) and click **`Load & Auto-Detect`**.
+2. **Method 2 — Paste Your Local PC File Path**:
+   - Right-click your workflow `.json` file in Windows Explorer → **Copy as path** (e.g., `D:\ComfyUI\user\default\workflows\my_minimax.json`), paste it into the input box, and click **`Load & Auto-Detect`**.
+3. **Method 3 — Export & Upload `.JSON`**:
+   - In ComfyUI, click **Workflow → Export** (or **Export (API)**) to save a `.json` file on your PC, then click **`Upload .JSON`**.
+- **Automatic Node Detection & Override**: Both standard ComfyUI UI workflows (`nodes` + `links`) and API-format workflows are supported. The Studio automatically detects your **Previs Video (`<Video 1>`)**, **Positive Prompt**, **Reference Images (`<picture 1>`–`<picture 4>`)**, **Seed**, and **Video Output** nodes — and you can click **`Inspect / Override Mapping`** to reassign any node via dropdown. *(Required model weights inside your custom workflow remain your responsibility in `ComfyUI/models/`.)*
 
 ---
 

@@ -5,6 +5,7 @@ import {
   StoredCustomWorkflowConfig,
   autoDetectWorkflowBindings,
   fetchAndDetectWorkflowFromUrl,
+  listLocalComfyWorkflows,
   loadStoredCustomWorkflowConfig,
   saveStoredCustomWorkflowConfig,
   syncActiveMinimaxTemplateToRegistry,
@@ -20,6 +21,8 @@ import {
   ChevronDown,
   ChevronUp,
   RotateCcw,
+  HelpCircle,
+  FolderOpen,
 } from 'lucide-react';
 
 interface CustomWorkflowConfigBarProps {
@@ -42,6 +45,9 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
   const [errorText, setErrorText] = useState<string | null>(null);
   const [statusText, setStatusText] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState<boolean>(false);
+  const [showGuide, setShowGuide] = useState<boolean>(!compact);
+  const [localSavedWorkflows, setLocalSavedWorkflows] = useState<string[]>([]);
+  const [isScanningLocal, setIsScanningLocal] = useState<boolean>(false);
   const [detected, setDetected] = useState<AutoDetectedWorkflowResult | null>(() => {
     const initial = loadStoredCustomWorkflowConfig();
     if (initial.rawJson) {
@@ -78,14 +84,17 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
     applyAndPersist(nextConfig, detected);
   };
 
-  const handleFetchFromUrl = async () => {
-    if (!urlInput.trim()) {
-      setErrorText('Please paste a GitHub, HuggingFace, or direct .json workflow URL.');
+  const handleFetchFromUrl = async (customTargetUrl?: string) => {
+    const targetUrl = (customTargetUrl ?? urlInput).trim();
+    if (!targetUrl) {
+      setErrorText(
+        'Please paste your local ComfyUI workflow URL (e.g. http://127.0.0.1:8188/api/userdata/workflows%2Fmy_workflow.json) or local .json file path (e.g. D:\\ComfyUI\\user\\default\\workflows\\my_workflow.json).'
+      );
       return;
     }
     setIsLoadingUrl(true);
     setErrorText(null);
-    setStatusText('Fetching workflow JSON & auto-detecting ComfyUI nodes...');
+    setStatusText('Loading local ComfyUI workflow & auto-detecting nodes...');
     try {
       let objInfo: Record<string, unknown> | null = null;
       try {
@@ -95,19 +104,24 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
       }
 
       const { normalizedUrl, rawJson, result } = await fetchAndDetectWorkflowFromUrl(
-        urlInput,
+        targetUrl,
         {},
         objInfo
       );
-      const label = normalizedUrl.split('/').pop() || 'custom_workflow.json';
+      const rawName = decodeURIComponent(normalizedUrl.split(/[\\/]/).pop() || 'custom_workflow.json').replace(
+        /^.*\?path=/,
+        ''
+      );
+      const label = rawName.split(/[\\/]/).pop() || 'custom_workflow.json';
       const nextConfig: StoredCustomWorkflowConfig = {
         activeSource: 'custom',
-        url: urlInput.trim(),
+        url: targetUrl,
         label,
         rawJson,
         overrides: {},
         updatedAt: new Date().toISOString(),
       };
+      setUrlInput(targetUrl);
       applyAndPersist(nextConfig, result);
       setStatusText(
         `Auto-detected ${result.candidates.length} nodes (${
@@ -120,6 +134,31 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
       setStatusText(null);
     } finally {
       setIsLoadingUrl(false);
+    }
+  };
+
+  const handleScanLocalComfy = async () => {
+    setIsScanningLocal(true);
+    setErrorText(null);
+    setStatusText('Scanning local ComfyUI (127.0.0.1:8188) for saved workflows...');
+    try {
+      const list = await listLocalComfyWorkflows();
+      setLocalSavedWorkflows(list);
+      if (list.length > 0) {
+        setStatusText(
+          `Found ${list.length} saved workflow(s) on your local ComfyUI server. Click any workflow below to load & auto-detect it.`
+        );
+      } else {
+        setStatusText(null);
+        setErrorText(
+          'No saved workflows found in ComfyUI/user/default/workflows/ on 127.0.0.1:8188. Save your workflow inside ComfyUI (Ctrl+S), paste its local file path, or click "Upload .JSON".'
+        );
+      }
+    } catch (err: unknown) {
+      setErrorText(err instanceof Error ? err.message : String(err));
+      setStatusText(null);
+    } finally {
+      setIsScanningLocal(false);
     }
   };
 
@@ -256,7 +295,7 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            🌐 Custom Workflow URL / .JSON
+            🖥️ Local Workflow URL / .JSON
           </button>
         </div>
       </div>
@@ -269,18 +308,28 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
               type="text"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="Paste GitHub / HuggingFace / raw ComfyUI workflow .json URL..."
+              placeholder="Local ComfyUI workflow URL (http://127.0.0.1:8188/...) or local path (D:\...\workflow.json)..."
               className="flex-1 rounded-lg bg-black/70 border border-white/15 px-2.5 py-1.5 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
             />
             <button
               type="button"
-              onClick={handleFetchFromUrl}
+              onClick={() => handleFetchFromUrl()}
               disabled={isLoadingUrl}
               className="flex items-center justify-center gap-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-3 py-1.5 text-[10.5px] transition-all disabled:opacity-50 cursor-pointer shrink-0"
-              title="Fetch workflow JSON from URL and auto-detect Video, Prompt, Reference Image, Seed & Output nodes"
+              title="Load local workflow JSON and auto-detect Video, Prompt, Reference Image, Seed & Output nodes"
             >
               <RefreshCw className={`h-3 w-3 ${isLoadingUrl ? 'animate-spin' : ''}`} />
-              <span>{isLoadingUrl ? 'Detecting...' : 'Fetch & Auto-Detect'}</span>
+              <span>{isLoadingUrl ? 'Detecting...' : 'Load & Auto-Detect'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleScanLocalComfy}
+              disabled={isScanningLocal}
+              className="flex items-center justify-center gap-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-400/35 px-2.5 py-1.5 text-[10.5px] font-semibold cursor-pointer shrink-0"
+              title="Scan saved workflows inside your local ComfyUI server (127.0.0.1:8188)"
+            >
+              <FolderOpen className={`h-3 w-3 text-indigo-300 ${isScanningLocal ? 'animate-pulse' : ''}`} />
+              <span>{isScanningLocal ? 'Scanning...' : 'Scan Local ComfyUI'}</span>
             </button>
             <label
               className="flex items-center justify-center gap-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-slate-200 border border-white/15 px-2.5 py-1.5 text-[10.5px] font-semibold cursor-pointer shrink-0"
@@ -295,7 +344,81 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
                 className="hidden"
               />
             </label>
+            <button
+              type="button"
+              onClick={() => setShowGuide((prev) => !prev)}
+              className="flex items-center justify-center gap-1 rounded-lg bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 px-2 py-1.5 text-[10px] font-semibold cursor-pointer shrink-0"
+              title="Show / hide step-by-step Local Workflow User Guide"
+            >
+              <HelpCircle className="h-3 w-3" />
+              <span>Guide</span>
+            </button>
           </div>
+
+          {/* Saved Workflows Found on Local ComfyUI Server */}
+          {localSavedWorkflows.length > 0 && (
+            <div className="rounded-lg bg-indigo-950/30 border border-indigo-500/30 px-2.5 py-2 space-y-1.5">
+              <div className="text-[10px] font-bold text-indigo-200">
+                Saved Workflows on Local ComfyUI (127.0.0.1:8188) — click to load:
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {localSavedWorkflows.map((wfName) => (
+                  <button
+                    key={wfName}
+                    type="button"
+                    onClick={() => handleFetchFromUrl(wfName)}
+                    className="rounded bg-indigo-500/20 hover:bg-cyan-500/30 border border-indigo-400/30 hover:border-cyan-400/50 px-2 py-0.5 text-[10px] text-indigo-100 hover:text-white cursor-pointer transition-colors"
+                  >
+                    📄 {wfName}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Step-by-Step User Guide for Local ComfyUI Workflows */}
+          {showGuide && (
+            <div className="rounded-lg bg-[#070b12]/90 border border-cyan-500/25 p-2.5 space-y-1.5 text-[10.5px] text-slate-300 leading-relaxed">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-cyan-300 flex items-center gap-1.5">
+                  <HelpCircle className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                  How to Connect Your Own Local ComfyUI Workflow (3 Easy Ways)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowGuide(false)}
+                  className="text-[10px] text-slate-400 hover:text-white cursor-pointer"
+                >
+                  Hide
+                </button>
+              </div>
+              <ol className="list-decimal list-inside space-y-1 text-[10px] text-slate-300">
+                <li>
+                  <strong className="text-white">Method 1 — Directly from Local ComfyUI (`127.0.0.1:8188`):</strong>{' '}
+                  In your ComfyUI window, press <code className="text-cyan-300">Ctrl+S</code> to save your workflow (stored in{' '}
+                  <code className="text-slate-200">ComfyUI/user/default/workflows/</code>). Then click{' '}
+                  <strong className="text-indigo-300">Scan Local ComfyUI</strong> above to pick it with one click, or paste its local URL:{' '}
+                  <code className="text-cyan-200">http://127.0.0.1:8188/api/userdata/workflows%2Fyour_workflow.json</code> (or simply type{' '}
+                  <code className="text-cyan-200">your_workflow.json</code>).
+                </li>
+                <li>
+                  <strong className="text-white">Method 2 — Paste Your Local PC File Path:</strong>{' '}
+                  Right-click your workflow <code className="text-cyan-300">.json</code> file in Windows Explorer &rarr;{' '}
+                  <strong className="text-white">Copy as path</strong> (for example:{' '}
+                  <code className="text-cyan-200">D:\ComfyUI\user\default\workflows\my_minimax.json</code>), paste it in the box above, and click{' '}
+                  <strong className="text-cyan-300">Load &amp; Auto-Detect</strong>.
+                </li>
+                <li>
+                  <strong className="text-white">Method 3 — Export &amp; Upload `.JSON`:</strong>{' '}
+                  In ComfyUI, click <strong className="text-white">Workflow &rarr; Export</strong> (or <strong className="text-white">Export (API)</strong>) to save the <code className="text-cyan-300">.json</code> file on your PC, then click{' '}
+                  <strong className="text-cyan-300">Upload .JSON</strong>.
+                </li>
+              </ol>
+              <div className="text-[9.5px] text-slate-400 pt-0.5 border-t border-white/5">
+                💡 <strong className="text-slate-200">Note:</strong> Both standard ComfyUI UI workflows and API-format workflows are supported. After loading, the Studio automatically detects your <strong className="text-cyan-300">Video</strong>, <strong className="text-cyan-300">Prompt</strong>, <strong className="text-cyan-300">Reference Images 1–4</strong>, <strong className="text-cyan-300">Seed</strong>, and <strong className="text-emerald-300">Output</strong> nodes (and lets you override any node via <strong className="text-cyan-300">Inspect / Override Mapping</strong>). Required model weights inside your custom workflow remain your responsibility in <code className="text-slate-300">ComfyUI/models/</code>.
+              </div>
+            </div>
+          )}
 
           {/* Detected Nodes Badge + Interactive Inspector Toggle */}
           {detected && (

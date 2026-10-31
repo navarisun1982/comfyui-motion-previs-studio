@@ -64,11 +64,33 @@ export interface StoredCustomWorkflowConfig {
 const STORAGE_KEY = 'cmpvs_custom_minimax_workflow_v1';
 
 /**
- * Normalize GitHub blob, HuggingFace blob, or Gist URLs into direct raw JSON URLs.
+ * Normalize local ComfyUI workflow URLs, local file paths (`D:\...\workflow.json` / `file:///...`),
+ * relative ComfyUI userdata workflow names (`workflows/my_workflow.json`), or direct `.json` URLs.
  */
 export function normalizeWorkflowUrl(rawUrl: string): string {
-  const trimmed = rawUrl.trim();
+  const trimmed = rawUrl.trim().replace(/^["']+|["']+$/g, '');
   if (!trimmed) return '';
+
+  // Local Windows drive path (e.g. D:\ComfyUI\user\default\workflows\my_workflow.json) or file:// URL
+  if (/^[a-zA-Z]:[\\/]/.test(trimmed) || /^file:\/\//i.test(trimmed)) {
+    return `/api/local-workflow?path=${encodeURIComponent(trimmed)}`;
+  }
+
+  // Local ComfyUI userdata friendly URL: http://127.0.0.1:8188/userdata/workflows/foo.json
+  const localUserdataMatch = trimmed.match(
+    /^(https?:\/\/(?:127\.0\.0\.1|localhost):\d+)\/userdata\/workflows\/(.+)$/i
+  );
+  if (localUserdataMatch) {
+    const encodedPath = encodeURIComponent(`workflows/${decodeURIComponent(localUserdataMatch[2])}`);
+    return `${localUserdataMatch[1]}/api/userdata/${encodedPath}`;
+  }
+
+  // Relative ComfyUI workflow filename (e.g. "workflows/my_minimax.json" or "my_minimax.json")
+  if (!/^https?:\/\//i.test(trimmed) && !trimmed.startsWith('/') && trimmed.toLowerCase().endsWith('.json')) {
+    const cleanRel = trimmed.replace(/^workflows[\\/]/i, '');
+    const encodedPath = encodeURIComponent(`workflows/${cleanRel}`);
+    return `/api/comfy/api/userdata/${encodedPath}`;
+  }
 
   // GitHub blob -> raw.githubusercontent.com
   const ghMatch = trimmed.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)$/i);
@@ -664,7 +686,35 @@ export function autoDetectWorkflowBindings(
 }
 
 /**
- * Fetch a workflow JSON from a URL and run `autoDetectWorkflowBindings`.
+ * List saved workflow `.json` files stored inside the user's local ComfyUI server
+ * (`ComfyUI/user/default/workflows/` via `/api/userdata?dir=workflows`).
+ */
+export async function listLocalComfyWorkflows(): Promise<string[]> {
+  const endpoints = [
+    '/api/comfy/api/userdata?dir=workflows',
+    'http://127.0.0.1:8188/api/userdata?dir=workflows',
+  ];
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        const list = await res.json();
+        if (Array.isArray(list)) {
+          return list
+            .map((item) => (typeof item === 'string' ? item : item?.path || item?.name || ''))
+            .filter((name: string) => name.toLowerCase().endsWith('.json'));
+        }
+      }
+    } catch {
+      // try next endpoint
+    }
+  }
+  return [];
+}
+
+/**
+ * Fetch a workflow JSON from a local ComfyUI URL, local file path, or saved ComfyUI workflow
+ * and run `autoDetectWorkflowBindings`.
  */
 export async function fetchAndDetectWorkflowFromUrl(
   rawUrl: string,
@@ -673,15 +723,84 @@ export async function fetchAndDetectWorkflowFromUrl(
 ): Promise<{ normalizedUrl: string; rawJson: string; result: AutoDetectedWorkflowResult }> {
   const normalizedUrl = normalizeWorkflowUrl(rawUrl);
   if (!normalizedUrl) {
-    throw new Error('Please enter a valid workflow URL.');
+    throw new Error('Please enter a valid local ComfyUI workflow URL or file path.');
   }
 
-  const res = await fetch(normalizedUrl);
+  // Check if user pasted the root ComfyUI server URL (e.g., http://127.0.0.1:8188 or http://127.0.0.1:8188/#...)
+  const rootComfyMatch = normalizedUrl.match(
+    /^https?:\/\/(?:127\.0\.0\.1|localhost):\d+(?:\/?(?:#.*)?)?$/i
+  );
+  if (rootComfyMatch) {
+    // 1. Try grabbing the most recent active workflow from local ComfyUI /history
+    try {
+      const histRes = await fetch('/api/comfy/history?max_items=1');
+      if (histRes.ok) {
+        const histData = (await histRes.json()) as Record<string, any>;
+        const promptIds = Object.keys(histData || {});
+        if (promptIds.length > 0) {
+          const latestEntry = histData[promptIds[promptIds.length - 1]];
+          const apiPrompt = latestEntry?.prompt?.[2];
+          if (apiPrompt && typeof apiPrompt === 'object') {
+            const rawJson = JSON.stringify(apiPrompt, null, 2);
+            const result = autoDetectWorkflowBindings(rawJson, overrides, objectInfo);
+            return {
+              normalizedUrl: 'comfyui_active_history_workflow.json',
+              rawJson,
+              result,
+            };
+          }
+        }
+      }
+    } catch {
+      // fallback to userdata workflows
+    }
+
+    // 2. Try loading the first saved workflow from ComfyUI /api/userdata?dir=workflows
+    const savedList = await listLocalComfyWorkflows();
+    if (savedList.length > 0) {
+      const firstSaved = savedList[0];
+      const userdataUrl = `/api/comfy/api/userdata/${encodeURIComponent(`workflows/${firstSaved.replace(/^workflows[\\/]/i, '')}`)}`;
+      const savedRes = await fetch(userdataUrl);
+      if (savedRes.ok) {
+        const rawJson = await savedRes.text();
+        const result = autoDetectWorkflowBindings(rawJson, overrides, objectInfo);
+        return {
+          normalizedUrl: firstSaved,
+          rawJson,
+          result,
+        };
+      }
+    }
+
+    throw new Error(
+      'You entered the root ComfyUI server URL (http://127.0.0.1:8188), which returns the HTML web page rather than a specific .json workflow. Either click "Scan Local ComfyUI Workflows" below to pick a saved workflow, paste a direct local workflow URL/path (e.g. D:\\ComfyUI\\user\\default\\workflows\\my_workflow.json), or click "Upload .JSON".'
+    );
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(normalizedUrl);
+  } catch (err) {
+    // If direct fetch to http://127.0.0.1:8188/... failed due to browser CORS, route via /api/comfy proxy
+    const localProxyMatch = normalizedUrl.match(/^https?:\/\/(?:127\.0\.0\.1|localhost):8188(\/.*)$/i);
+    if (localProxyMatch) {
+      res = await fetch(`/api/comfy${localProxyMatch[1]}`);
+    } else {
+      throw err;
+    }
+  }
+
   if (!res.ok) {
-    throw new Error(`Failed to fetch workflow from URL (HTTP ${res.status} ${res.statusText}).`);
+    throw new Error(`Failed to fetch workflow from local URL (HTTP ${res.status} ${res.statusText}).`);
   }
 
   const rawJson = await res.text();
+  if (rawJson.trim().startsWith('<!DOCTYPE') || rawJson.trim().startsWith('<html')) {
+    throw new Error(
+      'The URL returned an HTML page instead of a ComfyUI .json workflow. Please use "Scan Local ComfyUI Workflows", paste the local .json path/URL, or click "Upload .JSON".'
+    );
+  }
+
   const result = autoDetectWorkflowBindings(rawJson, overrides, objectInfo);
   return { normalizedUrl, rawJson, result };
 }

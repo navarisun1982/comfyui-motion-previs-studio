@@ -9,6 +9,22 @@ import {
 import { bindTemplate } from '../src/pipeline/templateBinder';
 
 describe('customWorkflowResolver', () => {
+  it('normalizes local ComfyUI workflow URLs, local file paths, and relative workflow names', () => {
+    expect(
+      normalizeWorkflowUrl('http://127.0.0.1:8188/userdata/workflows/my_minimax.json')
+    ).toBe('http://127.0.0.1:8188/api/userdata/workflows%2Fmy_minimax.json');
+
+    expect(normalizeWorkflowUrl('workflows/my_minimax.json')).toBe(
+      '/api/comfy/api/userdata/workflows%2Fmy_minimax.json'
+    );
+
+    expect(
+      normalizeWorkflowUrl('"D:\\ComfyUI\\user\\default\\workflows\\my_minimax.json"')
+    ).toBe(
+      `/api/local-workflow?path=${encodeURIComponent('D:\\ComfyUI\\user\\default\\workflows\\my_minimax.json')}`
+    );
+  });
+
   it('normalizes GitHub and HuggingFace blob URLs into raw URLs', () => {
     expect(
       normalizeWorkflowUrl(
