@@ -131,9 +131,17 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     return () => window.clearInterval(interval);
   }, [isGenerating, isRefining]);
 
-  // Process reference image to extract silhouette & geometry metrics
+  // Process reference image to extract silhouette & geometry metrics ONLY.
+  // Do NOT synthesize a placeholder 3D sculpt until the user explicitly clicks
+  // "Generate 3D Figure" or "Instant Procedural 3D".
   const processImageForSilhouette = async (url: string) => {
     try {
+      // Clear any previous 3D figure so the user returns to the clean Guided Step-2 card
+      setSculpt(null);
+      setCharacterRig(null);
+      setCurrentIoU(null);
+      setGenerationError(null);
+
       const { mask, metrics, palette, canvasDataUrl } = await extractMaskFromImageUrl(url, 512);
       setReferenceMask(mask);
       setReferenceMetrics(metrics);
@@ -141,36 +149,6 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       const preview = generateMaskDataUrl(mask, [6, 182, 212, 230]);
       setMaskPreviewUrl(preview);
       setReferenceImageUrl(canvasDataUrl);
-
-      // Instantly synthesize a 3D procedural sculpt matching the reference image
-      const cleanPrompt = (prompt || name || '').trim();
-      const initialSculpt = synthesizeRecipeFromImage({
-        name: cleanPrompt || '3D Object',
-        prompt: cleanPrompt,
-        metrics,
-        palette,
-      });
-      setSculpt(initialSculpt);
-      if (!name && initialSculpt.name && initialSculpt.name !== '3D Object' && initialSculpt.name !== 'Sculpted Prop') {
-        setName(initialSculpt.name);
-      }
-      setDisplayMode('parametric');
-
-      const initialIoU = evaluateSilhouetteMatch(initialSculpt, mask);
-      setCurrentIoU(initialIoU);
-
-      // Only attempt to build a skinned character rig IF the user explicitly requested a humanoid character
-      if (isHumanoidPrompt(cleanPrompt)) {
-        try {
-          const rig = await createSkinnedCharacterFromConcept(canvasDataUrl, cleanPrompt);
-          setCharacterRig(rig);
-          setDisplayMode('skinned');
-        } catch (rigErr) {
-          console.warn('Could not auto-generate skinned rig from concept:', rigErr);
-        }
-      } else {
-        setCharacterRig(null);
-      }
     } catch (err) {
       console.warn('Could not extract silhouette from image:', err);
     }
@@ -1097,18 +1075,98 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
             {/* 3D Canvas Mount Point */}
             <div ref={canvasMountRef} className="flex-1 w-full h-full cursor-grab active:cursor-grabbing relative" />
 
-            {/* Instructions Overlay (When empty) */}
+            {/* Instructions / Guided Step-2 Overlay (When no 3D figure is generated yet) */}
             {!sculpt && !characterRig && !isGenerating && (
               <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center pointer-events-none">
-                <div className="h-16 w-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-500 mb-3">
-                  <Box className="h-8 w-8" />
-                </div>
-                <h3 className="text-sm font-bold text-slate-300 mb-1">
-                  Interactive 3D Stage Preview
-                </h3>
-                <p className="text-xs text-slate-500 max-w-sm">
-                  Upload an image or enter a description on the left to reason and build a multi-part parametric 3D proxy.
-                </p>
+                {referenceImageUrl ? (
+                  <div className="pointer-events-auto max-w-md w-full rounded-2xl bg-[#0e121d]/90 backdrop-blur-xl border border-cyan-500/30 p-5 shadow-2xl space-y-4">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+                      <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-400/30 text-[10px] font-mono font-bold text-cyan-300 uppercase tracking-wider">
+                        ✓ Step 1 Complete · Reference Staged
+                      </span>
+                      {referenceMetrics && (
+                        <span className="text-[10px] font-mono text-slate-400">
+                          Ratio <strong className="text-cyan-300">{referenceMetrics.aspectRatio}:1</strong>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-4 text-left">
+                      <div className="relative h-24 w-24 rounded-xl overflow-hidden border border-white/15 bg-black/60 shrink-0 flex items-center justify-center">
+                        <img
+                          src={showMaskOverlay && maskPreviewUrl ? maskPreviewUrl : referenceImageUrl}
+                          alt="Staged Reference"
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+
+                      <div className="flex-1 min-w-0 space-y-1.5">
+                        <h3 className="text-xs font-bold text-white font-mono">
+                          Step 2: Ready to Generate 3D Figure
+                        </h3>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Your concept silhouette &amp; color palette are extracted. Add an optional description on the left (e.g.{' '}
+                          <span className="text-amber-300 font-mono">&quot;Tribal Archer Female&quot;</span>) or generate directly now.
+                        </p>
+
+                        {referencePalette && (
+                          <div className="flex items-center gap-2 pt-1">
+                            <span className="text-[9px] font-mono text-slate-500 uppercase">Extracted Palette:</span>
+                            <div className="flex items-center gap-1">
+                              <span
+                                className="h-3.5 w-3.5 rounded-full border border-white/30"
+                                style={{ backgroundColor: referencePalette.primaryColor }}
+                                title={`Primary: ${referencePalette.primaryColor}`}
+                              />
+                              <span
+                                className="h-3.5 w-3.5 rounded-full border border-white/30"
+                                style={{ backgroundColor: referencePalette.secondaryColor }}
+                                title={`Secondary: ${referencePalette.secondaryColor}`}
+                              />
+                              <span
+                                className="h-3.5 w-3.5 rounded-full border border-white/30"
+                                style={{ backgroundColor: referencePalette.accentColor }}
+                                title={`Accent: ${referencePalette.accentColor}`}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleGenerate}
+                        className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-600 via-indigo-600 to-cyan-600 hover:from-amber-500 hover:via-indigo-500 hover:to-cyan-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-950/50 transition-all font-mono"
+                      >
+                        <Sparkles className="h-4 w-4 text-amber-300" />
+                        <span>Generate 3D Figure Now</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleInstantProceduralGenerate}
+                        className="py-2.5 px-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 text-cyan-300 hover:text-cyan-200 text-[11px] font-mono flex items-center justify-center gap-1.5 transition-colors"
+                        title="Instant 0ms Procedural Synthesis"
+                      >
+                        <Zap className="h-3.5 w-3.5 text-cyan-400" />
+                        <span>0ms Procedural</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="h-16 w-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-500 mb-3">
+                      <Box className="h-8 w-8" />
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-300 mb-1">
+                      Interactive 3D Stage Preview
+                    </h3>
+                    <p className="text-xs text-slate-500 max-w-sm">
+                      Upload an image or enter a description on the left to reason and build a multi-part parametric 3D proxy.
+                    </p>
+                  </>
+                )}
               </div>
             )}
 
@@ -1144,6 +1202,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                 {sculpt ? (
                   <span>
                     Ready to place in scene or export: <strong className="text-white">{sculpt.name}</strong>
+                  </span>
+                ) : referenceImageUrl ? (
+                  <span className="text-cyan-300">
+                    Reference image staged · Click <strong className="text-white">Generate 3D Figure</strong> to build your 3D model
                   </span>
                 ) : (
                   <span>Left-drag to rotate · Scroll to zoom</span>
