@@ -1,9 +1,16 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { getModelBuffer } from '../services/modelStorage';
 
+const dracoLoader = new DRACOLoader();
 const gltfLoader = new GLTFLoader();
+gltfLoader.setDRACOLoader(dracoLoader);
+if (MeshoptDecoder) {
+  gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+}
 
 // Master cache of normalized template groups keyed by modelUrl or model ID
 const normalizedTemplateCache = new Map<string, THREE.Group>();
@@ -17,6 +24,7 @@ export interface LoadedModelResult {
   size: THREE.Vector3;
   center: THREE.Vector3;
   sourceUrl: string;
+  animations?: THREE.AnimationClip[];
 }
 
 /**
@@ -104,7 +112,8 @@ export async function loadGltfModel(
     const bbox = new THREE.Box3().setFromObject(cloned);
     const size = bbox.getSize(new THREE.Vector3());
     const center = bbox.getCenter(new THREE.Vector3());
-    return { scene: cloned, bbox, size, center, sourceUrl: modelUrl };
+    const animations = (cachedTemplate.userData?.gltfAnimations as THREE.AnimationClip[] | undefined)?.map((c) => c.clone()) || [];
+    return { scene: cloned, bbox, size, center, sourceUrl: modelUrl, animations };
   }
 
   // 2. Check pending in-flight loads to prevent duplicate simultaneous parses
@@ -122,6 +131,7 @@ export async function loadGltfModel(
             '',
             (gltf) => {
               const normalized = normalizeGltfScene(gltf.scene, targetHeightMeters);
+              normalized.userData.gltfAnimations = gltf.animations || [];
               resolve(normalized);
             },
             (err) => {
@@ -138,6 +148,7 @@ export async function loadGltfModel(
           modelUrl,
           (gltf) => {
             const normalized = normalizeGltfScene(gltf.scene, targetHeightMeters);
+            normalized.userData.gltfAnimations = gltf.animations || [];
             resolve(normalized);
           },
           undefined,
@@ -161,8 +172,9 @@ export async function loadGltfModel(
     const bbox = new THREE.Box3().setFromObject(cloned);
     const size = bbox.getSize(new THREE.Vector3());
     const center = bbox.getCenter(new THREE.Vector3());
+    const animations = (template.userData?.gltfAnimations as THREE.AnimationClip[] | undefined)?.map((c) => c.clone()) || [];
 
-    return { scene: cloned, bbox, size, center, sourceUrl: modelUrl };
+    return { scene: cloned, bbox, size, center, sourceUrl: modelUrl, animations };
   } finally {
     pendingLoads.delete(modelUrl);
   }
@@ -179,7 +191,8 @@ export function getCachedGltfModel(modelUrl: string): LoadedModelResult | null {
   const bbox = new THREE.Box3().setFromObject(cloned);
   const size = bbox.getSize(new THREE.Vector3());
   const center = bbox.getCenter(new THREE.Vector3());
-  return { scene: cloned, bbox, size, center, sourceUrl: modelUrl };
+  const animations = (cached.userData?.gltfAnimations as THREE.AnimationClip[] | undefined)?.map((c) => c.clone()) || [];
+  return { scene: cloned, bbox, size, center, sourceUrl: modelUrl, animations };
 }
 
 /**

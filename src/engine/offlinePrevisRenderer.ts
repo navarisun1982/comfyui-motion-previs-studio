@@ -287,6 +287,9 @@ export async function renderOfflinePrevisPasses(
 
       // --- Pass 1: RGB Viewfinder ---
       if (shouldRenderRgb) {
+        if (renderer.shadowMap) {
+          renderer.shadowMap.enabled = true;
+        }
         scene.overrideMaterial = null;
         scene.background = prevBackground;
         renderer.render(scene, camera);
@@ -303,9 +306,19 @@ export async function renderOfflinePrevisPasses(
 
       // --- Pass 2: Volumetric Linear Depth Map ---
       if (shouldRenderDepth) {
+        const hiddenContactShadows: THREE.Object3D[] = [];
+        scene.traverse((obj) => {
+          if (obj.userData?.isContactShadow && obj.visible) {
+            obj.visible = false;
+            hiddenContactShadows.push(obj);
+          }
+        });
         scene.overrideMaterial = depthMaterial;
         scene.background = new THREE.Color(0x000000);
         renderer.render(scene, camera);
+        for (const obj of hiddenContactShadows) {
+          obj.visible = true;
+        }
 
         const depthCanvas = document.createElement('canvas');
         depthCanvas.width = width;

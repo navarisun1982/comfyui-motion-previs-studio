@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { useShotStore, PrevisRendererFn, getEffectiveStageLights } from '../stores/useShotStore';
 import { logger } from '../stores/useLogStore';
 import { FocalLength, AspectRatio } from '../types/shotspec';
@@ -93,6 +94,56 @@ const ASPECT_RATIOS: Record<AspectRatio, number> = {
 
 type ViewMode = 'split' | 'stage' | 'viewfinder';
 
+
+let cachedContactShadowTexture: THREE.Texture | null = null;
+function getContactShadowTexture(): THREE.Texture | null {
+  if (cachedContactShadowTexture) return cachedContactShadowTexture;
+  if (typeof document === 'undefined') return null;
+  const size = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 4, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, 'rgba(0, 0, 0, 0.68)');
+  grad.addColorStop(0.45, 'rgba(0, 0, 0, 0.36)');
+  grad.addColorStop(0.8, 'rgba(0, 0, 0, 0.10)');
+  grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  cachedContactShadowTexture = tex;
+  return tex;
+}
+
+function createActorContactShadowMesh(kind: string, name: string): THREE.Mesh {
+  const signature = `${kind} ${name}`.toLowerCase();
+  const isVehicle = /vehicle|car|truck|van|suv|bus|motorcycle|bike|spaceship|mech/.test(signature);
+  const isLargeProp = /tree|building|tower|wall|arch|pillar|fountain|statue/.test(signature);
+  const w = isVehicle ? 4.4 : isLargeProp ? 3.4 : 2.15;
+  const d = isVehicle ? 6.8 : isLargeProp ? 3.4 : 2.15;
+  const geo = new THREE.PlaneGeometry(w, d);
+  geo.rotateX(-Math.PI / 2);
+  const shadowTex = getContactShadowTexture();
+  const mat = new THREE.MeshBasicMaterial({
+    map: shadowTex || undefined,
+    color: shadowTex ? 0xffffff : 0x000000,
+    transparent: true,
+    opacity: shadowTex ? 0.88 : 0.35,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+  });
+  const blob = new THREE.Mesh(geo, mat);
+  blob.position.y = 0.015;
+  blob.name = '__contact_shadow__';
+  blob.userData = { isContactShadow: true };
+  blob.raycast = () => {};
+  blob.layers.set(0);
+  return blob;
+}
 
 export interface StagePrevis3DProps {
   externalTime?: number;
@@ -702,6 +753,16 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       lingeringCanvases.forEach((c) => c.remove());
       stageMountRef.current.appendChild(renderer.domElement);
       stageRendererRef.current = renderer;
+      if (stageSceneRef.current && !stageSceneRef.current.environment) {
+        try {
+          const pmrem = new THREE.PMREMGenerator(renderer);
+          const roomEnv = new RoomEnvironment();
+          stageSceneRef.current.environment = pmrem.fromScene(roomEnv, 0.04).texture;
+          (stageSceneRef.current as any).environmentIntensity = 0.35;
+          roomEnv.dispose();
+          pmrem.dispose();
+        } catch {}
+      }
 
       const controls = new OrbitControls(stageCameraRef.current, renderer.domElement);
       controls.enableDamping = true;
@@ -815,9 +876,21 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         vfRenderer.domElement.dataset.role = 'viewfinder';
         viewfinderMountRef.current.appendChild(vfRenderer.domElement);
       }
+      vfRenderer.shadowMap.enabled = true;
+      vfRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
       vfRenderer.toneMapping = THREE.ACESFilmicToneMapping;
       vfRenderer.toneMappingExposure = 1.45;
       vfRendererRef.current = vfRenderer;
+      if (stageSceneRef.current && !stageSceneRef.current.environment) {
+        try {
+          const pmrem = new THREE.PMREMGenerator(vfRenderer);
+          const roomEnv = new RoomEnvironment();
+          stageSceneRef.current.environment = pmrem.fromScene(roomEnv, 0.04).texture;
+          (stageSceneRef.current as any).environmentIntensity = 0.35;
+          roomEnv.dispose();
+          pmrem.dispose();
+        } catch {}
+      }
       (window as any).__vfCamera = vfCameraRef.current;
       (window as any).__vfRenderer = vfRenderer;
     };
@@ -1265,6 +1338,20 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       if (idx === 0) {
         dirLight.castShadow = true;
       }
+      if (idx === 0 || idx === 1) {
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.set(2048, 2048);
+        const shadowCam = dirLight.shadow.camera;
+        shadowCam.left = -42;
+        shadowCam.right = 42;
+        shadowCam.top = 42;
+        shadowCam.bottom = -42;
+        shadowCam.near = 1.0;
+        shadowCam.far = 140.0;
+        shadowCam.updateProjectionMatrix();
+        dirLight.shadow.bias = -0.0003;
+        dirLight.shadow.normalBias = 0.02;
+      }
       dirLight.target.position.set(0, 4, 0);
       lightsGroup.add(dirLight);
       lightsGroup.add(dirLight.target);
@@ -1532,6 +1619,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         setLayerRecursively(hitProxy, 0);
         hitProxy.layers.enable(1);
         mesh.add(hitProxy);
+        mesh.add(createActorContactShadowMesh(actorKind, actorName));
 
         const pos = getActorPositionAtTime(actor, currentTimeRef.current);
         mesh.position.set(pos.x, pos.y, pos.z);
@@ -1800,6 +1888,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         mesh.position.set(actorPos.x, actorPos.y + cadenceY, actorPos.z);
         if (typeof mesh.userData.update === 'function') {
           mesh.userData.update(0.016);
+        }
+        if (typeof mesh.userData.setAnimationTime === 'function') {
+          mesh.userData.setAnimationTime(t, actor.motionCycles ?? 1);
         }
         const actorScale = actor.scale ?? 1.0;
         mesh.scale.set(actorScale, actorScale, actorScale);

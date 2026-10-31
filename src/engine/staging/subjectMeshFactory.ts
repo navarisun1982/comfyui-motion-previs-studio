@@ -144,9 +144,22 @@ export function createSubjectMesh(
 
   // 1. If explicit GLB/GLTF modelUrl is provided, load or clone from cache
   if (modelUrl) {
+    const attachGltfAnimations = (sceneRoot: THREE.Group, clips?: THREE.AnimationClip[]) => {
+      if (!clips || clips.length === 0) return;
+      const mixer = new THREE.AnimationMixer(sceneRoot);
+      const action = mixer.clipAction(clips[0]);
+      action.play();
+      group.userData.animationMixer = mixer;
+      group.userData.animationClips = clips;
+      group.userData.setAnimationTime = (timeSec: number, cycles: number = 1) => {
+        mixer.setTime(Math.max(0, timeSec * Math.max(0.1, cycles)));
+      };
+    };
+
     const cached = getCachedGltfModel(modelUrl);
     if (cached) {
       group.add(cached.scene);
+      attachGltfAnimations(cached.scene, cached.animations);
       const size = cached.size;
       const baseRadius = Math.max(2.4, Math.max(size.x, size.z) * 0.55);
       group.add(createBaseRing(baseRadius, colorHex, isGhostWireframe, isSelected));
@@ -187,6 +200,7 @@ export function createSubjectMesh(
           applyObjectTargetColor(result.scene, group.userData.customColorHex);
         }
         group.add(result.scene);
+        attachGltfAnimations(result.scene, result.animations);
 
         // Dynamically adjust banner position to match real model height
         group.children.forEach((child) => {
