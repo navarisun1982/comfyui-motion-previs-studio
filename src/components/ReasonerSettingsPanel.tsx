@@ -51,6 +51,7 @@ import {
   Download,
   GitBranch,
 } from 'lucide-react';
+import { GlbResourcesDirectory } from './GlbResourcesDirectory';
 
 type Status = { tone: 'ok' | 'err' | 'info'; text: string } | null;
 
@@ -609,6 +610,9 @@ export const ReasonerSettingsPanel: React.FC<{ onSaved?: () => void; onClose?: (
           </div>
         )}
       </div>
+
+      {/* 3D & Animated .GLB Resource Libraries Directory */}
+      <GlbResourcesDirectory compact />
 
       <div className="pt-1 border-t border-white/10 flex items-center justify-between">
         <span className="text-xs font-bold text-slate-200 tracking-wide">Object Reasoner &amp; Prompt Director · LLM Provider</span>

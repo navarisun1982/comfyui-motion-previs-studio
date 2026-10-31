@@ -267,5 +267,22 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     expect(afterDirect.motionCycles).toBe(3);
     expect(afterDirect.trajectory.keyframes?.length).toBe(37);
   });
+
+  it('toggles the 14-site Animated .GLB Resources Directory inside the Look/Ref sub-tab', () => {
+    const props = createProps();
+    const { getByRole, getByText } = render(<CharacterControlCard {...props} />);
+
+    fireEvent.click(getByRole('tab', { name: /Look\/Ref/i }));
+    const glbSitesBtn = getByText('.GLB Sites');
+    expect(glbSitesBtn).toBeTruthy();
+
+    fireEvent.click(glbSitesBtn);
+    expect(getByText('Quaternius')).toBeTruthy();
+    expect(getByText('Poly Pizza')).toBeTruthy();
+    expect(getByText('Kenney 3D Assets')).toBeTruthy();
+    expect(getByText('Adobe Mixamo')).toBeTruthy();
+    expect(getByText('Meshy AI')).toBeTruthy();
+    expect(getByText('gltf.report (by Don McCurdy)')).toBeTruthy();
+  });
 });
 

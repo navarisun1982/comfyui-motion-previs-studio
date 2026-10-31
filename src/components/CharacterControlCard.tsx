@@ -41,7 +41,9 @@ import {
   Check,
   SlidersHorizontal,
   User,
+  Globe,
 } from 'lucide-react';
+import { GlbResourcesDirectory } from './GlbResourcesDirectory';
 
 export const OBJECT_TARGET_PALETTE = [
   { hex: '#ef4444', name: 'Red' },
@@ -164,6 +166,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const promptInputRef = useRef<HTMLInputElement | null>(null);
   const lookPromptInputRef = useRef<HTMLInputElement | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<CharacterCardSubTab>('motion');
+  const [showGlbResources, setShowGlbResources] = useState<boolean>(false);
 
   const kind = actor.kind || 'human';
   const shotDur = shotDurationSeconds || 4;
@@ -1299,6 +1302,20 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
 
                       <button
                         type="button"
+                        onClick={() => setShowGlbResources((prev) => !prev)}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] font-medium transition-colors cursor-pointer ${
+                          showGlbResources
+                            ? 'bg-indigo-600 text-white border-indigo-400'
+                            : 'bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-200 border-indigo-500/35'
+                        }`}
+                        title="Browse 14 curated Free CC0, Sketchfab, Mixamo & AI Animated .GLB websites"
+                      >
+                        <Globe className="h-3 w-3 text-indigo-300" />
+                        <span>.GLB Sites</span>
+                      </button>
+
+                      <button
+                        type="button"
                         disabled={refiningActorId === actor.id || !(actor.token || actor.name || '').trim()}
                         onClick={() => onRefineObjectByPrompt(actor)}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/35 disabled:opacity-40 border border-amber-500/45 text-amber-200 text-[10px] font-semibold transition-colors cursor-pointer"
@@ -1343,6 +1360,12 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                       <Pencil className="h-3 w-3" />
                     </button>
                   </div>
+
+                  {showGlbResources && (
+                    <div className="pt-1">
+                      <GlbResourcesDirectory compact defaultExpanded />
+                    </div>
+                  )}
                 </div>
 
                 {/* 2. Target Color (Scene ID) */}

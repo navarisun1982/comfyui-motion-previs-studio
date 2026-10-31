@@ -22,9 +22,11 @@ import {
   Settings2,
   CheckSquare,
   Zap,
+  Globe,
 } from 'lucide-react';
 import { lookupPartGraph } from '../engine/procedural3D/partGraph';
 import { AIGenerator3D } from './AIGenerator3D';
+import { GlbResourcesDirectory } from './GlbResourcesDirectory';
 
 const CATEGORIES: { id: AssetCategory; label: string; icon: string }[] = [
   { id: 'all', label: 'All Catalog', icon: '🌐' },
@@ -83,6 +85,7 @@ export const AssetLibraryModal: React.FC = () => {
 
   // Generator Panel state
   const [showGenerator, setShowGenerator] = useState(false);
+  const [showResourcesDrawer, setShowResourcesDrawer] = useState(false);
   const [showAiStudio, setShowAiStudio] = useState(false);
   const [studioInitialPrompt, setStudioInitialPrompt] = useState<string>('');
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
@@ -292,6 +295,20 @@ export const AssetLibraryModal: React.FC = () => {
               <span>Upload GLB / GLTF</span>
             </button>
 
+            {/* Free Animated .GLB Resource Sites Toggle Button */}
+            <button
+              onClick={() => setShowResourcesDrawer((prev) => !prev)}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold font-mono transition-all border cursor-pointer ${
+                showResourcesDrawer
+                  ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg shadow-indigo-600/30'
+                  : 'bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-200 border-indigo-500/40'
+              }`}
+              title="Browse 14 curated Free CC0, Sketchfab, Mixamo & AI Animated .GLB websites"
+            >
+              <Globe className="h-3.5 w-3.5 text-indigo-300" />
+              <span>🌐 .GLB Resources (14)</span>
+            </button>
+
             {/* AI 3D Generator Studio Button */}
             <button
               onClick={() => {
@@ -350,6 +367,13 @@ export const AssetLibraryModal: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* Free Animated .GLB Websites & Resources Directory Drawer */}
+        {showResourcesDrawer && (
+          <div className="border-b border-indigo-500/35 bg-[#0c101b] p-4 animate-in slide-in-from-top duration-200">
+            <GlbResourcesDirectory compact defaultExpanded />
+          </div>
+        )}
 
         {/* AI 3D Generator Sub-Panel */}
         {showGenerator && (
