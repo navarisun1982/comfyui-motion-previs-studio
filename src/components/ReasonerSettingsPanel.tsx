@@ -52,6 +52,7 @@ import {
   GitBranch,
 } from 'lucide-react';
 import { GlbResourcesDirectory } from './GlbResourcesDirectory';
+import { CustomWorkflowConfigBar } from './CustomWorkflowConfigBar';
 
 type Status = { tone: 'ok' | 'err' | 'info'; text: string } | null;
 
@@ -609,6 +610,9 @@ export const ReasonerSettingsPanel: React.FC<{ onSaved?: () => void; onClose?: (
             {comfyMessage.text}
           </div>
         )}
+
+        {/* Custom Workflow URL / .JSON Auto-Detector inside Settings */}
+        <CustomWorkflowConfigBar compact />
       </div>
 
       {/* 3D & Animated .GLB Resource Libraries Directory */}

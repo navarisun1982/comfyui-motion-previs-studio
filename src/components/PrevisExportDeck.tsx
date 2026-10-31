@@ -10,6 +10,11 @@ import { defaultJobRunner } from '../pipeline/jobRunner';
 import { loadBundledTemplates } from '../pipeline/templateLoader';
 import { templateRegistry } from '../pipeline/templateRegistry';
 import {
+  loadStoredCustomWorkflowConfig,
+  syncActiveMinimaxTemplateToRegistry,
+} from '../pipeline/customWorkflowResolver';
+import { CustomWorkflowConfigBar } from './CustomWorkflowConfigBar';
+import {
   Film,
   Download,
   Copy,
@@ -244,9 +249,10 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
   const handleRenderInComfyUI = async () => {
     setComfyErrorText(null);
-    // Validate that all 4 Reference Image slots are filled for MiniMax H3 Ref2VA
+    const customConfig = loadStoredCustomWorkflowConfig();
+    // Validate that all 4 Reference Image slots are filled when using the built-in 4-ref MiniMax H3 Ref2VA workflow
     const trimmedRefs = refImageNames.map((n) => n.trim()) as [string, string, string, string];
-    if (trimmedRefs.some((n) => n.length === 0)) {
+    if (customConfig.activeSource !== 'custom' && trimmedRefs.some((n) => n.length === 0)) {
       setComfyErrorText('All 4 Reference Image slots (<picture 1> to <picture 4>) must be filled before submitting to MiniMax H3 Ref2VA.');
       return;
     }
@@ -282,12 +288,18 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
         }
       }
 
+      let objInfo: Record<string, unknown> | null = null;
+      try {
+        objInfo = await defaultComfyClient.getObjectInfo();
+      } catch {
+        objInfo = null;
+      }
+      syncActiveMinimaxTemplateToRegistry(customConfig, objInfo);
       if (templateRegistry.list().length === 0) {
         loadBundledTemplates();
       }
 
-      // 2. Queue job via JobRunner using minimax_h3_ref2va (mode: 'control')
-      // Always ensure a valid MiniMax H3 Ref2VA multi-subject prompt is bound to Node 138
+      // 2. Queue job via JobRunner using active minimax_h3 template (built-in or custom URL/JSON)
       const minimaxCompiled = getAdapter('minimax-h3').compilePrompt(shot);
       const effectiveMinimaxPrompt =
         activeEngineTab === 'minimax-h3' &&
@@ -296,7 +308,11 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
           ? displayPositivePrompt
           : minimaxCompiled.positivePrompt;
 
-      setComfyStatusText('Step 3/3: Binding minimax_h3_ref2va (SolAttn + 8-Step Turbo LoRA) & queuing in ComfyUI...');
+      setComfyStatusText(
+        customConfig.activeSource === 'custom'
+          ? `Step 3/3: Binding Custom Workflow (${customConfig.label || 'Custom JSON'}) & queuing in ComfyUI...`
+          : 'Step 3/3: Binding minimax_h3_ref2va (SolAttn + 8-Step Turbo LoRA) & queuing in ComfyUI...'
+      );
       await defaultJobRunner.run({
         shot,
         engine: 'minimax-h3',
@@ -952,6 +968,9 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 </button>
               </div>
             </div>
+
+            {/* Workflow Source Switcher + Custom Workflow URL / .JSON Auto-Detector */}
+            <CustomWorkflowConfigBar compact />
 
             {/* Collapsible Workflow Setup & Required Models Guide */}
             <details className="rounded-xl bg-black/40 border border-white/10 px-3.5 py-2 text-[10px] font-mono text-slate-300">
