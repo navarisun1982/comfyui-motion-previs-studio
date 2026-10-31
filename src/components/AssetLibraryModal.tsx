@@ -27,6 +27,7 @@ import {
 import { lookupPartGraph } from '../engine/procedural3D/partGraph';
 import { AIGenerator3D } from './AIGenerator3D';
 import { GlbResourcesDirectory } from './GlbResourcesDirectory';
+import { useShallow } from 'zustand/react/shallow';
 
 const CATEGORIES: { id: AssetCategory; label: string; icon: string }[] = [
   { id: 'all', label: 'All Catalog', icon: '🌐' },
@@ -41,8 +42,6 @@ const CATEGORIES: { id: AssetCategory; label: string; icon: string }[] = [
   { id: 'weapons', label: 'Weapons', icon: '⚔️' },
   { id: 'scifi', label: 'Sci-Fi & Tech', icon: '⚛️' },
 ];
-
-import { useShallow } from 'zustand/react/shallow';
 
 export const AssetLibraryModal: React.FC = () => {
   const {
@@ -114,6 +113,18 @@ export const AssetLibraryModal: React.FC = () => {
     const id = window.setInterval(() => setElapsedSec(Math.round((Date.now() - started) / 1000)), 500);
     return () => window.clearInterval(id);
   }, [isGenerating]);
+
+  // Allow closing the 3D Asset Library with Escape key when no nested modal is active
+  useEffect(() => {
+    if (!isOpen || showAiStudio || showSettingsModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        closeLibrary();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, showAiStudio, showSettingsModal, closeLibrary]);
 
   const handleReasonWithLlm = async (asset: Asset3DItem, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -243,34 +254,40 @@ export const AssetLibraryModal: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200">
-      <div className="flex h-[90vh] w-[95vw] max-w-6xl flex-col rounded-2xl border border-white/15 bg-[#0b0d14] text-slate-100 shadow-2xl overflow-hidden">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
+      onClick={closeLibrary}
+    >
+      <div
+        className="flex h-[90vh] w-[95vw] max-w-6xl flex-col rounded-2xl border border-white/15 bg-[#0b0d14] text-slate-100 shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/10 px-6 py-4 bg-[#10131d]">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-indigo-600 shadow-lg shadow-amber-500/20 text-white font-bold text-lg">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-3.5 bg-[#10131d]">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-indigo-600 shadow-lg shadow-amber-500/20 text-white font-bold text-lg">
               <Box className="h-5 w-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="font-display text-lg font-bold tracking-wide text-white">
-                  3D Asset Library & AI Generator
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-display text-base sm:text-lg font-bold tracking-wide text-white truncate">
+                  3D Asset Library &amp; AI Generator
                 </h2>
                 <span className="rounded-full bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-300 border border-amber-500/30">
                   {allAssets.length} Assets
                 </span>
-                <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-300 border border-emerald-500/30">
+                <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-300 border border-emerald-500/30 hidden sm:inline">
                   GLB / GLTF Native
                 </span>
               </div>
-              <p className="text-xs text-slate-400 font-sans">
-                Curated 3D Asset Catalog • Full support for GLB/GLTF imports & procedural generation
+              <p className="text-xs text-slate-400 font-sans truncate">
+                Curated 3D Asset Catalog • Full support for GLB/GLTF imports &amp; procedural generation
               </p>
             </div>
           </div>
 
           {/* Action Buttons in Header */}
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
             {/* Hidden native file input */}
             <input
               type="file"
@@ -284,7 +301,7 @@ export const AssetLibraryModal: React.FC = () => {
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploading}
-              className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 px-3.5 py-1.5 text-xs font-semibold text-white shadow-md shadow-blue-600/30 transition-all disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-blue-600/30 transition-all disabled:opacity-50"
               title="Upload any 3D model (.glb / .gltf) from your PC"
             >
               {isUploading ? (
@@ -292,13 +309,13 @@ export const AssetLibraryModal: React.FC = () => {
               ) : (
                 <Upload className="h-4 w-4" />
               )}
-              <span>Upload GLB / GLTF</span>
+              <span>Upload GLB</span>
             </button>
 
             {/* Free Animated .GLB Resource Sites Toggle Button */}
             <button
               onClick={() => setShowResourcesDrawer((prev) => !prev)}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold font-mono transition-all border cursor-pointer ${
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold font-mono transition-all border cursor-pointer ${
                 showResourcesDrawer
                   ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg shadow-indigo-600/30'
                   : 'bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-200 border-indigo-500/40'
@@ -315,8 +332,8 @@ export const AssetLibraryModal: React.FC = () => {
                 setStudioInitialPrompt(genPrompt || searchQuery || '');
                 setShowAiStudio(true);
               }}
-              className="flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold bg-gradient-to-r from-amber-500 via-indigo-600 to-cyan-500 text-white hover:brightness-110 shadow-md shadow-indigo-600/30 transition-all font-mono"
-              title="Open Concept-to-3D Studio with Reference Image Silhouette Alignment & Multi-Pass Sculpting"
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-amber-500 via-indigo-600 to-cyan-500 text-white hover:brightness-110 shadow-md shadow-indigo-600/30 transition-all font-mono"
+              title="Open Concept-to-3D Studio with Direct Vision-to-3D & Multi-Pass Sculpting"
             >
               <Sparkles className="h-4 w-4 text-amber-300" />
               <span>✨ Concept-to-3D Studio</span>
@@ -325,7 +342,7 @@ export const AssetLibraryModal: React.FC = () => {
             {/* Quick Text-to-3D Bar Toggle Button */}
             <button
               onClick={() => setShowGenerator(!showGenerator)}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold font-mono transition-all ${
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold font-mono transition-all ${
                 showGenerator
                   ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/30'
                   : 'bg-white/10 text-white hover:bg-white/15 border border-white/10'
@@ -346,7 +363,7 @@ export const AssetLibraryModal: React.FC = () => {
                   setIsMultiSelectMode(true);
                 }
               }}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all border ${
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all border ${
                 isMultiSelectMode
                   ? 'bg-amber-500 text-black border-amber-400 shadow-md shadow-amber-500/30'
                   : 'bg-white/5 hover:bg-white/10 text-slate-300 border-white/10'
@@ -357,20 +374,36 @@ export const AssetLibraryModal: React.FC = () => {
               <span>Select Multiple {selectedAssetIds.size > 0 && `(${selectedAssetIds.size})`}</span>
             </button>
 
-            {/* Close Button */}
+            {/* Prominent Close Button */}
             <button
+              type="button"
               onClick={closeLibrary}
-              className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
+              aria-label="Close 3D Asset Library"
+              className="flex items-center gap-1 rounded-lg border border-white/20 bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-rose-500/25 hover:border-rose-400/50 hover:text-white transition-colors shrink-0 cursor-pointer"
               title="Close Library (Esc)"
             >
-              <X className="h-5 w-5" />
+              <X className="h-4 w-4" />
+              <span>Close</span>
             </button>
           </div>
         </div>
 
         {/* Free Animated .GLB Websites & Resources Directory Drawer */}
         {showResourcesDrawer && (
-          <div className="border-b border-indigo-500/35 bg-[#0c101b] p-4 animate-in slide-in-from-top duration-200">
+          <div className="border-b border-indigo-500/35 bg-[#0c101b] p-4 animate-in slide-in-from-top duration-200 max-h-[55vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-mono text-indigo-300 font-semibold">
+                Download any animated .GLB from these libraries, then click &ldquo;Upload GLB&rdquo; above to place it on stage:
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowResourcesDrawer(false)}
+                className="flex items-center gap-1 rounded-md border border-white/15 bg-white/5 px-2 py-0.5 text-[11px] font-mono text-slate-300 hover:bg-white/15 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="h-3 w-3" />
+                <span>Hide Resources</span>
+              </button>
+            </div>
             <GlbResourcesDirectory compact defaultExpanded />
           </div>
         )}
@@ -430,7 +463,7 @@ export const AssetLibraryModal: React.FC = () => {
                   disabled={isGenerating}
                   className="rounded-xl bg-black/50 border border-white/20 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-400 font-mono"
                 >
-                  <option value="props">📦 Props & Items</option>
+                  <option value="props">📦 Props &amp; Items</option>
                   <option value="furniture">🪑 Furniture</option>
                   <option value="vehicle">🚗 Vehicles</option>
                   <option value="architecture">🏛️ Architecture</option>
@@ -544,7 +577,7 @@ export const AssetLibraryModal: React.FC = () => {
                 selectedCategory === 'custom' ? 'text-amber-400 font-bold' : ''
               }`}
             >
-              ⭐ Custom & Uploads ({customAssets.length})
+              ⭐ Custom &amp; Uploads ({customAssets.length})
             </button>
           </div>
         </div>
@@ -606,7 +639,7 @@ export const AssetLibraryModal: React.FC = () => {
                 className="rounded-xl bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 text-xs font-semibold flex items-center gap-1.5 shadow"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>Generate "{searchQuery}" with AI</span>
+                <span>Generate &ldquo;{searchQuery}&rdquo; with AI</span>
               </button>
             </div>
           ) : (
@@ -864,14 +897,22 @@ export const AssetLibraryModal: React.FC = () => {
         )}
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-white/10 px-6 py-3 bg-[#0d0f17] text-xs text-slate-400 font-mono">
+        <div className="flex items-center justify-between border-t border-white/10 px-6 py-2.5 bg-[#0d0f17] text-xs text-slate-400 font-mono">
           <div className="flex items-center gap-2">
             <span className="text-emerald-400">● 60 FPS Three.js Viewport</span>
             <span className="text-slate-600">•</span>
             <span>Drag-and-Drop or Click to Place</span>
           </div>
-          <div>
-            <span>ComfyUI Motion Previs Studio • 3D Asset Ecosystem</span>
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:inline">ComfyUI Motion Previs Studio • 3D Asset Ecosystem</span>
+            <button
+              type="button"
+              onClick={closeLibrary}
+              className="flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200 hover:bg-white/15 hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="h-3.5 w-3.5" />
+              <span>Close Library (Esc)</span>
+            </button>
           </div>
         </div>
       </div>
@@ -885,8 +926,17 @@ export const AssetLibraryModal: React.FC = () => {
 
       {/* Embedded Studio Reasoner Settings Modal */}
       {showSettingsModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-white/10 bg-[#0e111a] p-6 shadow-2xl">
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowSettingsModal(false);
+          }}
+        >
+          <div
+            className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-white/10 bg-[#0e111a] p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <ReasonerSettingsPanel onClose={() => setShowSettingsModal(false)} />
           </div>
         </div>
