@@ -14,6 +14,10 @@
 
 import { SculptSpec, SculptPart, lookupCuratedSculptSpec } from './sculptSpec';
 import { SilhouetteMetrics, ExtractedPalette } from './silhouette';
+import {
+  extractCharacterFeaturesFromModelOutput,
+  compileCharacterToClaySculpt,
+} from './characterClayCompiler';
 
 export type SupportedPalette = ExtractedPalette | Record<string, any>;
 
@@ -816,19 +820,33 @@ export function buildUniversalSilhouetteSlicesRecipe(
 }
 
 /**
- * CozyClay 12-Slice Silhouette Hull Tracer:
- * Traces the 12 horizontal outline slices (`metrics.outline.rows`) directly into soft clay `blob` parts,
- * faithfully preserving separated left/right limbs, head, torso, legs, and sampled local colors.
+ * Anatomical Character Clay Maquette Tracer (replaces horizontal slice slabs for humanoid characters):
+ * Uses `compileCharacterToClaySculpt` with extracted palette colors so humanoid characters ALWAYS
+ * have proper head, hair/hood, torso, tunic skirt, arms, legs, boots, and equipment — never horizontal slabs!
  */
 export function buildCozyClaySilhouetteTraceRecipe(opts: ImageToRecipeOptions): SculptSpec | null {
   const { name = 'Clay Figure', prompt = '', metrics, palette, defaultHeight } = opts;
+  const cleanText = `${name} ${prompt}`;
+  const isHuman =
+    isHumanoidPrompt(cleanText) ||
+    /\b(reference figure|character|archer|traveler|humanoid|scout|warrior|person|figure)\b/i.test(cleanText) ||
+    Boolean((palette as any)?.skin);
+
+  if (isHuman) {
+    const features = extractCharacterFeaturesFromModelOutput(
+      { name: name || 'Sculpted Character', heightMeters: defaultHeight || 1.75 },
+      cleanText || 'Elven Scout Archer',
+      palette as any
+    );
+    return compileCharacterToClaySculpt(features);
+  }
+
   const outline = metrics?.outline;
   if (!outline || !Array.isArray(outline.rows) || outline.rows.length === 0) {
     return null;
   }
 
-  const isHuman = isHumanoidPrompt(`${name} ${prompt}`);
-  const fullHeight = defaultHeight || (isHuman ? 1.75 : metrics && metrics.aspectRatio > 1.3 ? 1.2 : 0.45);
+  const fullHeight = defaultHeight || (metrics && metrics.aspectRatio > 1.3 ? 1.2 : 0.45);
   const { primaryColor, secondaryColor, accentColor, dominantColors } = resolveColors(palette);
 
   const numRows = outline.rows.length;
@@ -836,7 +854,6 @@ export function buildCozyClaySilhouetteTraceRecipe(opts: ImageToRecipeOptions): 
   const parts: SculptPart[] = [];
 
   outline.rows.forEach((slice, rowIdx) => {
-    // slice.y is 0 at head top, 1 at feet bottom. Convert to world Y (0 at floor, fullHeight at top)
     const centerY = Number(((1 - slice.y) * fullHeight).toFixed(3));
     if (!Array.isArray(slice.spans) || slice.spans.length === 0) return;
 
@@ -844,7 +861,6 @@ export function buildCozyClaySilhouetteTraceRecipe(opts: ImageToRecipeOptions): 
       const [startX, endX] = span;
       const spanW = Math.max(0.03, Number(((endX - startX) * fullHeight).toFixed(3)));
       const centerX = Number((((startX + endX) / 2) * fullHeight).toFixed(3));
-      // Depth proportional to span width, slightly slimmer on limbs/extrema
       const isLimbSpan = slice.spans.length > 1;
       const spanD = Math.max(0.03, Number((spanW * (isLimbSpan ? 0.85 : 0.72)).toFixed(3)));
 
@@ -852,21 +868,6 @@ export function buildCozyClaySilhouetteTraceRecipe(opts: ImageToRecipeOptions): 
         slice.spanColors?.[spanIdx] ||
         dominantColors[(rowIdx + spanIdx) % Math.max(1, dominantColors.length)] ||
         primaryColor;
-
-      // Determine humanoid bone tag when applicable
-      let bone: any = undefined;
-      if (isHuman) {
-        if (slice.y < 0.18) bone = 'Head';
-        else if (slice.y < 0.38) {
-          bone = isLimbSpan ? (centerX > 0 ? 'LeftArm' : 'RightArm') : 'Chest';
-        } else if (slice.y < 0.56) {
-          bone = isLimbSpan ? (centerX > 0 ? 'LeftForeArm' : 'RightForeArm') : 'Spine';
-        } else if (slice.y < 0.78) {
-          bone = isLimbSpan ? (centerX > 0 ? 'LeftUpLeg' : 'RightUpLeg') : 'Hips';
-        } else {
-          bone = centerX > 0.02 ? 'LeftFoot' : centerX < -0.02 ? 'RightFoot' : 'Hips';
-        }
-      }
 
       parts.push({
         id: `slice_${rowIdx + 1}_${spanIdx + 1}`,
@@ -876,9 +877,8 @@ export function buildCozyClaySilhouetteTraceRecipe(opts: ImageToRecipeOptions): 
         rotation: [0, 0, 0],
         material: 'mat_clay_primary',
         color: localColor,
-        roundness: 0.9, // Smooth organic ellipsoid in our engine (roundness=1 is ellipsoid)
+        roundness: 0.9,
         taper: rowIdx === 0 ? 0.25 : rowIdx === numRows - 1 ? -0.15 : 0,
-        ...(bone ? { bone } : {}),
       });
     });
   });
@@ -888,10 +888,10 @@ export function buildCozyClaySilhouetteTraceRecipe(opts: ImageToRecipeOptions): 
   return {
     version: 2,
     route: 'author',
-    rig: isHuman ? 'humanoid' : 'none',
-    name: name && name !== '3D Object' && name !== 'reference object' ? name : isHuman ? 'Sculpted Character' : 'Sculpted Clay Figure',
+    rig: 'none',
+    name: name && name !== '3D Object' && name !== 'reference object' ? name : 'Sculpted Clay Figure',
     heightMeters: fullHeight,
-    identity: `CozyClay 12-slice silhouette trace (${parts.length} parts, aspect ratio ${metrics?.aspectRatio ?? 1}:1).`,
+    identity: `Sculpted clay figure (${parts.length} parts, aspect ratio ${metrics?.aspectRatio ?? 1}:1).`,
     materials: [
       { id: 'mat_clay_primary', color: primaryColor, roughness: 0.68, metalness: 0.05 },
       { id: 'mat_clay_secondary', color: secondaryColor, roughness: 0.65, metalness: 0.08 },
@@ -930,20 +930,19 @@ export function synthesizeRecipeFromImage(opts: ImageToRecipeOptions): SculptSpe
     return curated;
   }
 
-  // 3. CozyClay 12-Slice Silhouette Hull Tracer when reference outline spans are measured from an uploaded image
-  const hasMeasuredOutline =
-    metrics?.outline &&
-    Array.isArray(metrics.outline.rows) &&
-    metrics.outline.rows.length >= 6;
-
-  if (hasMeasuredOutline) {
-    const traced = buildCozyClaySilhouetteTraceRecipe(opts);
-    if (traced) return traced;
+  // 2.5. Humanoid Character Clay Maquette Compiler (head, torso, tunic skirt, arms, legs, boots, bow/weapons)
+  if (isHumanoidPrompt(cleanPrompt) || /\b(reference figure|character)\b/i.test(cleanPrompt)) {
+    const features = extractCharacterFeaturesFromModelOutput(
+      { name: name || 'Sculpted Character', heightMeters: defaultHeight || 1.75 },
+      cleanPrompt || 'Elven Scout Archer',
+      palette as any
+    );
+    return compileCharacterToClaySculpt(features);
   }
 
-  // Legacy stand-up pouch fallback when only synthetic 10-band widthProfile is passed (no 12-row outline)
+  // 3. Legacy stand-up pouch fallback when synthetic 10-band widthProfile is passed
   const isLegacyPouchGeometry =
-    !hasMeasuredOutline &&
+    !metrics?.outline &&
     !isHumanoidPrompt(cleanPrompt) &&
     metrics &&
     metrics.aspectRatio >= 1.3 &&

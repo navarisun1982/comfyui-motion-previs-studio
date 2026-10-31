@@ -205,9 +205,13 @@ export function isolateDominantSubject(
 
 /**
  * Extracts a binary silhouette mask from raw RGBA pixel data.
- * If transparent pixels exist, uses alpha channel (alpha > 30).
- * Otherwise detects background by perimeter border sampling and thresholds color distance,
- * followed by Connected Component Analysis (CCA) to isolate the central dominant subject.
+ * 1. If transparent pixels exist (alpha < 220), uses alpha channel (alpha > 40).
+ * 2. Otherwise performs Multi-Cluster Perimeter Flood-Fill Background Removal:
+ *    - Samples all perimeter border pixels and clusters them into up to 4 background color palettes
+ *      (handling baked grey/white PNG checkerboards, two-tone studio backdrops, and soft gradients).
+ *    - Runs an 8-connected flood-fill inward from the image borders using both palette distance and
+ *      step-to-step gradient continuity so internal clothing/skin with light tones is never erased.
+ * 3. Runs Connected Component Analysis (CCA) to isolate the central dominant subject.
  */
 export function extractMaskFromRgba(
   rgba: Uint8ClampedArray | Uint8Array,
@@ -215,58 +219,217 @@ export function extractMaskFromRgba(
   height: number,
   colorThreshold = 28
 ): SilhouetteMask {
-  const data = new Uint8Array(width * height);
-  let hasAlpha = false;
+  const size = width * height;
+  const data = new Uint8Array(size);
+  let transparentCount = 0;
 
   for (let i = 3; i < rgba.length; i += 4) {
-    if (rgba[i] < 220) {
-      hasAlpha = true;
-      break;
+    if (rgba[i] < 128) {
+      transparentCount++;
     }
   }
 
-  if (hasAlpha) {
+  // Only use alpha-channel mask if a real transparent background exists (> 5% of image pixels have alpha < 128).
+  // Otherwise a single anti-aliased edge pixel with alpha=219 would mark 100% of an opaque checkerboard PNG as foreground!
+  if (transparentCount > size * 0.05) {
     for (let i = 0, p = 0; i < rgba.length; i += 4, p++) {
-      data[p] = rgba[i + 3] > 40 ? 1 : 0;
+      data[p] = rgba[i + 3] > 128 ? 1 : 0;
     }
     const filtered = isolateDominantSubject(data, width, height, 0.03);
-    return { width, height, data: filtered };
+    // Double-check: if the alpha mask STILL covers > 92% of the entire rectangle, it's a fake-alpha image (baked checkerboard),
+    // so fall through to the RGB flood-fill background remover!
+    const fgCount = filtered.reduce((sum, v) => sum + v, 0);
+    if (fgCount < size * 0.92) {
+      return { width, height, data: filtered };
+    }
   }
 
-  // Sample perimeter border pixels for robust background estimation
-  let sumR = 0, sumG = 0, sumB = 0, borderCount = 0;
-  const samplePixel = (x: number, y: number) => {
+  // 1. Collect border samples around the perimeter (excluding the middle 40% of the bottom edge where feet/legs stand)
+  const borderSamples: [number, number, number][] = [];
+  const addBorderSample = (x: number, y: number) => {
     const idx = (y * width + x) * 4;
-    sumR += rgba[idx];
-    sumG += rgba[idx + 1];
-    sumB += rgba[idx + 2];
-    borderCount++;
+    borderSamples.push([rgba[idx], rgba[idx + 1], rgba[idx + 2]]);
   };
 
-  // Sample top and bottom rows
-  for (let x = 0; x < width; x += Math.max(1, Math.floor(width / 32))) {
-    samplePixel(x, 0);
-    samplePixel(x, height - 1);
+  const stepX = Math.max(1, Math.floor(width / 64));
+  const stepY = Math.max(1, Math.floor(height / 64));
+  for (let x = 0; x < width; x += stepX) {
+    addBorderSample(x, 0);
+    if (height > 2) addBorderSample(x, 1);
+    // Bottom edge: only sample outer 30% on left and right so standing feet in the center don't pollute bg clusters
+    if (x < width * 0.3 || x > width * 0.7) {
+      addBorderSample(x, height - 1);
+    }
   }
-  // Sample left and right columns
-  for (let y = 0; y < height; y += Math.max(1, Math.floor(height / 32))) {
-    samplePixel(0, y);
-    samplePixel(width - 1, y);
-  }
-
-  const bgR = Math.round(sumR / Math.max(borderCount, 1));
-  const bgG = Math.round(sumG / Math.max(borderCount, 1));
-  const bgB = Math.round(sumB / Math.max(borderCount, 1));
-
-  for (let i = 0, p = 0; i < rgba.length; i += 4, p++) {
-    const dr = rgba[i] - bgR;
-    const dg = rgba[i + 1] - bgG;
-    const db = rgba[i + 2] - bgB;
-    const dist = Math.sqrt(dr * dr + dg * dg + db * db);
-    data[p] = dist > colorThreshold ? 1 : 0;
+  for (let y = 0; y < height; y += stepY) {
+    addBorderSample(0, y);
+    addBorderSample(width - 1, y);
+    if (width > 2) {
+      addBorderSample(1, y);
+      addBorderSample(width - 2, y);
+    }
   }
 
-  // Filter out scattered table items, coffee beans, noise, and shadow islands
+  // 2. Cluster border samples into background color centroids (supports baked checkerboards + studio backdrops)
+  const clusters: { r: number; g: number; b: number; count: number; sumR: number; sumG: number; sumB: number }[] = [];
+  const clusterMergeDist = 18;
+
+  for (const [r, g, b] of borderSamples) {
+    let matched = false;
+    for (const c of clusters) {
+      const d = Math.hypot(r - c.r, g - c.g, b - c.b);
+      if (d <= clusterMergeDist) {
+        c.count++;
+        c.sumR += r;
+        c.sumG += g;
+        c.sumB += b;
+        c.r = c.sumR / c.count;
+        c.g = c.sumG / c.count;
+        c.b = c.sumB / c.count;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      clusters.push({ r, g, b, count: 1, sumR: r, sumG: g, sumB: b });
+    }
+  }
+
+  clusters.sort((a, b) => b.count - a.count);
+  // Keep top background clusters that represent at least 4% of border samples (up to 4 clusters)
+  const minClusterCount = Math.max(1, Math.floor(borderSamples.length * 0.04));
+  const bgClusters = clusters.filter((c, i) => i === 0 || (i < 4 && c.count >= minClusterCount));
+
+  // Detect if the background is a neutral/light/grey checkerboard or studio backdrop
+  const isNeutralCluster = (c: { r: number; g: number; b: number }) =>
+    Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b) <= 26 && c.r >= 100;
+  const isCheckerboardBg =
+    (bgClusters.length >= 2 && isNeutralCluster(bgClusters[0]) && isNeutralCluster(bgClusters[1])) ||
+    (bgClusters.length >= 1 && isNeutralCluster(bgClusters[0]) && bgClusters[0].r >= 170);
+
+  const minDistToBgClusters = (r: number, g: number, b: number): number => {
+    let best = Infinity;
+    for (const c of bgClusters) {
+      const d = Math.hypot(r - c.r, g - c.g, b - c.b);
+      if (d < best) best = d;
+    }
+    // If checkerboard/neutral backdrop is detected, any low-saturation pixel in the light/grey range
+    // is treated as part of the background (handles warm/tinted JPEG checkerboards and anti-aliased grid seams)
+    if (isCheckerboardBg) {
+      const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+      const luma = (r + g + b) / 3;
+      if (chroma <= 22 && luma >= 145) {
+        return Math.min(best, chroma * 1.15);
+      }
+    }
+    return best;
+  };
+
+  // 3. For very small test images (< 12x12), use direct multi-cluster distance thresholding
+  if (width < 12 || height < 12) {
+    for (let p = 0; p < size; p++) {
+      const idx = p * 4;
+      const dist = minDistToBgClusters(rgba[idx], rgba[idx + 1], rgba[idx + 2]);
+      data[p] = dist > colorThreshold ? 1 : 0;
+    }
+    return { width, height, data: isolateDominantSubject(data, width, height, 0.04) };
+  }
+
+  // 4. Perimeter Flood-Fill Background Removal (BFS from outer edges inward)
+  // This prevents light clothing/armor inside the character from being turned into holes,
+  // while cleanly walking across baked checkerboard tiles and studio gradients.
+  const isBg = new Uint8Array(size);
+  const queue = new Int32Array(size);
+  let qHead = 0;
+  let qTail = 0;
+
+  const seedThresh = Math.max(colorThreshold, 30);
+  const floodClusterThresh = Math.max(colorThreshold + 6, 34);
+  const stepGradThresh = 22; // Smooth studio vignette step tolerance
+
+  const trySeed = (x: number, y: number) => {
+    const p = y * width + x;
+    if (isBg[p]) return;
+    const idx = p * 4;
+    const dist = minDistToBgClusters(rgba[idx], rgba[idx + 1], rgba[idx + 2]);
+    if (dist <= seedThresh) {
+      isBg[p] = 1;
+      queue[qTail++] = p;
+    }
+  };
+
+  for (let x = 0; x < width; x++) {
+    trySeed(x, 0);
+    // Seed bottom edge outside the center foot contact zone, or if it clearly matches background
+    const pBot = (height - 1) * width + x;
+    const idxBot = pBot * 4;
+    const botDist = minDistToBgClusters(rgba[idxBot], rgba[idxBot + 1], rgba[idxBot + 2]);
+    if (x < width * 0.32 || x > width * 0.68 || botDist <= seedThresh * 0.75) {
+      trySeed(x, height - 1);
+    }
+  }
+  for (let y = 0; y < height; y++) {
+    trySeed(0, y);
+    trySeed(width - 1, y);
+  }
+
+  while (qHead < qTail) {
+    const curr = queue[qHead++];
+    const cy = Math.floor(curr / width);
+    const cx = curr % width;
+    const cIdx = curr * 4;
+    const cr = rgba[cIdx];
+    const cg = rgba[cIdx + 1];
+    const cb = rgba[cIdx + 2];
+
+    // 8-connected neighbors so diagonal checkerboard corners flood seamlessly
+    for (let dy = -1; dy <= 1; dy++) {
+      const ny = cy + dy;
+      if (ny < 0 || ny >= height) continue;
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = cx + dx;
+        if (nx < 0 || nx >= width) continue;
+        const np = ny * width + nx;
+        if (isBg[np]) continue;
+
+        const nIdx = np * 4;
+        const nr = rgba[nIdx];
+        const ng = rgba[nIdx + 1];
+        const nb = rgba[nIdx + 2];
+
+        const clusterDist = minDistToBgClusters(nr, ng, nb);
+        const stepDist = Math.hypot(nr - cr, ng - cg, nb - cb);
+
+        // Accept neighbor as background if it matches any background cluster (e.g. jumping between white and grey checkerboard tiles)
+        // OR if it is a smooth vignette continuation still reasonably close to the background palette
+        if (clusterDist <= floodClusterThresh || (stepDist <= stepGradThresh && clusterDist <= floodClusterThresh * 1.65)) {
+          isBg[np] = 1;
+          queue[qTail++] = np;
+        }
+      }
+    }
+  }
+
+  for (let p = 0; p < size; p++) {
+    data[p] = isBg[p] === 1 ? 0 : 1;
+  }
+
+  // 5. Safety Guard: If > 88% of the canvas was STILL marked as foreground (e.g. a border frame blocked the flood-fill),
+  // re-run direct multi-cluster + chroma segmentation so the whole page NEVER turns into a 1:1 cyan rectangle!
+  const fgSum = data.reduce((s, v) => s + v, 0);
+  if (fgSum > size * 0.88) {
+    for (let p = 0; p < size; p++) {
+      const idx = p * 4;
+      const r = rgba[idx];
+      const g = rgba[idx + 1];
+      const b = rgba[idx + 2];
+      const dist = minDistToBgClusters(r, g, b);
+      data[p] = dist > floodClusterThresh ? 1 : 0;
+    }
+  }
+
+  // 6. Filter out scattered table items, coffee beans, noise, and shadow islands
   const cleanedData = isolateDominantSubject(data, width, height, 0.04);
 
   return { width, height, data: cleanedData };
@@ -847,8 +1010,17 @@ export function extractPaletteFromRgba(
 
 export async function extractMaskFromImageUrl(
   imageUrl: string,
-  maxDim = 512
-): Promise<{ mask: SilhouetteMask; metrics: SilhouetteMetrics; palette: ExtractedPalette; canvasDataUrl: string }> {
+  maxDim = 512,
+  colorThreshold = 28
+): Promise<{
+  mask: SilhouetteMask;
+  metrics: SilhouetteMetrics;
+  palette: ExtractedPalette;
+  canvasDataUrl: string;
+  rawRgba: Uint8ClampedArray;
+  width: number;
+  height: number;
+}> {
   return new Promise((resolve, reject) => {
     if (typeof Image === 'undefined') {
       reject(new Error('Image is not defined in this environment.'));
@@ -874,10 +1046,45 @@ export async function extractMaskFromImageUrl(
       }
       ctx.drawImage(img, 0, 0, w, h);
       const imgData = ctx.getImageData(0, 0, w, h);
-      const mask = extractMaskFromRgba(imgData.data, w, h);
+      const mask = extractMaskFromRgba(imgData.data, w, h, colorThreshold);
       const metrics = measureSilhouette(mask, imgData.data);
-      const palette = extractPaletteFromRgba(imgData.data, w, h, mask);
-      resolve({ mask, metrics, palette, canvasDataUrl: canvas.toDataURL('image/png') });
+
+      // Sample palette from the center-subject zone of the raw untouched image (ignoring outer border/checkerboard pixels)
+      // so that pixel mask imperfections never erase clothing colors!
+      const centerSubjectMaskData = new Uint8Array(w * h);
+      for (let y = Math.floor(h * 0.08); y < Math.ceil(h * 0.92); y++) {
+        for (let x = Math.floor(w * 0.2); x < Math.ceil(w * 0.8); x++) {
+          const idx = (y * w + x) * 4;
+          const r = imgData.data[idx];
+          const g = imgData.data[idx + 1];
+          const b = imgData.data[idx + 2];
+          const a = imgData.data[idx + 3];
+          const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+          const luma = (r + g + b) / 3;
+          // Ignore transparent pixels and pure neutral light grey/white checkerboard tiles
+          if (a > 100 && !(chroma <= 16 && luma >= 185)) {
+            centerSubjectMaskData[y * w + x] = 1;
+          }
+        }
+      }
+      const hasCenterSamples = centerSubjectMaskData.some((v) => v === 1);
+      const paletteMask: SilhouetteMask = hasCenterSamples
+        ? { width: w, height: h, data: centerSubjectMaskData }
+        : mask;
+      const palette = extractPaletteFromRgba(imgData.data, w, h, paletteMask);
+
+      // Return the untouched original image on the canvas (never erase or eat into the character photo!)
+      const rawDataUrl = canvas.toDataURL('image/png');
+
+      resolve({
+        mask,
+        metrics,
+        palette,
+        canvasDataUrl: rawDataUrl,
+        rawRgba: imgData.data,
+        width: w,
+        height: h,
+      });
     };
     img.onerror = () => reject(new Error('Failed to load image for silhouette extraction'));
     img.src = imageUrl;

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import * as THREE from 'three';
 import {
   Sparkles,
@@ -6,8 +6,6 @@ import {
   X,
   Check,
   Loader2,
-  Eye,
-  EyeOff,
   RefreshCw,
   Box,
   Layers,
@@ -29,13 +27,7 @@ import {
   SilhouetteMask,
   SilhouetteMetrics,
   ExtractedPalette,
-  SculptCompareReport,
   extractMaskFromImageUrl,
-  generateMaskDataUrl,
-  renderSculptSilhouette,
-  computeSilhouetteIoU,
-  compareSculptToReference,
-  runCozyClayCandidateRefinement,
 } from '../engine/procedural3D/silhouette';
 import {
   reasonSculpt,
@@ -44,13 +36,19 @@ import {
   ObjectReasonerError,
 } from '../services/objectReasoner';
 import { useShotStore } from '../stores/useShotStore';
-import { useAssetLibraryStore, Asset3DItem } from '../stores/useAssetLibraryStore';
+import {
+  useAssetLibraryStore,
+  Asset3DItem,
+} from '../stores/useAssetLibraryStore';
 import { createSkinnedCharacterFromConcept, type HumanoidRig } from '../engine/kinematics';
 import {
   synthesizeRecipeFromImage,
-  buildCozyClaySilhouetteTraceRecipe,
   isHumanoidPrompt,
 } from '../engine/procedural3D/imageToRecipe';
+import {
+  extractCharacterFeaturesFromModelOutput,
+  compileCharacterToClaySculpt,
+} from '../engine/procedural3D/characterClayCompiler';
 
 export interface AIGenerator3DProps {
   isOpen: boolean;
@@ -73,11 +71,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   const [prompt, setPrompt] = useState(initialPrompt);
   const [name, setName] = useState('');
   const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(initialImageUrl || null);
-  const [referenceMask, setReferenceMask] = useState<SilhouetteMask | null>(null);
+  const [, setReferenceMask] = useState<SilhouetteMask | null>(null);
   const [referenceMetrics, setReferenceMetrics] = useState<SilhouetteMetrics | null>(null);
   const [referencePalette, setReferencePalette] = useState<ExtractedPalette | null>(null);
-  const [maskPreviewUrl, setMaskPreviewUrl] = useState<string | null>(null);
-  const [showMaskOverlay, setShowMaskOverlay] = useState(false);
+  const [, setMaskPreviewUrl] = useState<string | null>(null);
 
   // Generation states
   const [isGenerating, setIsGenerating] = useState(false);
@@ -88,10 +85,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   // Resulting 3D Spec & Rig
   const [sculpt, setSculpt] = useState<SculptSpec | null>(null);
   const [characterRig, setCharacterRig] = useState<HumanoidRig | null>(null);
-  const [displayMode, setDisplayMode] = useState<'skinned' | 'parametric'>('parametric');
-  const [currentIoU, setCurrentIoU] = useState<number | null>(null);
+  const [displayMode, setDisplayMode] = useState<'skinned' | 'parametric'>('skinned');
+  const [, setCurrentIoU] = useState<number | null>(null);
   const [compareSheetUrl, setCompareSheetUrl] = useState<string | null>(null);
-  const [compareReport, setCompareReport] = useState<SculptCompareReport | null>(null);
+  const [compareReport, setCompareReport] = useState<any>(null);
   const [showCompareSheet, setShowCompareSheet] = useState(false);
   const [candidateRace, setCandidateRace] = useState<{ label: string; iou: number; delta: number }[]>([]);
   const [isWireframe, setIsWireframe] = useState(false);
@@ -142,7 +139,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     return () => window.clearInterval(interval);
   }, [isGenerating, isRefining]);
 
-  // Process reference image to extract silhouette & geometry metrics ONLY.
+  // Process reference image to sample center-zone color palette & stage untouched image.
   // Do NOT synthesize a placeholder 3D sculpt until the user explicitly clicks
   // "Generate 3D Figure" or "Instant Procedural 3D".
   const processImageForSilhouette = async (url: string) => {
@@ -161,11 +158,9 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       setReferenceMask(mask);
       setReferenceMetrics(metrics);
       setReferencePalette(palette);
-      const preview = generateMaskDataUrl(mask, [6, 182, 212, 230]);
-      setMaskPreviewUrl(preview);
       setReferenceImageUrl(canvasDataUrl);
     } catch (err) {
-      console.warn('Could not extract silhouette from image:', err);
+      console.warn('Could not extract palette from image:', err);
     }
   };
 
@@ -180,30 +175,6 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     };
     reader.readAsDataURL(file);
   };
-
-  // Evaluate IoU & CozyClay comparison report between current sculpt and reference mask
-  const evaluateSilhouetteMatch = useCallback(
-    (spec: SculptSpec, refMask: SilhouetteMask | null): number | null => {
-      if (!refMask) return null;
-      try {
-        const comp = compareSculptToReference(spec, refMask, 160);
-        setCompareReport(comp.report);
-        if (comp.sheetDataUrl) {
-          setCompareSheetUrl(comp.sheetDataUrl);
-        }
-        return comp.report.iou;
-      } catch (err) {
-        console.warn('Failed to compute silhouette IoU:', err);
-        try {
-          const sculptMask = renderSculptSilhouette(spec, 128);
-          return computeSilhouetteIoU(refMask, sculptMask, 64);
-        } catch {
-          return null;
-        }
-      }
-    },
-    []
-  );
 
   // Initialize Three.js interactive preview
   useEffect(() => {
@@ -399,7 +370,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     }
   }, [sculpt, characterRig, displayMode, isWireframe]);
 
-  // Execute initial generation (CozyClay Multi-Stage Loop: Measure -> Draft -> Score -> Candidate Race)
+  // Execute initial generation (Direct Vision-to-3D: Raw Untouched Image + Center-Zone Palette -> Vision LLM + Skinned 3D Rig / Anatomical Clay Compiler)
   const handleGenerate = async () => {
     const cleanPrompt = (prompt || name).trim();
     if (!cleanPrompt && !referenceImageUrl) {
@@ -409,85 +380,50 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
     setIsGenerating(true);
     setGenerationError(null);
-    setGenerationStage('Stage 1/4: Measuring 12-slice reference outline & color spans...');
+    setGenerationStage('Analyzing reference image & directorial description...');
 
-    const inferredHint = referenceMetrics
-      ? referenceMetrics.aspectRatio < 0.85
-        ? 'wide sculpted character or object'
-        : referenceMetrics.aspectRatio > 1.35
-          ? 'standing character or upright figure'
-          : 'volumetric sculpted character or object'
-      : 'reference object';
-
-    const effectivePrompt = cleanPrompt || (referenceImageUrl ? inferredHint : '3d object');
-    const isHumanoid = isHumanoidPrompt(effectivePrompt);
+    const effectivePrompt = cleanPrompt || (referenceImageUrl ? 'character or object in reference image' : '3d object');
+    const isHumanoid = isHumanoidPrompt(effectivePrompt) || (!cleanPrompt && Boolean(referenceImageUrl));
     const reasonerPrompt = referenceImageUrl
       ? isHumanoid
-        ? `Sculpt the character in the attached reference image (${effectivePrompt}) as a CozyClay parametric 3D recipe matching the 12-row outline spans, anatomical proportions, clothing, gear, and sampled image colors.`
-        : `Sculpt the subject in the attached reference image (${effectivePrompt}) as a CozyClay parametric 3D recipe matching the 12-row outline spans, soft clay blobs, and sampled image colors.`
+        ? `Analyze the attached reference image (${effectivePrompt}) and sculpt a complete anatomical 3D character recipe (head, hair/hood, torso, tunic/armor, arms, legs, boots, and held weapons/gear) using the sampled colors.`
+        : `Analyze the attached reference image (${effectivePrompt}) and construct a clean multi-part 3D recipe with accurate primitives and sampled colors.`
       : effectivePrompt;
 
     try {
-      setGenerationStage('Stage 2/4: Drafting CozyClay 3D recipe from outline spans...');
+      setGenerationStage('Reasoning 3D anatomy, costume layers & parts from vision...');
       let generated = await reasonSculpt(reasonerPrompt, {
         imageBase64: referenceImageUrl || undefined,
-        silhouetteMeasurements: referenceMetrics || undefined,
         extractedPalette: referencePalette || undefined,
         timeoutMs: 120_000,
         onStage: (s) => setGenerationStage(s),
       });
 
-      // Stage 3 & 4: Score silhouette against reference and run CozyClay candidate race
-      if (referenceMask) {
-        setGenerationStage('Stage 3/4: Scoring silhouette & running CozyClay candidate race...');
-        const refinement = runCozyClayCandidateRefinement(generated, referenceMask);
-        let bestSpec = refinement.bestSpec;
-        let bestComp = refinement.bestComparison;
-        let raceList = refinement.candidates;
+      const isHumanoidSubject =
+        generated.rig === 'humanoid' ||
+        isHumanoidPrompt(effectivePrompt) ||
+        isHumanoidPrompt(generated.name) ||
+        (!cleanPrompt && Boolean(referenceImageUrl));
 
-        // Also test the 12-slice CozyClay hull tracer so if the LLM missed the silhouette badly,
-        // the 12-slice outline hull wins the candidate race automatically!
-        if (referenceMetrics?.outline) {
-          const tracedSpec = buildCozyClaySilhouetteTraceRecipe({
-            name: generated.name || cleanPrompt || '3D Figure',
-            prompt: cleanPrompt || effectivePrompt,
-            metrics: referenceMetrics,
-            palette: referencePalette || undefined,
-          });
-          if (tracedSpec) {
-            const tracedRefinement = runCozyClayCandidateRefinement(tracedSpec, referenceMask);
-            const traceDelta = Number((tracedRefinement.bestComparison.report.iou - bestComp.report.iou).toFixed(3));
-            raceList = [
-              ...raceList,
-              {
-                label: 'CozyClay 12-Slice Hull Trace',
-                iou: tracedRefinement.bestComparison.report.iou,
-                delta: traceDelta,
-              },
-            ];
-            if (tracedRefinement.bestComparison.report.iou > bestComp.report.iou + 0.12 || bestComp.report.iou < 0.52) {
-              bestSpec = tracedRefinement.bestSpec;
-              bestComp = tracedRefinement.bestComparison;
-            }
-          }
-        }
-
-        generated = bestSpec;
-        setCurrentIoU(bestComp.report.iou);
-        setCompareReport(bestComp.report);
-        if (bestComp.sheetDataUrl) {
-          setCompareSheetUrl(bestComp.sheetDataUrl);
-        }
-        setCandidateRace(raceList);
-      } else {
-        setCurrentIoU(null);
-        setCompareReport(null);
-        setCompareSheetUrl(null);
-        setCandidateRace([]);
+      // If the LLM returned horizontal slices or fewer than 6 anatomical parts for a humanoid character,
+      // upgrade the Parametric tab to our full Anatomical Character Clay Maquette (`compileCharacterToClaySculpt`)
+      // so there are NEVER horizontal slice slabs!
+      const hasSliceSlabs = generated.parts.some((p) => /^slice_\d+/i.test(p.id));
+      if (isHumanoidSubject && (hasSliceSlabs || generated.parts.length < 6)) {
+        const features = extractCharacterFeaturesFromModelOutput(
+          generated,
+          `${cleanPrompt} ${generated.name || ''} ${generated.identity || ''}`.trim() || 'Elven Scout Archer',
+          referencePalette || undefined
+        );
+        generated = compileCharacterToClaySculpt(features);
       }
 
       setSculpt(generated);
       setName(generated.name || cleanPrompt || '3D Figure');
+      setCurrentIoU(null);
+      setCompareReport(null);
+      setCompareSheetUrl(null);
+      setCandidateRace([]);
 
       if (cleanPrompt) {
         registerSculptSpec(cleanPrompt, generated);
@@ -496,53 +432,70 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         registerSculptSpec(effectivePrompt, generated);
       }
 
-      // Default to Pure CozyClay Sculpting ('parametric') for ALL images so the user sees the faithful
-      // CozyClay 3D sculpt immediately, while also building the optional Skinned 3D Rig toggle for humanoids.
-      setDisplayMode('parametric');
-      const isHumanoidSubject = generated.rig === 'humanoid' || isHumanoidPrompt(effectivePrompt);
+      // For humanoid characters, build and default to the Skinned 3D Character Rig (Smooth Humanoid + Sculpted Hair, Tunic, Armor & Bow/Weapon),
+      // with the Parametric Clay Maquette available on the second tab!
       if (isHumanoidSubject) {
-        setGenerationStage('Stage 4/4: Preparing optional Skinned 3D Rig toggle...');
+        setGenerationStage('Dressing Skinned 3D Character Rig with sculpted costume & gear...');
         try {
           const rig = await createSkinnedCharacterFromConcept(
             referenceImageUrl || '',
-            effectivePrompt,
+            `${cleanPrompt} ${generated.name || ''} ${generated.identity || ''}`.trim() || 'Elven Scout Archer',
             { rawModelOutput: generated }
           );
           setCharacterRig(rig);
+          setDisplayMode('skinned');
         } catch (rigErr) {
-          console.warn('Could not build optional skinned character rig:', rigErr);
+          console.warn('Could not build skinned character rig:', rigErr);
+          setDisplayMode('parametric');
         }
       } else {
         setCharacterRig(null);
+        setDisplayMode('parametric');
       }
     } catch (err) {
       let msg = err instanceof ObjectReasonerError ? err.message : (err as Error)?.message || 'Generation failed';
       if (msg.includes('did not answer within')) {
         msg += ' (Tip: Heavy local models like 26B/31B can time out when VRAM is tight or competing with ComfyUI. Switch to a lighter model like qwen3.5:9b or Gemini in Reasoner Settings, or generate procedurally below.)';
       }
-      // Graceful procedural recovery: synthesize authentic CozyClay 12-slice silhouette hull recipe
+      // Graceful procedural recovery: build full Anatomical Character Clay Maquette + Skinned 3D Rig (never horizontal slabs!)
       try {
-        let fallbackSculpt = synthesizeRecipeFromImage({
-          name: cleanPrompt || '3D Figure',
-          prompt: cleanPrompt || effectivePrompt,
-          metrics: referenceMetrics || undefined,
-          palette: referencePalette || undefined,
-        });
+        const isHumanoidFallback = isHumanoidPrompt(effectivePrompt) || Boolean(referenceImageUrl);
+        let fallbackSculpt: SculptSpec;
+        if (isHumanoidFallback) {
+          const features = extractCharacterFeaturesFromModelOutput(
+            { name: cleanPrompt || 'Sculpted Character' },
+            cleanPrompt || 'Elven Scout Archer',
+            referencePalette || undefined
+          );
+          fallbackSculpt = compileCharacterToClaySculpt(features);
+        } else {
+          fallbackSculpt = synthesizeRecipeFromImage({
+            name: cleanPrompt || '3D Figure',
+            prompt: cleanPrompt || effectivePrompt,
+            palette: referencePalette || undefined,
+          });
+        }
+
         if (fallbackSculpt && fallbackSculpt.parts && fallbackSculpt.parts.length > 0) {
-          if (referenceMask) {
-            const refinement = runCozyClayCandidateRefinement(fallbackSculpt, referenceMask);
-            fallbackSculpt = refinement.bestSpec;
-            setCurrentIoU(refinement.bestComparison.report.iou);
-            setCompareReport(refinement.bestComparison.report);
-            if (refinement.bestComparison.sheetDataUrl) {
-              setCompareSheetUrl(refinement.bestComparison.sheetDataUrl);
-            }
-            setCandidateRace(refinement.candidates);
-          }
           setSculpt(fallbackSculpt);
-          setDisplayMode('parametric');
           setName(fallbackSculpt.name || cleanPrompt || '3D Figure');
           if (cleanPrompt) registerSculptSpec(cleanPrompt, fallbackSculpt);
+
+          if (isHumanoidFallback) {
+            try {
+              const rig = await createSkinnedCharacterFromConcept(
+                referenceImageUrl || '',
+                cleanPrompt || 'Elven Scout Archer',
+                { rawModelOutput: fallbackSculpt }
+              );
+              setCharacterRig(rig);
+              setDisplayMode('skinned');
+            } catch {
+              setDisplayMode('parametric');
+            }
+          } else {
+            setDisplayMode('parametric');
+          }
         }
       } catch (synthErr) {
         console.warn('Procedural fallback synthesis failed:', synthErr);
@@ -554,40 +507,59 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     }
   };
 
-  // Instant offline procedural 3D figure generation (0ms CozyClay 12-Slice Hull Tracer + Candidate Race, no LLM required)
-  const handleInstantProceduralGenerate = () => {
+  // Instant offline procedural 3D figure generation (0ms: Skinned 3D Character Rig + Anatomical Clay Maquette, no LLM required)
+  const handleInstantProceduralGenerate = async () => {
     const cleanPrompt = prompt.trim();
-    const effectivePrompt = cleanPrompt || (referenceImageUrl ? 'reference figure' : '3D Figure');
+    const effectivePrompt = cleanPrompt || (referenceImageUrl ? 'Elven Scout Archer' : '3D Figure');
     setGenerationError(null);
-    setGenerationStage('Tracing 12-slice CozyClay silhouette hull & running candidate race...');
+    setGenerationStage('Synthesizing 3D character rig & anatomical clay maquette...');
     try {
-      let fallbackSculpt = synthesizeRecipeFromImage({
-        name: cleanPrompt || '3D Figure',
-        prompt: cleanPrompt || effectivePrompt,
-        metrics: referenceMetrics || undefined,
-        palette: referencePalette || undefined,
-      });
-      if (referenceMask && fallbackSculpt) {
-        const refinement = runCozyClayCandidateRefinement(fallbackSculpt, referenceMask);
-        fallbackSculpt = refinement.bestSpec;
-        setCurrentIoU(refinement.bestComparison.report.iou);
-        setCompareReport(refinement.bestComparison.report);
-        if (refinement.bestComparison.sheetDataUrl) {
-          setCompareSheetUrl(refinement.bestComparison.sheetDataUrl);
-        }
-        setCandidateRace(refinement.candidates);
+      const isHumanoidTarget = isHumanoidPrompt(effectivePrompt) || Boolean(referenceImageUrl && !cleanPrompt);
+      let fallbackSculpt: SculptSpec;
+
+      if (isHumanoidTarget) {
+        const features = extractCharacterFeaturesFromModelOutput(
+          { name: cleanPrompt || 'Sculpted Character' },
+          effectivePrompt,
+          referencePalette || undefined
+        );
+        fallbackSculpt = compileCharacterToClaySculpt(features);
       } else {
-        setCurrentIoU(null);
-        setCompareReport(null);
-        setCompareSheetUrl(null);
-        setCandidateRace([]);
+        fallbackSculpt = synthesizeRecipeFromImage({
+          name: cleanPrompt || '3D Figure',
+          prompt: effectivePrompt,
+          palette: referencePalette || undefined,
+        });
       }
+
+      setCurrentIoU(null);
+      setCompareReport(null);
+      setCompareSheetUrl(null);
+      setCandidateRace([]);
+
       if (fallbackSculpt && fallbackSculpt.parts && fallbackSculpt.parts.length > 0) {
         setSculpt(fallbackSculpt);
         setName(fallbackSculpt.name || cleanPrompt || '3D Figure');
         if (cleanPrompt) registerSculptSpec(cleanPrompt, fallbackSculpt);
       }
-      setDisplayMode('parametric');
+
+      if (isHumanoidTarget) {
+        try {
+          const rig = await createSkinnedCharacterFromConcept(
+            referenceImageUrl || '',
+            effectivePrompt,
+            { rawModelOutput: fallbackSculpt }
+          );
+          setCharacterRig(rig);
+          setDisplayMode('skinned');
+        } catch {
+          setCharacterRig(null);
+          setDisplayMode('parametric');
+        }
+      } else {
+        setCharacterRig(null);
+        setDisplayMode('parametric');
+      }
     } catch (err: any) {
       setGenerationError(err?.message || 'Procedural generation failed');
     } finally {
@@ -603,14 +575,13 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
     setIsRefining(true);
     setGenerationError(null);
-    setGenerationStage('Refining 3D proportions and silhouette...');
+    setGenerationStage('Refining 3D proportions, costume & gear...');
 
     try {
       const revised = await reasonSculpt(cleanFeedback, {
         reviseSpec: sculpt,
         revisionFeedback: cleanFeedback,
         imageBase64: referenceImageUrl || undefined,
-        silhouetteMeasurements: referenceMetrics || undefined,
         extractedPalette: referencePalette || undefined,
         timeoutMs: 120_000,
         onStage: (s) => setGenerationStage(s),
@@ -618,69 +589,11 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
       setSculpt(revised);
       setRevisionFeedback('');
-
-      if (referenceMask) {
-        const iou = evaluateSilhouetteMatch(revised, referenceMask);
-        setCurrentIoU(iou);
-      }
     } catch (err) {
       let msg = err instanceof ObjectReasonerError ? err.message : (err as Error)?.message || 'Refinement failed';
       if (msg.includes('did not answer within')) {
         msg += ' (Tip: Heavy local models like 26B/31B can time out when VRAM is tight or competing with ComfyUI. Switch to a lighter model like qwen3.5:9b or Gemini in Reasoner Settings, or generate procedurally below.)';
       }
-      setGenerationError(msg);
-    } finally {
-      setIsRefining(false);
-      setGenerationStage('');
-    }
-  };
-
-  // Automated Silhouette Optimization Pass (CozyClay Multi-Candidate Race + Optional LLM Refinement)
-  const handleAutoAlign = async () => {
-    if (!sculpt || !referenceMask || !referenceMetrics) return;
-
-    setIsRefining(true);
-    setGenerationError(null);
-    setGenerationStage('Running CozyClay multi-candidate silhouette optimization race...');
-
-    try {
-      // 1. Run local CozyClay 4-candidate optimization race + 12-slice trace check (instant, guaranteed non-regressing)
-      const localRace = runCozyClayCandidateRefinement(sculpt, referenceMask);
-      let bestSpec = localRace.bestSpec;
-      let bestComp = localRace.bestComparison;
-      let raceList = [...localRace.candidates];
-
-      if (referenceMetrics.outline) {
-        const traced = buildCozyClaySilhouetteTraceRecipe({
-          name: sculpt.name || prompt || '3D Figure',
-          prompt: prompt || sculpt.name || '3D Figure',
-          metrics: referenceMetrics,
-          palette: referencePalette || undefined,
-        });
-        if (traced) {
-          const tracedRace = runCozyClayCandidateRefinement(traced, referenceMask);
-          const delta = Number((tracedRace.bestComparison.report.iou - bestComp.report.iou).toFixed(3));
-          raceList.push({
-            label: 'CozyClay 12-Slice Hull Trace',
-            iou: tracedRace.bestComparison.report.iou,
-            delta,
-          });
-          if (tracedRace.bestComparison.report.iou > bestComp.report.iou) {
-            bestSpec = tracedRace.bestSpec;
-            bestComp = tracedRace.bestComparison;
-          }
-        }
-      }
-
-      setSculpt(bestSpec);
-      setCurrentIoU(bestComp.report.iou);
-      setCompareReport(bestComp.report);
-      if (bestComp.sheetDataUrl) {
-        setCompareSheetUrl(bestComp.sheetDataUrl);
-      }
-      setCandidateRace(raceList);
-    } catch (err) {
-      const msg = err instanceof ObjectReasonerError ? err.message : (err as Error)?.message || 'Auto-alignment failed';
       setGenerationError(msg);
     } finally {
       setIsRefining(false);
@@ -849,12 +762,12 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
               {referenceImageUrl ? (
                 <div className="relative group rounded-xl overflow-hidden border border-cyan-500/30 bg-black/60 h-44 flex items-center justify-center">
                   <img
-                    src={showMaskOverlay && maskPreviewUrl ? maskPreviewUrl : referenceImageUrl}
+                    src={referenceImageUrl}
                     alt="Reference Preview"
                     className="w-full h-full object-contain"
                   />
 
-                  {/* Extracted Palette Swatches & Mask Overlay Controls */}
+                  {/* Extracted Center-Zone Palette Swatches */}
                   <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/80 backdrop-blur-md px-2 py-1 rounded-full border border-white/10">
                     {referencePalette ? (
                       <>
@@ -879,43 +792,15 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     )}
                   </div>
 
-                  <div className="absolute top-2 right-2 flex items-center gap-1.5">
-                    {maskPreviewUrl && (
-                      <button
-                        onClick={() => setShowMaskOverlay(!showMaskOverlay)}
-                        className={`px-2 py-1 rounded text-[10px] font-mono font-semibold flex items-center gap-1 backdrop-blur-md transition-all ${
-                          showMaskOverlay
-                            ? 'bg-cyan-500 text-black shadow-glow-cyan'
-                            : 'bg-black/75 text-cyan-300 border border-cyan-500/40'
-                        }`}
-                        title="Toggle Silhouette Mask View"
-                      >
-                        {showMaskOverlay ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                        <span>Silhouette</span>
-                      </button>
-                    )}
+                  {/* Direct Vision-to-3D Status Footer HUD */}
+                  <div className="absolute bottom-0 inset-x-0 bg-black/85 backdrop-blur-sm px-3 py-1.5 border-t border-white/10 flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-emerald-300 font-semibold">
+                      ✓ Direct Vision-to-3D Ready
+                    </span>
+                    <span className="text-slate-300">
+                      Palette Sampled ✓
+                    </span>
                   </div>
-
-                  {/* Silhouette Metrics Footer HUD */}
-                  {referenceMetrics && (
-                    <div className="absolute bottom-0 inset-x-0 bg-black/80 backdrop-blur-sm px-3 py-1.5 border-t border-white/10 flex items-center justify-between text-[10px] font-mono">
-                      <span className="text-slate-300">
-                        Aspect Ratio:{' '}
-                        <strong className="text-cyan-300">{referenceMetrics.aspectRatio}:1</strong>
-                      </span>
-                      {referenceMetrics.outline && (
-                        <span className="text-emerald-300 font-semibold" title="CozyClay 12-Slice Outline Measured">
-                          12 Slices ✓
-                        </span>
-                      )}
-                      <span className="text-slate-300">
-                        Center:{' '}
-                        <strong className="text-cyan-300">
-                          [{referenceMetrics.centerOfMass[0]}, {referenceMetrics.centerOfMass[1]}]
-                        </strong>
-                      </span>
-                    </div>
-                  )}
                 </div>
               ) : (
                 <div
@@ -1055,17 +940,6 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     <RefreshCw className="h-3 w-3" />
                     Refine & Revise Figure
                   </span>
-                  {referenceMask && (
-                    <button
-                      onClick={handleAutoAlign}
-                      disabled={isRefining}
-                      className="px-2 py-0.5 rounded bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 text-[10px] font-mono font-semibold flex items-center gap-1 transition-colors disabled:opacity-50"
-                      title="Automatically optimize proportions to maximize 2D silhouette overlap"
-                    >
-                      <Zap className="h-2.5 w-2.5" />
-                      <span>Auto-Align Silhouette</span>
-                    </button>
-                  )}
                 </div>
 
                 <div className="flex items-center gap-1.5">
@@ -1095,37 +969,8 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
           <div className="md:col-span-7 bg-[#090b10] flex flex-col relative overflow-hidden">
             {/* Viewport Overlay Controls Top-Bar */}
             <div className="absolute top-3 inset-x-3 z-10 flex items-center justify-between pointer-events-none">
-              {/* Silhouette IoU Match Badge & CozyClay Compare Sheet Toggle */}
+              {/* Active 3D Mode Badge */}
               <div className="pointer-events-auto flex items-center gap-2">
-                {currentIoU !== null && (
-                  <div
-                    className={`px-3 py-1 rounded-full backdrop-blur-md border text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg ${
-                      currentIoU >= 0.75
-                        ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300 shadow-emerald-950/50'
-                        : currentIoU >= 0.5
-                        ? 'bg-amber-950/80 border-amber-500/50 text-amber-300 shadow-amber-950/50'
-                        : 'bg-slate-900/80 border-slate-700 text-slate-300'
-                    }`}
-                  >
-                    <span>🎯</span>
-                    <span>{Math.round(currentIoU * 100)}% Silhouette Match</span>
-                  </div>
-                )}
-                {compareSheetUrl && (
-                  <button
-                    type="button"
-                    onClick={() => setShowCompareSheet((v) => !v)}
-                    className={`px-2.5 py-1 rounded-full backdrop-blur-md border text-[10px] font-mono font-bold flex items-center gap-1.5 transition-all shadow-md ${
-                      showCompareSheet
-                        ? 'bg-cyan-500 text-black border-cyan-300'
-                        : 'bg-black/75 text-cyan-300 border-cyan-500/40 hover:border-cyan-400'
-                    }`}
-                    title="Toggle CozyClay Side-by-Side Comparison Sheet (Grey=Match, Red=Missing, Blue=Extra)"
-                  >
-                    <Eye className="h-3 w-3" />
-                    <span>Compare Sheet</span>
-                  </button>
-                )}
                 {characterRig && displayMode === 'skinned' ? (
                   <span className="px-2.5 py-1 rounded-full bg-emerald-950/80 backdrop-blur-md border border-emerald-500/40 text-[10px] font-mono text-emerald-300 font-bold flex items-center gap-1.5 shadow-md">
                     <span>✨</span>
@@ -1218,7 +1063,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     <div className="flex items-center gap-4 text-left">
                       <div className="relative h-24 w-24 rounded-xl overflow-hidden border border-white/15 bg-black/60 shrink-0 flex items-center justify-center">
                         <img
-                          src={showMaskOverlay && maskPreviewUrl ? maskPreviewUrl : referenceImageUrl}
+                          src={referenceImageUrl}
                           alt="Staged Reference"
                           className="w-full h-full object-contain"
                         />
