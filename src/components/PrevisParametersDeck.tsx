@@ -25,6 +25,9 @@ import {
   Users,
   Target,
   Clock,
+  ChevronDown,
+  ChevronRight,
+  Plus,
 } from 'lucide-react';
 
 import { useAssetLibraryStore } from '../stores/useAssetLibraryStore';
@@ -158,10 +161,10 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
   const [socketTargetActorId, setSocketTargetActorId] = useState<string>('');
   const [socketTargetBone, setSocketTargetBone] = useState<HumanoidBone>('RightHand');
 
-  // Zero-Scroll Sub-Tabs & Pinned Cast Switcher State
+  // Zero-Scroll Sub-Tabs & Collapsible Vertical Sections State
   const [cameraSubTab, setCameraSubTab] = useState<'optics' | 'trajectory' | 'all'>('optics');
   const [showAddSubjectDrawer, setShowAddSubjectDrawer] = useState<boolean>(false);
-  const [castViewMode, setCastViewMode] = useState<'focus' | 'all'>('focus');
+  const [showCastPoolDrawer, setShowCastPoolDrawer] = useState<boolean>(false);
   const [envSubTab, setEnvSubTab] = useState<'presets' | 'weather' | 'all'>('presets');
   const [lightSubTab, setLightSubTab] = useState<'lights' | 'script' | 'all'>('lights');
 
@@ -254,10 +257,16 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
     }
   };
 
-  // Auto-expand and auto-scroll to selected actor card in staging tab
+  // Auto-expand selected actor card and auto-collapse other cards (Vertical Accordion) in staging tab
   React.useEffect(() => {
     if (selectedActorId && selectedActorId !== '__camera__') {
-      setCollapsedActors((prev) => (prev[selectedActorId] ? { ...prev, [selectedActorId]: false } : prev));
+      setCollapsedActors(() => {
+        const next: Record<string, boolean> = {};
+        useShotStore.getState().shot.actors.forEach((a) => {
+          next[a.id] = a.id !== selectedActorId;
+        });
+        return next;
+      });
     }
     if (selectedActorId && activeTab === 'staging') {
       const el = document.querySelector(`[data-actor-card="${selectedActorId}"]`);
@@ -713,111 +722,31 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
         {/* ================= TAB 2: CAST & STAGE (ZERO DUPLICATES + SCENE CAST POOL) ================= */}
         {activeTab === 'staging' && (
           <div className="p-3 space-y-2.5">
-            {/* Pinned Cast Switcher Strip + Collapsible Add Subject / Pool Drawer Toggle */}
-            <div className="rounded-xl bg-[#090d16] border border-[#273247] p-2 space-y-2">
-              <div className="flex items-center justify-between gap-1.5">
-                <span className="text-[10.5px] font-bold text-slate-200 flex items-center gap-1.5 truncate">
-                  <Users className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                  <span>Stage Cast ({shot.actors.length})</span>
-                </span>
-
-                <div className="flex items-center gap-1 shrink-0">
-                  {shot.actors.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setCastViewMode((m) => (m === 'focus' ? 'all' : 'focus'))}
-                      className={`px-2 py-0.5 rounded-md text-[9.5px] font-mono font-semibold border transition-all ${
-                        castViewMode === 'focus'
-                          ? 'bg-indigo-600/25 border-indigo-400/50 text-indigo-200'
-                          : 'bg-[#131C2E] border-white/10 text-slate-300 hover:text-white'
-                      }`}
-                      title="Toggle between showing only the selected character card (Zero Scroll) vs stacking all cards"
-                    >
-                      {castViewMode === 'focus' ? '🎯 1 Card' : `⊞ All (${shot.actors.length})`}
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => setShowAddSubjectDrawer((v) => !v)}
-                    className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold border transition-all ${
-                      showAddSubjectDrawer || shot.actors.length === 0
-                        ? 'bg-amber-500 text-black border-amber-300 shadow-sm'
-                        : 'bg-emerald-600/25 hover:bg-emerald-600/40 text-emerald-200 border-emerald-400/50'
-                    }`}
-                    title="Expand or collapse Add Subject, 3D Asset Library & Scene Cast Pool drawer"
-                  >
-                    {showAddSubjectDrawer || shot.actors.length === 0
-                      ? '▾ Hide Add / Pool'
-                      : `+ Add / Pool (${sceneCastPool.length})`}
-                  </button>
-                </div>
-              </div>
-
-              {/* Horizontal Avatar Chip Strip for Instant 1-Click Character Switching */}
-              {shot.actors.length > 0 && (
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
-                  {shot.actors.map((act, idx) => {
-                    const activeActorId =
-                      selectedActorId && shot.actors.some((a) => a.id === selectedActorId)
-                        ? selectedActorId
-                        : shot.actors[0]?.id;
-                    const isChipActive = act.id === activeActorId;
-                    const k = act.kind || 'human';
-                    const chipIcon =
-                      k === 'human' || k === 'character'
-                        ? '👤'
-                        : k === 'car'
-                        ? '🚗'
-                        : k === 'tree'
-                        ? '🌲'
-                        : k === 'table'
-                        ? '🪑'
-                        : k === 'chair'
-                        ? '💺'
-                        : k === 'cutout'
-                        ? '🖼️'
-                        : '📦';
-                    return (
-                      <button
-                        key={act.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedActorId(act.id);
-                          setCollapsedActors((prev) => ({ ...prev, [act.id]: false }));
-                        }}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10.5px] font-semibold border transition-all shrink-0 max-w-[145px] ${
-                          isChipActive
-                            ? 'bg-gradient-to-b from-blue-600/35 to-indigo-700/35 border-blue-400 text-white shadow-[0_0_10px_rgba(59,130,246,0.25)]'
-                            : 'bg-[#131b2e] border-white/[0.08] text-slate-300 hover:text-white hover:bg-[#19233b]'
-                        }`}
-                        title={`Switch inspector focus to ${act.name}`}
-                      >
-                        <span
-                          className="h-2 w-2 rounded-full shrink-0"
-                          style={{
-                            backgroundColor:
-                              act.color || OBJECT_TARGET_PALETTE[idx % OBJECT_TARGET_PALETTE.length].hex,
-                          }}
-                        />
-                        <span className="text-[10px] leading-none shrink-0">{chipIcon}</span>
-                        <span className="truncate">{act.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Collapsible Add Subject + Asset Library + Scene Cast Pool Drawer */}
-            <div className={showAddSubjectDrawer || shot.actors.length === 0 ? 'space-y-3' : 'hidden'}>
-            {/* 1. Unified Add to Stage Card — Clean, Uncluttered, Tactile */}
+            {/* 1. Unified Add to Stage Card — Individual Vertical Collapsible Panel */}
             <div className="ui-card space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="font-display font-bold text-xs tracking-wide text-white">Add Subject or Prop</span>
-                <span className="font-mono text-[10px] text-slate-400">1-Click Place on Stage</span>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddSubjectDrawer((v) => !v)}
+                className="w-full flex items-center justify-between gap-2 text-left group"
+                title="Expand or collapse Add Subject, Props & 3D Asset Library"
+              >
+                <span className="flex items-center gap-1.5 min-w-0">
+                  {showAddSubjectDrawer || shot.actors.length === 0 ? (
+                    <ChevronDown className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                  )}
+                  <Plus className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                  <span className="font-display font-bold text-xs tracking-wide text-white group-hover:text-amber-200 transition-colors truncate">
+                    Add Subject or Prop
+                  </span>
+                </span>
+                <span className="font-mono text-[9.5px] px-2 py-0.5 rounded-md bg-white/[0.06] border border-white/10 text-slate-300 shrink-0">
+                  {showAddSubjectDrawer || shot.actors.length === 0 ? '▾ Hide' : '+ 1-Click Place / 200+ Models'}
+                </span>
+              </button>
 
+              <div className={showAddSubjectDrawer || shot.actors.length === 0 ? 'space-y-3 pt-1 border-t border-white/10' : 'hidden'}>
               {/* 6 Primary Subject Cards */}
               <div className="grid grid-cols-3 gap-2 font-mono">
                 <button
@@ -996,17 +925,32 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                   200+ Models
                 </span>
               </button>
+              </div>
             </div>
 
-                        {/* 2. Scene Cast Pool (Compact Cross-Shot Roster) */}
-            <div className="rounded-xl bg-[#121A2A] border border-[#6658F5]/35 shadow-sm p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-[11px] font-bold text-indigo-300 flex items-center gap-1.5">
-                  <Users className="h-3.5 w-3.5 text-indigo-400" />
-                  <span>Scene Cast Pool ({sceneCastPool.length})</span>
+            {/* 2. Scene Cast Pool — Individual Vertical Collapsible Panel */}
+            <div className="rounded-xl bg-[#121A2A] border border-[#6658F5]/35 shadow-sm p-2.5 space-y-2">
+              <button
+                type="button"
+                onClick={() => setShowCastPoolDrawer((v) => !v)}
+                className="w-full flex items-center justify-between gap-2 text-left group"
+                title="Expand or collapse Scene Cast Pool for cross-shot continuity"
+              >
+                <span className="font-mono text-[11px] font-bold text-indigo-300 group-hover:text-indigo-200 flex items-center gap-1.5 min-w-0">
+                  {showCastPoolDrawer ? (
+                    <ChevronDown className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                  )}
+                  <Users className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                  <span className="truncate">Scene Cast Pool ({sceneCastPool.length})</span>
                 </span>
-                <span className="font-mono text-[9.5px] text-slate-400">Cross-Shot Continuity</span>
-              </div>
+                <span className="font-mono text-[9.5px] text-slate-400 shrink-0">
+                  {showCastPoolDrawer ? '▾ Hide' : 'Cross-Shot Continuity'}
+                </span>
+              </button>
+
+              <div className={showCastPoolDrawer ? 'pt-1.5 border-t border-indigo-500/20' : 'hidden'}>
               {sceneCastPool.length === 0 ? (
                 <p className="text-[10px] font-mono text-slate-400 leading-relaxed">
                   Click <strong className="text-indigo-300">Save</strong> on any stage character below to keep their look &amp; scale ready across shots.
@@ -1039,11 +983,11 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                   ))}
                 </div>
               )}
-            </div>
+              </div>
             </div>
 
-            {/* 3. Placed 3D Objects List */}
-            <div className="space-y-3 pt-1 border-t border-white/10">
+            {/* 3. Placed 3D Objects List (Vertical Stack with Auto-Collapse Accordion) */}
+            <div className="space-y-2.5 pt-1 border-t border-white/10">
               <div className="flex items-center justify-between">
                 <span className="font-display font-bold text-xs text-white">Placed on Stage ({shot.actors.length})</span>
                 {shot.actors.length > 0 && (
@@ -1052,7 +996,13 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        const allCollapsed = shot.actors.every((a) => collapsedActors[a.id]);
+                        const effectiveFocusedActorId =
+                          selectedActorId && shot.actors.some((a) => a.id === selectedActorId)
+                            ? selectedActorId
+                            : shot.actors[0]?.id;
+                        const allCollapsed = shot.actors.every((a) =>
+                          collapsedActors[a.id] !== undefined ? collapsedActors[a.id] : a.id !== effectiveFocusedActorId
+                        );
                         const next: Record<string, boolean> = {};
                         shot.actors.forEach((a) => {
                           next[a.id] = !allCollapsed;
@@ -1062,7 +1012,16 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                       className="ui-chip text-[10px] px-2 py-1"
                       title="Collapse or expand all object cards"
                     >
-                      {shot.actors.every((a) => collapsedActors[a.id]) ? '▸ Expand' : '▾ Collapse'}
+                      {shot.actors.every((a) =>
+                        collapsedActors[a.id] !== undefined
+                          ? collapsedActors[a.id]
+                          : a.id !==
+                            (selectedActorId && shot.actors.some((act) => act.id === selectedActorId)
+                              ? selectedActorId
+                              : shot.actors[0]?.id)
+                      )
+                        ? '▸ Expand'
+                        : '▾ Collapse'}
                     </button>
                     <button
                       type="button"
@@ -1099,29 +1058,28 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                   No subjects on stage yet. Click any card in <strong className="text-white">Add Subject or Prop</strong> above to place one.
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {shot.actors.map((actor) => {
                     const shotDur = shot.durationSeconds || 4;
                     const win = motionWindowByActor[actor.id] || { start: 0, end: shotDur };
-                    const isSelected = actor.id === selectedActorId;
-                    const isCollapsed = Boolean(collapsedActors[actor.id]);
+                    const effectiveFocusedActorId =
+                      selectedActorId && shot.actors.some((a) => a.id === selectedActorId)
+                        ? selectedActorId
+                        : shot.actors[0]?.id;
+                    const isSelected = actor.id === effectiveFocusedActorId;
+                    const isCollapsed =
+                      collapsedActors[actor.id] !== undefined
+                        ? Boolean(collapsedActors[actor.id])
+                        : actor.id !== effectiveFocusedActorId;
                     const isFineTuneOpen = expandedFineTuneByActor[actor.id] !== false;
                     const isMotionSectionOpen = motionSectionOpenByActor[actor.id] !== false;
                     const isTimingSectionOpen = timingSectionOpenByActor[actor.id] !== false;
                     const activeHumanGroup: HumanoidMotionGroup = humanMotionGroupByActor[actor.id] || 'move';
                     const travelMode = motionTravelModeByActor[actor.id] || 'auto';
-                    const effectiveFocusedActorId =
-                      selectedActorId && shot.actors.some((a) => a.id === selectedActorId)
-                        ? selectedActorId
-                        : shot.actors[0]?.id;
-                    const isHiddenInFocusMode =
-                      castViewMode === 'focus' &&
-                      shot.actors.length > 1 &&
-                      actor.id !== effectiveFocusedActorId;
 
                     return (
-                      <div key={actor.id} className={isHiddenInFocusMode ? 'hidden' : ''}>
                       <CharacterControlCard
+                        key={actor.id}
                         actor={actor}
                         allActors={shot.actors}
                         humanoidActors={humanoidActors}
@@ -1140,9 +1098,22 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                         generatingActingId={generatingActingId}
                         socketTargetActorId={socketTargetActorId}
                         socketTargetBone={socketTargetBone}
-                        onSelectActor={(id) => setSelectedActorId(id)}
+                        onSelectActor={(id) => {
+                          setSelectedActorId(id);
+                          setCollapsedActors(() => {
+                            const next: Record<string, boolean> = {};
+                            shot.actors.forEach((a) => {
+                              next[a.id] = a.id !== id;
+                            });
+                            return next;
+                          });
+                        }}
                         onToggleCollapse={(id) =>
-                          setCollapsedActors((prev) => ({ ...prev, [id]: !prev[id] }))
+                          setCollapsedActors((prev) => {
+                            const currentlyCollapsed =
+                              prev[id] !== undefined ? Boolean(prev[id]) : id !== effectiveFocusedActorId;
+                            return { ...prev, [id]: !currentlyCollapsed };
+                          })
                         }
                         onToggleFineTune={(id) =>
                           setExpandedFineTuneByActor((prev) => ({
@@ -1272,7 +1243,6 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                         onChangeSocketTargetActor={(targetId) => setSocketTargetActorId(targetId)}
                         onChangeSocketTargetBone={(bone) => setSocketTargetBone(bone)}
                       />
-                      </div>
                     );
                   })}
                 </div>

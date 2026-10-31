@@ -1134,8 +1134,14 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
 
                 {/* Row 3: Active Cue Status, Chaining & Clear */}
                 <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-white/[0.06] font-mono text-[10px]">
-                  <span className="flex items-center gap-1.5 text-slate-400 truncate">
-                    <MapPin className="h-3 w-3 text-rose-400 shrink-0" />
+                  <span
+                    className="flex items-center gap-1.5 text-slate-400 truncate"
+                    style={actor.color ? { color: actor.color } : undefined}
+                  >
+                    <MapPin
+                      className="h-3 w-3 text-rose-400 shrink-0"
+                      style={actor.color ? { color: actor.color } : undefined}
+                    />
                     <span className="truncate">
                       {kfs.length} {kfs.length === 1 ? 'cue' : 'cues'} ({Math.round(actor.trajectory.startPosition.x)},{Math.round(actor.trajectory.startPosition.y)} → {Math.round(actor.trajectory.endPosition.x)},{Math.round(actor.trajectory.endPosition.y)})
                     </span>

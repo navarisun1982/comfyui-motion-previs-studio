@@ -167,7 +167,8 @@ export function createSubjectMesh(
         name || kind.toUpperCase() || '3D MODEL',
         subtitleBadge || 'GLB 3D MODEL',
         isGhostWireframe,
-        showLabels
+        showLabels,
+        colorHex
       );
       banner.position.y = Math.max(1.8, size.y + 0.25);
       group.add(banner);
@@ -230,7 +231,8 @@ export function createSubjectMesh(
       name || kind.toUpperCase() || '3D MODEL',
       subtitleBadge || 'LOADING 3D MODEL...',
       isGhostWireframe,
-      showLabels
+      showLabels,
+      colorHex
     );
     banner.position.y = Math.max(1.8, size.y + 0.25);
     group.add(banner);
@@ -258,7 +260,8 @@ export function createSubjectMesh(
       name || kind.toUpperCase() || 'CUTOUT',
       subtitleBadge || (kind.toLowerCase() === 'backdrop' ? 'BACKDROP PLATE' : '2D STANDEE'),
       isGhostWireframe,
-      showLabels
+      showLabels,
+      colorHex
     );
     banner.position.y = Math.max(1.8, size.y + 0.25);
     group.add(banner);
@@ -283,7 +286,8 @@ export function createSubjectMesh(
       name || kind.toUpperCase() || 'GREYBOX',
       subtitleBadge || 'GREYBOX PRIMITIVE',
       isGhostWireframe,
-      showLabels
+      showLabels,
+      colorHex
     );
     banner.position.y = Math.max(1.5, size.y + 0.25);
     group.add(banner);
@@ -412,7 +416,8 @@ export function createSubjectMesh(
       name || kind.toUpperCase() || 'SUBJECT',
       subtitleBadge || (actorPosePreset ? actorPosePreset.toUpperCase() : 'HUMANOID'),
       isGhostWireframe,
-      showLabels
+      showLabels,
+      colorHex
     );
     banner.position.y = Math.max(5.3, size.y + 0.25);
     group.add(banner);
@@ -450,7 +455,8 @@ export function createSubjectMesh(
     name || kind.toUpperCase() || 'SUBJECT',
     subtitleBadge || kind.toUpperCase() || 'SUBJECT',
     isGhostWireframe,
-    showLabels
+    showLabels,
+    colorHex
   );
   banner.position.y = Math.max(1.8, size.y + 0.25);
   group.add(banner);

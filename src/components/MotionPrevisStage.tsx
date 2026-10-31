@@ -30,6 +30,7 @@ export interface TimelineMarker {
   time: number;
   label: string;
   color: string;
+  actorId?: string;
 }
 
 interface MotionPrevisStageProps {
@@ -297,23 +298,31 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   // Add keyframe cue
   const handleAddMarker = () => {
     const id = `m_${Date.now()}`;
+    const targetActor =
+      selectedActorId && selectedActorId !== '__camera__'
+        ? shot.actors.find((a) => a.id === selectedActorId)
+        : undefined;
+    const markerColor =
+      selectedActorId === '__camera__'
+        ? shot.camera.color || '#f59e0b'
+        : targetActor?.color || '#f59e0b';
     const newMarker: TimelineMarker = {
       id,
       time: Number(currentTime.toFixed(2)),
-      label: `Cue @ ${currentTime.toFixed(1)}s`,
-      color: '#f59e0b',
+      label: targetActor
+        ? `${targetActor.name} Cue @ ${currentTime.toFixed(1)}s`
+        : `Cue @ ${currentTime.toFixed(1)}s`,
+      color: markerColor,
+      actorId: selectedActorId,
     };
     setMarkers((prev) => [...prev, newMarker]);
 
     if (selectedActorId === '__camera__') {
       const camPos = shot.camera.movement.startPosition;
       updateCameraPositionAtTime(currentTime, camPos, duration);
-    } else if (selectedActorId) {
-      const targetActor = shot.actors.find((a) => a.id === selectedActorId);
-      if (targetActor) {
-        const pos = interpolateTrajectoryPosition(targetActor.trajectory, currentTime, duration);
-        updateActorPositionAtTime(selectedActorId, currentTime, pos, duration);
-      }
+    } else if (selectedActorId && targetActor) {
+      const pos = interpolateTrajectoryPosition(targetActor.trajectory, currentTime, duration);
+      updateActorPositionAtTime(selectedActorId, currentTime, pos, duration);
     }
   };
 
@@ -483,6 +492,10 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                   }`}
                   title="Select subject & edit in Cast & Stage Inspector"
                 >
+                  <span
+                    className="h-2 w-2 rounded-full shrink-0 border border-white/30"
+                    style={{ backgroundColor: act.color || '#eab308' }}
+                  />
                   <span>{icon}</span>
                   <span className="font-semibold text-white max-w-[100px] truncate">{act.name}</span>
                   <button
@@ -824,11 +837,19 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
           {/* Timeline User Cue Markers */}
           {markers.map((m) => {
             const mPct = (m.time / duration) * 100;
+            const liveActorColor =
+              m.actorId === '__camera__'
+                ? shot.camera.color
+                : m.actorId
+                ? shot.actors.find((a) => a.id === m.actorId)?.color
+                : undefined;
+            const effectiveMarkerColor = liveActorColor || m.color || '#f59e0b';
             return (
               <div
                 key={m.id}
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  if (m.actorId) setSelectedActorId(m.actorId);
                   setCurrentTime(m.time);
                 }}
                 className="absolute top-1 z-30 flex flex-col items-center cursor-pointer group pointer-events-auto"
@@ -837,9 +858,12 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
               >
                 <div
                   className="h-3 w-3 rotate-45 border border-white shadow-sm transition-transform group-hover:scale-125"
-                  style={{ backgroundColor: m.color }}
+                  style={{ backgroundColor: effectiveMarkerColor }}
                 />
-                <span className="opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[#090D16]/95 px-1 font-mono text-[8px] text-white mt-1 whitespace-nowrap pointer-events-none border border-[#273247] shadow-lg">
+                <span
+                  className="opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[#090D16]/95 px-1 font-mono text-[8px] text-white mt-1 whitespace-nowrap pointer-events-none border border-[#273247] shadow-lg"
+                  style={{ borderColor: effectiveMarkerColor, color: effectiveMarkerColor }}
+                >
                   {m.label}
                 </span>
               </div>
@@ -853,11 +877,13 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                 ...kf,
                 actorName: a.name,
                 actorId: a.id,
+                actorColor: a.color,
               }))
             )
             .map((kf) => {
               const kfPct = (kf.time / duration) * 100;
               const isSelected = kf.actorId === selectedActorId;
+              const cueColor = kf.actorColor || (isSelected ? '#F0AE42' : '#18B8D8');
               return (
                 <div
                   key={kf.id}
@@ -872,12 +898,14 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                 >
                   <div
                     className={`h-2.5 w-2.5 rotate-45 border shadow-sm transition-transform group-hover:scale-150 ${
-                      isSelected
-                        ? 'bg-[#F0AE42] border-white scale-125'
-                        : 'bg-[#18B8D8] border-white/70'
+                      isSelected ? 'border-white scale-125' : 'border-white/70'
                     }`}
+                    style={{ backgroundColor: cueColor }}
                   />
-                  <span className="opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[#090D16]/95 px-1 font-mono text-[8px] text-[#F0AE42] -mt-6 whitespace-nowrap pointer-events-none border border-[#273247] shadow-lg">
+                  <span
+                    className="opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[#090D16]/95 px-1 font-mono text-[8px] -mt-6 whitespace-nowrap pointer-events-none border shadow-lg"
+                    style={{ color: cueColor, borderColor: cueColor }}
+                  >
                     {kf.actorName} @ {kf.time.toFixed(1)}s
                   </span>
                 </div>
@@ -917,7 +945,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                     onClick={() => setCurrentTime(m.time)}
                     className="flex items-center gap-1 rounded-md bg-[#1A2436] hover:bg-[#223047] px-2 py-0.5 text-[#F0F3FA] border border-[#273247]"
                   >
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: m.color }} />
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: (m.actorId === '__camera__' ? shot.camera.color : m.actorId ? shot.actors.find((a) => a.id === m.actorId)?.color : undefined) || m.color }} />
                     <span>{m.label}</span>
                     <span
                       onClick={(e) => {

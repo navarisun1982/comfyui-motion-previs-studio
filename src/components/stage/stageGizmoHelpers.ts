@@ -39,7 +39,8 @@ export function createSpriteBanner(
   name: string,
   subtitleBadge?: string,
   isGhostWireframe: boolean = false,
-  visible: boolean = true
+  visible: boolean = true,
+  colorHex?: number
 ): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = 384;
@@ -55,7 +56,11 @@ export function createSpriteBanner(
     }
     ctx.fill();
     ctx.lineWidth = 2.5;
-    ctx.strokeStyle = isGhostWireframe ? '#06b6d4' : 'rgba(245, 158, 11, 0.85)';
+    const hexColorStr =
+      typeof colorHex === 'number' && !Number.isNaN(colorHex)
+        ? `#${colorHex.toString(16).padStart(6, '0')}`
+        : undefined;
+    ctx.strokeStyle = isGhostWireframe ? '#06b6d4' : hexColorStr || 'rgba(245, 158, 11, 0.85)';
     ctx.stroke();
 
     ctx.textAlign = 'center';
@@ -70,7 +75,7 @@ export function createSpriteBanner(
       ctx.fillText(displayName, 192, 34);
 
       // Subtitle badge
-      ctx.fillStyle = isGhostWireframe ? '#22d3ee' : '#10b981';
+      ctx.fillStyle = isGhostWireframe ? '#22d3ee' : hexColorStr || '#10b981';
       ctx.font = '600 15px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace';
       ctx.fillText(subtitleBadge.toUpperCase(), 192, 66);
     } else {
@@ -109,7 +114,7 @@ export function createBaseRing(
   group.name = '__base_ring_group__';
   group.visible = Boolean(isSelected || isGhostWireframe);
 
-  const ringColor = isSelected ? 0xf59e0b : isGhostWireframe ? 0x06b6d4 : colorHex;
+  const ringColor = isGhostWireframe ? 0x06b6d4 : (colorHex || 0xf59e0b);
   const clampedRadius = Math.min(radius, 1.35);
 
   const ringThickness = 0.10;

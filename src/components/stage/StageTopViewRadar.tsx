@@ -756,7 +756,7 @@ export const StageTopViewRadar: React.FC<StageTopViewRadarProps> = ({
 
           return (
             <g key={actor.id}>
-              {/* Actor Movement Trajectory Line */}
+              {/* Actor Movement Trajectory Line & Keyframe Cue Waypoints */}
               {Math.hypot(startV.x - endV.x, startV.y - endV.y) > 1 && (
                 <line
                   x1={startV.x}
@@ -769,6 +769,25 @@ export const StageTopViewRadar: React.FC<StageTopViewRadarProps> = ({
                   opacity="0.75"
                 />
               )}
+              {(actor.trajectory.keyframes || []).map((kf) => {
+                const kfView = stageToView(kf.position);
+                return (
+                  <rect
+                    key={kf.id}
+                    x={kfView.x - 0.9}
+                    y={kfView.y - 0.9}
+                    width="1.8"
+                    height="1.8"
+                    transform={`rotate(45 ${kfView.x} ${kfView.y})`}
+                    fill={actColor}
+                    stroke={isLightTheme ? '#ffffff' : '#0f172a'}
+                    strokeWidth="0.3"
+                    opacity="0.9"
+                  >
+                    <title>{`${actor.name} Cue @ ${kf.time.toFixed(1)}s`}</title>
+                  </rect>
+                );
+              })}
 
               <g
                 transform={`translate(${vPos.x}, ${vPos.y})`}
