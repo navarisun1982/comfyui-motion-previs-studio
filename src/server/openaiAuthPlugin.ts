@@ -67,14 +67,81 @@ function getAuthService() {
   return require('./openaiAuthService.cjs');
 }
 
+function getAppUpdateService() {
+  try {
+    const resolved = require.resolve('./appUpdateService.cjs');
+    delete require.cache[resolved];
+  } catch {}
+  return require('./appUpdateService.cjs');
+}
+
+function attachAppUpdateMiddleware(middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void }) {
+  middlewares.use(async (req, res, next) => {
+    const rawUrl = req.url || '';
+    const pathname = rawUrl.split('?')[0].replace(/\/+$/, '') || '/';
+
+    if (!pathname.startsWith('/api/app-update')) {
+      next();
+      return;
+    }
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    if (pathname === '/api/app-update/check' && req.method === 'GET') {
+      try {
+        const fetchRemote = !rawUrl.includes('fetch=0');
+        const result = await getAppUpdateService().checkAppUpdate({ fetchRemote });
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(200);
+        res.end(JSON.stringify(result));
+      } catch (err: any) {
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'application/json');
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+      }
+      return;
+    }
+
+    if (pathname === '/api/app-update/apply' && req.method === 'POST') {
+      try {
+        const result = await getAppUpdateService().applyAppUpdate({ isElectron: false });
+        res.setHeader('Content-Type', 'application/json');
+        res.writeHead(200);
+        res.end(JSON.stringify(result));
+      } catch (err: any) {
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'application/json');
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+      }
+      return;
+    }
+
+    next();
+  });
+}
+
 export function openaiAuthPlugin(): Plugin {
   return {
     name: 'openai-auth-plugin',
     configurePreviewServer(server) {
       attachComfyMiddleware(server.middlewares);
+      attachAppUpdateMiddleware(server.middlewares);
     },
     configureServer(server) {
       attachComfyMiddleware(server.middlewares);
+      attachAppUpdateMiddleware(server.middlewares);
       server.middlewares.use(async (req, res, next) => {
         const rawUrl = req.url || '';
         const pathname = rawUrl.split('?')[0].replace(/\/+$/, '') || '/';

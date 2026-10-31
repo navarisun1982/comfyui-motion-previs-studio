@@ -24,6 +24,12 @@ import {
 import { useComfyStore } from '../stores/useComfyStore';
 import { defaultComfyClient } from '../services/comfyClient';
 import {
+  AppUpdateStatus,
+  checkForAppUpdates,
+  applyAppUpdateFromGitHub,
+  subscribeAppUpdateStatus,
+} from '../services/appUpdater';
+import {
   Cpu,
   Cloud,
   RefreshCw,
@@ -42,6 +48,8 @@ import {
   ShieldCheck,
   User,
   Zap,
+  Download,
+  GitBranch,
 } from 'lucide-react';
 
 type Status = { tone: 'ok' | 'err' | 'info'; text: string } | null;
@@ -114,6 +122,84 @@ export const ReasonerSettingsPanel: React.FC<{ onSaved?: () => void; onClose?: (
   const [comfyUrlInput, setComfyUrlInput] = useState<string>(comfyServerUrl || 'http://127.0.0.1:8188');
   const [comfyBusy, setComfyBusy] = useState<boolean>(false);
   const [comfyMessage, setComfyMessage] = useState<Status>(null);
+
+  // GitHub App Update State
+  const [updateStatus, setUpdateStatus] = useState<AppUpdateStatus | null>(null);
+  const [updateBusy, setUpdateBusy] = useState<'check' | 'apply' | null>(null);
+  const [updateMessage, setUpdateMessage] = useState<Status>(null);
+  const [updateStepsLog, setUpdateStepsLog] = useState<string[]>([]);
+
+  useEffect(() => {
+    const unsub = subscribeAppUpdateStatus((st) => {
+      setUpdateStatus(st);
+    });
+    checkForAppUpdates(true).catch(() => {});
+    return () => {
+      unsub();
+    };
+  }, []);
+
+  const handleCheckForUpdates = async () => {
+    setUpdateBusy('check');
+    setUpdateMessage({ tone: 'info', text: 'Checking GitHub (origin/master) for new updates...' });
+    try {
+      const st = await checkForAppUpdates(true);
+      if (!st.ok) {
+        setUpdateMessage({ tone: 'err', text: st.error || 'Failed to check for updates.' });
+      } else if (st.offlineWarning) {
+        setUpdateMessage({ tone: 'info', text: st.offlineWarning });
+      } else if (st.updateAvailable) {
+        setUpdateMessage({
+          tone: 'ok',
+          text: `${st.behindCount} new update${st.behindCount === 1 ? '' : 's'} available on GitHub (${st.localSha} → ${st.remoteSha}). Click "Install Update & Reload" below.`,
+        });
+      } else {
+        setUpdateMessage({
+          tone: 'ok',
+          text: `You are running the latest version (commit ${st.localSha}).`,
+        });
+      }
+    } catch (err: any) {
+      setUpdateMessage({ tone: 'err', text: err?.message || 'Update check failed.' });
+    } finally {
+      setUpdateBusy(null);
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    setUpdateBusy('apply');
+    setUpdateStepsLog(['Connecting to GitHub and preparing safe update...']);
+    setUpdateMessage({
+      tone: 'info',
+      text: 'Downloading update from GitHub (auto-backing up local changes if needed)...',
+    });
+    try {
+      const res = await applyAppUpdateFromGitHub();
+      if (res.stepsLog && res.stepsLog.length > 0) {
+        setUpdateStepsLog(res.stepsLog);
+      }
+      if (res.alreadyUpToDate) {
+        setUpdateMessage({
+          tone: 'ok',
+          text: `Already up to date at commit ${res.newSha}.`,
+        });
+      } else {
+        setUpdateMessage({
+          tone: 'ok',
+          text: `Updated ${res.updatedCommitsCount} commit(s) (${res.previousSha} → ${res.newSha})${
+            res.stashedChanges ? ' • Local file tweaks safely backed up in git stash' : ''
+          }${res.ranNpmInstall ? ' • Dependencies updated' : ''}. Reloading studio...`,
+        });
+        setTimeout(() => {
+          window.location.reload();
+        }, 1600);
+      }
+    } catch (err: any) {
+      setUpdateMessage({ tone: 'err', text: err?.message || 'Failed to apply GitHub update.' });
+    } finally {
+      setUpdateBusy(null);
+    }
+  };
 
   const testAndConnectComfy = async (targetUrl?: string) => {
     const cleanUrl = (targetUrl ?? comfyUrlInput).trim().replace(/\/+$/, '') || 'http://127.0.0.1:8188';
@@ -322,11 +408,122 @@ export const ReasonerSettingsPanel: React.FC<{ onSaved?: () => void; onClose?: (
       }}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-slate-200 tracking-wide">Studio Settings · ComfyUI Bridge &amp; AI Reasoner</span>
+        <span className="text-xs font-bold text-slate-200 tracking-wide">Studio Settings · App Updates, ComfyUI Bridge &amp; AI Reasoner</span>
         {onClose && (
           <button type="button" onClick={onClose} className="text-[11px] text-slate-400 hover:text-white" id="reasoner-settings-close">
             Close
           </button>
+        )}
+      </div>
+
+      {/* GitHub One-Click App Updater & Version Card */}
+      <div className="rounded-xl border border-emerald-500/35 bg-gradient-to-br from-emerald-950/35 via-slate-900/60 to-black/60 p-3.5 space-y-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <div className="h-6 w-6 rounded-md bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300">
+              <GitBranch className="h-3.5 w-3.5" />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-white tracking-wide">GitHub App Updater (One-Click Sync)</span>
+              <div className="text-[10px] font-mono text-slate-400">
+                {updateStatus?.localCommitSummary
+                  ? `Installed: ${updateStatus.localCommitSummary}`
+                  : 'Checking local repository version...'}
+              </div>
+            </div>
+          </div>
+
+          <span
+            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
+              updateStatus?.updateAvailable
+                ? 'bg-amber-500/20 text-amber-200 border-amber-400/50 animate-pulse'
+                : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+            }`}
+          >
+            {updateStatus?.updateAvailable
+              ? `${updateStatus.behindCount} UPDATE${updateStatus.behindCount === 1 ? '' : 'S'} AVAILABLE (${updateStatus.remoteSha})`
+              : `UP TO DATE (${updateStatus?.localSha || 'master'})`}
+          </span>
+        </div>
+
+        {/* Incoming Commits Changelog when updates are available */}
+        {updateStatus?.updateAvailable && updateStatus.incomingCommits.length > 0 && (
+          <div className="rounded-lg border border-amber-500/30 bg-black/50 p-2.5 space-y-1 max-h-32 overflow-y-auto">
+            <div className="text-[10px] font-bold text-amber-300 uppercase tracking-wider">
+              What&apos;s New on GitHub ({updateStatus.incomingCommits.length}):
+            </div>
+            {updateStatus.incomingCommits.map((c) => (
+              <div key={c.sha} className="flex items-center justify-between gap-2 text-[10.5px] font-mono text-slate-200">
+                <span className="truncate">
+                  <span className="text-emerald-400 font-bold">{c.sha}</span> · {c.message}
+                </span>
+                <span className="text-[9.5px] text-slate-400 shrink-0">{c.date}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[10px] text-slate-400">
+            Auto-stashes any local file tweaks so updates never fail with merge conflicts. Your saved scenes &amp; API keys stay untouched.
+          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              id="app-update-check-btn"
+              onClick={handleCheckForUpdates}
+              disabled={updateBusy !== null}
+              className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${updateBusy === 'check' ? 'animate-spin text-emerald-300' : 'text-emerald-400'}`} />
+              <span>Check for Updates</span>
+            </button>
+
+            <button
+              type="button"
+              id="app-update-install-btn"
+              onClick={handleInstallUpdate}
+              disabled={updateBusy !== null}
+              className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold text-white shadow-md disabled:opacity-50 cursor-pointer ${
+                updateStatus?.updateAvailable
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 shadow-emerald-500/25'
+                  : 'bg-emerald-700/60 hover:bg-emerald-600/70 border border-emerald-400/30'
+              }`}
+            >
+              {updateBusy === 'apply' ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+              <span>
+                {updateStatus?.updateAvailable
+                  ? `Install Update (${updateStatus.behindCount}) & Reload`
+                  : 'Sync / Re-Verify Latest'}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {updateStepsLog.length > 0 && (
+          <div className="rounded-lg bg-black/50 border border-white/10 px-2.5 py-1.5 font-mono text-[10px] text-slate-300 space-y-0.5">
+            {updateStepsLog.map((step, idx) => (
+              <div key={idx}>• {step}</div>
+            ))}
+          </div>
+        )}
+
+        {updateMessage && (
+          <div
+            className={`rounded-lg border px-2.5 py-1.5 text-[10.5px] font-mono ${
+              updateMessage.tone === 'ok'
+                ? 'border-emerald-500/40 bg-emerald-950/50 text-emerald-200'
+                : updateMessage.tone === 'err'
+                ? 'border-rose-500/40 bg-rose-950/60 text-rose-200'
+                : 'border-sky-500/30 bg-sky-950/40 text-sky-200'
+            }`}
+          >
+            {updateMessage.text}
+          </div>
         )}
       </div>
 

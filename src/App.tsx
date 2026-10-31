@@ -9,6 +9,11 @@ import { useComfyStore } from './stores/useComfyStore';
 import { defaultComfyClient } from './services/comfyClient';
 import { getReasonerConfig, PROVIDERS } from './services/objectReasoner';
 import {
+  AppUpdateStatus,
+  checkForAppUpdates,
+  subscribeAppUpdateStatus,
+} from './services/appUpdater';
+import {
   Clapperboard,
   GitCompare,
   Sparkles,
@@ -21,6 +26,7 @@ import {
   Redo2,
   HelpCircle,
   Download,
+  RefreshCw,
 } from 'lucide-react';
 import { DebuggerTogglePill } from './components/DebuggerTogglePill';
 
@@ -104,6 +110,8 @@ export default function App() {
   const [showPresetsModal, setShowPresetsModal] = useState<boolean>(false);
   const [showDiffInspector, setShowDiffInspector] = useState<boolean>(false);
   const [showWelcomeModal, setShowWelcomeModal] = useState<boolean>(false);
+  const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateStatus | null>(null);
+  const [checkingUpdateHeader, setCheckingUpdateHeader] = useState<boolean>(false);
   const { toggleOpen: toggleDebugger } = useLogStore();
   const {
     connectionStatus: comfyConnectionStatus,
@@ -111,9 +119,12 @@ export default function App() {
     setSystemStats: setComfySystemStats,
   } = useComfyStore();
 
-  // Auto-probe ComfyUI connection on startup
+  // Auto-probe ComfyUI connection and silently check GitHub for app updates on startup
   useEffect(() => {
     let mounted = true;
+    const unsubUpdate = subscribeAppUpdateStatus((st) => {
+      if (mounted) setAppUpdateStatus(st);
+    });
     (async () => {
       const health = await defaultComfyClient.checkHealth();
       if (!mounted) return;
@@ -124,8 +135,10 @@ export default function App() {
         setComfyConnectionStatus('disconnected');
       }
     })();
+    checkForAppUpdates(true).catch(() => {});
     return () => {
       mounted = false;
+      unsubUpdate();
     };
   }, [setComfyConnectionStatus, setComfySystemStats]);
 
@@ -313,6 +326,52 @@ export default function App() {
 
           {/* In-App Debugger Toggle */}
           <DebuggerTogglePill />
+
+          {/* GitHub One-Click App Update Pill */}
+          <button
+            type="button"
+            id="header-app-update-button"
+            onClick={async () => {
+              if (appUpdateStatus?.updateAvailable) {
+                setShowSettingsModal(true);
+                return;
+              }
+              setCheckingUpdateHeader(true);
+              try {
+                await checkForAppUpdates(true);
+                setShowSettingsModal(true);
+              } finally {
+                setCheckingUpdateHeader(false);
+              }
+            }}
+            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold border transition-all cursor-pointer ${
+              appUpdateStatus?.updateAvailable
+                ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border-emerald-400/70 shadow-[0_0_12px_rgba(16,185,129,0.28)]'
+                : 'bg-[#131C2E] hover:bg-[#1A2436] text-[#D0D9E8] hover:text-white border-[#273247]'
+            }`}
+            title={
+              appUpdateStatus?.updateAvailable
+                ? `${appUpdateStatus.behindCount} new update(s) available on GitHub! Click to view changelog & install.`
+                : `App Up to Date (${appUpdateStatus?.localSha || 'master'}) — Click to check GitHub for updates`
+            }
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${
+                checkingUpdateHeader
+                  ? 'animate-spin text-emerald-300'
+                  : appUpdateStatus?.updateAvailable
+                  ? 'text-emerald-300'
+                  : 'text-cyan-400'
+              }`}
+            />
+            {appUpdateStatus?.updateAvailable ? (
+              <span className="font-bold text-emerald-200">
+                ⬆️ {appUpdateStatus.behindCount} {appUpdateStatus.behindCount === 1 ? 'Update' : 'Updates'}
+              </span>
+            ) : (
+              <span className="hidden xl:inline">Update</span>
+            )}
+          </button>
 
           {/* Studio Settings button (AI Reasoner & Preferences) */}
           <button

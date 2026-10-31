@@ -98,6 +98,47 @@ function startLocalProxyServer() {
     }
 
     const rawUrl = req.url || '/';
+    const pathname = rawUrl.split('?')[0].replace(/\/+$/, '') || '/';
+
+    if (pathname.startsWith('/api/app-update')) {
+      const appUpdateService = require('../src/server/appUpdateService.cjs');
+      if (pathname === '/api/app-update/check' && req.method === 'GET') {
+        const fetchRemote = !rawUrl.includes('fetch=0');
+        appUpdateService
+          .checkAppUpdate({ fetchRemote })
+          .then((result) => {
+            if (!res.headersSent) {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            }
+          })
+          .catch((err) => {
+            if (!res.headersSent) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: err.message }));
+            }
+          });
+        return;
+      }
+      if (pathname === '/api/app-update/apply' && req.method === 'POST') {
+        appUpdateService
+          .applyAppUpdate({ isElectron: true })
+          .then((result) => {
+            if (!res.headersSent) {
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            }
+          })
+          .catch((err) => {
+            if (!res.headersSent) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: err.message }));
+            }
+          });
+        return;
+      }
+    }
+
     let targetHost = '127.0.0.1';
     let targetPort = 8188;
     let forwardPath = rawUrl;
