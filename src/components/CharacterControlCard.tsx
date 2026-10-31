@@ -9,6 +9,7 @@ import {
   getObjectAwareStagePlacements,
   OBJECT_CATEGORY_LABELS,
   getReadyMadeMotionsForCategory,
+  findReadyMadeMotionById,
   HumanoidMotionGroup,
 } from '../engine/kinematics';
 import { interpolateTrajectoryPosition } from '../engine/trajectoryMath';
@@ -196,6 +197,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const visibleClips = isHumanoid
     ? allCategoryClips.filter((c) => c.humanGroup === activeHumanGroup)
     : allCategoryClips;
+  const activeMotionClipObj = actor.motionClip ? findReadyMadeMotionById(actor.motionClip) : undefined;
 
   const renderSubjectAvatar = () => {
     if (kind === 'human' || kind === 'character') {
@@ -421,133 +423,251 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
           </div>
 
           {/* ================= B. MOTION STUDIO ================= */}
-          <div className="inspector-section space-y-2.5">
-            {/* Motion Studio Header + Auto / Move / Spot Segmented Control */}
+          <div className="inspector-section space-y-2">
+            {/* Motion Studio Header + Active Motion Status Badge */}
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={() => onToggleMotionSection?.(actor.id)}
-                className="flex items-center gap-1.5 text-left group"
+                className="flex items-center gap-1.5 text-left group min-w-0"
                 title="Toggle Ready-Made Motions section"
               >
-                <span className="text-emerald-400 text-sm leading-none">🏃</span>
-                <span className="text-[11.5px] font-semibold text-emerald-300 group-hover:text-emerald-200 tracking-tight">
+                {isMotionSectionOpen ? (
+                  <ChevronDown className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                )}
+                <span className="text-emerald-400 text-sm leading-none shrink-0">🏃</span>
+                <span className="text-[11.5px] font-semibold text-emerald-300 group-hover:text-emerald-200 tracking-tight truncate">
                   Ready-Made Motions
                 </span>
               </button>
 
-              {/* Segmented Travel Mode Control: Auto | Move | Spot */}
-              <div
-                className="inline-flex items-center rounded-lg bg-[#090c14] p-0.5 border border-white/[0.08] text-[10.5px]"
-                role="group"
-                aria-label="Motion Floor Travel Mode"
-              >
-                {(
-                  [
-                    { id: 'auto', label: 'Auto', icon: '⚡', tip: 'Auto: Locomotion travels across floor; acting/combat stays on spot' },
-                    { id: 'travel', label: 'Move', icon: '🚶', tip: 'Move: Travel across the stage floor while performing motion' },
-                    { id: 'in-place', label: 'Spot', icon: '📍', tip: 'Spot: Lock to current floor coordinates and perform motion in-place' },
-                  ] as const
-                ).map((mMode) => {
-                  const isActiveMode = travelMode === mMode.id;
-                  return (
-                    <button
-                      key={mMode.id}
-                      type="button"
-                      onClick={() => {
-                        onUpdateTravelMode(actor.id, mMode.id);
-                        onSelectActor(actor.id);
-                        const clipToApply =
-                          actor.motionClip ||
-                          visibleClips[0]?.id ||
-                          allCategoryClips[0]?.id;
-                        if (clipToApply) {
-                          onApplyReadyMadeMotion(actor.id, clipToApply, {
-                            startTimeSec: safeStart,
-                            endTimeSec: safeEnd,
-                            travelMode: mMode.id,
-                            motionCycles: actor.motionCycles ?? 1,
-                          });
-                        }
-                      }}
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-medium transition-all ${
-                        isActiveMode
-                          ? 'bg-emerald-600 text-white shadow-sm'
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                      title={mMode.tip}
-                    >
-                      <span className="text-[10px]">{mMode.icon}</span>
-                      <span>{mMode.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              {/* Live Active Motion Indicator Pill */}
+              {activeMotionClipObj ? (
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-400/50 text-[10px] font-semibold text-emerald-200 truncate max-w-[165px] shadow-sm"
+                  title={`Currently applied motion clip: ${activeMotionClipObj.name}`}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                  <span className="shrink-0">{activeMotionClipObj.icon}</span>
+                  <span className="truncate">Active: {activeMotionClipObj.name}</span>
+                </span>
+              ) : (
+                <span
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-900/80 border border-white/[0.08] text-[9.5px] text-slate-400 truncate"
+                  title="Pick any action clip below to apply a ready-made motion"
+                >
+                  <span>Select an action clip</span>
+                </span>
+              )}
             </div>
 
             {isMotionSectionOpen && (
-              <>
-                {/* Humanoid Category Segmented Tabs: Move / Jump | Fight / Action | Act / Emote */}
+              <div className="pt-0.5">
+                {/* Step 1: Connected Category Folder Tabs (Humanoid) */}
                 {isHumanoid && (
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {(
-                      [
-                        { id: 'move', label: 'Move / Jump', icon: '🏃' },
-                        { id: 'combat', label: 'Fight / Action', icon: '⚔️' },
-                        { id: 'acting', label: 'Act / Emote', icon: '🎭' },
-                      ] as const
-                    ).map((tab) => {
-                      const isTabActive = activeHumanGroup === tab.id;
+                  <div>
+                    <div className="flex items-center justify-between px-1 pb-1 text-[9.5px] font-medium text-slate-400">
+                      <span>1. Category Folder</span>
+                      <span className="text-indigo-300/80 font-mono">2. Pick Action Below</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 px-1">
+                      {(
+                        [
+                          { id: 'move', label: 'Move', fullLabel: 'Move / Jump', icon: '🏃' },
+                          { id: 'combat', label: 'Fight', fullLabel: 'Fight / Action', icon: '⚔️' },
+                          { id: 'acting', label: 'Act', fullLabel: 'Act / Emote', icon: '🎭' },
+                        ] as const
+                      ).map((tab) => {
+                        const isTabActive = activeHumanGroup === tab.id;
+                        const hasActiveClipInTab = activeMotionClipObj?.humanGroup === tab.id;
+                        return (
+                          <button
+                            key={tab.id}
+                            type="button"
+                            onClick={() => onUpdateHumanGroup(actor.id, tab.id)}
+                            title={
+                              hasActiveClipInTab
+                                ? `${tab.fullLabel} folder (contains active clip: ${activeMotionClipObj?.name})`
+                                : `Browse ${tab.fullLabel} action presets`
+                            }
+                            className={`relative flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-t-lg text-[10.5px] font-semibold border-t border-x transition-all ${
+                              isTabActive
+                                ? 'bg-[#111726] border-indigo-400/60 text-white shadow-[0_-2px_10px_rgba(99,102,241,0.15)] z-10 -mb-px pb-2'
+                                : 'bg-[#090d16] border-white/[0.07] text-slate-400 hover:text-slate-200 hover:bg-[#0e1320]'
+                            }`}
+                          >
+                            <span className="text-xs leading-none shrink-0">{tab.icon}</span>
+                            <span className="truncate">{tab.label}</span>
+                            {hasActiveClipInTab && (
+                              <span
+                                className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399] shrink-0"
+                                title={`Active motion (${activeMotionClipObj?.name}) is in this category`}
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Connected Folder Body: Preset Action Grid + Dedicated Floor Path Bar */}
+                <div
+                  className={`rounded-b-xl ${
+                    isHumanoid ? 'rounded-tl-none rounded-tr-none border-indigo-400/45' : 'rounded-xl border-white/[0.1]'
+                  } bg-[#111726] border p-2 space-y-2 shadow-inner overflow-hidden`}
+                >
+                  {/* Folder Sub-Header showing active category & clip count */}
+                  <div className="flex items-center justify-between gap-1 text-[9.5px] text-slate-400 px-0.5">
+                    <span className="font-medium text-indigo-200/90 truncate">
+                      {isHumanoid
+                        ? activeHumanGroup === 'move'
+                          ? '📂 Move & Jump Clips:'
+                          : activeHumanGroup === 'combat'
+                          ? '📂 Fight & Action Clips:'
+                          : '📂 Act & Emote Clips:'
+                        : `📂 ${OBJECT_CATEGORY_LABELS[objCategory]} Clips:`}
+                    </span>
+                    <span className="font-mono text-[9px] text-slate-400 bg-black/30 px-1.5 py-0.5 rounded border border-white/[0.06] shrink-0">
+                      {visibleClips.length} clips
+                    </span>
+                  </div>
+
+                  {/* Step 2: Action Preset Grid (All Ready-Made Motions for Active Category) */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {visibleClips.map((clip) => {
+                      const isActiveClip = actor.motionClip === clip.id;
+                      const clipWillTravel =
+                        travelMode === 'travel'
+                          ? true
+                          : travelMode === 'in-place'
+                          ? false
+                          : clip.travelsByDefault;
                       return (
                         <button
-                          key={tab.id}
+                          key={clip.id}
                           type="button"
-                          onClick={() => onUpdateHumanGroup(actor.id, tab.id)}
-                          className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-[10.5px] font-semibold border transition-all ${
-                            isTabActive
-                              ? 'bg-indigo-600/90 border-indigo-400/60 text-white shadow-sm'
-                              : 'bg-[#131824] border-white/[0.07] text-slate-300 hover:text-white hover:bg-[#192030]'
+                          onClick={() => {
+                            onSelectActor(actor.id);
+                            onApplyReadyMadeMotion(actor.id, clip.id, {
+                              startTimeSec: safeStart,
+                              endTimeSec: safeEnd,
+                              travelMode,
+                              motionCycles: actor.motionCycles ?? 1,
+                            });
+                          }}
+                          className={`flex items-center justify-between gap-1 px-2 py-1.5 rounded-lg text-left text-[10.5px] font-medium border transition-all min-w-0 ${
+                            isActiveClip
+                              ? 'bg-emerald-600/25 border-emerald-400/80 text-white font-semibold shadow-[0_0_12px_rgba(16,185,129,0.2)] ring-1 ring-emerald-400/40'
+                              : 'bg-[#161e31] hover:bg-[#1d2740] border-white/[0.08] hover:border-indigo-400/40 text-slate-200 hover:text-white'
                           }`}
+                          title={`${clip.description} (${safeStart.toFixed(1)}s → ${safeEnd.toFixed(1)}s • ${
+                            clipWillTravel ? 'Travels across floor' : 'Stays in-place on spot'
+                          })`}
                         >
-                          <span className="text-xs leading-none">{tab.icon}</span>
-                          <span className="truncate">{tab.label}</span>
+                          <span className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs leading-none shrink-0">{clip.icon}</span>
+                            <span className="truncate">{clip.name}</span>
+                          </span>
+                          <span
+                            className={`shrink-0 text-[8.5px] font-mono px-1 py-0.2 rounded ${
+                              isActiveClip
+                                ? 'bg-emerald-500/30 text-emerald-200 border border-emerald-300/40'
+                                : clipWillTravel
+                                ? 'bg-cyan-950/60 text-cyan-300/80'
+                                : 'bg-slate-900/70 text-slate-400'
+                            }`}
+                          >
+                            {isActiveClip ? 'ON' : clipWillTravel ? '👣' : '📍'}
+                          </span>
                         </button>
                       );
                     })}
                   </div>
-                )}
 
-                {/* Preset Grid (All Ready-Made Motions for Active Category) */}
-                <div className="grid grid-cols-2 gap-1.5">
-                  {visibleClips.map((clip) => {
-                    const isActiveClip = actor.motionClip === clip.id;
-                    return (
-                      <button
-                        key={clip.id}
-                        type="button"
-                        onClick={() => {
-                          onSelectActor(actor.id);
-                          onApplyReadyMadeMotion(actor.id, clip.id, {
-                            startTimeSec: safeStart,
-                            endTimeSec: safeEnd,
-                            travelMode,
-                            motionCycles: actor.motionCycles ?? 1,
-                          });
-                        }}
-                        className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left text-[11px] font-medium border transition-all ${
-                          isActiveClip
-                            ? 'bg-emerald-600/25 border-emerald-400/70 text-white font-semibold shadow-sm'
-                            : 'bg-[#131824] hover:bg-[#1a2132] border-white/[0.07] hover:border-white/20 text-slate-200 hover:text-white'
-                        }`}
-                        title={`${clip.description} (${safeStart.toFixed(1)}s → ${safeEnd.toFixed(1)}s)`}
+                  {/* Dedicated Floor Path Footer Bar (Label on line 1, 3-way buttons on line 2 so nothing overflows) */}
+                  <div className="pt-1.5 border-t border-white/[0.07] space-y-1">
+                    <div className="flex items-center justify-between text-[9.5px] px-0.5">
+                      <span
+                        className="font-semibold text-slate-300"
+                        title="Controls whether the selected action travels across the stage floor or stays planted on the current spot"
                       >
-                        <span className="text-xs leading-none shrink-0">{clip.icon}</span>
-                        <span className="truncate">{clip.name}</span>
-                      </button>
-                    );
-                  })}
+                        Floor Path Mode:
+                      </span>
+                      <span className="text-[9px] text-slate-400 font-mono">
+                        {travelMode === 'auto'
+                          ? 'Default per clip'
+                          : travelMode === 'travel'
+                          ? 'Forces floor travel'
+                          : 'Locked on spot'}
+                      </span>
+                    </div>
+                    <div
+                      className="grid grid-cols-3 gap-1 rounded-lg bg-[#090c14] p-0.5 border border-white/[0.08] text-[10px]"
+                      role="group"
+                      aria-label="Motion Floor Travel Mode"
+                    >
+                      {(
+                        [
+                          {
+                            id: 'auto',
+                            label: 'Auto',
+                            icon: '⚡',
+                            tip: 'Auto Path: Walk/Run/Jump travels across floor; Fight/Act stays on spot',
+                          },
+                          {
+                            id: 'travel',
+                            label: 'Travel',
+                            icon: '👣',
+                            tip: 'Travel Floor: Move across the stage floor while performing the action',
+                          },
+                          {
+                            id: 'in-place',
+                            label: 'In-Place',
+                            icon: '📍',
+                            tip: 'In-Place (Spot): Lock to current floor coordinates and perform action on the spot',
+                          },
+                        ] as const
+                      ).map((mMode) => {
+                        const isActiveMode = travelMode === mMode.id;
+                        return (
+                          <button
+                            key={mMode.id}
+                            type="button"
+                            onClick={() => {
+                              onUpdateTravelMode(actor.id, mMode.id);
+                              onSelectActor(actor.id);
+                              const clipToApply =
+                                actor.motionClip ||
+                                visibleClips[0]?.id ||
+                                allCategoryClips[0]?.id;
+                              if (clipToApply) {
+                                onApplyReadyMadeMotion(actor.id, clipToApply, {
+                                  startTimeSec: safeStart,
+                                  endTimeSec: safeEnd,
+                                  travelMode: mMode.id,
+                                  motionCycles: actor.motionCycles ?? 1,
+                                });
+                              }
+                            }}
+                            className={`inline-flex items-center justify-center gap-1 px-1.5 py-1 rounded-md font-medium transition-all min-w-0 ${
+                              isActiveMode
+                                ? 'bg-emerald-600 text-white shadow-sm'
+                                : 'text-slate-400 hover:text-slate-200'
+                            }`}
+                            title={mMode.tip}
+                          >
+                            <span className="text-[10px] leading-none shrink-0">{mMode.icon}</span>
+                            <span className="truncate">{mMode.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
-              </>
+              </div>
             )}
           </div>
 
@@ -713,77 +833,83 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
           </div>
 
           {/* ================= D. TIMING & DIRECTION ================= */}
-          <div className="inspector-section space-y-2.5">
-            {/* Row 1: Timing Controls */}
-            <div className="flex items-center justify-between gap-1.5">
-              <button
-                type="button"
-                onClick={() => onToggleTimingSection?.(actor.id)}
-                className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-200 hover:text-white shrink-0"
-                title="Toggle Timing & Direction section"
-              >
-                <Clock className="h-3.5 w-3.5 text-blue-400" />
-                <span>Timing</span>
-              </button>
+          <div className="inspector-section space-y-2">
+            {/* Row 1: Timing Header + Quick Range Buttons (Full / Playhead) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onToggleTimingSection?.(actor.id)}
+                  className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-200 hover:text-white shrink-0"
+                  title="Toggle Timing & Direction section"
+                >
+                  <Clock className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+                  <span>Timing Window</span>
+                </button>
 
-              <div className="flex items-center gap-1 font-mono text-[10.5px]">
-                <input
-                  type="number"
-                  min={0}
-                  max={Math.max(0, shotDur - 0.5)}
-                  step={0.5}
-                  value={safeStart}
-                  aria-label="Start time in seconds"
-                  onChange={(e) => {
-                    const nextStart = Math.max(0, Math.min(shotDur - 0.5, Number(e.target.value) || 0));
-                    onUpdateMotionWindow(actor.id, {
-                      start: nextStart,
-                      end: Math.max(nextStart + 0.5, safeEnd),
-                    });
-                  }}
-                  className="w-11 rounded-md bg-[#131824] border border-white/[0.1] px-1 py-0.5 text-center text-emerald-300 font-bold focus:outline-none focus:border-emerald-400"
-                />
-                <span className="text-slate-500">-</span>
-                <input
-                  type="number"
-                  min={0.5}
-                  max={shotDur}
-                  step={0.5}
-                  value={safeEnd}
-                  aria-label="End time in seconds"
-                  onChange={(e) => {
-                    const nextEnd = Math.max(safeStart + 0.5, Math.min(shotDur, Number(e.target.value) || shotDur));
-                    onUpdateMotionWindow(actor.id, {
-                      start: safeStart,
-                      end: nextEnd,
-                    });
-                  }}
-                  className="w-11 rounded-md bg-[#131824] border border-white/[0.1] px-1 py-0.5 text-center text-cyan-300 font-bold focus:outline-none focus:border-cyan-400"
-                />
-                <span className="text-slate-500 text-[10px]">s</span>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onUpdateMotionWindow(actor.id, { start: 0, end: shotDur })}
+                    className="px-2 py-0.5 rounded-md bg-[#141926] hover:bg-[#1c2334] text-[10px] font-medium text-slate-300 hover:text-white border border-white/[0.08]"
+                    title={`Span full shot duration (0s – ${shotDur}s)`}
+                  >
+                    Full ({shotDur}s)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const playheadStart = Math.min(shotDur - 0.5, Number(currentTime.toFixed(1)));
+                      onUpdateMotionWindow(actor.id, { start: playheadStart, end: shotDur });
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-[10px] font-semibold text-amber-300 border border-amber-500/35"
+                    title="Set start time to current playhead position"
+                  >
+                    <Play className="h-2.5 w-2.5 fill-amber-300 text-amber-300 shrink-0" />
+                    <span>Playhead</span>
+                  </button>
+                </div>
               </div>
 
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => onUpdateMotionWindow(actor.id, { start: 0, end: shotDur })}
-                  className="px-2 py-1 rounded-md bg-[#141926] hover:bg-[#1c2334] text-[10px] font-medium text-slate-300 hover:text-white border border-white/[0.08]"
-                  title={`Span full shot duration (0s – ${shotDur}s)`}
-                >
-                  Full ({shotDur}s)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const playheadStart = Math.min(shotDur - 0.5, Number(currentTime.toFixed(1)));
-                    onUpdateMotionWindow(actor.id, { start: playheadStart, end: shotDur });
-                  }}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500/25 text-[10px] font-semibold text-amber-300 border border-amber-500/35"
-                  title="Set start time to current playhead position"
-                >
-                  <Play className="h-2.5 w-2.5 fill-amber-300 text-amber-300" />
-                  <span>Playhead</span>
-                </button>
+              {/* Row 1B: Start & End Second Inputs on their own clean line */}
+              <div className="flex items-center justify-between gap-2 rounded-lg bg-[#111622] border border-white/[0.06] px-2.5 py-1 font-mono text-[10.5px]">
+                <span className="text-[10px] font-sans font-medium text-slate-400">Range (sec):</span>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={0}
+                    max={Math.max(0, shotDur - 0.5)}
+                    step={0.5}
+                    value={safeStart}
+                    aria-label="Start time in seconds"
+                    onChange={(e) => {
+                      const nextStart = Math.max(0, Math.min(shotDur - 0.5, Number(e.target.value) || 0));
+                      onUpdateMotionWindow(actor.id, {
+                        start: nextStart,
+                        end: Math.max(nextStart + 0.5, safeEnd),
+                      });
+                    }}
+                    className="w-12 rounded-md bg-[#131824] border border-white/[0.1] px-1.5 py-0.5 text-center text-emerald-300 font-bold focus:outline-none focus:border-emerald-400"
+                  />
+                  <span className="text-slate-500">to</span>
+                  <input
+                    type="number"
+                    min={0.5}
+                    max={shotDur}
+                    step={0.5}
+                    value={safeEnd}
+                    aria-label="End time in seconds"
+                    onChange={(e) => {
+                      const nextEnd = Math.max(safeStart + 0.5, Math.min(shotDur, Number(e.target.value) || shotDur));
+                      onUpdateMotionWindow(actor.id, {
+                        start: safeStart,
+                        end: nextEnd,
+                      });
+                    }}
+                    className="w-12 rounded-md bg-[#131824] border border-white/[0.1] px-1.5 py-0.5 text-center text-cyan-300 font-bold focus:outline-none focus:border-cyan-400"
+                  />
+                  <span className="text-slate-500 text-[10px]">s</span>
+                </div>
               </div>
             </div>
 
@@ -942,19 +1068,19 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
             <button
               type="button"
               onClick={() => onToggleFineTune(actor.id)}
-              className="w-full flex items-center justify-between px-3 py-2 bg-[#121724] hover:bg-[#171e2f] text-slate-200 transition-colors"
+              className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-[#121724] hover:bg-[#171e2f] text-slate-200 transition-colors"
               title="Toggle Appearance, Color, Transform & Rigging controls"
             >
-              <span className="flex items-center gap-2 text-[11px] font-semibold">
+              <span className="flex items-center gap-1.5 text-[11px] font-semibold min-w-0">
                 {isFineTuneOpen ? (
-                  <ChevronDown className="h-3.5 w-3.5 text-cyan-400" />
+                  <ChevronDown className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
                 ) : (
-                  <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                  <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
                 )}
-                <SlidersHorizontal className="h-3.5 w-3.5 text-cyan-400" />
-                <span>Appearance, Color &amp; Rig Sliders</span>
+                <SlidersHorizontal className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                <span className="truncate">Appearance &amp; Rig Sliders</span>
               </span>
-              <span className="font-mono text-[10px] text-slate-400">
+              <span className="font-mono text-[10px] text-slate-400 shrink-0">
                 X:{currentX} Z:{currentDepthZ} <span className="text-slate-600">|</span> {(actor.scale ?? 1.0).toFixed(1)}
               </span>
             </button>
