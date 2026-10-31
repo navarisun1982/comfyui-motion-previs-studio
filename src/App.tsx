@@ -530,8 +530,14 @@ export default function App() {
           onOpenWorkspace={(mode) => setWorkspaceMode(mode)}
         />
         {showSettingsModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-            <div className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-[#273247] bg-[#0D1320] p-6 shadow-2xl">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+            onClick={() => setShowSettingsModal(false)}
+          >
+            <div
+              className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-[#273247] bg-[#0D1320] p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
               <Suspense fallback={<div className="text-[#98A5BC] font-mono text-xs p-4">Loading settings...</div>}>
                 <ReasonerSettingsPanel onClose={() => setShowSettingsModal(false)} />
               </Suspense>

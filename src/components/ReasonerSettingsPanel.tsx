@@ -100,7 +100,14 @@ const errMsg = (e: unknown) => (e instanceof ObjectReasonerError ? e.message : (
  * Supports direct OpenAI / ChatGPT browser authentication (no manual API key needed),
  * as well as Ollama, llama.cpp, Gemini, and custom OpenAI-compatible endpoints.
  */
-export const ReasonerSettingsPanel: React.FC<{ onSaved?: () => void; onClose?: () => void }> = ({ onSaved, onClose }) => {
+export type SettingsTabId = 'llm' | 'comfy' | 'resources';
+
+export const ReasonerSettingsPanel: React.FC<{
+  onSaved?: () => void;
+  onClose?: () => void;
+  initialTab?: SettingsTabId;
+}> = ({ onSaved, onClose, initialTab = 'llm' }) => {
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTabId>(initialTab);
   const [draft, setDraft] = useState<ReasonerSettings>(() => getReasonerSettings());
   const [models, setModels] = useState<string[]>([]);
   const [busy, setBusy] = useState<'models' | 'test' | 'login' | null>(null);
@@ -410,254 +417,212 @@ export const ReasonerSettingsPanel: React.FC<{ onSaved?: () => void; onClose?: (
       }}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-slate-200 tracking-wide">Studio Settings · App Updates, ComfyUI Bridge &amp; AI Reasoner</span>
+        <span className="text-xs font-bold text-slate-200 tracking-wide">Studio Settings · AI Reasoner, ComfyUI Workflows &amp; 3D Resources</span>
         {onClose && (
-          <button type="button" onClick={onClose} className="text-[11px] text-slate-400 hover:text-white" id="reasoner-settings-close">
-            Close
-          </button>
-        )}
-      </div>
-
-      {/* GitHub One-Click App Updater & Version Card */}
-      <div className="rounded-xl border border-emerald-500/35 bg-gradient-to-br from-emerald-950/35 via-slate-900/60 to-black/60 p-3.5 space-y-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded-md bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300">
-              <GitBranch className="h-3.5 w-3.5" />
-            </div>
-            <div>
-              <span className="text-xs font-bold text-white tracking-wide">GitHub App Updater (One-Click Sync)</span>
-              <div className="text-[10px] font-mono text-slate-400">
-                {updateStatus?.localCommitSummary
-                  ? `Installed: ${updateStatus.localCommitSummary}`
-                  : 'Checking local repository version...'}
-              </div>
-            </div>
-          </div>
-
-          <span
-            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
-              updateStatus?.updateAvailable
-                ? 'bg-amber-500/20 text-amber-200 border-amber-400/50 animate-pulse'
-                : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-            }`}
-          >
-            {updateStatus?.updateAvailable
-              ? `${updateStatus.behindCount} UPDATE${updateStatus.behindCount === 1 ? '' : 'S'} AVAILABLE (${updateStatus.remoteSha})`
-              : `UP TO DATE (${updateStatus?.localSha || 'master'})`}
-          </span>
-        </div>
-
-        {/* Incoming Commits Changelog when updates are available */}
-        {updateStatus?.updateAvailable && updateStatus.incomingCommits.length > 0 && (
-          <div className="rounded-lg border border-amber-500/30 bg-black/50 p-2.5 space-y-1 max-h-32 overflow-y-auto">
-            <div className="text-[10px] font-bold text-amber-300 uppercase tracking-wider">
-              What&apos;s New on GitHub ({updateStatus.incomingCommits.length}):
-            </div>
-            {updateStatus.incomingCommits.map((c) => (
-              <div key={c.sha} className="flex items-center justify-between gap-2 text-[10.5px] font-mono text-slate-200">
-                <span className="truncate">
-                  <span className="text-emerald-400 font-bold">{c.sha}</span> · {c.message}
-                </span>
-                <span className="text-[9.5px] text-slate-400 shrink-0">{c.date}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-[10px] text-slate-400">
-            Auto-stashes any local file tweaks so updates never fail with merge conflicts. Your saved scenes &amp; API keys stay untouched.
-          </span>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              id="app-update-check-btn"
-              onClick={handleCheckForUpdates}
-              disabled={updateBusy !== null}
-              className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 disabled:opacity-50 cursor-pointer"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${updateBusy === 'check' ? 'animate-spin text-emerald-300' : 'text-emerald-400'}`} />
-              <span>Check for Updates</span>
-            </button>
-
-            <button
-              type="button"
-              id="app-update-install-btn"
-              onClick={handleInstallUpdate}
-              disabled={updateBusy !== null}
-              className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold text-white shadow-md disabled:opacity-50 cursor-pointer ${
-                updateStatus?.updateAvailable
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 shadow-emerald-500/25'
-                  : 'bg-emerald-700/60 hover:bg-emerald-600/70 border border-emerald-400/30'
-              }`}
-            >
-              {updateBusy === 'apply' ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
-              )}
-              <span>
-                {updateStatus?.updateAvailable
-                  ? `Install Update (${updateStatus.behindCount}) & Reload`
-                  : 'Sync / Re-Verify Latest'}
-              </span>
-            </button>
-          </div>
-        </div>
-
-        {updateStepsLog.length > 0 && (
-          <div className="rounded-lg bg-black/50 border border-white/10 px-2.5 py-1.5 font-mono text-[10px] text-slate-300 space-y-0.5">
-            {updateStepsLog.map((step, idx) => (
-              <div key={idx}>• {step}</div>
-            ))}
-          </div>
-        )}
-
-        {updateMessage && (
-          <div
-            className={`rounded-lg border px-2.5 py-1.5 text-[10.5px] font-mono ${
-              updateMessage.tone === 'ok'
-                ? 'border-emerald-500/40 bg-emerald-950/50 text-emerald-200'
-                : updateMessage.tone === 'err'
-                ? 'border-rose-500/40 bg-rose-950/60 text-rose-200'
-                : 'border-sky-500/30 bg-sky-950/40 text-sky-200'
-            }`}
-          >
-            {updateMessage.text}
-          </div>
-        )}
-      </div>
-
-      {/* ComfyUI Server Connection & Live Status Card */}
-      <div className="rounded-xl border border-indigo-500/35 bg-gradient-to-br from-indigo-950/40 via-slate-900/60 to-black/60 p-3.5 space-y-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded-md bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-indigo-300">
-              <Zap className="h-3.5 w-3.5" />
-            </div>
-            <span className="text-xs font-bold text-white tracking-wide">ComfyUI Local Server (MiniMax H3 &amp; LTX-2.5)</span>
-          </div>
-          <span
-            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
-              comfyStatus === 'connected'
-                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                : comfyStatus === 'connecting'
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-            }`}
-          >
-            {comfyStatus === 'connected' && comfyStats
-              ? `ONLINE • ${comfyStats.gpuName} (${comfyStats.vramTotalGb}GB VRAM)`
-              : comfyStatus === 'connecting'
-              ? 'CONNECTING...'
-              : 'OFFLINE'}
-          </span>
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-2">
-          <input
-            id="comfyui-server-url"
-            className={inputCls}
-            value={comfyUrlInput}
-            onChange={(e) => setComfyUrlInput(e.target.value)}
-            placeholder="http://127.0.0.1:8188"
-          />
           <button
             type="button"
-            id="comfyui-test-connect"
-            onClick={() => testAndConnectComfy()}
-            disabled={comfyBusy}
-            className="shrink-0 flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-indigo-500/20 disabled:opacity-50 cursor-pointer"
+            onClick={onClose}
+            className="rounded-lg border border-white/15 bg-white/5 hover:bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
+            id="reasoner-settings-close"
           >
-            {comfyBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
-            <span>Test &amp; Connect ComfyUI</span>
+            ✕ Close
           </button>
-        </div>
-
-        {comfyStatus === 'connected' && (
-          <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
-            <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
-              ✓ MiniMax H3 Ref2VA Ready
-            </span>
-            <span
-              className={`px-2 py-0.5 rounded border ${
-                comfyDetected.ltx
-                  ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300'
-                  : 'bg-white/5 border-white/10 text-slate-400'
-              }`}
-            >
-              {comfyDetected.ltx ? '✓ LTX-2.5 Nodes Detected' : 'LTX-2.5 Nodes'}
-            </span>
-            {comfyStats && (
-              <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300">
-                ComfyUI v{comfyStats.comfyVersion} • RAM {comfyStats.ramFreeGb}/{comfyStats.ramTotalGb}GB free
-              </span>
-            )}
-          </div>
         )}
+      </div>
 
-        {comfyMessage && (
-          <div
-            className={`rounded-lg border px-2.5 py-1.5 text-[10px] font-mono ${
-              comfyMessage.tone === 'ok'
-                ? 'border-emerald-500/40 bg-emerald-950/50 text-emerald-200'
-                : comfyMessage.tone === 'err'
-                ? 'border-rose-500/40 bg-rose-950/60 text-rose-200'
-                : 'border-sky-500/30 bg-sky-950/40 text-sky-200'
+      {/* 3-Tab Navigation Bar: LLM | ComfyUI & Workflows | 3D Resources */}
+      <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-[#080b12] p-1 border border-white/10 font-mono text-xs">
+        <button
+          type="button"
+          id="settings-tab-llm"
+          onClick={() => setActiveSettingsTab('llm')}
+          className={`flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition-all cursor-pointer truncate ${
+            activeSettingsTab === 'llm'
+              ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-black font-bold shadow-md shadow-amber-500/20'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <Cpu className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">LLM &amp; Reasoner</span>
+          {updateStatus?.updateAvailable && (
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse shrink-0" title="App Update Available" />
+          )}
+        </button>
+
+        <button
+          type="button"
+          id="settings-tab-comfy"
+          onClick={() => setActiveSettingsTab('comfy')}
+          className={`flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition-all cursor-pointer truncate ${
+            activeSettingsTab === 'comfy'
+              ? 'bg-gradient-to-r from-indigo-500 to-violet-600 text-white font-bold shadow-md shadow-indigo-500/25'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <Zap className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">ComfyUI &amp; Workflows</span>
+          <span
+            className={`h-2 w-2 rounded-full shrink-0 ${
+              comfyStatus === 'connected' ? 'bg-emerald-400' : 'bg-rose-400'
             }`}
-          >
-            {comfyMessage.text}
-          </div>
-        )}
+          />
+        </button>
 
-        {/* Custom Workflow URL / .JSON Auto-Detector inside Settings */}
-        <CustomWorkflowConfigBar compact />
+        <button
+          type="button"
+          id="settings-tab-resources"
+          onClick={() => setActiveSettingsTab('resources')}
+          className={`flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition-all cursor-pointer truncate ${
+            activeSettingsTab === 'resources'
+              ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold shadow-md shadow-cyan-500/25'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <Sparkles className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">3D .GLB Resources</span>
+        </button>
       </div>
 
-      {/* 3D & Animated .GLB Resource Libraries Directory */}
-      <GlbResourcesDirectory compact />
-
-      <div className="pt-1 border-t border-white/10 flex items-center justify-between">
-        <span className="text-xs font-bold text-slate-200 tracking-wide">Object Reasoner &amp; Prompt Director · LLM Provider</span>
-      </div>
-
-      {/* Provider selector */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {ORDER.map((id) => {
-          const pi = PROVIDERS[id];
-          const on = id === active;
-          return (
-            <button
-              key={id}
-              type="button"
-              id={`reasoner-provider-${id}`}
-              onClick={() => selectProvider(id)}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-left transition-all ${
-                on
-                  ? 'border-amber-400 bg-amber-500/15 text-amber-200 shadow-md shadow-amber-500/10'
-                  : 'border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/25 hover:bg-white/[0.06]'
-              }`}
-            >
-              {pi.local ? <Cpu className="h-4 w-4 shrink-0" /> : <Cloud className="h-4 w-4 shrink-0" />}
-              <span className="flex flex-col leading-tight">
-                <span className="text-xs font-semibold">{id === 'openai' ? 'OpenAI / ChatGPT' : pi.label}</span>
-                <span className="text-[10px] text-slate-500">
-                  {id === 'openai'
-                    ? openAiAuth?.authenticated
-                      ? '✓ Browser Signed In'
-                      : 'Browser Sign-in'
-                    : pi.local
-                      ? 'local · open weights'
-                      : pi.needsKey
-                        ? 'API key'
-                        : 'local or hosted'}
-                </span>
+      {/* TAB 2: ComfyUI Server Connection & Custom Workflows */}
+      {activeSettingsTab === 'comfy' && (
+        <div className="space-y-3 animate-in fade-in duration-150">
+          <div className="rounded-xl border border-indigo-500/35 bg-gradient-to-br from-indigo-950/40 via-slate-900/60 to-black/60 p-3.5 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="h-6 w-6 rounded-md bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-indigo-300">
+                  <Zap className="h-3.5 w-3.5" />
+                </div>
+                <span className="text-xs font-bold text-white tracking-wide">ComfyUI Local Server (MiniMax H3 &amp; LTX-2.5)</span>
+              </div>
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
+                  comfyStatus === 'connected'
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : comfyStatus === 'connecting'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                }`}
+              >
+                {comfyStatus === 'connected' && comfyStats
+                  ? `ONLINE • ${comfyStats.gpuName} (${comfyStats.vramTotalGb}GB VRAM)`
+                  : comfyStatus === 'connecting'
+                  ? 'CONNECTING...'
+                  : 'OFFLINE'}
               </span>
-            </button>
-          );
-        })}
-      </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                id="comfyui-server-url"
+                className={inputCls}
+                value={comfyUrlInput}
+                onChange={(e) => setComfyUrlInput(e.target.value)}
+                placeholder="http://127.0.0.1:8188"
+              />
+              <button
+                type="button"
+                id="comfyui-test-connect"
+                onClick={() => testAndConnectComfy()}
+                disabled={comfyBusy}
+                className="shrink-0 flex items-center justify-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-400 hover:to-violet-500 px-3.5 py-2 text-xs font-bold text-white shadow-md shadow-indigo-500/20 disabled:opacity-50 cursor-pointer"
+              >
+                {comfyBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+                <span>Test &amp; Connect ComfyUI</span>
+              </button>
+            </div>
+
+            {comfyStatus === 'connected' && (
+              <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+                <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
+                  ✓ MiniMax H3 Ref2VA Ready
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded border ${
+                    comfyDetected.ltx
+                      ? 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300'
+                      : 'bg-white/5 border-white/10 text-slate-400'
+                  }`}
+                >
+                  {comfyDetected.ltx ? '✓ LTX-2.5 Nodes Detected' : 'LTX-2.5 Nodes'}
+                </span>
+                {comfyStats && (
+                  <span className="px-2 py-0.5 rounded bg-white/5 border border-white/10 text-slate-300">
+                    ComfyUI v{comfyStats.comfyVersion} • RAM {comfyStats.ramFreeGb}/{comfyStats.ramTotalGb}GB free
+                  </span>
+                )}
+              </div>
+            )}
+
+            {comfyMessage && (
+              <div
+                className={`rounded-lg border px-2.5 py-1.5 text-[10px] font-mono ${
+                  comfyMessage.tone === 'ok'
+                    ? 'border-emerald-500/40 bg-emerald-950/50 text-emerald-200'
+                    : comfyMessage.tone === 'err'
+                    ? 'border-rose-500/40 bg-rose-950/60 text-rose-200'
+                    : 'border-sky-500/30 bg-sky-950/40 text-sky-200'
+                }`}
+              >
+                {comfyMessage.text}
+              </div>
+            )}
+
+            {/* Custom Workflow URL / .JSON Auto-Detector inside ComfyUI Tab */}
+            <CustomWorkflowConfigBar />
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: 3D & Animated .GLB Resource Libraries Directory */}
+      {activeSettingsTab === 'resources' && (
+        <div className="space-y-3 animate-in fade-in duration-150">
+          <GlbResourcesDirectory defaultExpanded />
+        </div>
+      )}
+
+      {/* TAB 1: LLM & Reasoner + GitHub App Updater */}
+      {activeSettingsTab === 'llm' && (
+        <div className="space-y-3 animate-in fade-in duration-150">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-200 tracking-wide">Object Reasoner &amp; Prompt Director · LLM Provider</span>
+          </div>
+
+          {/* Provider selector (properly bounded & truncated so buttons never overflow) */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {ORDER.map((id) => {
+              const pi = PROVIDERS[id];
+              const on = id === active;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  id={`reasoner-provider-${id}`}
+                  onClick={() => selectProvider(id)}
+                  className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition-all min-w-0 overflow-hidden cursor-pointer ${
+                    on
+                      ? 'border-amber-400 bg-amber-500/15 text-amber-200 shadow-md shadow-amber-500/10'
+                      : 'border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/25 hover:bg-white/[0.06]'
+                  }`}
+                >
+                  {pi.local ? <Cpu className="h-4 w-4 shrink-0" /> : <Cloud className="h-4 w-4 shrink-0" />}
+                  <span className="flex flex-col leading-tight min-w-0 flex-1">
+                    <span className="text-xs font-semibold truncate">{id === 'openai' ? 'OpenAI' : pi.label}</span>
+                    <span className="text-[10px] text-slate-400 truncate">
+                      {id === 'openai'
+                        ? openAiAuth?.authenticated
+                          ? '✓ Signed In'
+                          : 'Browser / Key'
+                        : pi.local
+                          ? 'Local · Open'
+                          : pi.needsKey
+                            ? 'API Key'
+                            : 'Local / Cloud'}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
       <p className="text-[11px] text-slate-400">{info.hint}</p>
 
@@ -1000,35 +965,147 @@ export const ReasonerSettingsPanel: React.FC<{ onSaved?: () => void; onClose?: (
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <button
-          type="button"
-          id="reasoner-check-connection"
-          onClick={refreshModels}
-          disabled={busy !== null}
-          className="flex items-center gap-1.5 rounded-lg border border-white/15 px-3 py-1.5 text-xs text-slate-200 hover:border-white/30 disabled:opacity-50"
-        >
-          <PlugZap className="h-3.5 w-3.5" /> Check connection
-        </button>
-        <button
-          type="button"
-          id="reasoner-test-generation"
-          onClick={testGeneration}
-          disabled={busy !== null}
-          className="flex items-center gap-1.5 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-3 py-1.5 text-xs text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50"
-        >
-          {busy === 'test' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5" />} Test reasoning
-        </button>
-        <button
-          type="button"
-          id="reasoner-save"
-          onClick={save}
-          disabled={busy !== null}
-          className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-1.5 text-xs font-bold text-black hover:from-amber-400 hover:to-amber-500 disabled:opacity-50"
-        >
-          <Save className="h-3.5 w-3.5" /> Save
-        </button>
-      </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              id="reasoner-check-connection"
+              onClick={refreshModels}
+              disabled={busy !== null}
+              className="flex items-center gap-1.5 rounded-lg border border-white/15 px-3 py-1.5 text-xs text-slate-200 hover:border-white/30 disabled:opacity-50"
+            >
+              <PlugZap className="h-3.5 w-3.5" /> Check connection
+            </button>
+            <button
+              type="button"
+              id="reasoner-test-generation"
+              onClick={testGeneration}
+              disabled={busy !== null}
+              className="flex items-center gap-1.5 rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-3 py-1.5 text-xs text-indigo-200 hover:bg-indigo-500/20 disabled:opacity-50"
+            >
+              {busy === 'test' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5" />} Test reasoning
+            </button>
+            <button
+              type="button"
+              id="reasoner-save"
+              onClick={save}
+              disabled={busy !== null}
+              className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-1.5 text-xs font-bold text-black hover:from-amber-400 hover:to-amber-500 disabled:opacity-50"
+            >
+              <Save className="h-3.5 w-3.5" /> Save
+            </button>
+          </div>
+
+          {/* GitHub One-Click App Updater & Version Card */}
+          <div className="rounded-xl border border-emerald-500/35 bg-gradient-to-br from-emerald-950/35 via-slate-900/60 to-black/60 p-3.5 space-y-2.5 mt-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className="h-6 w-6 rounded-md bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300">
+                  <GitBranch className="h-3.5 w-3.5" />
+                </div>
+                <div>
+                  <span className="text-xs font-bold text-white tracking-wide">GitHub App Updater (One-Click Sync)</span>
+                  <div className="text-[10px] font-mono text-slate-400">
+                    {updateStatus?.localCommitSummary
+                      ? `Installed: ${updateStatus.localCommitSummary}`
+                      : 'Checking local repository version...'}
+                  </div>
+                </div>
+              </div>
+
+              <span
+                className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
+                  updateStatus?.updateAvailable
+                    ? 'bg-amber-500/20 text-amber-200 border-amber-400/50 animate-pulse'
+                    : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                }`}
+              >
+                {updateStatus?.updateAvailable
+                  ? `${updateStatus.behindCount} UPDATE${updateStatus.behindCount === 1 ? '' : 'S'} AVAILABLE (${updateStatus.remoteSha})`
+                  : `UP TO DATE (${updateStatus?.localSha || 'master'})`}
+              </span>
+            </div>
+
+            {updateStatus?.updateAvailable && updateStatus.incomingCommits.length > 0 && (
+              <div className="rounded-lg border border-amber-500/30 bg-black/50 p-2.5 space-y-1 max-h-32 overflow-y-auto">
+                <div className="text-[10px] font-bold text-amber-300 uppercase tracking-wider">
+                  What&apos;s New on GitHub ({updateStatus.incomingCommits.length}):
+                </div>
+                {updateStatus.incomingCommits.map((c) => (
+                  <div key={c.sha} className="flex items-center justify-between gap-2 text-[10.5px] font-mono text-slate-200">
+                    <span className="truncate">
+                      <span className="text-emerald-400 font-bold">{c.sha}</span> · {c.message}
+                    </span>
+                    <span className="text-[9.5px] text-slate-400 shrink-0">{c.date}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[10px] text-slate-400">
+                Auto-stashes any local file tweaks so updates never fail with merge conflicts. Your saved scenes &amp; API keys stay untouched.
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  id="app-update-check-btn"
+                  onClick={handleCheckForUpdates}
+                  disabled={updateBusy !== null}
+                  className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 px-3 py-1.5 text-xs font-semibold text-slate-200 disabled:opacity-50 cursor-pointer"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${updateBusy === 'check' ? 'animate-spin text-emerald-300' : 'text-emerald-400'}`} />
+                  <span>Check for Updates</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="app-update-install-btn"
+                  onClick={handleInstallUpdate}
+                  disabled={updateBusy !== null}
+                  className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-bold text-white shadow-md disabled:opacity-50 cursor-pointer ${
+                    updateStatus?.updateAvailable
+                      ? 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 shadow-emerald-500/25'
+                      : 'bg-emerald-700/60 hover:bg-emerald-600/70 border border-emerald-400/30'
+                  }`}
+                >
+                  {updateBusy === 'apply' ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                  <span>
+                    {updateStatus?.updateAvailable
+                      ? `Install Update (${updateStatus.behindCount}) & Reload`
+                      : 'Sync / Re-Verify Latest'}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {updateStepsLog.length > 0 && (
+              <div className="rounded-lg bg-black/50 border border-white/10 px-2.5 py-1.5 font-mono text-[10px] text-slate-300 space-y-0.5">
+                {updateStepsLog.map((step, idx) => (
+                  <div key={idx}>• {step}</div>
+                ))}
+              </div>
+            )}
+
+            {updateMessage && (
+              <div
+                className={`rounded-lg border px-2.5 py-1.5 text-[10.5px] font-mono ${
+                  updateMessage.tone === 'ok'
+                    ? 'border-emerald-500/40 bg-emerald-950/50 text-emerald-200'
+                    : updateMessage.tone === 'err'
+                    ? 'border-rose-500/40 bg-rose-950/60 text-rose-200'
+                    : 'border-sky-500/30 bg-sky-950/40 text-sky-200'
+                }`}
+              >
+                {updateMessage.text}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
