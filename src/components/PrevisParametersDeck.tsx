@@ -158,6 +158,13 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
   const [socketTargetActorId, setSocketTargetActorId] = useState<string>('');
   const [socketTargetBone, setSocketTargetBone] = useState<HumanoidBone>('RightHand');
 
+  // Zero-Scroll Sub-Tabs & Pinned Cast Switcher State
+  const [cameraSubTab, setCameraSubTab] = useState<'optics' | 'trajectory' | 'all'>('optics');
+  const [showAddSubjectDrawer, setShowAddSubjectDrawer] = useState<boolean>(false);
+  const [castViewMode, setCastViewMode] = useState<'focus' | 'all'>('focus');
+  const [envSubTab, setEnvSubTab] = useState<'presets' | 'weather' | 'all'>('presets');
+  const [lightSubTab, setLightSubTab] = useState<'lights' | 'script' | 'all'>('lights');
+
   const handleSynthesizeEnv = async () => {
     if (!envPromptInput.trim() || isSynthesizingEnv) return;
     const promptText = envPromptInput.trim();
@@ -362,7 +369,32 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
       <div className="flex-1 overflow-y-auto">
         {/* ================= TAB 1: CAMERA & LENS ================= */}
         {activeTab === 'camera' && (
-          <div className="p-3.5 space-y-4">
+          <div className="p-3.5 space-y-3">
+            {/* Zero-Scroll Camera Sub-Tabs */}
+            <div className="grid grid-cols-3 gap-1 rounded-xl bg-[#080b12] p-1 border border-white/[0.08]">
+              {(
+                [
+                  { id: 'optics' as const, label: '🎥 Lens & Framing' },
+                  { id: 'trajectory' as const, label: '🛤️ 3D Path & Rig' },
+                  { id: 'all' as const, label: '⊞ All' },
+                ]
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setCameraSubTab(t.id)}
+                  className={`py-1.5 px-2 rounded-lg text-[10.5px] font-semibold transition-all truncate ${
+                    cameraSubTab === t.id
+                      ? 'bg-gradient-to-b from-indigo-600 to-indigo-700 text-white shadow-sm border border-indigo-400/50'
+                      : 'text-slate-400 hover:text-white hover:bg-white/[0.05] border border-transparent'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className={cameraSubTab === 'optics' || cameraSubTab === 'all' ? 'space-y-3.5' : 'hidden'}>
             {/* Focal Length & Lens with FOV Degrees & Optical Impact */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
@@ -463,7 +495,9 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 <strong className="text-amber-400">Angle Psychology:</strong> {activeAngleInfo}
               </div>
             </div>
+            </div>
 
+            <div className={cameraSubTab === 'trajectory' || cameraSubTab === 'all' ? 'space-y-3.5' : 'hidden'}>
             {/* All 17 Categorized Camera Movements (Restored from CameraDeck!) */}
             <div className="space-y-1">
               <span className="text-slate-400 font-mono text-[10px]">Camera Movement Archetype (17 Rigs)</span>
@@ -672,12 +706,111 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 </button>
               </div>
             </div>
+            </div>
           </div>
         )}
 
         {/* ================= TAB 2: CAST & STAGE (ZERO DUPLICATES + SCENE CAST POOL) ================= */}
         {activeTab === 'staging' && (
-          <div className="p-3.5 space-y-4">
+          <div className="p-3 space-y-2.5">
+            {/* Pinned Cast Switcher Strip + Collapsible Add Subject / Pool Drawer Toggle */}
+            <div className="rounded-xl bg-[#090d16] border border-[#273247] p-2 space-y-2">
+              <div className="flex items-center justify-between gap-1.5">
+                <span className="text-[10.5px] font-bold text-slate-200 flex items-center gap-1.5 truncate">
+                  <Users className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                  <span>Stage Cast ({shot.actors.length})</span>
+                </span>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  {shot.actors.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setCastViewMode((m) => (m === 'focus' ? 'all' : 'focus'))}
+                      className={`px-2 py-0.5 rounded-md text-[9.5px] font-mono font-semibold border transition-all ${
+                        castViewMode === 'focus'
+                          ? 'bg-indigo-600/25 border-indigo-400/50 text-indigo-200'
+                          : 'bg-[#131C2E] border-white/10 text-slate-300 hover:text-white'
+                      }`}
+                      title="Toggle between showing only the selected character card (Zero Scroll) vs stacking all cards"
+                    >
+                      {castViewMode === 'focus' ? '🎯 1 Card' : `⊞ All (${shot.actors.length})`}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAddSubjectDrawer((v) => !v)}
+                    className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold border transition-all ${
+                      showAddSubjectDrawer || shot.actors.length === 0
+                        ? 'bg-amber-500 text-black border-amber-300 shadow-sm'
+                        : 'bg-emerald-600/25 hover:bg-emerald-600/40 text-emerald-200 border-emerald-400/50'
+                    }`}
+                    title="Expand or collapse Add Subject, 3D Asset Library & Scene Cast Pool drawer"
+                  >
+                    {showAddSubjectDrawer || shot.actors.length === 0
+                      ? '▾ Hide Add / Pool'
+                      : `+ Add / Pool (${sceneCastPool.length})`}
+                  </button>
+                </div>
+              </div>
+
+              {/* Horizontal Avatar Chip Strip for Instant 1-Click Character Switching */}
+              {shot.actors.length > 0 && (
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+                  {shot.actors.map((act, idx) => {
+                    const activeActorId =
+                      selectedActorId && shot.actors.some((a) => a.id === selectedActorId)
+                        ? selectedActorId
+                        : shot.actors[0]?.id;
+                    const isChipActive = act.id === activeActorId;
+                    const k = act.kind || 'human';
+                    const chipIcon =
+                      k === 'human' || k === 'character'
+                        ? '👤'
+                        : k === 'car'
+                        ? '🚗'
+                        : k === 'tree'
+                        ? '🌲'
+                        : k === 'table'
+                        ? '🪑'
+                        : k === 'chair'
+                        ? '💺'
+                        : k === 'cutout'
+                        ? '🖼️'
+                        : '📦';
+                    return (
+                      <button
+                        key={act.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedActorId(act.id);
+                          setCollapsedActors((prev) => ({ ...prev, [act.id]: false }));
+                        }}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10.5px] font-semibold border transition-all shrink-0 max-w-[145px] ${
+                          isChipActive
+                            ? 'bg-gradient-to-b from-blue-600/35 to-indigo-700/35 border-blue-400 text-white shadow-[0_0_10px_rgba(59,130,246,0.25)]'
+                            : 'bg-[#131b2e] border-white/[0.08] text-slate-300 hover:text-white hover:bg-[#19233b]'
+                        }`}
+                        title={`Switch inspector focus to ${act.name}`}
+                      >
+                        <span
+                          className="h-2 w-2 rounded-full shrink-0"
+                          style={{
+                            backgroundColor:
+                              act.color || OBJECT_TARGET_PALETTE[idx % OBJECT_TARGET_PALETTE.length].hex,
+                          }}
+                        />
+                        <span className="text-[10px] leading-none shrink-0">{chipIcon}</span>
+                        <span className="truncate">{act.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Collapsible Add Subject + Asset Library + Scene Cast Pool Drawer */}
+            <div className={showAddSubjectDrawer || shot.actors.length === 0 ? 'space-y-3' : 'hidden'}>
             {/* 1. Unified Add to Stage Card — Clean, Uncluttered, Tactile */}
             <div className="ui-card space-y-3">
               <div className="flex items-center justify-between">
@@ -907,6 +1040,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 </div>
               )}
             </div>
+            </div>
 
             {/* 3. Placed 3D Objects List */}
             <div className="space-y-3 pt-1 border-t border-white/10">
@@ -976,10 +1110,18 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                     const isTimingSectionOpen = timingSectionOpenByActor[actor.id] !== false;
                     const activeHumanGroup: HumanoidMotionGroup = humanMotionGroupByActor[actor.id] || 'move';
                     const travelMode = motionTravelModeByActor[actor.id] || 'auto';
+                    const effectiveFocusedActorId =
+                      selectedActorId && shot.actors.some((a) => a.id === selectedActorId)
+                        ? selectedActorId
+                        : shot.actors[0]?.id;
+                    const isHiddenInFocusMode =
+                      castViewMode === 'focus' &&
+                      shot.actors.length > 1 &&
+                      actor.id !== effectiveFocusedActorId;
 
                     return (
+                      <div key={actor.id} className={isHiddenInFocusMode ? 'hidden' : ''}>
                       <CharacterControlCard
-                        key={actor.id}
                         actor={actor}
                         allActors={shot.actors}
                         humanoidActors={humanoidActors}
@@ -1130,6 +1272,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                         onChangeSocketTargetActor={(targetId) => setSocketTargetActorId(targetId)}
                         onChangeSocketTargetBone={(bone) => setSocketTargetBone(bone)}
                       />
+                      </div>
                     );
                   })}
                 </div>
@@ -1140,7 +1283,32 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
 
         {/* ================= TAB 3: ENVIRONMENT / SET ================= */}
         {activeTab === 'environment' && (
-          <div className="p-3.5 space-y-4">
+          <div className="p-3.5 space-y-3">
+            {/* Zero-Scroll Environment Sub-Tabs */}
+            <div className="grid grid-cols-3 gap-1 rounded-xl bg-[#080b12] p-1 border border-white/[0.08]">
+              {(
+                [
+                  { id: 'presets' as const, label: '🏛️ Set & Presets' },
+                  { id: 'weather' as const, label: '🌦️ Weather & Fog' },
+                  { id: 'all' as const, label: '⊞ All' },
+                ]
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setEnvSubTab(t.id)}
+                  className={`py-1.5 px-2 rounded-lg text-[10.5px] font-semibold transition-all truncate ${
+                    envSubTab === t.id
+                      ? 'bg-gradient-to-b from-emerald-600 to-teal-700 text-white shadow-sm border border-emerald-400/50'
+                      : 'text-slate-400 hover:text-white hover:bg-white/[0.05] border border-transparent'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className={envSubTab === 'presets' || envSubTab === 'all' ? 'space-y-3.5' : 'hidden'}>
             <div className="rounded-lg bg-gradient-to-br from-emerald-950/40 via-[#10141f] to-[#0c0e14] border border-emerald-500/30 p-3 space-y-2 shadow-lg">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -1357,9 +1525,10 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 })}
               </div>
             </div>
+            </div>
 
             {/* Physical Scene Controls */}
-            <div className="space-y-3 pt-2 border-t border-white/5">
+            <div className={envSubTab === 'weather' || envSubTab === 'all' ? 'space-y-3 pt-1' : 'hidden'}>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="font-display font-bold text-xs text-white">Weather Condition</span>
@@ -1552,7 +1721,32 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
 
         {/* ================= TAB 4: LIGHT & SCRIPT (WITH EDITABLE NEGATIVE PROMPT RESTORED!) ================= */}
         {activeTab === 'atmosphere' && (
-          <div className="p-3.5 space-y-4">
+          <div className="p-3.5 space-y-3">
+            {/* Zero-Scroll Lighting Sub-Tabs */}
+            <div className="grid grid-cols-3 gap-1 rounded-xl bg-[#080b12] p-1 border border-white/[0.08]">
+              {(
+                [
+                  { id: 'lights' as const, label: '💡 Stage Lights' },
+                  { id: 'script' as const, label: '📜 Script & Neg' },
+                  { id: 'all' as const, label: '⊞ All' },
+                ]
+              ).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setLightSubTab(t.id)}
+                  className={`py-1.5 px-2 rounded-lg text-[10.5px] font-semibold transition-all truncate ${
+                    lightSubTab === t.id
+                      ? 'bg-gradient-to-b from-amber-500 to-amber-600 text-black font-bold shadow-sm border border-amber-300/60'
+                      : 'text-slate-400 hover:text-white hover:bg-white/[0.05] border border-transparent'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            <div className={lightSubTab === 'lights' || lightSubTab === 'all' ? 'space-y-3.5' : 'hidden'}>
             {/* Lighting Style */}
             <div className="space-y-1.5">
               <span className="font-display font-bold text-xs tracking-wide text-white">Lighting Mood Style</span>
@@ -1766,7 +1960,9 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 ))}
               </div>
             </div>
+            </div>
 
+            <div className={lightSubTab === 'script' || lightSubTab === 'all' ? 'space-y-3.5' : 'hidden'}>
             {/* Scene Narrative & Atmosphere Prompt */}
             <div className="space-y-1.5 pt-2 border-t border-white/5">
               <div className="flex items-center justify-between">
@@ -1825,6 +2021,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                   </button>
                 ))}
               </div>
+            </div>
             </div>
           </div>
         )}

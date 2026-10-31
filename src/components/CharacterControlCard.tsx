@@ -1,4 +1,5 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
+export type CharacterCardSubTab = 'motion' | 'timing' | 'look' | 'rig' | 'all';
 import { Actor, Point2D, Point3D } from '../types/shotspec';
 import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
 import {
@@ -155,6 +156,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const promptInputRef = useRef<HTMLInputElement | null>(null);
   const lookPromptInputRef = useRef<HTMLInputElement | null>(null);
+  const [activeSubTab, setActiveSubTab] = useState<CharacterCardSubTab>('motion');
 
   const kind = actor.kind || 'human';
   const shotDur = shotDurationSeconds || 4;
@@ -341,8 +343,124 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
       {/* ================= CARD BODY ================= */}
       {!isCollapsed && (
         <div className="space-y-2.5 pt-2 border-t border-white/[0.07]" onClick={(e) => e.stopPropagation()}>
-          {/* ================= A2. COMFYUI VIDEO REFERENCE IMAGE ================= */}
-          <div className="rounded-xl bg-[#101524] border border-indigo-500/30 p-2 flex items-center justify-between gap-2.5">
+          {/* ================= 4 FOCUSED SUB-TABS BAR (ZERO-SCROLL INSPECTOR) ================= */}
+          <div className="space-y-1.5">
+            {/* Compact Status Summary Strip */}
+            <div className="flex items-center justify-between gap-1.5 px-1 text-[9.5px] font-mono text-slate-400">
+              <span className="truncate flex items-center gap-1.5">
+                {actor.conceptImageUrl ? (
+                  <span className="text-emerald-300 font-semibold">🖼️ Ref Ready</span>
+                ) : (
+                  <span>🖼️ No Ref</span>
+                )}
+                <span className="text-slate-600">•</span>
+                <span className="text-cyan-300">
+                  📍 ({currentX}, {currentDepthZ})
+                </span>
+                <span className="text-slate-600">•</span>
+                <span>{(actor.scale ?? 1.0).toFixed(1)}x</span>
+              </span>
+              {activeMotionClipObj && (
+                <span className="text-emerald-300 font-semibold truncate">
+                  {activeMotionClipObj.icon} {activeMotionClipObj.name}
+                </span>
+              )}
+            </div>
+
+            {/* 4 Focused Sub-Tabs + All Toggle */}
+            <div
+              className="grid grid-cols-5 gap-1 rounded-xl bg-[#080b12] p-1 border border-white/[0.08]"
+              role="tablist"
+              aria-label="Character Inspector Sub-Tabs"
+            >
+              {(
+                [
+                  {
+                    id: 'motion' as const,
+                    label: 'Motion',
+                    icon: '🏃',
+                    dot: Boolean(actor.motionClip),
+                    tip: 'Ready-Made Motions, Floor Path, Stance & Stage Spot',
+                  },
+                  {
+                    id: 'timing' as const,
+                    label: 'Timing',
+                    icon: '⏱️',
+                    badge: kfs.length > 0 ? String(kfs.length) : undefined,
+                    tip: 'Timing Window (sec), Action Cycles (1x–5x) & Natural-Language AI Directing',
+                  },
+                  {
+                    id: 'look' as const,
+                    label: 'Look/Ref',
+                    icon: '🎨',
+                    dot: Boolean(actor.conceptImageUrl || actor.modelUrl),
+                    tip: 'ComfyUI Reference Image, 3D Look Prompt, Attach .GLB & Color Swatches',
+                  },
+                  {
+                    id: 'rig' as const,
+                    label: 'Rig/XYZ',
+                    icon: '🦴',
+                    dot: Boolean(actor.socketToBone),
+                    tip: 'XYZ Stage Coordinates, Scale, Facing Angle, Bone Sockets & FK/IK Rig',
+                  },
+                  {
+                    id: 'all' as const,
+                    label: 'All',
+                    icon: '⊞',
+                    tip: 'Show all sections expanded at once',
+                  },
+                ]
+              ).map((tab) => {
+                const isTabActive = activeSubTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isTabActive}
+                    onClick={() => {
+                      setActiveSubTab(tab.id);
+                      if ((tab.id === 'look' || tab.id === 'rig') && !isFineTuneOpen) {
+                        onToggleFineTune(actor.id);
+                      }
+                      if (tab.id === 'motion' && !isMotionSectionOpen) {
+                        onToggleMotionSection?.(actor.id);
+                      }
+                      if (tab.id === 'timing' && !isTimingSectionOpen) {
+                        onToggleTimingSection?.(actor.id);
+                      }
+                    }}
+                    title={tab.tip}
+                    className={`relative flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-[10px] font-semibold transition-all min-w-0 ${
+                      isTabActive
+                        ? 'bg-gradient-to-b from-indigo-600 to-indigo-700 text-white shadow-sm border border-indigo-400/50'
+                        : 'text-slate-400 hover:text-white hover:bg-white/[0.05] border border-transparent'
+                    }`}
+                  >
+                    <span className="text-[10px] leading-none shrink-0">{tab.icon}</span>
+                    <span className="truncate">{tab.label}</span>
+                    {tab.dot && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_5px_#34d399] shrink-0" />
+                    )}
+                    {tab.badge && (
+                      <span className="px-1 rounded bg-cyan-500/25 text-cyan-200 font-mono text-[8.5px] leading-tight shrink-0">
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ================= SUB-TAB 3 (OR ALL): COMFYUI VIDEO REFERENCE IMAGE ================= */}
+          <div
+            className={
+              activeSubTab === 'look' || activeSubTab === 'all'
+                ? 'rounded-xl bg-[#101524] border border-indigo-500/30 p-2 flex items-center justify-between gap-2.5'
+                : 'hidden'
+            }
+          >
             <div className="flex items-center gap-2.5 min-w-0">
               {actor.conceptImageUrl ? (
                 <img
@@ -422,6 +540,8 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
             </div>
           </div>
 
+          {/* ================= SUB-TAB 1 (MOTION & STANCE) ================= */}
+          <div className={activeSubTab === 'motion' || activeSubTab === 'all' ? 'space-y-2.5' : 'hidden'}>
           {/* ================= B. MOTION STUDIO ================= */}
           <div className="inspector-section space-y-2">
             {/* Motion Studio Header + Active Motion Status Badge */}
@@ -475,9 +595,9 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                     <div className="grid grid-cols-3 gap-1 px-1">
                       {(
                         [
-                          { id: 'move', label: 'Move', fullLabel: 'Move / Jump', icon: '🏃' },
-                          { id: 'combat', label: 'Fight', fullLabel: 'Fight / Action', icon: '⚔️' },
-                          { id: 'acting', label: 'Act', fullLabel: 'Act / Emote', icon: '🎭' },
+                          { id: 'move', label: 'Move / Jump', fullLabel: 'Move / Jump', icon: '🏃' },
+                          { id: 'combat', label: 'Fight / Action', fullLabel: 'Fight / Action', icon: '⚔️' },
+                          { id: 'acting', label: 'Act / Emote', fullLabel: 'Act / Emote', icon: '🎭' },
                         ] as const
                       ).map((tab) => {
                         const isTabActive = activeHumanGroup === tab.id;
@@ -492,13 +612,13 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                                 ? `${tab.fullLabel} folder (contains active clip: ${activeMotionClipObj?.name})`
                                 : `Browse ${tab.fullLabel} action presets`
                             }
-                            className={`relative flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-t-lg text-[10.5px] font-semibold border-t border-x transition-all ${
+                            className={`relative flex items-center justify-center gap-1 py-1.5 px-1 rounded-t-lg text-[9.5px] tracking-tight font-semibold border-t border-x transition-all ${
                               isTabActive
                                 ? 'bg-[#111726] border-indigo-400/60 text-white shadow-[0_-2px_10px_rgba(99,102,241,0.15)] z-10 -mb-px pb-2'
                                 : 'bg-[#090d16] border-white/[0.07] text-slate-400 hover:text-slate-200 hover:bg-[#0e1320]'
                             }`}
                           >
-                            <span className="text-xs leading-none shrink-0">{tab.icon}</span>
+                            <span className="text-[10px] leading-none shrink-0">{tab.icon}</span>
                             <span className="truncate">{tab.label}</span>
                             {hasActiveClipInTab && (
                               <span
@@ -619,13 +739,13 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                           },
                           {
                             id: 'travel',
-                            label: 'Travel',
+                            label: 'Move',
                             icon: '👣',
-                            tip: 'Travel Floor: Move across the stage floor while performing the action',
+                            tip: 'Move / Travel Floor: Move across the stage floor while performing the action',
                           },
                           {
                             id: 'in-place',
-                            label: 'In-Place',
+                            label: 'Spot',
                             icon: '📍',
                             tip: 'In-Place (Spot): Lock to current floor coordinates and perform action on the spot',
                           },
@@ -831,9 +951,10 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
               </select>
             </div>
           </div>
+          </div>
 
-          {/* ================= D. TIMING & DIRECTION ================= */}
-          <div className="inspector-section space-y-2">
+          {/* ================= SUB-TAB 2: TIMING & DIRECTION ================= */}
+          <div className={activeSubTab === 'timing' || activeSubTab === 'all' ? 'inspector-section space-y-2' : 'hidden'}>
             {/* Row 1: Timing Header + Quick Range Buttons (Full / Playhead) */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between gap-1.5">
@@ -1063,12 +1184,22 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
           </div>
 
           {/* ================= E. APPEARANCE, COLOR & RIG SLIDERS ================= */}
-          <div className="rounded-xl bg-[#0d111a] border border-white/[0.08] overflow-hidden">
-            {/* Collapsible Section Header */}
+          <div
+            className={
+              activeSubTab === 'look' || activeSubTab === 'rig' || activeSubTab === 'all'
+                ? 'rounded-xl bg-[#0d111a] border border-white/[0.08] overflow-hidden'
+                : 'hidden'
+            }
+          >
+            {/* Collapsible Section Header (shown in All mode) */}
             <button
               type="button"
               onClick={() => onToggleFineTune(actor.id)}
-              className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-[#121724] hover:bg-[#171e2f] text-slate-200 transition-colors"
+              className={
+                activeSubTab === 'all'
+                  ? 'w-full flex items-center justify-between gap-2 px-3 py-2 bg-[#121724] hover:bg-[#171e2f] text-slate-200 transition-colors'
+                  : 'hidden'
+              }
               title="Toggle Appearance, Color, Transform & Rigging controls"
             >
               <span className="flex items-center gap-1.5 text-[11px] font-semibold min-w-0">
@@ -1087,6 +1218,8 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
 
             {isFineTuneOpen && (
               <div className="p-2.5 space-y-2.5 border-t border-white/[0.06]">
+                {/* SUB-TAB 3: LOOK, .GLB & COLOR SWATCHES */}
+                <div className={activeSubTab === 'look' || activeSubTab === 'all' ? 'space-y-2.5' : 'hidden'}>
                 {/* 1. Edit 3D Look by Prompt & Attach .GLB */}
                 <div className="inspector-subcard space-y-2">
                   <div className="flex items-center justify-between gap-1.5">
@@ -1216,7 +1349,10 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                     </label>
                   </div>
                 </div>
+                </div>
 
+                {/* SUB-TAB 4: RIG, XYZ TRANSFORM, SCALE & BONE SOCKETS */}
+                <div className={activeSubTab === 'rig' || activeSubTab === 'all' ? 'space-y-2.5' : 'hidden'}>
                 {/* 3. Transform & Position: 3-Column Stage X, Height Y, Depth Z Cards */}
                 <div className="grid grid-cols-3 gap-1.5 font-mono">
                   {/* Stage X */}
@@ -1641,6 +1777,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                     </div>
                   );
                 })()}
+                </div>
               </div>
             )}
           </div>
