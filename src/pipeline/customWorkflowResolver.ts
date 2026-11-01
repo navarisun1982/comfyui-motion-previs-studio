@@ -167,6 +167,11 @@ const KNOWN_WIDGET_ORDERS: Record<string, string[]> = {
   RIFEInterpolation: ['ckpt_name', 'clear_cache_after_n_frames', 'multiplier', 'fast_mode', 'ensemble', 'scale_factor'],
   PathchSageAttentionKJ: ['sage_attention'],
   SolAttnPatch: ['enabled'],
+  '[Comfy3D] Load SF3D Model': ['model_name'],
+  '[Comfy3D] StableFast3D': ['texture_resolution', 'remesh_option'],
+  '[Comfy3D] Resize Image Foreground': ['Foreground_Ratio'],
+  '[Comfy3D] Switch Mesh Axis': ['axis_x_to', 'axis_y_to', 'axis_z_to', 'flip_normal', 'scale'],
+  '[Comfy3D] Save 3D Mesh': ['save_path'],
 };
 
 interface UiWorkflowNode {

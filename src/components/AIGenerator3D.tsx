@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import {
   Sparkles,
@@ -6,55 +6,37 @@ import {
   X,
   Check,
   Loader2,
-  RefreshCw,
   Box,
-  Layers,
-  Sliders,
-  ChevronDown,
-  ChevronUp,
-  Image as ImageIcon,
+  Download,
   Zap,
   Settings,
   AlertTriangle,
+  Dice5,
+  FolderOpen,
+  RotateCw,
 } from 'lucide-react';
 import { ReasonerSettingsPanel } from './ReasonerSettingsPanel';
-import {
-  SculptSpec,
-  buildSculpt,
-  registerSculptSpec,
-} from '../engine/procedural3D/sculptSpec';
-import {
-  SilhouetteMask,
-  SilhouetteMetrics,
-  ExtractedPalette,
-  extractMaskFromImageUrl,
-} from '../engine/procedural3D/silhouette';
-import {
-  reasonSculpt,
-  describeReasoner,
-  getReasonerConfig,
-  ObjectReasonerError,
-} from '../services/objectReasoner';
 import { useShotStore } from '../stores/useShotStore';
+import { useAssetLibraryStore } from '../stores/useAssetLibraryStore';
+import { useComfyStore } from '../stores/useComfyStore';
+import { loadGltfModel } from '../engine/gltfModelLoader';
 import {
-  useAssetLibraryStore,
-  Asset3DItem,
-} from '../stores/useAssetLibraryStore';
-import { createSkinnedCharacterFromConcept, type HumanoidRig } from '../engine/kinematics';
+  Comfy3DEngineMode,
+  Comfy3DQualityMode,
+  Comfy3DGenerationResult,
+  generate3DGlbInComfy,
+} from '../services/comfy3dGenerator';
 import {
-  synthesizeRecipeFromImage,
-  isHumanoidPrompt,
-} from '../engine/procedural3D/imageToRecipe';
-import {
-  extractCharacterFeaturesFromModelOutput,
-  compileCharacterToClaySculpt,
-} from '../engine/procedural3D/characterClayCompiler';
+  listLocalComfyWorkflows,
+  normalizeWorkflowUrl,
+} from '../pipeline/customWorkflowResolver';
 
 export interface AIGenerator3DProps {
   isOpen: boolean;
   onClose: () => void;
   initialPrompt?: string;
   initialImageUrl?: string;
+  targetActorId?: string;
   onApplyToScene?: (actorId: string) => void;
 }
 
@@ -63,46 +45,49 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   onClose,
   initialPrompt = '',
   initialImageUrl,
+  targetActorId,
   onApplyToScene,
 }) => {
   const addActor = useShotStore((s) => s.addActor);
+  const updateActor = useShotStore((s) => s.updateActor);
+  const uploadGlbFile = useAssetLibraryStore((s) => s.uploadGlbFile);
+  const comfyStatus = useComfyStore((s) => s.connectionStatus);
+  const comfyStats = useComfyStore((s) => s.systemStats);
 
-  // Input states
-  const [prompt, setPrompt] = useState(initialPrompt);
-  const [name, setName] = useState('');
+  // Input & Actor Metadata
+  const [actorName, setActorName] = useState(initialPrompt || 'Hero Character');
+  const [actorCategory, setActorCategory] = useState<'human' | 'creature' | 'prop'>('human');
   const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(initialImageUrl || null);
-  const [, setReferenceMask] = useState<SilhouetteMask | null>(null);
-  const [referenceMetrics, setReferenceMetrics] = useState<SilhouetteMetrics | null>(null);
-  const [referencePalette, setReferencePalette] = useState<ExtractedPalette | null>(null);
-  const [, setMaskPreviewUrl] = useState<string | null>(null);
 
-  // Generation states
+  // ComfyUI 3D Workflow Controls (#aa77013b-18f1-4679-9678-6d455d3536c5)
+  const [engineMode, setEngineMode] = useState<Comfy3DEngineMode>('pixal3d');
+  const [qualityMode, setQualityMode] = useState<Comfy3DQualityMode>('fast_vertex');
+  const [removeBackground, setRemoveBackground] = useState<boolean>(true);
+  const [textureResolution, setTextureResolution] = useState<1024 | 2048 | 4096>(2048);
+  const [seed, setSeed] = useState<number>(42);
+
+  // Custom Local 3D Workflow URL / .JSON
+  const [workflowSource, setWorkflowSource] = useState<'builtin' | 'custom'>('builtin');
+  const [customWorkflowUrl, setCustomWorkflowUrl] = useState<string>('');
+  const [customWorkflowJson, setCustomWorkflowJson] = useState<string>('');
+  const [customWorkflowLabel, setCustomWorkflowLabel] = useState<string>('');
+  const [localWorkflows, setLocalWorkflows] = useState<string[]>([]);
+  const [isScanningLocal, setIsScanningLocal] = useState<boolean>(false);
+
+  // Generation State
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationStage, setGenerationStage] = useState('');
+  const [stepProgress, setStepProgress] = useState<{ step: number; maxSteps: number } | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
 
-  // Resulting 3D Spec & Rig
-  const [sculpt, setSculpt] = useState<SculptSpec | null>(null);
-  const [characterRig, setCharacterRig] = useState<HumanoidRig | null>(null);
-  const [displayMode, setDisplayMode] = useState<'skinned' | 'parametric'>('skinned');
-  const [, setCurrentIoU] = useState<number | null>(null);
-  const [compareSheetUrl, setCompareSheetUrl] = useState<string | null>(null);
-  const [compareReport, setCompareReport] = useState<any>(null);
-  const [showCompareSheet, setShowCompareSheet] = useState(false);
-  const [candidateRace, setCandidateRace] = useState<{ label: string; iou: number; delta: number }[]>([]);
+  // Generated .GLB Result & Viewport Controls
+  const [generatedResult, setGeneratedResult] = useState<Comfy3DGenerationResult | null>(null);
   const [isWireframe, setIsWireframe] = useState(false);
-  const [showPartList, setShowPartList] = useState(false);
-
-  // Revision states
-  const [revisionFeedback, setRevisionFeedback] = useState('');
-  const [isRefining, setIsRefining] = useState(false);
+  const [autoSpin, setAutoSpin] = useState(true);
   const [appliedSuccess, setAppliedSuccess] = useState(false);
-  const [showReasonerSettings, setShowReasonerSettings] = useState(false);
-  const [reasonerRev, setReasonerRev] = useState(0);
-
-  const cfg = useMemo(() => getReasonerConfig(), [reasonerRev]);
-  const reasonerDesc = useMemo(() => describeReasoner(cfg), [cfg]);
+  const [savedLibrarySuccess, setSavedLibrarySuccess] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
 
   // 3D Canvas Mount Ref
   const canvasMountRef = useRef<HTMLDivElement>(null);
@@ -113,67 +98,99 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   const animFrameRef = useRef<number | null>(null);
   const isDraggingRef = useRef(false);
   const prevMouseRef = useRef({ x: 0, y: 0 });
-  const orbitRef = useRef({ theta: 0.35, phi: 0.28, radius: 4.5 });
-  const targetLookAtRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 1.0, 0));
+  const orbitRef = useRef({ theta: 0.35, phi: 1.25, radius: 3.4 });
+  const targetLookAtRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0.9, 0));
   const updateCameraRef = useRef<(() => void) | null>(null);
+  const autoSpinRef = useRef<boolean>(autoSpin);
+  autoSpinRef.current = autoSpin;
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize from initial props
   useEffect(() => {
-    if (initialPrompt && !prompt) setPrompt(initialPrompt);
+    if (initialPrompt && !actorName) setActorName(initialPrompt);
     if (initialImageUrl && !referenceImageUrl) {
       setReferenceImageUrl(initialImageUrl);
-      processImageForSilhouette(initialImageUrl);
     }
   }, [initialPrompt, initialImageUrl]);
 
   // Elapsed timer during generation
   useEffect(() => {
-    if (!isGenerating && !isRefining) return;
+    if (!isGenerating) return;
     const started = Date.now();
     setElapsedSec(0);
     const interval = window.setInterval(() => {
       setElapsedSec(Math.round((Date.now() - started) / 1000));
     }, 500);
     return () => window.clearInterval(interval);
-  }, [isGenerating, isRefining]);
-
-  // Process reference image to sample center-zone color palette & stage untouched image.
-  // Do NOT synthesize a placeholder 3D sculpt until the user explicitly clicks
-  // "Generate 3D Figure" or "Instant Procedural 3D".
-  const processImageForSilhouette = async (url: string) => {
-    try {
-      // Clear any previous 3D figure so the user returns to the clean Guided Step-2 card
-      setSculpt(null);
-      setCharacterRig(null);
-      setCurrentIoU(null);
-      setCompareSheetUrl(null);
-      setCompareReport(null);
-      setShowCompareSheet(false);
-      setCandidateRace([]);
-      setGenerationError(null);
-
-      const { mask, metrics, palette, canvasDataUrl } = await extractMaskFromImageUrl(url, 512);
-      setReferenceMask(mask);
-      setReferenceMetrics(metrics);
-      setReferencePalette(palette);
-      setReferenceImageUrl(canvasDataUrl);
-    } catch (err) {
-      console.warn('Could not extract palette from image:', err);
-    }
-  };
+  }, [isGenerating]);
 
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
+    if (!actorName || actorName === 'Hero Character') {
+      setActorName(baseName || 'Hero Character');
+    }
     const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = reader.result as string;
-      setReferenceImageUrl(dataUrl);
-      await processImageForSilhouette(dataUrl);
+    reader.onload = () => {
+      setReferenceImageUrl(reader.result as string);
+      setGenerationError(null);
     };
     reader.readAsDataURL(file);
+  };
+
+  // Load Custom 3D Workflow from Local URL / Local File Path
+  const handleLoadCustomWorkflowUrl = async (targetUrl?: string) => {
+    const raw = (targetUrl ?? customWorkflowUrl).trim();
+    if (!raw) {
+      setGenerationError('Please enter a local ComfyUI 3D workflow URL or file path (.json).');
+      return;
+    }
+    setGenerationError(null);
+    try {
+      const normalized = normalizeWorkflowUrl(raw);
+      const res = await fetch(normalized);
+      if (!res.ok) {
+        throw new Error(`Failed to load local 3D workflow (HTTP ${res.status}).`);
+      }
+      const text = await res.text();
+      JSON.parse(text);
+      setCustomWorkflowJson(text);
+      setCustomWorkflowUrl(raw);
+      setCustomWorkflowLabel(raw.split(/[\\/]/).pop() || 'custom_3d_workflow.json');
+    } catch (err: any) {
+      setGenerationError(err?.message || 'Could not load custom 3D workflow JSON.');
+    }
+  };
+
+  const handleUploadCustomWorkflowFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setGenerationError(null);
+    try {
+      const text = await file.text();
+      JSON.parse(text);
+      setCustomWorkflowJson(text);
+      setCustomWorkflowUrl(file.name);
+      setCustomWorkflowLabel(file.name);
+    } catch (err: any) {
+      setGenerationError(`Invalid workflow JSON in ${file.name}: ${err?.message || 'parse error'}`);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleScanLocalComfyWorkflows = async () => {
+    setIsScanningLocal(true);
+    setGenerationError(null);
+    try {
+      const list = await listLocalComfyWorkflows();
+      setLocalWorkflows(list);
+    } catch (err: any) {
+      setGenerationError(err?.message || 'Could not scan local ComfyUI workflows.');
+    } finally {
+      setIsScanningLocal(false);
+    }
   };
 
   // Initialize Three.js interactive preview
@@ -185,7 +202,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     const h = container.clientHeight || 420;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0c0e14);
+    scene.background = new THREE.Color(0x090c14);
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(38, w / h, 0.1, 100);
@@ -196,15 +213,20 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
     rendererRef.current = renderer;
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
-    // Studio Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+    // Studio Lighting for PBR & Vertex-Colored GLB Models
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.35);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xfff5ea, 2.2);
+    const hemiLight = new THREE.HemisphereLight(0xe2e8f0, 0x1e293b, 0.9);
+    scene.add(hemiLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfff5ea, 2.4);
     dirLight.position.set(5, 8, 5);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.set(1024, 1024);
@@ -215,11 +237,11 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     scene.add(rimLight);
 
     const fillLight = new THREE.DirectionalLight(0xa855f7, 0.8);
-    fillLight.position.set(0, -4, -4);
+    fillLight.position.set(0, -4, 4);
     scene.add(fillLight);
 
     // Ground Grid
-    const grid = new THREE.GridHelper(10, 20, 0xd4af37, 0x1e293b);
+    const grid = new THREE.GridHelper(10, 20, 0x06b6d4, 0x1e293b);
     grid.position.y = 0;
     scene.add(grid);
 
@@ -235,7 +257,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       const x = target.x + radius * Math.sin(phi) * Math.sin(theta);
       const y = target.y + radius * Math.cos(phi);
       const z = target.z + radius * Math.sin(phi) * Math.cos(theta);
-      camera.position.set(x, Math.max(0.2, y), z);
+      camera.position.set(x, Math.max(0.15, y), z);
       camera.lookAt(target);
     };
     updateCameraRef.current = updateCamera;
@@ -253,7 +275,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       prevMouseRef.current = { x: e.clientX, y: e.clientY };
 
       orbitRef.current.theta -= dx * 0.008;
-      orbitRef.current.phi = Math.max(0.08, Math.min(Math.PI * 0.48, orbitRef.current.phi - dy * 0.008));
+      orbitRef.current.phi = Math.max(
+        0.12,
+        Math.min(Math.PI * 0.48, orbitRef.current.phi - dy * 0.008)
+      );
       updateCamera();
     };
     const onMouseUp = () => {
@@ -261,7 +286,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      orbitRef.current.radius = Math.max(1.2, Math.min(15, orbitRef.current.radius + e.deltaY * 0.005));
+      orbitRef.current.radius = Math.max(
+        1.0,
+        Math.min(15, orbitRef.current.radius + e.deltaY * 0.004)
+      );
       updateCamera();
     };
 
@@ -275,6 +303,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     const render = () => {
       if (!running) return;
       animFrameRef.current = requestAnimationFrame(render);
+      if (autoSpinRef.current && !isDraggingRef.current && modelGroupRef.current?.children.length) {
+        orbitRef.current.theta += 0.0045;
+        updateCamera();
+      }
       renderer.render(scene, camera);
     };
     render();
@@ -305,446 +337,244 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     };
   }, [isOpen]);
 
-  // Update 3D Model when sculpt or isWireframe changes
+  // Mount generated .GLB mesh into the Three.js viewport when `generatedResult` or `isWireframe` changes
   useEffect(() => {
     const group = modelGroupRef.current;
     if (!group) return;
 
-    // Clear previous children
     while (group.children.length > 0) {
       const child = group.children[0];
       group.remove(child);
-      if ((child as any).geometry) (child as any).geometry.dispose();
     }
 
-    // If skinned rig mode is active and characterRig is loaded, display it
-    if (displayMode === 'skinned' && characterRig) {
-      characterRig.root.traverse((c) => {
-        if ((c as THREE.Mesh).isMesh) {
-          const m = c as THREE.Mesh;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          if (isWireframe && (m.material as any)) {
-            (m.material as any).wireframe = true;
-          }
-        }
-      });
-      group.add(characterRig.root);
+    if (!generatedResult?.blobUrl) return;
 
-      const box = new THREE.Box3().setFromObject(characterRig.root);
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      const maxDim = Math.max(size.x, size.y, size.z, 1.0);
-      orbitRef.current.radius = maxDim * 1.5;
-      targetLookAtRef.current.copy(center);
-      updateCameraRef.current?.();
+    let cancelled = false;
+    loadGltfModel(generatedResult.blobUrl)
+      .then((loaded) => {
+        if (cancelled) return;
+        loaded.scene.traverse((obj) => {
+          if ((obj as THREE.Mesh).isMesh) {
+            const mesh = obj as THREE.Mesh;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const m of mats) {
+              if (m && 'wireframe' in m) {
+                (m as any).wireframe = isWireframe;
+              }
+            }
+          }
+        });
+        group.add(loaded.scene);
+
+        const box = new THREE.Box3().setFromObject(loaded.scene);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z, 1.0);
+        orbitRef.current.radius = maxDim * 1.65;
+        targetLookAtRef.current.copy(center);
+        updateCameraRef.current?.();
+      })
+      .catch((err) => {
+        console.error('Failed to display generated GLB in preview:', err);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [generatedResult, isWireframe]);
+
+  // Execute ComfyUI 3D .GLB Generation
+  const handleGenerateGlb = async () => {
+    if (!referenceImageUrl) {
+      setGenerationError('Please upload a reference character or object image first.');
       return;
     }
-
-    if (!sculpt) return;
-
-    try {
-      const kit = buildSculpt(sculpt);
-      kit.group.traverse((c) => {
-        if ((c as THREE.Mesh).isMesh) {
-          const m = c as THREE.Mesh;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          if (isWireframe && (m.material as any)) {
-            (m.material as any).wireframe = true;
-          }
-        }
-      });
-      group.add(kit.group);
-
-      // Center model and adjust orbit distance to fit object height
-      const box = new THREE.Box3().setFromObject(kit.group);
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      const maxDim = Math.max(size.x, size.y, size.z, 1.0);
-      orbitRef.current.radius = maxDim * 2.0;
-      targetLookAtRef.current.copy(center);
-      updateCameraRef.current?.();
-    } catch (err) {
-      console.error('Failed to construct 3D mesh from sculpt spec:', err);
-    }
-  }, [sculpt, characterRig, displayMode, isWireframe]);
-
-  // Execute initial generation (Direct Vision-to-3D: Raw Untouched Image + Center-Zone Palette -> Vision LLM + Skinned 3D Rig / Anatomical Clay Compiler)
-  const handleGenerate = async () => {
-    const cleanPrompt = (prompt || name).trim();
-    if (!cleanPrompt && !referenceImageUrl) {
-      setGenerationError('Please provide a prompt description or reference image.');
+    if (workflowSource === 'custom' && !customWorkflowJson.trim()) {
+      setGenerationError(
+        'Please load a custom local 3D workflow (.json) or switch back to the Built-in Pixal3D / TRELLIS.2 workflow.'
+      );
       return;
     }
 
     setIsGenerating(true);
     setGenerationError(null);
-    setGenerationStage('Analyzing reference image & directorial description...');
-
-    const effectivePrompt = cleanPrompt || (referenceImageUrl ? 'character or object in reference image' : '3d object');
-    const isHumanoid = isHumanoidPrompt(effectivePrompt) || (!cleanPrompt && Boolean(referenceImageUrl));
-    const reasonerPrompt = referenceImageUrl
-      ? isHumanoid
-        ? `Analyze the attached reference image (${effectivePrompt}) and sculpt a complete anatomical 3D character recipe (head, hair/hood, torso, tunic/armor, arms, legs, boots, and held weapons/gear) using the sampled colors.`
-        : `Analyze the attached reference image (${effectivePrompt}) and construct a clean multi-part 3D recipe with accurate primitives and sampled colors.`
-      : effectivePrompt;
+    setStepProgress(null);
+    setGenerationStage('Connecting to local ComfyUI & uploading reference image...');
 
     try {
-      setGenerationStage('Reasoning 3D anatomy, costume layers & parts from vision...');
-      let generated = await reasonSculpt(reasonerPrompt, {
-        imageBase64: referenceImageUrl || undefined,
-        extractedPalette: referencePalette || undefined,
-        timeoutMs: 120_000,
-        onStage: (s) => setGenerationStage(s),
+      const result = await generate3DGlbInComfy({
+        imageDataUrl: referenceImageUrl,
+        actorName: actorName.trim() || 'Hero Character',
+        engineMode,
+        qualityMode,
+        removeBackground,
+        textureResolution,
+        seed,
+        customWorkflowJson: workflowSource === 'custom' ? customWorkflowJson : undefined,
+        onProgress: (stageText, detail) => {
+          setGenerationStage(stageText);
+          if (detail?.step !== undefined && detail?.maxSteps !== undefined) {
+            setStepProgress({ step: detail.step, maxSteps: detail.maxSteps });
+          } else {
+            setStepProgress(null);
+          }
+        },
       });
 
-      const isHumanoidSubject =
-        generated.rig === 'humanoid' ||
-        isHumanoidPrompt(effectivePrompt) ||
-        isHumanoidPrompt(generated.name) ||
-        (!cleanPrompt && Boolean(referenceImageUrl));
-
-      // If the LLM returned horizontal slices or fewer than 6 anatomical parts for a humanoid character,
-      // upgrade the Parametric tab to our full Anatomical Character Clay Maquette (`compileCharacterToClaySculpt`)
-      // so there are NEVER horizontal slice slabs!
-      const hasSliceSlabs = generated.parts.some((p) => /^slice_\d+/i.test(p.id));
-      if (isHumanoidSubject && (hasSliceSlabs || generated.parts.length < 6)) {
-        const features = extractCharacterFeaturesFromModelOutput(
-          generated,
-          `${cleanPrompt} ${generated.name || ''} ${generated.identity || ''}`.trim() || 'Elven Scout Archer',
-          referencePalette || undefined
-        );
-        generated = compileCharacterToClaySculpt(features);
-      }
-
-      setSculpt(generated);
-      setName(generated.name || cleanPrompt || '3D Figure');
-      setCurrentIoU(null);
-      setCompareReport(null);
-      setCompareSheetUrl(null);
-      setCandidateRace([]);
-
-      if (cleanPrompt) {
-        registerSculptSpec(cleanPrompt, generated);
-      }
-      if (effectivePrompt) {
-        registerSculptSpec(effectivePrompt, generated);
-      }
-
-      // For humanoid characters, build and default to the Skinned 3D Character Rig (Smooth Humanoid + Sculpted Hair, Tunic, Armor & Bow/Weapon),
-      // with the Parametric Clay Maquette available on the second tab!
-      if (isHumanoidSubject) {
-        setGenerationStage('Dressing Skinned 3D Character Rig with sculpted costume & gear...');
-        try {
-          const rig = await createSkinnedCharacterFromConcept(
-            referenceImageUrl || '',
-            `${cleanPrompt} ${generated.name || ''} ${generated.identity || ''}`.trim() || 'Elven Scout Archer',
-            { rawModelOutput: generated }
-          );
-          setCharacterRig(rig);
-          setDisplayMode('skinned');
-        } catch (rigErr) {
-          console.warn('Could not build skinned character rig:', rigErr);
-          setDisplayMode('parametric');
-        }
-      } else {
-        setCharacterRig(null);
-        setDisplayMode('parametric');
-      }
-    } catch (err) {
-      let msg = err instanceof ObjectReasonerError ? err.message : (err as Error)?.message || 'Generation failed';
-      if (msg.includes('did not answer within')) {
-        msg += ' (Tip: Heavy local models like 26B/31B can time out when VRAM is tight or competing with ComfyUI. Switch to a lighter model like qwen3.5:9b or Gemini in Reasoner Settings, or generate procedurally below.)';
-      }
-      // Graceful procedural recovery: build full Anatomical Character Clay Maquette + Skinned 3D Rig (never horizontal slabs!)
-      try {
-        const isHumanoidFallback = isHumanoidPrompt(effectivePrompt) || Boolean(referenceImageUrl);
-        let fallbackSculpt: SculptSpec;
-        if (isHumanoidFallback) {
-          const features = extractCharacterFeaturesFromModelOutput(
-            { name: cleanPrompt || 'Sculpted Character' },
-            cleanPrompt || 'Elven Scout Archer',
-            referencePalette || undefined
-          );
-          fallbackSculpt = compileCharacterToClaySculpt(features);
-        } else {
-          fallbackSculpt = synthesizeRecipeFromImage({
-            name: cleanPrompt || '3D Figure',
-            prompt: cleanPrompt || effectivePrompt,
-            palette: referencePalette || undefined,
-          });
-        }
-
-        if (fallbackSculpt && fallbackSculpt.parts && fallbackSculpt.parts.length > 0) {
-          setSculpt(fallbackSculpt);
-          setName(fallbackSculpt.name || cleanPrompt || '3D Figure');
-          if (cleanPrompt) registerSculptSpec(cleanPrompt, fallbackSculpt);
-
-          if (isHumanoidFallback) {
-            try {
-              const rig = await createSkinnedCharacterFromConcept(
-                referenceImageUrl || '',
-                cleanPrompt || 'Elven Scout Archer',
-                { rawModelOutput: fallbackSculpt }
-              );
-              setCharacterRig(rig);
-              setDisplayMode('skinned');
-            } catch {
-              setDisplayMode('parametric');
-            }
-          } else {
-            setDisplayMode('parametric');
-          }
-        }
-      } catch (synthErr) {
-        console.warn('Procedural fallback synthesis failed:', synthErr);
-      }
-      setGenerationError(msg);
+      setGeneratedResult(result);
+    } catch (err: any) {
+      setGenerationError(
+        err?.message ||
+          'Failed to generate 3D .GLB in ComfyUI. Please verify ComfyUI is running at http://127.0.0.1:8188.'
+      );
     } finally {
       setIsGenerating(false);
       setGenerationStage('');
+      setStepProgress(null);
     }
   };
 
-  // Instant offline procedural 3D figure generation (0ms: Skinned 3D Character Rig + Anatomical Clay Maquette, no LLM required)
-  const handleInstantProceduralGenerate = async () => {
-    const cleanPrompt = prompt.trim();
-    const effectivePrompt = cleanPrompt || (referenceImageUrl ? 'Elven Scout Archer' : '3D Figure');
-    setGenerationError(null);
-    setGenerationStage('Synthesizing 3D character rig & anatomical clay maquette...');
-    try {
-      const isHumanoidTarget = isHumanoidPrompt(effectivePrompt) || Boolean(referenceImageUrl && !cleanPrompt);
-      let fallbackSculpt: SculptSpec;
-
-      if (isHumanoidTarget) {
-        const features = extractCharacterFeaturesFromModelOutput(
-          { name: cleanPrompt || 'Sculpted Character' },
-          effectivePrompt,
-          referencePalette || undefined
-        );
-        fallbackSculpt = compileCharacterToClaySculpt(features);
-      } else {
-        fallbackSculpt = synthesizeRecipeFromImage({
-          name: cleanPrompt || '3D Figure',
-          prompt: effectivePrompt,
-          palette: referencePalette || undefined,
-        });
-      }
-
-      setCurrentIoU(null);
-      setCompareReport(null);
-      setCompareSheetUrl(null);
-      setCandidateRace([]);
-
-      if (fallbackSculpt && fallbackSculpt.parts && fallbackSculpt.parts.length > 0) {
-        setSculpt(fallbackSculpt);
-        setName(fallbackSculpt.name || cleanPrompt || '3D Figure');
-        if (cleanPrompt) registerSculptSpec(cleanPrompt, fallbackSculpt);
-      }
-
-      if (isHumanoidTarget) {
-        try {
-          const rig = await createSkinnedCharacterFromConcept(
-            referenceImageUrl || '',
-            effectivePrompt,
-            { rawModelOutput: fallbackSculpt }
-          );
-          setCharacterRig(rig);
-          setDisplayMode('skinned');
-        } catch {
-          setCharacterRig(null);
-          setDisplayMode('parametric');
-        }
-      } else {
-        setCharacterRig(null);
-        setDisplayMode('parametric');
-      }
-    } catch (err: any) {
-      setGenerationError(err?.message || 'Procedural generation failed');
-    } finally {
-      setGenerationStage('');
-    }
+  // Download generated .GLB file to user's computer
+  const handleDownloadGlb = () => {
+    if (!generatedResult) return;
+    const a = document.createElement('a');
+    a.href = generatedResult.blobUrl;
+    a.download = generatedResult.filename.endsWith('.glb')
+      ? generatedResult.filename
+      : `${generatedResult.filename}.glb`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
-  // Execute director revision
-  const handleRefine = async () => {
-    if (!sculpt) return;
-    const cleanFeedback = revisionFeedback.trim();
-    if (!cleanFeedback) return;
-
-    setIsRefining(true);
-    setGenerationError(null);
-    setGenerationStage('Refining 3D proportions, costume & gear...');
-
-    try {
-      const revised = await reasonSculpt(cleanFeedback, {
-        reviseSpec: sculpt,
-        revisionFeedback: cleanFeedback,
-        imageBase64: referenceImageUrl || undefined,
-        extractedPalette: referencePalette || undefined,
-        timeoutMs: 120_000,
-        onStage: (s) => setGenerationStage(s),
-      });
-
-      setSculpt(revised);
-      setRevisionFeedback('');
-    } catch (err) {
-      let msg = err instanceof ObjectReasonerError ? err.message : (err as Error)?.message || 'Refinement failed';
-      if (msg.includes('did not answer within')) {
-        msg += ' (Tip: Heavy local models like 26B/31B can time out when VRAM is tight or competing with ComfyUI. Switch to a lighter model like qwen3.5:9b or Gemini in Reasoner Settings, or generate procedurally below.)';
-      }
-      setGenerationError(msg);
-    } finally {
-      setIsRefining(false);
-      setGenerationStage('');
-    }
+  // Save generated .GLB to 3D Asset Library
+  const handleSaveToLibrary = async () => {
+    if (!generatedResult) return;
+    await uploadGlbFile(generatedResult.glbFile);
+    setSavedLibrarySuccess(true);
+    setTimeout(() => setSavedLibrarySuccess(false), 1500);
   };
 
-  // Add created actor to active previs scene
+  // Add or apply generated .GLB character/object to active 3D scene
+  // Auto-syncs `conceptImageUrl: referenceImageUrl` so <picture 1> is immediately bound for MiniMax H3 video rendering!
   const handleAddToScene = () => {
-    if (!sculpt && !characterRig) return;
+    if (!generatedResult) return;
+    const cleanName = actorName.trim() || 'ComfyUI 3D Character';
 
-    const actorName = sculpt?.name || name || '3D Object';
-    const actorToken = prompt || actorName;
-    const isHumanoid = sculpt?.rig === 'humanoid' || (displayMode === 'skinned' && !!characterRig);
-    const kind = sculpt?.route === 'quadruped-walker' ? 'creature' : isHumanoid ? 'human' : 'prop';
-
-    // If using skinned character rig, do not pass blocky sculpt so StagePrevis3D renders the high-fidelity skinned character
-    const passSculpt = displayMode === 'skinned' && characterRig ? undefined : (sculpt || undefined);
-
-    addActor(actorName, kind as any, actorToken, {
-      conceptImageUrl: referenceImageUrl || undefined,
-      sculpt: passSculpt,
-      partGraph: passSculpt,
-    });
+    if (targetActorId) {
+      updateActor(targetActorId, {
+        name: cleanName,
+        kind: actorCategory,
+        modelUrl: generatedResult.blobUrl,
+        conceptImageUrl: referenceImageUrl || undefined,
+      });
+    } else {
+      addActor(cleanName, actorCategory, cleanName, {
+        modelUrl: generatedResult.blobUrl,
+        conceptImageUrl: referenceImageUrl || undefined,
+      });
+    }
 
     setAppliedSuccess(true);
     setTimeout(() => {
       setAppliedSuccess(false);
-      onApplyToScene?.(actorName);
+      onApplyToScene?.(cleanName);
       onClose();
-    }, 600);
-  };
-
-  // Save to persistent 3D Asset Library
-  const handleSaveToLibrary = () => {
-    if (!sculpt) return;
-    const cleanName = sculpt.name || name || 'Custom 3D Model';
-    const cleanPrompt = prompt || cleanName;
-    registerSculptSpec(cleanPrompt, sculpt);
-
-    const assetItem: Asset3DItem = {
-      id: `ai-sculpt-${Date.now()}`,
-      name: cleanName,
-      nameAr: cleanName,
-      category: sculpt.route === 'quadruped-walker' ? 'creature' : sculpt.rig === 'humanoid' ? 'character' : 'custom',
-      kind: sculpt.route === 'quadruped-walker' ? 'creature' : sculpt.rig === 'humanoid' ? 'human' : 'prop',
-      icon: sculpt.rig === 'humanoid' ? '👤' : sculpt.route === 'quadruped-walker' ? '🐾' : '✨',
-      tokenPrompt: cleanPrompt,
-      isCustom: true,
-      scale: 1.0,
-      source: 'ai-generated',
-      createdAt: new Date().toLocaleDateString(),
-      description: `Parametric 3D Figure: ${sculpt.parts.length} parts, ${sculpt.heightMeters.toFixed(2)}m tall, rig: ${sculpt.rig}. ${sculpt.identity || ''}`,
-    };
-
-    useAssetLibraryStore.setState((s) => ({
-      customAssets: [assetItem, ...s.customAssets],
-      selectedCategory: 'custom',
-    }));
-
-    setAppliedSuccess(true);
-    setTimeout(() => setAppliedSuccess(false), 1200);
+    }, 500);
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-5xl h-[88vh] max-h-[860px] bg-[#0c0e15] border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-200 font-sans">
-        {/* Reasoner Settings Overlay */}
-        {showReasonerSettings && (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="relative w-full max-w-5xl h-[90vh] max-h-[880px] bg-[#0b0e17] border border-white/15 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-200 font-sans">
+        {/* Studio Settings Modal Overlay */}
+        {showSettingsModal && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6 overflow-y-auto">
-            <div className="w-full max-w-xl">
-              <ReasonerSettingsPanel
-                onClose={() => setShowReasonerSettings(false)}
-                onSaved={() => {
-                  setShowReasonerSettings(false);
-                  setReasonerRev((v) => v + 1);
-                }}
-              />
+            <div className="w-full max-w-2xl">
+              <ReasonerSettingsPanel onClose={() => setShowSettingsModal(false)} />
             </div>
           </div>
         )}
 
         {/* Header Bar */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-[#121622] shrink-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 border-b border-white/10 bg-[#111624] shrink-0">
           <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-amber-500 to-indigo-600 flex items-center justify-center text-white shadow-lg">
-              <Sparkles className="h-4 w-4" />
+            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-cyan-500 via-indigo-600 to-violet-600 flex items-center justify-center text-white shadow-lg shadow-cyan-500/20">
+              <Box className="h-5 w-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-bold text-white tracking-wide">
-                  AI 3D Generator
+                  ComfyUI 3D Character &amp; Object Studio (.GLB)
                 </h2>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 font-semibold">
-                  Parametric 3D Studio
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/35 font-semibold">
+                  Pixal3D • TRELLIS.2 • BiRefNet
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Direct concept photos, sketches, and descriptions into parametric 3D visual proxies
+                Turn any character or object concept image into a real textured 3D <code className="text-cyan-300">.GLB</code> mesh via local ComfyUI
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <button
               type="button"
-              onClick={() => setShowReasonerSettings(true)}
-              className="flex items-center gap-1.5 text-[11px] font-mono text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded border border-white/10 hover:border-white/25 transition-all"
-              title="Click to change Reasoner engine or model"
+              onClick={() => setShowSettingsModal(true)}
+              className="flex items-center gap-1.5 text-[11px] font-mono text-slate-200 hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-1.5 rounded-lg border border-white/10 hover:border-white/25 transition-all cursor-pointer"
+              title="Open ComfyUI & Workflow Settings"
             >
-              <span className="text-slate-400">Reasoner:</span>
-              <span className="text-cyan-300 font-semibold">{reasonerDesc}</span>
-              <Settings className="h-3 w-3 text-slate-400" />
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  comfyStatus === 'connected' ? 'bg-emerald-400' : 'bg-rose-400'
+                }`}
+              />
+              <span>
+                {comfyStatus === 'connected'
+                  ? `ComfyUI Online${comfyStats ? ` • ${comfyStats.vramTotalGb}GB` : ''}`
+                  : 'ComfyUI Offline'}
+              </span>
+              <Settings className="h-3.5 w-3.5 text-slate-400" />
             </button>
             <button
+              type="button"
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
-              title="Close Generator"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:text-white hover:bg-rose-500/25 hover:border-rose-400/40 text-xs font-semibold transition-colors cursor-pointer"
+              title="Close 3D Generator"
             >
-              <X className="h-5 w-5" />
+              <X className="h-4 w-4" />
+              <span>Close</span>
             </button>
           </div>
         </div>
 
-        {/* Main Split Body */}
-        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 min-h-0 overflow-hidden">
-          {/* Left Column: Input Deck (5 cols) */}
-          <div className="md:col-span-5 border-r border-white/10 bg-[#0e111a] p-5 flex flex-col gap-4 overflow-y-auto custom-scrollbar">
-            {/* 1. Reference Image Dropzone */}
+        {/* Main Two-Column Body */}
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 overflow-hidden">
+          {/* LEFT COLUMN (5 Cols): Image Input + ComfyUI 3D Controls */}
+          <div className="lg:col-span-5 border-r border-white/10 bg-[#0d111c] p-4 overflow-y-auto space-y-3.5">
+            {/* 1. Reference Image Upload */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-[11px] font-mono font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <ImageIcon className="h-3.5 w-3.5 text-cyan-400" />
-                  Reference Image
+                <label className="text-[11px] font-mono uppercase tracking-wider text-slate-300 font-bold flex items-center gap-1.5">
+                  <Upload className="h-3.5 w-3.5 text-cyan-400" />
+                  1. Character / Object Reference Image
                 </label>
                 {referenceImageUrl && (
                   <button
+                    type="button"
                     onClick={() => {
                       setReferenceImageUrl(null);
-                      setReferenceMask(null);
-                      setReferenceMetrics(null);
-                      setMaskPreviewUrl(null);
-                      setCurrentIoU(null);
-                      setCompareSheetUrl(null);
-                      setCompareReport(null);
-                      setShowCompareSheet(false);
-                      setCandidateRace([]);
+                      setGeneratedResult(null);
                     }}
-                    className="text-[10px] font-mono text-rose-400 hover:text-rose-300"
+                    className="text-[11px] text-rose-400 hover:text-rose-300 font-medium cursor-pointer"
                   >
                     Clear Image
                   </button>
@@ -754,544 +584,518 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/png,image/jpeg,image/webp"
-                className="hidden"
+                accept="image/*"
                 onChange={handleImageFileChange}
+                className="hidden"
               />
 
-              {referenceImageUrl ? (
-                <div className="relative group rounded-xl overflow-hidden border border-cyan-500/30 bg-black/60 h-44 flex items-center justify-center">
-                  <img
-                    src={referenceImageUrl}
-                    alt="Reference Preview"
-                    className="w-full h-full object-contain"
-                  />
-
-                  {/* Extracted Center-Zone Palette Swatches */}
-                  <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/80 backdrop-blur-md px-2 py-1 rounded-full border border-white/10">
-                    {referencePalette ? (
-                      <>
-                        <div
-                          className="h-3 w-3 rounded-full border border-white/30"
-                          style={{ backgroundColor: referencePalette.primaryColor }}
-                          title={`Primary: ${referencePalette.primaryColor}`}
-                        />
-                        <div
-                          className="h-3 w-3 rounded-full border border-white/30"
-                          style={{ backgroundColor: referencePalette.secondaryColor }}
-                          title={`Secondary: ${referencePalette.secondaryColor}`}
-                        />
-                        <div
-                          className="h-3 w-3 rounded-full border border-white/30"
-                          style={{ backgroundColor: referencePalette.accentColor }}
-                          title={`Accent: ${referencePalette.accentColor}`}
-                        />
-                      </>
-                    ) : (
-                      <span className="text-[9px] font-mono text-slate-400">Sampling...</span>
-                    )}
-                  </div>
-
-                  {/* Direct Vision-to-3D Status Footer HUD */}
-                  <div className="absolute bottom-0 inset-x-0 bg-black/85 backdrop-blur-sm px-3 py-1.5 border-t border-white/10 flex items-center justify-between text-[10px] font-mono">
-                    <span className="text-emerald-300 font-semibold">
-                      ✓ Direct Vision-to-3D Ready
-                    </span>
-                    <span className="text-slate-300">
-                      Palette Sampled ✓
-                    </span>
-                  </div>
-                </div>
-              ) : (
+              {!referenceImageUrl ? (
                 <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="rounded-xl border border-dashed border-white/20 hover:border-cyan-400/60 bg-white/[0.02] hover:bg-cyan-950/20 p-5 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all group text-center"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const file = e.dataTransfer.files?.[0];
+                    if (file && file.type.startsWith('image/')) {
+                      const reader = new FileReader();
+                      reader.onload = () => setReferenceImageUrl(reader.result as string);
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="border-2 border-dashed border-cyan-500/35 hover:border-cyan-400/70 rounded-xl p-5 flex flex-col items-center justify-center gap-2 cursor-pointer bg-cyan-950/10 hover:bg-cyan-950/20 transition-all text-center"
                 >
-                  <div className="h-10 w-10 rounded-full bg-white/5 group-hover:bg-cyan-500/20 flex items-center justify-center text-slate-400 group-hover:text-cyan-300 transition-colors">
-                    <Upload className="h-5 w-5" />
+                  <Upload className="h-6 w-6 text-cyan-400" />
+                  <div className="text-xs font-semibold text-white">
+                    Click or Drag &amp; Drop Character / Object Image
                   </div>
-                  <div>
-                    <div className="text-xs font-semibold text-slate-200 group-hover:text-cyan-200">
-                      Upload Concept Image or Sketch
+                  <span className="text-[10px] text-slate-400">
+                    Supports any PNG, JPG, or WebP concept image — BiRefNet removes the background automatically in ComfyUI
+                  </span>
+                </div>
+              ) : (
+                <div className="relative rounded-xl overflow-hidden border border-white/15 bg-black/60 p-2 flex items-center gap-3">
+                  <img
+                    src={referenceImageUrl}
+                    alt="Reference"
+                    className="h-24 w-24 object-contain rounded-lg bg-[#141824] border border-white/10 shrink-0"
+                  />
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <div className="text-xs font-bold text-emerald-300 flex items-center gap-1">
+                      <Check className="h-3.5 w-3.5 shrink-0" />
+                      <span>Reference Image Staged</span>
                     </div>
-                    <div className="text-[10px] text-slate-500">
-                      PNG, JPG, WebP · Auto-extracts silhouette for 3D alignment
-                    </div>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      This image will be reconstructed into a 3D <code className="text-cyan-300">.GLB</code> mesh and automatically linked as the character&apos;s ComfyUI Reference Image (<code className="text-amber-300">&lt;picture 1&gt;</code>).
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-[10px] font-mono px-2 py-1 rounded bg-white/10 hover:bg-white/15 text-slate-200 cursor-pointer"
+                    >
+                      Replace Image...
+                    </button>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* 2. Text Prompt Input */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-mono font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                <Sliders className="h-3.5 w-3.5 text-amber-400" />
-                Prompt / Directorial Description
-              </label>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="e.g. vintage brass telescope on wooden tripod, armored cyberpunk scout in tactical trench coat, stone garden fountain..."
-                rows={3}
-                className="w-full bg-black/50 border border-white/15 focus:border-amber-400/80 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none transition-all resize-none font-mono"
+            {/* 2. Actor Name & Category */}
+            <div className="rounded-xl border border-white/10 bg-black/40 p-3 space-y-2.5">
+              <div className="text-[11px] font-mono uppercase tracking-wider text-slate-300 font-bold">
+                2. Actor Name &amp; Stage Category
+              </div>
+              <input
+                type="text"
+                value={actorName}
+                onChange={(e) => setActorName(e.target.value)}
+                placeholder="e.g. Elven Archer, Cyberpunk Scout, Sci-Fi Rover..."
+                className="w-full rounded-lg bg-black/70 border border-white/15 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
               />
-
-              {/* Quick Suggestion Chips */}
-              <div className="flex flex-wrap gap-1 pt-1">
-                {[
-                  'Tribal Archer Female',
-                  'Vintage Armored Scout',
-                  'Brass Telescope',
-                  'Stone Fireplace',
-                  'Cyberpunk Drone',
-                  'Ornate Wooden Chair',
-                ].map((sug) => (
+              <div className="grid grid-cols-3 gap-1.5 text-[11px] font-mono">
+                {(
+                  [
+                    { id: 'human' as const, label: '👤 Character' },
+                    { id: 'creature' as const, label: '🐾 Creature' },
+                    { id: 'prop' as const, label: '📦 Prop / Object' },
+                  ]
+                ).map((cat) => (
                   <button
-                    key={sug}
-                    onClick={() => {
-                      setPrompt(sug);
-                      setName(sug);
-                    }}
-                    className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-slate-400 hover:text-slate-200 border border-white/5 transition-colors"
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setActorCategory(cat.id)}
+                    className={`py-1.5 px-2 rounded-lg font-semibold border transition-all cursor-pointer truncate ${
+                      actorCategory === cat.id
+                        ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200 shadow-sm'
+                        : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
+                    }`}
                   >
-                    + {sug}
+                    {cat.label}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* 3. Primary Generate Button */}
+            {/* 3. ComfyUI 3D Engine & Quality Controls (#aa77013b) */}
+            <div className="rounded-xl border border-indigo-500/30 bg-indigo-950/15 p-3 space-y-3 font-mono text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-indigo-200 uppercase tracking-wider">
+                  3. ComfyUI 3D Engine &amp; Mesh Settings
+                </span>
+                <div className="flex rounded-lg bg-black/60 p-0.5 border border-white/10 text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => setWorkflowSource('builtin')}
+                    className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${
+                      workflowSource === 'builtin'
+                        ? 'bg-indigo-600 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Built-in (#aa77013b)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWorkflowSource('custom')}
+                    className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${
+                      workflowSource === 'custom'
+                        ? 'bg-cyan-500 text-black font-bold'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Custom 3D .JSON
+                  </button>
+                </div>
+              </div>
+
+              {workflowSource === 'custom' ? (
+                <div className="space-y-2 pt-1 border-t border-white/10">
+                  <div className="text-[10px] text-slate-300">
+                    Load any local ComfyUI 3D workflow (e.g. <code className="text-cyan-300">StableFast3D_to_Mesh.json</code> or custom local URL/path):
+                  </div>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={customWorkflowUrl}
+                      onChange={(e) => setCustomWorkflowUrl(e.target.value)}
+                      placeholder="D:\ComfyUI\custom_nodes\ComfyUI-3D-Pack\_Example_Workflows\StableFast3D_to_Mesh.json"
+                      className="flex-1 rounded-lg bg-black/70 border border-white/15 px-2.5 py-1.5 text-[10.5px] text-white placeholder-slate-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleLoadCustomWorkflowUrl()}
+                      className="px-2.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-[10px] cursor-pointer shrink-0"
+                    >
+                      Load
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleLoadCustomWorkflowUrl(
+                          'D:\\ComfyUI\\custom_nodes\\ComfyUI-3D-Pack\\_Example_Workflows\\StableFast3D_to_Mesh.json'
+                        )
+                      }
+                      className="px-2 py-1 rounded bg-white/10 hover:bg-white/15 text-[10px] text-cyan-200 border border-cyan-500/30 cursor-pointer"
+                    >
+                      ⚡ Load Installed StableFast3D_to_Mesh.json
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleScanLocalComfyWorkflows}
+                      disabled={isScanningLocal}
+                      className="flex items-center gap-1 px-2 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-[10px] text-indigo-200 border border-indigo-400/30 cursor-pointer"
+                    >
+                      <FolderOpen className="h-3 w-3" />
+                      <span>{isScanningLocal ? 'Scanning...' : 'Scan Local ComfyUI'}</span>
+                    </button>
+                    <label className="flex items-center gap-1 px-2 py-1 rounded bg-white/10 hover:bg-white/15 text-[10px] text-slate-200 border border-white/15 cursor-pointer">
+                      <Upload className="h-3 w-3 text-cyan-300" />
+                      <span>Upload .JSON</span>
+                      <input
+                        type="file"
+                        accept=".json,application/json"
+                        onChange={handleUploadCustomWorkflowFile}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                  {localWorkflows.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {localWorkflows.map((wf) => (
+                        <button
+                          key={wf}
+                          type="button"
+                          onClick={() => handleLoadCustomWorkflowUrl(wf)}
+                          className="px-1.5 py-0.5 rounded bg-indigo-500/20 hover:bg-cyan-500/30 text-[9.5px] text-indigo-100 border border-indigo-400/30 cursor-pointer"
+                        >
+                          📄 {wf}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {customWorkflowLabel && (
+                    <div className="text-[10px] text-emerald-300 font-semibold">
+                      ✓ Active Custom 3D Workflow: {customWorkflowLabel}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {/* Model Switch: Pixal3D vs. TRELLIS.2 */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400">
+                      3D Diffusion Model (Installed in <code className="text-slate-300">D:\ComfyUI\models\</code>)
+                    </label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setEngineMode('pixal3d')}
+                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                          engineMode === 'pixal3d'
+                            ? 'bg-indigo-600/30 border-indigo-400 text-white shadow'
+                            : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="font-bold text-[11px] text-indigo-200">⚡ Pixal3D INT8</div>
+                        <div className="text-[9.5px] text-slate-400 truncate">
+                          + MoGe Camera FoV Depth
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEngineMode('trellis2')}
+                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                          engineMode === 'trellis2'
+                            ? 'bg-cyan-600/30 border-cyan-400 text-white shadow'
+                            : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="font-bold text-[11px] text-cyan-200">🧊 TRELLIS.2 INT8</div>
+                        <div className="text-[9.5px] text-slate-400 truncate">
+                          Direct Voxel-to-Mesh
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Quality Mode: Fast Vertex-Color vs. Full PBR */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400">Mesh &amp; Texture Baking Mode</label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setQualityMode('fast_vertex')}
+                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                          qualityMode === 'fast_vertex'
+                            ? 'bg-emerald-600/25 border-emerald-400 text-white'
+                            : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="font-bold text-[11px] text-emerald-300">
+                          🚀 Fast Vertex-Color
+                        </div>
+                        <div className="text-[9.5px] text-slate-400 truncate">
+                          Skips slow UV/Normal bake
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setQualityMode('full_pbr')}
+                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
+                          qualityMode === 'full_pbr'
+                            ? 'bg-amber-600/25 border-amber-400 text-white'
+                            : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="font-bold text-[11px] text-amber-300">
+                          🎨 Full PBR UV-Baked
+                        </div>
+                        <div className="text-[9.5px] text-slate-400 truncate">
+                          Base + Normal + AO + Roughness
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Background Removal Toggle + Texture Resolution + Seed */}
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] text-slate-400">Auto Cutout</label>
+                  <button
+                    type="button"
+                    onClick={() => setRemoveBackground((v) => !v)}
+                    className={`py-1.5 px-2 rounded-lg border text-[10.5px] font-bold transition-all cursor-pointer truncate ${
+                      removeBackground
+                        ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
+                        : 'bg-white/5 border-white/15 text-slate-400'
+                    }`}
+                    title="Run BiRefNet AI background removal inside ComfyUI before 3D generation"
+                  >
+                    {removeBackground ? '✓ BiRefNet ON' : 'BiRefNet OFF'}
+                  </button>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] text-slate-400">Texture Res</label>
+                  <select
+                    value={textureResolution}
+                    onChange={(e) =>
+                      setTextureResolution(Number(e.target.value) as 1024 | 2048 | 4096)
+                    }
+                    className="rounded-lg bg-black/70 border border-white/15 px-2 py-1.5 text-[10.5px] text-white"
+                  >
+                    <option value={1024}>1024 px</option>
+                    <option value={2048}>2048 px</option>
+                    <option value={4096}>4096 px</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[10px] text-slate-400 flex items-center justify-between">
+                    <span>Seed</span>
+                    <button
+                      type="button"
+                      onClick={() => setSeed(Math.floor(Math.random() * 999999) + 1)}
+                      className="text-cyan-300 hover:text-white cursor-pointer"
+                      title="Randomize seed"
+                    >
+                      <Dice5 className="h-3 w-3" />
+                    </button>
+                  </label>
+                  <input
+                    type="number"
+                    value={seed}
+                    onChange={(e) => setSeed(Math.max(1, Number(e.target.value) || 42))}
+                    className="rounded-lg bg-black/70 border border-white/15 px-2 py-1.5 text-[10.5px] text-white"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Generate 3D .GLB Button */}
             <button
-              onClick={handleGenerate}
-              disabled={isGenerating || (!prompt.trim() && !referenceImageUrl)}
-              className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-600 via-indigo-600 to-cyan-600 hover:from-amber-500 hover:via-indigo-500 hover:to-cyan-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-950/50 disabled:opacity-50 transition-all font-mono"
+              type="button"
+              onClick={handleGenerateGlb}
+              disabled={isGenerating || !referenceImageUrl}
+              className="w-full py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider text-white bg-gradient-to-r from-cyan-500 via-indigo-600 to-violet-600 hover:brightness-110 disabled:opacity-40 shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
               {isGenerating ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin text-amber-300" />
-                  <span>
-                    Reasoning 3D Figure ({elapsedSec}s)...
-                  </span>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Generating 3D .GLB in ComfyUI ({elapsedSec}s)...</span>
                 </>
               ) : (
                 <>
-                  <Sparkles className="h-4 w-4 text-amber-300" />
-                  <span>{sculpt ? 'Re-Generate 3D Figure' : 'Generate 3D Figure'}</span>
+                  <Zap className="h-4 w-4" />
+                  <span>
+                    {generatedResult
+                      ? 'Re-Generate 3D .GLB in ComfyUI'
+                      : 'Generate 3D .GLB in ComfyUI'}
+                  </span>
                 </>
               )}
             </button>
 
-            {/* Quick Instant Procedural Action */}
-            <button
-              type="button"
-              onClick={handleInstantProceduralGenerate}
-              disabled={isGenerating || (!prompt.trim() && !referenceImageUrl)}
-              className="w-full py-1.5 px-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-cyan-300 hover:text-cyan-200 text-[11px] font-mono flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40"
-              title="Instantly construct an authentic multi-part 3D model using the local geometric engine (no LLM, 0ms)"
-            >
-              <Zap className="h-3 w-3 text-cyan-400" />
-              <span>Instant Procedural 3D (0ms · No LLM)</span>
-            </button>
-
-            {/* Active Stage or Error Status */}
-            {generationStage && (
-              <div className="px-3 py-2 rounded-lg bg-blue-950/40 border border-blue-500/30 text-[11px] font-mono text-blue-300 flex items-center gap-2 animate-pulse">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span>{generationStage}</span>
-              </div>
-            )}
-            {generationError && (
-              <div className="px-3 py-2.5 rounded-lg bg-rose-950/50 border border-rose-500/40 text-[11px] font-mono text-rose-300 space-y-2">
-                <div className="flex items-start gap-1.5">
-                  <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
-                  <div className="flex-1">
-                    <div>{generationError}</div>
-                    {sculpt && (
-                      <div className="text-[10px] text-emerald-300 mt-1">
-                        ✓ <strong>Procedural 3D proxy loaded:</strong> A full multi-part 3D model is active in the preview stage.
-                      </div>
-                    )}
+            {/* Live Progress Banner */}
+            {isGenerating && (
+              <div className="rounded-xl border border-cyan-500/35 bg-cyan-950/20 p-3 space-y-2 font-mono text-xs">
+                <div className="flex items-center justify-between text-[11px] text-cyan-200">
+                  <span className="truncate font-semibold">{generationStage}</span>
+                  <span className="text-cyan-400 shrink-0">{elapsedSec}s</span>
+                </div>
+                {stepProgress && stepProgress.maxSteps > 0 && (
+                  <div className="w-full h-1.5 rounded-full bg-black/60 overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-400 to-indigo-500 transition-all duration-200"
+                      style={{
+                        width: `${Math.min(
+                          100,
+                          Math.round((stepProgress.step / stepProgress.maxSteps) * 100)
+                        )}%`,
+                      }}
+                    />
                   </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-rose-500/20">
-                  <button
-                    type="button"
-                    onClick={() => setShowReasonerSettings(true)}
-                    className="px-2 py-1 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 text-[10px] font-mono transition-colors"
-                  >
-                    ⚙️ Change Reasoner Model
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleInstantProceduralGenerate}
-                    className="px-2 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 text-[10px] font-mono transition-colors"
-                  >
-                    ⚡ Re-synthesize Procedurally (0ms)
-                  </button>
-                </div>
+                )}
               </div>
             )}
 
-            {/* 4. Revision & Refinement Controls (Visible once figure is generated) */}
-            {sculpt && (
-              <div className="mt-auto pt-3 border-t border-white/10 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-mono font-bold text-amber-300 flex items-center gap-1.5">
-                    <RefreshCw className="h-3 w-3" />
-                    Refine & Revise Figure
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="text"
-                    value={revisionFeedback}
-                    onChange={(e) => setRevisionFeedback(e.target.value)}
-                    placeholder="e.g. widen torso, make ears longer, thicker legs..."
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && revisionFeedback.trim()) handleRefine();
-                    }}
-                    className="flex-1 bg-black/60 border border-white/15 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none font-mono"
-                  />
-                  <button
-                    onClick={handleRefine}
-                    disabled={isRefining || !revisionFeedback.trim()}
-                    className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs disabled:opacity-40 transition-colors font-mono"
-                  >
-                    {isRefining ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Refine'}
-                  </button>
+            {/* Error Banner */}
+            {generationError && (
+              <div className="rounded-xl border border-rose-500/40 bg-rose-950/25 p-3 text-xs text-rose-200 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-bold text-rose-300">ComfyUI 3D Generation Notice</div>
+                  <div className="text-[11px] leading-relaxed">{generationError}</div>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Right Column: 3D Interactive Canvas & Match HUD (7 cols) */}
-          <div className="md:col-span-7 bg-[#090b10] flex flex-col relative overflow-hidden">
-            {/* Viewport Overlay Controls Top-Bar */}
-            <div className="absolute top-3 inset-x-3 z-10 flex items-center justify-between pointer-events-none">
-              {/* Active 3D Mode Badge */}
-              <div className="pointer-events-auto flex items-center gap-2">
-                {characterRig && displayMode === 'skinned' ? (
-                  <span className="px-2.5 py-1 rounded-full bg-emerald-950/80 backdrop-blur-md border border-emerald-500/40 text-[10px] font-mono text-emerald-300 font-bold flex items-center gap-1.5 shadow-md">
-                    <span>✨</span>
-                    <span>Skinned 3D (Sculpted Previs)</span>
+          {/* RIGHT COLUMN (7 Cols): Interactive 3D .GLB Viewport & Export Bar */}
+          <div className="lg:col-span-7 flex flex-col bg-[#080a10] relative min-h-[380px]">
+            {/* Top Viewport Overlay Badges & Controls */}
+            <div className="absolute top-3 left-3 right-3 z-10 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
+              <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto">
+                {generatedResult ? (
+                  <>
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[11px] font-mono font-bold">
+                      ✓ .GLB Ready • {(generatedResult.sizeBytes / (1024 * 1024)).toFixed(2)} MB
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-black/75 border border-white/15 text-slate-200 text-[10.5px] font-mono">
+                      {generatedResult.vertexCount.toLocaleString()} verts •{' '}
+                      {generatedResult.triangleCount.toLocaleString()} tris
+                    </span>
+                  </>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-lg bg-black/70 border border-white/10 text-slate-400 text-[11px] font-mono">
+                    3D .GLB Preview Stage (Drag to Orbit • Scroll to Zoom)
                   </span>
-                ) : sculpt ? (
-                  <span className="px-2.5 py-1 rounded-full bg-black/70 backdrop-blur-md border border-white/10 text-[10px] font-mono text-slate-300">
-                    {sculpt.parts.length} parts · {sculpt.heightMeters.toFixed(2)}m tall ·{' '}
-                    {sculpt.rig === 'humanoid' ? 'Rigged (Humanoid)' : 'Static'}
-                  </span>
-                ) : null}
+                )}
               </div>
 
-              {/* View mode toggle, Wireframe, and HUD toggles */}
-              <div className="pointer-events-auto flex items-center gap-1.5">
-                {characterRig && (
-                  <div className="flex items-center bg-black/60 rounded-lg p-0.5 border border-white/15 backdrop-blur-md text-[10px] font-mono">
-                    <button
-                      onClick={() => setDisplayMode('skinned')}
-                      className={`px-2 py-0.5 rounded transition-all ${
-                        displayMode === 'skinned'
-                          ? 'bg-emerald-500 text-black font-bold'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      Skinned 3D
-                    </button>
-                    <button
-                      onClick={() => setDisplayMode('parametric')}
-                      className={`px-2 py-0.5 rounded transition-all ${
-                        displayMode === 'parametric'
-                          ? 'bg-amber-500 text-black font-bold'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      Parametric
-                    </button>
-                  </div>
-                )}
-
+              <div className="flex items-center gap-1.5 pointer-events-auto">
                 <button
-                  onClick={() => setIsWireframe(!isWireframe)}
-                  className={`px-2.5 py-1 rounded-lg backdrop-blur-md text-[10px] font-mono border transition-all flex items-center gap-1 ${
-                    isWireframe
-                      ? 'bg-cyan-500 text-black border-cyan-400 font-bold'
-                      : 'bg-black/60 text-slate-300 border-white/15 hover:border-white/30'
+                  type="button"
+                  onClick={() => setAutoSpin((v) => !v)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10.5px] font-mono font-semibold cursor-pointer ${
+                    autoSpin
+                      ? 'bg-cyan-500/20 border-cyan-400/40 text-cyan-200'
+                      : 'bg-black/70 border-white/15 text-slate-400 hover:text-white'
                   }`}
-                  title="Toggle wireframe topology view"
+                >
+                  <RotateCw className="h-3 w-3" />
+                  <span>Turntable</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsWireframe((v) => !v)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10.5px] font-mono font-semibold cursor-pointer ${
+                    isWireframe
+                      ? 'bg-amber-500/20 border-amber-400/40 text-amber-200'
+                      : 'bg-black/70 border-white/15 text-slate-400 hover:text-white'
+                  }`}
                 >
                   <Box className="h-3 w-3" />
                   <span>Wireframe</span>
                 </button>
-                {sculpt && (
-                  <button
-                    onClick={() => setShowPartList(!showPartList)}
-                    className={`px-2.5 py-1 rounded-lg backdrop-blur-md text-[10px] font-mono border transition-all flex items-center gap-1 ${
-                      showPartList
-                        ? 'bg-indigo-600 text-white border-indigo-400 font-bold'
-                        : 'bg-black/60 text-slate-300 border-white/15 hover:border-white/30'
-                    }`}
-                    title="Toggle part breakdown tree"
-                  >
-                    <Layers className="h-3 w-3" />
-                    <span>Parts</span>
-                    {showPartList ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                  </button>
-                )}
               </div>
             </div>
 
-            {/* 3D Canvas Mount Point */}
-            <div ref={canvasMountRef} className="flex-1 w-full h-full cursor-grab active:cursor-grabbing relative" />
+            {/* 3D WebGL Canvas Container */}
+            <div ref={canvasMountRef} className="flex-1 w-full h-full cursor-grab active:cursor-grabbing" />
 
-            {/* Instructions / Guided Step-2 Overlay (When no 3D figure is generated yet) */}
-            {!sculpt && !characterRig && !isGenerating && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center pointer-events-none">
-                {referenceImageUrl ? (
-                  <div className="pointer-events-auto max-w-md w-full rounded-2xl bg-[#0e121d]/90 backdrop-blur-xl border border-cyan-500/30 p-5 shadow-2xl space-y-4">
-                    <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
-                      <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-400/30 text-[10px] font-mono font-bold text-cyan-300 uppercase tracking-wider">
-                        ✓ Step 1 Complete · Reference Staged
-                      </span>
-                      {referenceMetrics && (
-                        <span className="text-[10px] font-mono text-slate-400">
-                          Ratio <strong className="text-cyan-300">{referenceMetrics.aspectRatio}:1</strong>
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-4 text-left">
-                      <div className="relative h-24 w-24 rounded-xl overflow-hidden border border-white/15 bg-black/60 shrink-0 flex items-center justify-center">
-                        <img
-                          src={referenceImageUrl}
-                          alt="Staged Reference"
-                          className="w-full h-full object-contain"
-                        />
-                      </div>
-
-                      <div className="flex-1 min-w-0 space-y-1.5">
-                        <h3 className="text-xs font-bold text-white font-mono">
-                          Step 2: Ready to Generate 3D Figure
-                        </h3>
-                        <p className="text-[11px] text-slate-400 leading-relaxed">
-                          Your concept silhouette &amp; color palette are extracted. Add an optional description on the left (e.g.{' '}
-                          <span className="text-amber-300 font-mono">&quot;Tribal Archer Female&quot;</span>) or generate directly now.
-                        </p>
-
-                        {referencePalette && (
-                          <div className="flex items-center gap-2 pt-1">
-                            <span className="text-[9px] font-mono text-slate-500 uppercase">Extracted Palette:</span>
-                            <div className="flex items-center gap-1">
-                              <span
-                                className="h-3.5 w-3.5 rounded-full border border-white/30"
-                                style={{ backgroundColor: referencePalette.primaryColor }}
-                                title={`Primary: ${referencePalette.primaryColor}`}
-                              />
-                              <span
-                                className="h-3.5 w-3.5 rounded-full border border-white/30"
-                                style={{ backgroundColor: referencePalette.secondaryColor }}
-                                title={`Secondary: ${referencePalette.secondaryColor}`}
-                              />
-                              <span
-                                className="h-3.5 w-3.5 rounded-full border border-white/30"
-                                style={{ backgroundColor: referencePalette.accentColor }}
-                                title={`Accent: ${referencePalette.accentColor}`}
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={handleGenerate}
-                        className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-600 via-indigo-600 to-cyan-600 hover:from-amber-500 hover:via-indigo-500 hover:to-cyan-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-indigo-950/50 transition-all font-mono"
-                      >
-                        <Sparkles className="h-4 w-4 text-amber-300" />
-                        <span>Generate 3D Figure Now</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleInstantProceduralGenerate}
-                        className="py-2.5 px-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 text-cyan-300 hover:text-cyan-200 text-[11px] font-mono flex items-center justify-center gap-1.5 transition-colors"
-                        title="Instant 0ms Procedural Synthesis"
-                      >
-                        <Zap className="h-3.5 w-3.5 text-cyan-400" />
-                        <span>0ms Procedural</span>
-                      </button>
-                    </div>
+            {/* Empty State Guidance Overlay when no .GLB is generated yet */}
+            {!generatedResult && !isGenerating && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-6">
+                <div className="max-w-md rounded-2xl border border-white/10 bg-black/75 backdrop-blur-md p-5 text-center space-y-2">
+                  <Sparkles className="h-7 w-7 text-cyan-400 mx-auto" />
+                  <div className="text-sm font-bold text-white">
+                    Upload an Image &amp; Click &ldquo;Generate 3D .GLB in ComfyUI&rdquo;
                   </div>
-                ) : (
-                  <>
-                    <div className="h-16 w-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-slate-500 mb-3">
-                      <Box className="h-8 w-8" />
-                    </div>
-                    <h3 className="text-sm font-bold text-slate-300 mb-1">
-                      Interactive 3D Stage Preview
-                    </h3>
-                    <p className="text-xs text-slate-500 max-w-sm">
-                      Upload an image or enter a description on the left to reason and build a multi-part parametric 3D proxy.
-                    </p>
-                  </>
-                )}
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Your local ComfyUI server (<code className="text-cyan-300">http://127.0.0.1:8188</code>) will remove the background with <strong>BiRefNet</strong>, reconstruct the 3D geometry and textures using <strong>Pixal3D</strong> or <strong>TRELLIS.2</strong>, and load the resulting <code className="text-cyan-300">.GLB</code> model right here.
+                  </p>
+                </div>
               </div>
             )}
 
-            {/* CozyClay Side-by-Side Compare Sheet & Candidate Race Drawer */}
-            {showCompareSheet && compareSheetUrl && (
-              <div className="absolute top-14 left-3 w-80 bg-[#0c0e15]/95 backdrop-blur-xl border border-cyan-500/40 rounded-xl p-3 z-20 shadow-2xl font-mono text-[10px] space-y-2.5">
-                <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
-                  <span className="font-bold text-cyan-300 flex items-center gap-1.5">
-                    <span>🎯</span>
-                    <span>CozyClay Silhouette Compare Sheet</span>
+            {/* Bottom Action Bar */}
+            <div className="px-5 py-3.5 border-t border-white/10 bg-[#101420] flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div className="text-xs font-mono text-slate-400 truncate max-w-[260px]">
+                {generatedResult ? (
+                  <span className="text-emerald-300 font-semibold" title={generatedResult.diskPath}>
+                    {generatedResult.filename}
                   </span>
+                ) : (
+                  <span>No .GLB generated yet</span>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {generatedResult && (
                   <button
                     type="button"
-                    onClick={() => setShowCompareSheet(false)}
-                    className="text-slate-400 hover:text-white"
-                    title="Close Compare Sheet"
+                    onClick={handleDownloadGlb}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-semibold text-slate-100 cursor-pointer transition-all"
+                    title="Download generated .GLB file to your PC"
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <Download className="h-3.5 w-3.5 text-cyan-300" />
+                    <span>Download .GLB</span>
                   </button>
-                </div>
-
-                <div className="rounded-lg overflow-hidden border border-white/15 bg-black/70">
-                  <img
-                    src={compareSheetUrl}
-                    alt="CozyClay Reference vs Sculpt Overlay"
-                    className="w-full h-36 object-contain"
-                  />
-                  <div className="px-2 py-1 bg-black/80 border-t border-white/10 flex items-center justify-between text-[9px] text-slate-300">
-                    <span className="flex items-center gap-1">
-                      <span className="h-2 w-2 rounded-full bg-[#bebebe] inline-block" /> Match
-                    </span>
-                    <span className="flex items-center gap-1 text-rose-300">
-                      <span className="h-2 w-2 rounded-full bg-[#dc2828] inline-block" /> Missing
-                    </span>
-                    <span className="flex items-center gap-1 text-blue-300">
-                      <span className="h-2 w-2 rounded-full bg-[#285adc] inline-block" /> Extra
-                    </span>
-                  </div>
-                </div>
-
-                {compareReport && (
-                  <div className="grid grid-cols-3 gap-1.5 text-center bg-white/[0.03] border border-white/10 rounded-lg p-1.5">
-                    <div>
-                      <div className="text-[9px] text-slate-400">Top Missing</div>
-                      <div className="font-bold text-rose-300">
-                        {Math.round(compareReport.missingByBand.top * 100)}%
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[9px] text-slate-400">Mid Missing</div>
-                      <div className="font-bold text-amber-300">
-                        {Math.round(compareReport.missingByBand.middle * 100)}%
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[9px] text-slate-400">Bot Missing</div>
-                      <div className="font-bold text-cyan-300">
-                        {Math.round(compareReport.missingByBand.bottom * 100)}%
-                      </div>
-                    </div>
-                  </div>
                 )}
 
-                {candidateRace.length > 0 && (
-                  <div className="space-y-1 pt-1 border-t border-white/10">
-                    <div className="text-[9px] uppercase tracking-wider text-slate-400 font-bold">
-                      CozyClay Candidate Race ({candidateRace.length} tested)
-                    </div>
-                    <div className="max-h-28 overflow-y-auto custom-scrollbar space-y-1">
-                      {candidateRace.map((c, idx) => (
-                        <div
-                          key={`${c.label}-${idx}`}
-                          className="flex items-center justify-between px-1.5 py-0.5 rounded bg-white/[0.03] text-slate-300"
-                        >
-                          <span className="truncate max-w-[175px]">{c.label}</span>
-                          <span className={c.delta > 0 ? 'text-emerald-300 font-bold' : 'text-slate-400'}>
-                            {Math.round(c.iou * 100)}%{' '}
-                            {c.delta !== 0 && `(${c.delta > 0 ? '+' : ''}${Math.round(c.delta * 100)}%)`}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Part List Inspector Drawer */}
-            {sculpt && showPartList && (
-              <div className="absolute bottom-16 right-3 w-72 max-h-64 bg-black/90 backdrop-blur-md border border-white/15 rounded-xl p-3 z-20 overflow-y-auto custom-scrollbar shadow-2xl font-mono text-[10px]">
-                <div className="font-bold text-slate-200 pb-1.5 border-b border-white/10 flex items-center justify-between">
-                  <span>Part Hierarchy ({sculpt.parts.length})</span>
-                  <span className="text-slate-500 font-normal">Shape / Bone</span>
-                </div>
-                <div className="space-y-1 pt-1.5">
-                  {sculpt.parts.map((p) => (
-                    <div
-                      key={p.id}
-                      className="flex items-center justify-between p-1 rounded hover:bg-white/5 text-slate-300"
-                    >
-                      <span className="font-semibold text-white truncate max-w-[120px]">{p.id}</span>
-                      <div className="flex items-center gap-1.5 text-slate-400">
-                        <span className="px-1 py-0.2 rounded bg-white/10 text-cyan-300">{p.shape}</span>
-                        {p.bone && (
-                          <span className="px-1 py-0.2 rounded bg-amber-500/20 text-amber-300">{p.bone}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Bottom Action Footer Bar */}
-            <div className="px-5 py-3 border-t border-white/10 bg-[#0e111a] flex items-center justify-between shrink-0">
-              <div className="text-[11px] font-mono text-slate-400">
-                {sculpt ? (
-                  <span>
-                    Ready to place in scene or export: <strong className="text-white">{sculpt.name}</strong>
-                  </span>
-                ) : referenceImageUrl ? (
-                  <span className="text-cyan-300">
-                    Reference image staged · Click <strong className="text-white">Generate 3D Figure</strong> to build your 3D model
-                  </span>
-                ) : (
-                  <span>Left-drag to rotate · Scroll to zoom</span>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
                 <button
-                  onClick={onClose}
-                  className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white font-mono text-xs font-semibold transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
+                  type="button"
+                  disabled={!generatedResult}
                   onClick={handleSaveToLibrary}
-                  disabled={!sculpt}
-                  className="px-4 py-2 rounded-xl bg-indigo-600/80 hover:bg-indigo-600 text-white font-mono text-xs font-semibold border border-indigo-400/40 disabled:opacity-40 transition-colors shadow-sm"
-                  title="Save figure to persistent 3D Asset Library"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs font-bold text-white shadow-md shadow-indigo-600/20 cursor-pointer transition-all"
                 >
-                  Save to 3D Library
+                  {savedLibrarySuccess ? (
+                    <>
+                      <Check className="h-3.5 w-3.5" />
+                      <span>Saved to 3D Library!</span>
+                    </>
+                  ) : (
+                    <span>Save to 3D Library</span>
+                  )}
                 </button>
+
                 <button
+                  type="button"
+                  disabled={!generatedResult}
                   onClick={handleAddToScene}
-                  disabled={!sculpt}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-mono text-xs font-bold disabled:opacity-40 transition-all shadow-glow-gold flex items-center gap-1.5"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-40 text-xs font-bold text-black shadow-md shadow-amber-500/20 cursor-pointer transition-all"
                 >
                   {appliedSuccess ? (
                     <>
                       <Check className="h-4 w-4" />
-                      <span>Added!</span>
+                      <span>Added to Scene!</span>
                     </>
                   ) : (
-                    <span>Add to Active Scene</span>
+                    <span>{targetActorId ? 'Apply .GLB to Actor' : 'Add to Active Scene'}</span>
                   )}
                 </button>
               </div>

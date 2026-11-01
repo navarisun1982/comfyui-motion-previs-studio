@@ -80,6 +80,68 @@ function attachLocalWorkflowMiddleware(middlewares: { use: (fn: (req: any, res: 
   const path = require('path');
   middlewares.use((req, res, next) => {
     const rawUrl = req.url || '';
+    if (rawUrl.startsWith('/api/comfy-glb-output')) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      try {
+        const parsedUrl = new URL(rawUrl, 'http://127.0.0.1:5173');
+        const explicitPath = (parsedUrl.searchParams.get('path') || '').trim();
+        const sinceMs = Number(parsedUrl.searchParams.get('sinceMs') || '0');
+        const comfyOutputDirs = ['D:\\ComfyUI\\output\\3d', 'D:\\ComfyUI\\output', 'D:\\ComfyUI\\temp'];
+
+        let targetFile = '';
+        if (explicitPath && fs.existsSync(explicitPath)) {
+          targetFile = explicitPath;
+        } else {
+          // Find the most recently modified .glb file across ComfyUI output directories
+          let newestMtime = Math.max(0, sinceMs - 5000);
+          const scanDir = (dir: string, depth = 0) => {
+            if (depth > 2 || !fs.existsSync(dir)) return;
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                scanDir(full, depth + 1);
+              } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.glb')) {
+                const stat = fs.statSync(full);
+                if (stat.mtimeMs >= newestMtime) {
+                  newestMtime = stat.mtimeMs;
+                  targetFile = full;
+                }
+              }
+            }
+          };
+          for (const d of comfyOutputDirs) {
+            scanDir(d, 0);
+          }
+        }
+
+        if (!targetFile || !fs.existsSync(targetFile)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No generated .glb file found in ComfyUI output directory yet.' }));
+          return;
+        }
+
+        const buf = fs.readFileSync(targetFile);
+        res.setHeader('X-Comfy-Glb-Path', encodeURIComponent(targetFile));
+        res.writeHead(200, {
+          'Content-Type': 'model/gltf-binary',
+          'Content-Length': buf.length,
+        });
+        res.end(buf);
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err?.message || 'Failed to read generated .glb file' }));
+      }
+      return;
+    }
+
     if (!rawUrl.startsWith('/api/local-workflow')) {
       next();
       return;

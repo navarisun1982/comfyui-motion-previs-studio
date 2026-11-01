@@ -44,6 +44,7 @@ import {
   Globe,
 } from 'lucide-react';
 import { GlbResourcesDirectory } from './GlbResourcesDirectory';
+import { AIGenerator3D } from './AIGenerator3D';
 
 export const OBJECT_TARGET_PALETTE = [
   { hex: '#ef4444', name: 'Red' },
@@ -167,6 +168,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const lookPromptInputRef = useRef<HTMLInputElement | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<CharacterCardSubTab>('motion');
   const [showGlbResources, setShowGlbResources] = useState<boolean>(false);
+  const [showComfy3dStudio, setShowComfy3dStudio] = useState<boolean>(false);
 
   const kind = actor.kind || 'human';
   const shotDur = shotDurationSeconds || 4;
@@ -505,7 +507,16 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="flex flex-wrap items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowComfy3dStudio(true)}
+                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/35 border border-cyan-400/45 text-[10px] font-bold text-cyan-200 cursor-pointer transition-colors"
+                title="Turn this character's reference image into a real 3D .GLB model using ComfyUI (Pixal3D / TRELLIS.2 / BiRefNet)"
+              >
+                <Box className="h-3 w-3 text-cyan-300" />
+                <span>Image &rarr; 3D .GLB</span>
+              </button>
               <label
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-400/40 text-[10px] font-semibold text-indigo-100 cursor-pointer transition-colors"
                 title="Upload reference image for this character/object (used in ComfyUI MiniMax H3 / LTX video)"
@@ -549,6 +560,16 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
               )}
             </div>
           </div>
+
+          {showComfy3dStudio && (
+            <AIGenerator3D
+              isOpen={showComfy3dStudio}
+              onClose={() => setShowComfy3dStudio(false)}
+              initialPrompt={actor.name}
+              initialImageUrl={actor.conceptImageUrl}
+              targetActorId={actor.id}
+            />
+          )}
 
           {/* ================= SUB-TAB 1 (MOTION & STANCE) ================= */}
           <div className={activeSubTab === 'motion' || activeSubTab === 'all' ? 'space-y-2.5' : 'hidden'}>
