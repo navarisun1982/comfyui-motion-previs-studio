@@ -16,6 +16,7 @@ const DB_VERSION = 1;
 // In-memory caches for zero-latency access
 const bufferMemoryCache = new Map<string, ArrayBuffer>();
 const blobUrlMemoryCache = new Map<string, string>();
+const blobUrlToModelIdCache = new Map<string, string>();
 
 let dbPromise: Promise<IDBDatabase | null> | null = null;
 
@@ -113,6 +114,9 @@ export async function storeModelBuffer(
 ): Promise<{ blobUrl: string; modelId: string }> {
   // 1. In-memory cache
   bufferMemoryCache.set(id, buffer);
+  bufferMemoryCache.set(`model://${id}`, buffer);
+  blobUrlToModelIdCache.set(id, id);
+  blobUrlToModelIdCache.set(`model://${id}`, id);
 
   // 2. Blob URL
   let blobUrl = '';
@@ -122,6 +126,7 @@ export async function storeModelBuffer(
       blobUrl = URL.createObjectURL(blob);
       blobUrlMemoryCache.set(id, blobUrl);
       blobUrlMemoryCache.set(blobUrl, blobUrl);
+      blobUrlToModelIdCache.set(blobUrl, id);
       bufferMemoryCache.set(blobUrl, buffer);
     } catch (e) {
       console.warn('Failed to create blob URL for model:', e);
@@ -165,8 +170,8 @@ export async function getModelBuffer(idOrUrl: string): Promise<ArrayBuffer | nul
   const memHit = bufferMemoryCache.get(idOrUrl);
   if (memHit) return memHit;
 
-  // Extract ID if formatted as model://id
-  const id = idOrUrl.startsWith('model://') ? idOrUrl.replace('model://', '') : idOrUrl;
+  // Extract ID if formatted as model://id or mapped from blob: URL
+  const id = getModelIdFromUrl(idOrUrl) || (idOrUrl.startsWith('model://') ? idOrUrl.replace('model://', '') : idOrUrl);
 
   const idHit = bufferMemoryCache.get(id);
   if (idHit) return idHit;
@@ -197,7 +202,10 @@ export async function getModelBuffer(idOrUrl: string): Promise<ArrayBuffer | nul
 
       if (record && record.buffer) {
         bufferMemoryCache.set(id, record.buffer);
+        bufferMemoryCache.set(`model://${id}`, record.buffer);
         bufferMemoryCache.set(idOrUrl, record.buffer);
+        blobUrlToModelIdCache.set(id, id);
+        blobUrlToModelIdCache.set(`model://${id}`, id);
         return record.buffer;
       }
     } catch (e) {
@@ -244,7 +252,11 @@ export async function getModelBlobUrl(idOrUrl: string): Promise<string> {
     const url = URL.createObjectURL(blob);
     blobUrlMemoryCache.set(id, url);
     blobUrlMemoryCache.set(url, url);
+    blobUrlToModelIdCache.set(url, id);
+    blobUrlToModelIdCache.set(id, id);
+    blobUrlToModelIdCache.set(`model://${id}`, id);
     bufferMemoryCache.set(url, buffer);
+    bufferMemoryCache.set(`model://${id}`, buffer);
     return url;
   }
 
@@ -293,9 +305,37 @@ export async function registerModelFile(file: File): Promise<{
 }
 
 /**
+ * Resolves any known model URL (`blob:...`, `model://...`, or raw modelId) back to its canonical `modelId`.
+ */
+export function getModelIdFromUrl(idOrUrl?: string | null): string | null {
+  if (!idOrUrl) return null;
+  if (idOrUrl.startsWith('model://')) {
+    return idOrUrl.replace('model://', '');
+  }
+  const mapped = blobUrlToModelIdCache.get(idOrUrl);
+  if (mapped) return mapped;
+  if (idOrUrl.startsWith('model-')) return idOrUrl;
+  return null;
+}
+
+/**
+ * Converts an ephemeral `blob:` URL into a persistent `model://<modelId>` URI when the model is registered
+ * in `modelStorage`, ensuring actors and library items survive page reloads and shot switches.
+ */
+export function toPersistentModelUri(idOrUrl?: string): string | undefined {
+  if (!idOrUrl) return undefined;
+  const modelId = getModelIdFromUrl(idOrUrl);
+  if (modelId) {
+    return `model://${modelId}`;
+  }
+  return idOrUrl;
+}
+
+/**
  * Clears in-memory caches (for testing).
  */
 export function clearModelMemoryCache(): void {
   bufferMemoryCache.clear();
   blobUrlMemoryCache.clear();
+  blobUrlToModelIdCache.clear();
 }

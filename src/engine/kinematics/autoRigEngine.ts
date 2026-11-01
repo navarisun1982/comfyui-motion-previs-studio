@@ -1305,28 +1305,52 @@ export function autoRigGltfScene(
   sceneRoot: THREE.Group,
   options: AutoRigOptions = {}
 ): AutoRigResult {
-  // 0. If re-rigging a previously auto-rigged scene, clean up old auto-generated bones first
-  const oldRigRoot = sceneRoot.getObjectByName('AutoRiggedRoot');
-  if (oldRigRoot) {
-    sceneRoot.remove(oldRigRoot);
-  }
+  // 0. If re-rigging a previously auto-rigged scene, clean up old auto-generated bones & overlays first.
+  // Collect targets into arrays BEFORE mutating parent.children so traversal indices never shift mid-loop.
+  const staleRigObjects: THREE.Object3D[] = [];
+  const autoSkinnedToRevert: THREE.SkinnedMesh[] = [];
   sceneRoot.traverse((child) => {
-    if ((child as THREE.SkinnedMesh).isSkinnedMesh && child.userData?.isAutoSkinned) {
-      // Revert SkinnedMesh back to standard Mesh before re-binding
-      const sm = child as THREE.SkinnedMesh;
-      const plainMesh = new THREE.Mesh(sm.geometry, sm.material);
-      plainMesh.name = sm.name;
-      plainMesh.position.copy(sm.position);
-      plainMesh.quaternion.copy(sm.quaternion);
-      plainMesh.scale.copy(sm.scale);
-      plainMesh.castShadow = true;
-      plainMesh.receiveShadow = true;
-      if (sm.parent) {
-        sm.parent.add(plainMesh);
-        sm.parent.remove(sm);
-      }
+    if (
+      child !== sceneRoot &&
+      (child.name === 'AutoRiggedRoot' || child.name === '__auto_rig_skeleton_helper__')
+    ) {
+      staleRigObjects.push(child);
+    } else if ((child as THREE.SkinnedMesh).isSkinnedMesh && child.userData?.isAutoSkinned) {
+      autoSkinnedToRevert.push(child as THREE.SkinnedMesh);
     }
   });
+
+  for (const staleObj of staleRigObjects) {
+    if (staleObj.parent) {
+      staleObj.parent.remove(staleObj);
+    }
+  }
+
+  for (const sm of autoSkinnedToRevert) {
+    // Revert SkinnedMesh back to standard Mesh with clean geometry before re-binding
+    const plainGeom = sm.geometry ? sm.geometry.clone() : new THREE.BufferGeometry();
+    plainGeom.deleteAttribute('skinIndex');
+    plainGeom.deleteAttribute('skinWeight');
+    if (sm.geometry?.userData?.__cachedAutoSkin) {
+      plainGeom.userData = {
+        ...plainGeom.userData,
+        __cachedAutoSkin: sm.geometry.userData.__cachedAutoSkin,
+      };
+    }
+    const plainMesh = new THREE.Mesh(plainGeom, sm.material);
+    plainMesh.name = sm.name;
+    plainMesh.position.copy(sm.position);
+    plainMesh.quaternion.copy(sm.quaternion);
+    plainMesh.scale.copy(sm.scale);
+    plainMesh.castShadow = true;
+    plainMesh.receiveShadow = true;
+    const { isAutoSkinned: _removed, ...restUserData } = sm.userData || {};
+    plainMesh.userData = restUserData;
+    if (sm.parent) {
+      sm.parent.add(plainMesh);
+      sm.parent.remove(sm);
+    }
+  }
 
   sceneRoot.updateMatrixWorld(true);
   const bbox = new THREE.Box3().setFromObject(sceneRoot);

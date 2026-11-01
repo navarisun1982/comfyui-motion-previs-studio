@@ -193,8 +193,12 @@ export const AssetLibraryModal: React.FC = () => {
 
   const handlePlaceOnStage = (asset: Asset3DItem) => {
     addActor(asset.name, asset.kind, asset.tokenPrompt, {
-      modelUrl: asset.modelUrl,
+      modelUrl: asset.modelUrl || (asset.modelId ? `model://${asset.modelId}` : undefined),
       scale: asset.scale || 1.0,
+      conceptImageUrl: asset.conceptImageUrl,
+      rigType: asset.rigType,
+      rigLandmarks: asset.rigLandmarks,
+      showBones: asset.showBones,
       actionDescription: `placed on stage from 3D Asset Library: ${asset.name}`,
     });
 
@@ -208,8 +212,12 @@ export const AssetLibraryModal: React.FC = () => {
     const selectedList = allAssets.filter((a) => selectedAssetIds.has(a.id));
     selectedList.forEach((asset) => {
       addActor(asset.name, asset.kind, asset.tokenPrompt, {
-        modelUrl: asset.modelUrl,
+        modelUrl: asset.modelUrl || (asset.modelId ? `model://${asset.modelId}` : undefined),
         scale: asset.scale || 1.0,
+        conceptImageUrl: asset.conceptImageUrl,
+        rigType: asset.rigType,
+        rigLandmarks: asset.rigLandmarks,
+        showBones: asset.showBones,
         actionDescription: `placed on stage from 3D Asset Library: ${asset.name}`,
       });
     });
@@ -671,9 +679,17 @@ export const AssetLibraryModal: React.FC = () => {
                   >
                     {/* Top Badges */}
                     <div className="flex items-center justify-between">
-                      <span className="text-2xl" role="img" aria-label={asset.name}>
-                        {asset.icon}
-                      </span>
+                      {asset.conceptImageUrl ? (
+                        <img
+                          src={asset.conceptImageUrl}
+                          alt={asset.name}
+                          className="h-9 w-9 rounded-lg object-cover border border-emerald-400/50 bg-black shrink-0"
+                        />
+                      ) : (
+                        <span className="text-2xl" role="img" aria-label={asset.name}>
+                          {asset.icon}
+                        </span>
+                      )}
                       <div className="flex items-center gap-1">
                         {isMultiSelectMode ? (
                           <div

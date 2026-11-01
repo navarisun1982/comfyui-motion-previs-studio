@@ -62,7 +62,8 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 }) => {
   const addActor = useShotStore((s) => s.addActor);
   const updateActor = useShotStore((s) => s.updateActor);
-  const uploadGlbFile = useAssetLibraryStore((s) => s.uploadGlbFile);
+  const saveGeneratedGlbToLibrary = useAssetLibraryStore((s) => s.saveGeneratedGlbToLibrary);
+  const closeLibrary = useAssetLibraryStore((s) => s.closeLibrary);
   const comfyStatus = useComfyStore((s) => s.connectionStatus);
   const comfyStats = useComfyStore((s) => s.systemStats);
 
@@ -570,6 +571,23 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       });
 
       setGeneratedResult(result);
+
+      // Automatically save the generated 3D .GLB character/object into the 3D Asset Library
+      const cleanName = actorName.trim() || 'Hero Character';
+      saveGeneratedGlbToLibrary({
+        modelId: result.modelId,
+        blobUrl: result.blobUrl,
+        name: cleanName,
+        actorCategory,
+        sizeBytes: result.sizeBytes,
+        conceptImageUrl: referenceImageUrl || undefined,
+        rigType,
+        rigLandmarks: customLandmarks || undefined,
+        showBones,
+        engineUsed: result.engineUsed,
+      });
+      setSavedLibrarySuccess(true);
+      setTimeout(() => setSavedLibrarySuccess(false), 2000);
     } catch (err: any) {
       setGenerationError(
         err?.message ||
@@ -595,19 +613,46 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     document.body.removeChild(a);
   };
 
-  // Save generated .GLB to 3D Asset Library
+  // Save or update generated .GLB in 3D Asset Library with current name, category & rig settings
   const handleSaveToLibrary = async () => {
     if (!generatedResult) return;
-    await uploadGlbFile(generatedResult.glbFile);
+    const cleanName = actorName.trim() || 'ComfyUI 3D Character';
+    saveGeneratedGlbToLibrary({
+      modelId: generatedResult.modelId,
+      blobUrl: generatedResult.blobUrl,
+      name: cleanName,
+      actorCategory,
+      sizeBytes: generatedResult.sizeBytes,
+      conceptImageUrl: referenceImageUrl || undefined,
+      rigType,
+      rigLandmarks: customLandmarks || rigInfo?.landmarks,
+      showBones,
+      engineUsed: generatedResult.engineUsed,
+    });
     setSavedLibrarySuccess(true);
     setTimeout(() => setSavedLibrarySuccess(false), 1500);
   };
 
   // Add or apply generated .GLB character/object to active 3D scene
-  // Auto-syncs `conceptImageUrl: referenceImageUrl` so <picture 1> is immediately bound for MiniMax H3 video rendering!
+  // Auto-syncs `conceptImageUrl: referenceImageUrl` so <picture 1> is immediately bound for MiniMax H3 video rendering,
+  // and ensures the 3D Asset Library entry is updated and both modals close so the rigged .GLB appears immediately on stage.
   const handleAddToScene = () => {
     if (!generatedResult) return;
     const cleanName = actorName.trim() || 'ComfyUI 3D Character';
+
+    // Ensure the 3D Asset Library has the latest name, category, and rig configuration
+    saveGeneratedGlbToLibrary({
+      modelId: generatedResult.modelId,
+      blobUrl: generatedResult.blobUrl,
+      name: cleanName,
+      actorCategory,
+      sizeBytes: generatedResult.sizeBytes,
+      conceptImageUrl: referenceImageUrl || undefined,
+      rigType,
+      rigLandmarks: customLandmarks || rigInfo?.landmarks,
+      showBones,
+      engineUsed: generatedResult.engineUsed,
+    });
 
     if (targetActorId) {
       updateActor(targetActorId, {
@@ -615,6 +660,8 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         kind: actorCategory,
         modelUrl: generatedResult.blobUrl,
         conceptImageUrl: referenceImageUrl || undefined,
+        sculpt: undefined,
+        partGraph: undefined,
         rigType,
         rigLandmarks: customLandmarks || rigInfo?.landmarks,
         showBones,
@@ -633,8 +680,9 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     setTimeout(() => {
       setAppliedSuccess(false);
       onApplyToScene?.(cleanName);
+      closeLibrary();
       onClose();
-    }, 500);
+    }, 350);
   };
 
   if (!isOpen) return null;

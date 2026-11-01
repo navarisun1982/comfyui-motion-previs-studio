@@ -206,14 +206,37 @@ export function createSubjectMesh(
         sceneRoot.updateMatrixWorld(true);
       }
 
-      const autoRigRes = autoRigGltfScene(sceneRoot, {
-        rigType: resolvedRigType,
-        categoryHint: kind,
-        nameHint: name,
-        promptHint: tokenPrompt,
-        landmarks: opts.rigLandmarks,
-        showBones: opts.showBones,
-      });
+      try {
+        const autoRigRes = autoRigGltfScene(sceneRoot, {
+          rigType: resolvedRigType,
+          categoryHint: kind,
+          nameHint: name,
+          promptHint: tokenPrompt,
+          landmarks: opts.rigLandmarks,
+          showBones: opts.showBones,
+        });
+
+        group.userData.autoRigResult = autoRigRes;
+        group.userData.autoRigType = autoRigRes.rigType;
+        group.userData.isAutoRiggedGlb = Boolean(sceneRoot.userData?.isAutoRiggedGlb);
+        if (autoRigRes.rig) {
+          group.userData.rig = autoRigRes.rig;
+          if (actorPose) {
+            applyBonePose(autoRigRes.rig, actorPose);
+          } else if (
+            actorPosePreset &&
+            POSE_PRESETS[actorPosePreset] &&
+            (!sceneRoot.userData?.isAutoRiggedGlb || actorPosePreset !== 'neutral-stand')
+          ) {
+            applyPosePreset(autoRigRes.rig, actorPosePreset);
+          } else if (autoRigRes.rigType === 'humanoid' && !sceneRoot.userData?.isAutoRiggedGlb) {
+            applyPosePreset(autoRigRes.rig, 'neutral-stand');
+          }
+        }
+      } catch (rigErr) {
+        console.warn(`Auto-rigging fallback to static GLB for [${name}]:`, rigErr);
+        group.userData.autoRigType = resolvedRigType;
+      }
 
       // Disable CPU triangle raycasting on all imported high-poly GLTF child meshes
       // so StagePrevis3D uses the lightweight `__actor_hit_proxy__` cylinder in O(1) time.
@@ -222,24 +245,6 @@ export function createSubjectMesh(
           child.raycast = () => {};
         }
       });
-
-      group.userData.autoRigResult = autoRigRes;
-      group.userData.autoRigType = autoRigRes.rigType;
-      group.userData.isAutoRiggedGlb = Boolean(sceneRoot.userData?.isAutoRiggedGlb);
-      if (autoRigRes.rig) {
-        group.userData.rig = autoRigRes.rig;
-        if (actorPose) {
-          applyBonePose(autoRigRes.rig, actorPose);
-        } else if (
-          actorPosePreset &&
-          POSE_PRESETS[actorPosePreset] &&
-          (!sceneRoot.userData?.isAutoRiggedGlb || actorPosePreset !== 'neutral-stand')
-        ) {
-          applyPosePreset(autoRigRes.rig, actorPosePreset);
-        } else if (autoRigRes.rigType === 'humanoid' && !sceneRoot.userData?.isAutoRiggedGlb) {
-          applyPosePreset(autoRigRes.rig, 'neutral-stand');
-        }
-      }
 
       const finalBox = new THREE.Box3().setFromObject(sceneRoot);
       const finalSize = finalBox.getSize(new THREE.Vector3());

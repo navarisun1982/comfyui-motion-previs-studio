@@ -43,6 +43,7 @@ import { logger } from './useLogStore';
 import { recordTrajectoryPositionAtTime, interpolateTrajectoryPosition, recordTrajectoryPoseAtTime } from '../engine/trajectoryMath';
 import { decomposeDirectorialMotion, compileMotionPlan, compileReadyMadeMotionKeyframes, findReadyMadeMotionById, READY_MADE_MOTIONS } from '../engine/kinematics';
 import { STORAGE_KEYS, safeGetItem, safeSetItem, sanitizeShotForStorage } from '../services/storage';
+import { toPersistentModelUri } from '../services/modelStorage';
 
 export type PrevisRendererFn = (
   passMode?: 'rgb' | 'depth' | 'openpose' | 'all',
@@ -383,7 +384,10 @@ const loadCachedCastPool = (): Actor[] => {
 };
 
 const persistCastPool = (pool: Actor[]) => {
-  safeSetItem(STORAGE_KEYS.CAST_POOL, pool);
+  const sanitized = pool.map((a) =>
+    a.modelUrl?.startsWith('blob:') ? { ...a, modelUrl: toPersistentModelUri(a.modelUrl) } : a
+  );
+  safeSetItem(STORAGE_KEYS.CAST_POOL, sanitized);
 };
 
 const initialCachedShots = loadCachedShots();
@@ -1112,6 +1116,9 @@ export const useShotStore = create<ShotState>((set, get) => {
         scale: target.scale,
         conceptImageUrl: target.conceptImageUrl,
         actionDescription: target.actionDescription,
+        rigType: target.rigType,
+        rigLandmarks: target.rigLandmarks,
+        showBones: target.showBones,
       });
       logger.action(`Imported "${target.name}" from Scene Cast Pool into active shot`);
     },

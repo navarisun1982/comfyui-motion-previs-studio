@@ -30,6 +30,8 @@ export interface Comfy3DGenerationOptions {
 }
 
 export interface Comfy3DGenerationResult {
+  modelId: string;
+  modelUri: string;
   blobUrl: string;
   glbFile: File;
   filename: string;
@@ -520,6 +522,8 @@ export async function generate3DGlbInComfy(
   }
 
   return {
+    modelId: registered.modelId,
+    modelUri: `model://${registered.modelId}`,
     blobUrl: registered.blobUrl,
     glbFile,
     filename: glbFilename,

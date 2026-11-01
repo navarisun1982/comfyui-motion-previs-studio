@@ -28,12 +28,29 @@ export interface Asset3DItem {
   kind: SubjectKind;
   modelUrl?: string; // Optional GLB/GLTF file URL or Data URI
   modelId?: string; // Persistent model ID in IndexedDB / modelStorage
+  conceptImageUrl?: string;
+  rigType?: 'auto' | 'humanoid' | 'quadruped' | 'spine_flex' | 'rigid_prop';
+  rigLandmarks?: Record<string, any>;
+  showBones?: boolean;
   isCustom?: boolean;
   scale?: number;
   source: 'curated' | 'uploaded' | 'ai-generated';
   createdAt?: string;
   description?: string;
   fileSize?: string;
+}
+
+export interface SaveGeneratedGlbParams {
+  modelId: string;
+  blobUrl: string;
+  name: string;
+  actorCategory: 'human' | 'creature' | 'prop';
+  sizeBytes?: number;
+  conceptImageUrl?: string;
+  rigType?: 'auto' | 'humanoid' | 'quadruped' | 'spine_flex' | 'rigid_prop';
+  rigLandmarks?: Record<string, any>;
+  showBones?: boolean;
+  engineUsed?: string;
 }
 
 // 200+ Canonical Curated 3D Assets across 9 production domains
@@ -2646,14 +2663,22 @@ const getSafeCustomAssets = (): Asset3DItem[] => {
 };
 
 const persistCustomAssets = (assets: Asset3DItem[]) => {
-  // Sanitize assets so we don't store megabytes of base64 in localStorage
+  // Sanitize assets so we don't store ephemeral blob: URLs in localStorage
   const sanitized = assets.map((a) => {
     if (a.modelUrl?.startsWith('blob:') && a.modelId) {
       return { ...a, modelUrl: `model://${a.modelId}` };
     }
     return a;
   });
-  safeSetItem(STORAGE_KEY, sanitized);
+  if (!safeSetItem(STORAGE_KEY, sanitized)) {
+    // Fallback if a large base64 conceptImageUrl exceeds localStorage quota
+    const compact = sanitized.map((a) =>
+      a.conceptImageUrl && a.conceptImageUrl.length > 100_000
+        ? { ...a, conceptImageUrl: undefined }
+        : a
+    );
+    safeSetItem(STORAGE_KEY, compact);
+  }
 };
 
 export interface AssetLibraryState {
@@ -2686,6 +2711,7 @@ export interface AssetLibraryState {
   addCustomAsset: (asset: Asset3DItem) => void;
   removeCustomAsset: (id: string) => void;
   uploadGlbFile: (file: File) => Promise<Asset3DItem>;
+  saveGeneratedGlbToLibrary: (params: SaveGeneratedGlbParams) => Asset3DItem;
   generateAssetWithAi: (
     prompt: string,
     category: AssetCategory,
@@ -2780,6 +2806,72 @@ export const useAssetLibraryStore = create<AssetLibraryState>((set, get) => {
         set({ isUploading: false });
         throw err;
       }
+    },
+
+    saveGeneratedGlbToLibrary: (params: SaveGeneratedGlbParams): Asset3DItem => {
+      const cleanName = (params.name || 'ComfyUI 3D Character').trim();
+      const category: AssetCategory =
+        params.actorCategory === 'human'
+          ? 'character'
+          : params.actorCategory === 'creature'
+          ? 'creature'
+          : 'props';
+      const kind: SubjectKind =
+        params.actorCategory === 'human'
+          ? 'human'
+          : params.actorCategory === 'creature'
+          ? 'creature'
+          : 'prop';
+      const icon =
+        params.actorCategory === 'human'
+          ? '👤'
+          : params.actorCategory === 'creature'
+          ? '🐾'
+          : '📦';
+      const sizeMB = params.sizeBytes
+        ? `${(params.sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+        : undefined;
+
+      const existing = get().customAssets;
+      const existingIdx = existing.findIndex(
+        (a) =>
+          (params.modelId && a.modelId === params.modelId) ||
+          (params.blobUrl && a.modelUrl === params.blobUrl) ||
+          (params.modelId && a.modelUrl === `model://${params.modelId}`)
+      );
+
+      const item: Asset3DItem = {
+        id: existingIdx >= 0 ? existing[existingIdx].id : `comfy-3d-${params.modelId}`,
+        name: cleanName,
+        nameAr: cleanName,
+        category,
+        kind,
+        icon,
+        tokenPrompt: `an authentic 3D ${params.actorCategory} model of ${cleanName}`,
+        modelUrl: params.blobUrl || `model://${params.modelId}`,
+        modelId: params.modelId,
+        conceptImageUrl: params.conceptImageUrl,
+        rigType: params.rigType,
+        rigLandmarks: params.rigLandmarks,
+        showBones: params.showBones,
+        isCustom: true,
+        scale: 1.0,
+        source: 'uploaded',
+        createdAt: existingIdx >= 0 ? existing[existingIdx].createdAt : new Date().toLocaleDateString(),
+        fileSize: sizeMB || (existingIdx >= 0 ? existing[existingIdx].fileSize : undefined),
+        description: `ComfyUI Image-to-3D (.GLB${params.engineUsed ? ` • ${params.engineUsed.toUpperCase()}` : ''})`,
+      };
+
+      let next: Asset3DItem[];
+      if (existingIdx >= 0) {
+        next = [...existing];
+        next[existingIdx] = item;
+      } else {
+        next = [item, ...existing];
+      }
+      set({ customAssets: next });
+      persistCustomAssets(next);
+      return item;
     },
 
     generateAssetWithAi: async (

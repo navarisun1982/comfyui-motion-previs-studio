@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { getModelBuffer } from '../services/modelStorage';
+import { getModelBuffer, getModelIdFromUrl } from '../services/modelStorage';
 
 const dracoLoader = new DRACOLoader();
 const gltfLoader = new GLTFLoader();
@@ -25,6 +25,57 @@ export interface LoadedModelResult {
   center: THREE.Vector3;
   sourceUrl: string;
   animations?: THREE.AnimationClip[];
+}
+
+function storeTemplateWithAliases(modelUrl: string, template: THREE.Group): void {
+  normalizedTemplateCache.set(modelUrl, template);
+  const modelId = getModelIdFromUrl(modelUrl);
+  if (modelId) {
+    normalizedTemplateCache.set(modelId, template);
+    normalizedTemplateCache.set(`model://${modelId}`, template);
+  }
+}
+
+function lookupTemplateWithAliases(modelUrl: string): THREE.Group | undefined {
+  const direct = normalizedTemplateCache.get(modelUrl);
+  if (direct) return direct;
+  const modelId = getModelIdFromUrl(modelUrl);
+  if (modelId) {
+    return (
+      normalizedTemplateCache.get(`model://${modelId}`) ||
+      normalizedTemplateCache.get(modelId)
+    );
+  }
+  return undefined;
+}
+
+/**
+ * Clones a cached GLTF template and deep-clones each Mesh's BufferGeometry
+ * so scaling, auto-rigging, or skinning a clone never mutates the master template.
+ */
+function cloneNormalizedTemplate(template: THREE.Group): THREE.Group {
+  const cloned = skeletonClone(template) as THREE.Group;
+  cloned.traverse((child) => {
+    if ((child as THREE.Mesh).isMesh) {
+      const mesh = child as THREE.Mesh;
+      if (mesh.geometry) {
+        const srcSkinCache = mesh.geometry.userData?.__cachedAutoSkin;
+        mesh.geometry = mesh.geometry.clone();
+        if (srcSkinCache) {
+          mesh.geometry.userData = { ...mesh.geometry.userData, __cachedAutoSkin: srcSkinCache };
+        }
+      }
+      if (mesh.material) {
+        if (Array.isArray(mesh.material)) {
+          mesh.material = mesh.material.map((m) => (m ? m.clone() : m));
+        } else {
+          mesh.material = mesh.material.clone();
+        }
+      }
+    }
+  });
+  cloned.updateMatrixWorld(true);
+  return cloned;
 }
 
 /**
@@ -104,15 +155,16 @@ export async function loadGltfModel(
     throw new Error('Cannot load GLTF: empty modelUrl provided.');
   }
 
-  // 1. Check template cache
-  const cachedTemplate = normalizedTemplateCache.get(modelUrl);
+  // 1. Check template cache (including model:// <-> blob: aliases)
+  const cachedTemplate = lookupTemplateWithAliases(modelUrl);
   if (cachedTemplate) {
-    const cloned = skeletonClone(cachedTemplate) as THREE.Group;
-    cloned.updateMatrixWorld(true);
+    storeTemplateWithAliases(modelUrl, cachedTemplate);
+    const cloned = cloneNormalizedTemplate(cachedTemplate);
     const bbox = new THREE.Box3().setFromObject(cloned);
     const size = bbox.getSize(new THREE.Vector3());
     const center = bbox.getCenter(new THREE.Vector3());
-    const animations = (cachedTemplate.userData?.gltfAnimations as THREE.AnimationClip[] | undefined)?.map((c) => c.clone()) || [];
+    const animations =
+      (cachedTemplate.userData?.gltfAnimations as THREE.AnimationClip[] | undefined)?.map((c) => c.clone()) || [];
     return { scene: cloned, bbox, size, center, sourceUrl: modelUrl, animations };
   }
 
@@ -165,14 +217,14 @@ export async function loadGltfModel(
 
   try {
     const template = await loadPromise;
-    normalizedTemplateCache.set(modelUrl, template);
+    storeTemplateWithAliases(modelUrl, template);
 
-    const cloned = skeletonClone(template) as THREE.Group;
-    cloned.updateMatrixWorld(true);
+    const cloned = cloneNormalizedTemplate(template);
     const bbox = new THREE.Box3().setFromObject(cloned);
     const size = bbox.getSize(new THREE.Vector3());
     const center = bbox.getCenter(new THREE.Vector3());
-    const animations = (template.userData?.gltfAnimations as THREE.AnimationClip[] | undefined)?.map((c) => c.clone()) || [];
+    const animations =
+      (template.userData?.gltfAnimations as THREE.AnimationClip[] | undefined)?.map((c) => c.clone()) || [];
 
     return { scene: cloned, bbox, size, center, sourceUrl: modelUrl, animations };
   } finally {
@@ -184,14 +236,15 @@ export async function loadGltfModel(
  * Synchronously checks if a model has already been parsed and cached.
  */
 export function getCachedGltfModel(modelUrl: string): LoadedModelResult | null {
-  const cached = normalizedTemplateCache.get(modelUrl);
+  const cached = lookupTemplateWithAliases(modelUrl);
   if (!cached) return null;
-  const cloned = skeletonClone(cached) as THREE.Group;
-  cloned.updateMatrixWorld(true);
+  storeTemplateWithAliases(modelUrl, cached);
+  const cloned = cloneNormalizedTemplate(cached);
   const bbox = new THREE.Box3().setFromObject(cloned);
   const size = bbox.getSize(new THREE.Vector3());
   const center = bbox.getCenter(new THREE.Vector3());
-  const animations = (cached.userData?.gltfAnimations as THREE.AnimationClip[] | undefined)?.map((c) => c.clone()) || [];
+  const animations =
+    (cached.userData?.gltfAnimations as THREE.AnimationClip[] | undefined)?.map((c) => c.clone()) || [];
   return { scene: cloned, bbox, size, center, sourceUrl: modelUrl, animations };
 }
 
@@ -200,7 +253,7 @@ export function getCachedGltfModel(modelUrl: string): LoadedModelResult | null {
  */
 export async function preloadGltfModels(modelUrls: string[]): Promise<void> {
   const tasks = modelUrls
-    .filter((url) => !!url && !normalizedTemplateCache.has(url))
+    .filter((url) => !!url && !lookupTemplateWithAliases(url))
     .map((url) => loadGltfModel(url).catch((err) => console.warn(`Preload failed for ${url}:`, err)));
   await Promise.all(tasks);
 }

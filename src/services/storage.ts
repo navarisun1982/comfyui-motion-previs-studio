@@ -1,4 +1,5 @@
 import type { ShotSpec } from '../types/shotspec';
+import { toPersistentModelUri } from './modelStorage';
 
 export const STORAGE_KEYS = {
   SHOTS_CACHE: 'comfy_ai_director_shots_cache_v1',
@@ -63,13 +64,14 @@ export function isLocalStorageAvailable(): boolean {
 
 /**
  * Strips ephemeral runtime URLs (such as blob: URLs) from a ShotSpec
- * before serializing to storage. Blob URLs die on document unload/reload;
- * persisting them creates dangling 404 links and broken preview states.
+ * before serializing to storage, while converting any actor's `blob:` 3D modelUrl
+ * to its persistent `model://<modelId>` IndexedDB URI so 3D GLB actors survive reloads.
  */
 export function sanitizeShotForStorage(shot: ShotSpec): ShotSpec {
   let modified = false;
   let vfxReference = shot.vfxReference;
   let referenceImage = shot.referenceImage;
+  let actors = shot.actors;
 
   if (vfxReference && vfxReference.videoUrl && vfxReference.videoUrl.startsWith('blob:')) {
     vfxReference = {
@@ -87,10 +89,24 @@ export function sanitizeShotForStorage(shot: ShotSpec): ShotSpec {
     modified = true;
   }
 
+  if (Array.isArray(shot.actors) && shot.actors.some((a) => a.modelUrl?.startsWith('blob:'))) {
+    actors = shot.actors.map((a) => {
+      if (a.modelUrl?.startsWith('blob:')) {
+        const persistentUri = toPersistentModelUri(a.modelUrl);
+        if (persistentUri && persistentUri !== a.modelUrl) {
+          modified = true;
+          return { ...a, modelUrl: persistentUri };
+        }
+      }
+      return a;
+    });
+  }
+
   if (!modified) return shot;
 
   return {
     ...shot,
+    actors,
     vfxReference,
     referenceImage,
   };

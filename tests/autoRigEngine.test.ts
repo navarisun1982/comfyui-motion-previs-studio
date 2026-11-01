@@ -208,5 +208,31 @@ describe('Universal 3D Auto-Rigging & Volumetric Skinning Engine', () => {
     const hits = raycaster.intersectObjects(group.children, true);
     expect(hits.length).toBe(0);
   });
+
+  it('safely re-rigs an already auto-rigged .GLB scene multiple times without losing meshes or accumulating overlays', () => {
+    const group = createSyntheticHumanoidGroup('a-pose');
+    const initialMeshCount = group.children.filter((c) => (c as THREE.Mesh).isMesh).length;
+
+    const r1 = autoRigGltfScene(group, { rigType: 'humanoid', showBones: true });
+    expect(r1.skinnedMeshCount).toBe(initialMeshCount);
+
+    const r2 = autoRigGltfScene(group, {
+      rigType: 'humanoid',
+      landmarks: { shoulderY: 0.8 },
+      showBones: true,
+    });
+    expect(r2.skinnedMeshCount).toBe(initialMeshCount);
+
+    const r3 = autoRigGltfScene(group, { rigType: 'quadruped', showBones: false });
+    expect(r3.skinnedMeshCount).toBe(initialMeshCount);
+
+    // Ensure only a single skeleton helper exists
+    let helperCount = 0;
+    group.traverse((c) => {
+      if (c.name === '__auto_rig_skeleton_helper__') helperCount++;
+    });
+    expect(helperCount).toBe(1);
+  });
 });
+
 

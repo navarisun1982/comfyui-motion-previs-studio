@@ -3,6 +3,8 @@ import {
   buildComfy3DWorkflow,
   extractGlbOutputFromHistory,
 } from '../src/services/comfy3dGenerator';
+import { useAssetLibraryStore } from '../src/stores/useAssetLibraryStore';
+import { storeModelBuffer, toPersistentModelUri } from '../src/services/modelStorage';
 
 describe('comfy3dGenerator', () => {
   it('builds optimized Pixal3D + Fast Vertex-Color workflow from #aa77013b template', () => {
@@ -125,5 +127,50 @@ describe('comfy3dGenerator', () => {
       type: 'output',
     });
   });
+
+  it('auto-saves generated 3D .GLB characters to the 3D Asset Library and updates in-place without duplicates', async () => {
+    const dummyBuf = new Uint8Array([0x67, 0x6c, 0x54, 0x46]).buffer;
+    const stored = await storeModelBuffer('model-test-hero-1', dummyBuf, 'Hero');
+    expect(toPersistentModelUri(stored.blobUrl)).toBe('model://model-test-hero-1');
+
+    const saved1 = useAssetLibraryStore.getState().saveGeneratedGlbToLibrary({
+      modelId: 'model-test-hero-1',
+      blobUrl: stored.blobUrl,
+      name: 'Cyber Samurai',
+      actorCategory: 'human',
+      sizeBytes: 4_200_000,
+      conceptImageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ',
+      rigType: 'humanoid',
+      showBones: true,
+      engineUsed: 'pixal3d',
+    });
+
+    expect(saved1.category).toBe('character');
+    expect(saved1.kind).toBe('human');
+    expect(saved1.name).toBe('Cyber Samurai');
+    expect(saved1.modelId).toBe('model-test-hero-1');
+
+    // Updating the same modelId in-place should not create a duplicate library item
+    const countBefore = useAssetLibraryStore
+      .getState()
+      .customAssets.filter((a) => a.modelId === 'model-test-hero-1').length;
+    expect(countBefore).toBe(1);
+
+    const saved2 = useAssetLibraryStore.getState().saveGeneratedGlbToLibrary({
+      modelId: 'model-test-hero-1',
+      blobUrl: stored.blobUrl,
+      name: 'Renamed Samurai',
+      actorCategory: 'human',
+      rigType: 'humanoid',
+      showBones: false,
+    });
+    expect(saved2.name).toBe('Renamed Samurai');
+
+    const countAfter = useAssetLibraryStore
+      .getState()
+      .customAssets.filter((a) => a.modelId === 'model-test-hero-1').length;
+    expect(countAfter).toBe(1);
+  });
 });
+
 
