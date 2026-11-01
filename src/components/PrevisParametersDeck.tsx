@@ -426,8 +426,8 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             <div className="grid grid-cols-3 gap-1 rounded-xl bg-[#080b12] p-1 border border-white/[0.08]">
               {(
                 [
-                  { id: 'optics' as const, label: '🎥 Lens & Framing' },
-                  { id: 'trajectory' as const, label: '🛤️ 3D Path & Rig' },
+                  { id: 'optics' as const, label: '🎥 Lens' },
+                  { id: 'trajectory' as const, label: '🛤️ Path' },
                   { id: 'all' as const, label: '⊞ All' },
                 ]
               ).map((t) => (
@@ -451,13 +451,13 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             <div className="rounded-xl bg-[#0b101b] border border-[#243046] p-2.5 space-y-2">
               <div className="flex items-center justify-between text-[10px] font-mono">
                 <span className="font-bold text-amber-300 flex items-center gap-1">
-                  🎥 3D Stage Camera Rig Size
+                  🎥 Rig Size
                 </span>
                 <div className="flex items-center gap-1">
                   {[
-                    { label: 'Mini 0.5x', val: 0.5 },
-                    { label: 'Compact 1x', val: 1.0 },
-                    { label: 'Large 1.4x', val: 1.4 },
+                    { label: '0.5x', val: 0.5 },
+                    { label: '1.0x', val: 1.0 },
+                    { label: '1.4x', val: 1.4 },
                   ].map((preset) => (
                     <button
                       key={preset.label}
@@ -477,7 +477,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
               <div className="grid grid-cols-2 gap-2.5 text-[9.5px] font-mono text-slate-400">
                 <div>
                   <div className="flex justify-between mb-0.5">
-                    <span>Rig Scale</span>
+                    <span>Scale</span>
                     <span className="text-white font-bold">{(shot.camera.gizmoScale ?? 1.0).toFixed(2)}x</span>
                   </div>
                   <input
@@ -492,7 +492,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 </div>
                 <div>
                   <div className="flex justify-between mb-0.5">
-                    <span>Frustum Cone</span>
+                    <span>Frustum</span>
                     <span className="text-white font-bold">
                       {(shot.camera.frustumLength ?? 24) === 0 ? 'Hidden' : `${shot.camera.frustumLength ?? 24}m`}
                     </span>
@@ -513,9 +513,9 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             {/* 2. Unified Camera Prime & Zoom Lens Slider (10–200mm + 12 Primes) */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="font-display font-bold text-xs tracking-wide text-white">Camera Lens (10–200mm & 12 Primes)</span>
+                <span className="font-display font-bold text-xs tracking-wide text-white">Camera Lens</span>
                 <span className="font-mono text-[10px] text-blue-400 font-bold">
-                  {shot.camera.lens.customFocalLengthMm ? `${shot.camera.lens.customFocalLengthMm}mm` : shot.camera.lens.focalLength} • {activeLensInfo.fov} FOV ({activeLensInfo.label})
+                  {shot.camera.lens.customFocalLengthMm ? `${shot.camera.lens.customFocalLengthMm}mm` : shot.camera.lens.focalLength} • {activeLensInfo.fov} ({activeLensInfo.label})
                 </span>
               </div>
 
@@ -572,7 +572,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 {/* Focus Plane Distance */}
                 <div className="pt-1 border-t border-slate-800/80">
                   <div className="flex justify-between text-slate-400 mb-0.5">
-                    <span>Focus Plane Distance</span>
+                    <span>Focus Dist</span>
                     <button
                       type="button"
                       onClick={() => updateCameraOptions({ showFocusPlane: shot.camera.showFocusPlane === false })}
@@ -599,43 +599,43 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
 
                 <div className="grid grid-cols-2 gap-2 pt-1">
                   <div className="space-y-0.5">
-                    <span className="text-slate-400 text-[9px]">Sensor Format</span>
+                    <span className="text-slate-400 text-[9px]">Sensor</span>
                     <select
                       value={shot.camera.lens.sensorSize || 'full-frame'}
                       onChange={(e) => updateCameraLens({ sensorSize: e.target.value as SensorSize })}
                       className="w-full rounded bg-[#090D16] border border-[#273247] px-2 py-1 text-white text-[10px] focus:outline-none"
                     >
-                      <option value="full-frame">Full-Frame 35mm (VistaVision)</option>
-                      <option value="super35">Super 35mm (Hollywood Standard)</option>
-                      <option value="anamorphic">Anamorphic 2x CinemaScope</option>
-                      <option value="imax-65mm">IMAX 65mm Large Format</option>
-                      <option value="micro-four-thirds">Micro Four Thirds (Deep DoF)</option>
+                      <option value="full-frame">Full-Frame 35mm</option>
+                      <option value="super35">Super 35mm</option>
+                      <option value="anamorphic">Anamorphic 2x</option>
+                      <option value="imax-65mm">IMAX 65mm</option>
+                      <option value="micro-four-thirds">Micro 4/3</option>
                     </select>
                   </div>
                   <div className="space-y-0.5">
-                    <span className="text-slate-400 text-[9px]">Aperture / T-Stop (DoF)</span>
+                    <span className="text-slate-400 text-[9px]">Aperture</span>
                     <select
                       value={shot.camera.lens.aperture || 'f/2.8'}
                       onChange={(e) => updateCameraLens({ aperture: e.target.value as Aperture })}
                       className="w-full rounded bg-[#090D16] border border-[#273247] px-2 py-1 text-white text-[10px] focus:outline-none"
                     >
-                      <option value="f/1.2">f/1.2 (Razor-Thin Bokeh)</option>
-                      <option value="f/1.4">f/1.4 (Fast Cinema Prime)</option>
-                      <option value="f/2.0">f/2.0 (Soft Subject Isolation)</option>
-                      <option value="f/2.8">f/2.8 (Narrative Sweet Spot)</option>
-                      <option value="f/4.0">f/4.0 (Balanced Studio DoF)</option>
-                      <option value="f/5.6">f/5.6 (Crisp Context)</option>
-                      <option value="f/8.0">f/8.0 (Deep Environmental)</option>
-                      <option value="f/11">f/11 (Architectural Deep)</option>
-                      <option value="f/16">f/16 (Hyper-Focal Sharpness)</option>
-                      <option value="f/22">f/22 (Infinite Split-Diopter)</option>
+                      <option value="f/1.2">f/1.2 (Ultra Shallow)</option>
+                      <option value="f/1.4">f/1.4 (Fast Prime)</option>
+                      <option value="f/2.0">f/2.0 (Soft Bokeh)</option>
+                      <option value="f/2.8">f/2.8 (Standard)</option>
+                      <option value="f/4.0">f/4.0 (Balanced)</option>
+                      <option value="f/5.6">f/5.6 (Crisp)</option>
+                      <option value="f/8.0">f/8.0 (Deep)</option>
+                      <option value="f/11">f/11 (Wide Deep)</option>
+                      <option value="f/16">f/16 (Hyper-Focal)</option>
+                      <option value="f/22">f/22 (Infinite)</option>
                     </select>
                   </div>
                 </div>
               </div>
 
               <div className="rounded-md bg-blue-950/30 border border-blue-500/20 px-2.5 py-1.5 text-[10px] text-blue-200/90 font-mono">
-                <strong className="text-blue-400">Optical Impact:</strong> {activeLensInfo.impact}
+                <strong className="text-blue-400">Lens Note:</strong> {activeLensInfo.impact}
               </div>
             </div>
 
@@ -644,7 +644,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
               <div className="flex items-center justify-between">
                 <span className="font-mono text-[10px] font-bold text-cyan-300 flex items-center gap-1">
                   <Target className="h-3 w-3 text-cyan-400" />
-                  1-Click Auto-Framing & Subject Lock
+                  Auto-Framing
                 </span>
                 {shot.camera.trackTargetActorId && (
                   <button
@@ -652,7 +652,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                     onClick={() => updateCameraOptions({ trackTargetActorId: undefined, followActorMovement: false })}
                     className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30"
                   >
-                    Unlock Aim
+                    Unlock
                   </button>
                 )}
               </div>
@@ -684,7 +684,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
 
               <div className="grid grid-cols-2 gap-2 pt-1 font-mono text-[9.5px]">
                 <div className="space-y-0.5">
-                  <span className="text-slate-400 text-[9px]">Lock Look-At to Subject</span>
+                  <span className="text-slate-400 text-[9px]">Track Subject</span>
                   <select
                     value={shot.camera.trackTargetActorId || ''}
                     onChange={(e) =>
@@ -694,17 +694,17 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                     }
                     className="w-full rounded bg-[#090D16] border border-[#273247] px-2 py-1 text-white text-[10px] focus:outline-none"
                   >
-                    <option value="">🔓 Free Stage Aim (Manual)</option>
+                    <option value="">🔓 Free Aim</option>
                     {shot.actors.map((a) => (
                       <option key={a.id} value={a.id}>
-                        🎯 Track: {a.name}
+                        🎯 {a.name}
                       </option>
                     ))}
                   </select>
                 </div>
 
                 <div className="space-y-0.5">
-                  <span className="text-slate-400 text-[9px]">Target Body Zone</span>
+                  <span className="text-slate-400 text-[9px]">Aim Zone</span>
                   <select
                     value={shot.camera.trackTargetBone || 'head'}
                     onChange={(e) =>
@@ -714,17 +714,17 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                     }
                     className="w-full rounded bg-[#090D16] border border-[#273247] px-2 py-1 text-white text-[10px] focus:outline-none"
                   >
-                    <option value="head">👁️ Head / Eyeline (4.4m)</option>
-                    <option value="chest">🫀 Upper Chest / Heart (3.5m)</option>
-                    <option value="pelvis">🧍 Center Pelvis / Waist (2.6m)</option>
-                    <option value="feet">👟 Ground / Footsteps (0.5m)</option>
+                    <option value="head">👁️ Head (4.4m)</option>
+                    <option value="chest">🫀 Chest (3.5m)</option>
+                    <option value="pelvis">🧍 Waist (2.6m)</option>
+                    <option value="feet">👟 Feet (0.5m)</option>
                   </select>
                 </div>
               </div>
 
               {shot.camera.trackTargetActorId && (
                 <label className="flex items-center justify-between pt-1 text-[9.5px] font-mono text-emerald-300 cursor-pointer">
-                  <span>🏃 Follow Subject Movement Across Stage (Steadicam Lock)</span>
+                  <span>🏃 Follow Subject</span>
                   <input
                     type="checkbox"
                     checked={Boolean(shot.camera.followActorMovement)}
@@ -738,34 +738,34 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             {/* Aspect Ratio & Shot Framing (with Extreme-Wide restored) */}
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <span className="text-slate-400 font-mono text-[10px]">Aspect Ratio</span>
+                <span className="text-slate-400 font-mono text-[10px]">Ratio</span>
                 <select
                   value={shot.aspectRatio}
                   onChange={(e) => updateAspectRatio(e.target.value as AspectRatio)}
                   className="w-full rounded bg-[#090D16] border border-[#273247] hover:border-[#384764] focus:border-[#6658F5] px-2 py-1.5 text-white text-[11px] focus:outline-none"
                 >
-                  <option value="16:9">16:9 (Standard Widescreen)</option>
-                  <option value="2.39:1">2.39:1 (Anamorphic Scope)</option>
-                  <option value="9:16">9:16 (Vertical Reels)</option>
-                  <option value="4:3">4:3 (Academy Ratio)</option>
+                  <option value="16:9">16:9 (Widescreen)</option>
+                  <option value="2.39:1">2.39:1 (Scope)</option>
+                  <option value="9:16">9:16 (Vertical)</option>
+                  <option value="4:3">4:3 (Academy)</option>
                   <option value="1:1">1:1 (Square)</option>
                 </select>
               </div>
 
               <div className="space-y-1">
-                <span className="text-slate-400 font-mono text-[10px]">Shot Framing</span>
+                <span className="text-slate-400 font-mono text-[10px]">Framing</span>
                 <select
                   value={shot.camera.shotType}
                   onChange={(e) => setShotType(e.target.value as ShotType)}
                   className="w-full rounded bg-[#090D16] border border-[#273247] hover:border-[#384764] focus:border-[#6658F5] px-2 py-1.5 text-white text-[11px] focus:outline-none"
                 >
-                  <option value="extreme-wide">Extreme Wide (Vast Scale)</option>
-                  <option value="wide">Wide Shot (Establishing)</option>
-                  <option value="medium-wide">Medium Wide (Cowboy / Knees)</option>
-                  <option value="medium">Medium Shot (Waist Up)</option>
-                  <option value="medium-close-up">Medium Close-Up (Chest Up)</option>
-                  <option value="close-up">Close-Up (Face)</option>
-                  <option value="extreme-close-up">Extreme Close-Up (Eyes/Detail)</option>
+                  <option value="extreme-wide">Extreme Wide</option>
+                  <option value="wide">Wide Shot</option>
+                  <option value="medium-wide">Medium Wide</option>
+                  <option value="medium">Medium Shot</option>
+                  <option value="medium-close-up">Medium Close-Up</option>
+                  <option value="close-up">Close-Up</option>
+                  <option value="extreme-close-up">Extreme Close-Up</option>
                 </select>
               </div>
             </div>
@@ -774,36 +774,36 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             <div className="space-y-1.5">
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
-                  <span className="text-slate-400 font-mono text-[10px]">Camera Angle</span>
+                  <span className="text-slate-400 font-mono text-[10px]">Angle</span>
                   <select
                     value={shot.camera.angle}
                     onChange={(e) => setCameraAngle(e.target.value as CameraAngle)}
                     className="w-full rounded bg-[#090D16] border border-[#273247] hover:border-[#384764] focus:border-[#6658F5] px-2 py-1.5 text-white text-[11px] focus:outline-none"
                   >
-                    <option value="eye-level">Eye Level (Neutral)</option>
-                    <option value="low-angle">Low Angle (Heroic/Dominant)</option>
-                    <option value="high-angle">High Angle (Vulnerable)</option>
-                    <option value="overhead-gods-eye">Overhead (God's Eye)</option>
-                    <option value="ground-level">Ground Level (Worm's Eye)</option>
-                    <option value="dutch-angle">Dutch Angle (Tilted Unease)</option>
+                    <option value="eye-level">Eye Level</option>
+                    <option value="low-angle">Low Angle</option>
+                    <option value="high-angle">High Angle</option>
+                    <option value="overhead-gods-eye">Overhead</option>
+                    <option value="ground-level">Ground Level</option>
+                    <option value="dutch-angle">Dutch Angle</option>
                   </select>
                 </div>
 
                 <div className="space-y-1">
-                  <span className="text-slate-400 font-mono text-[10px]">Movement Speed</span>
+                  <span className="text-slate-400 font-mono text-[10px]">Speed</span>
                   <select
                     value={shot.camera.movement.speed}
                     onChange={(e) => setCameraMovement(shot.camera.movement.type, e.target.value as MovementSpeed)}
                     className="w-full rounded bg-[#090D16] border border-[#273247] hover:border-[#384764] focus:border-[#6658F5] px-2 py-1.5 text-white text-[11px] focus:outline-none"
                   >
-                    <option value="slow-cinematic">Slow Cinematic</option>
-                    <option value="moderate">Moderate Paced</option>
-                    <option value="rapid-dynamic">Dynamic Fast Action</option>
+                    <option value="slow-cinematic">Slow</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="rapid-dynamic">Fast</option>
                   </select>
                 </div>
               </div>
               <div className="rounded-md bg-amber-950/25 border border-amber-500/20 px-2.5 py-1.5 text-[10px] text-amber-200/90 font-mono">
-                <strong className="text-amber-400">Angle Psychology:</strong> {activeAngleInfo}
+                <strong className="text-amber-400">Angle Note:</strong> {activeAngleInfo}
               </div>
             </div>
             </div>
@@ -811,47 +811,47 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             <div className={cameraSubTab === 'trajectory' || cameraSubTab === 'all' ? 'space-y-3.5' : 'hidden'}>
             {/* All 21 Categorized Camera Movements */}
             <div className="space-y-1">
-              <span className="text-slate-400 font-mono text-[10px]">Camera Movement Archetype (21 Cinema Rigs)</span>
+              <span className="text-slate-400 font-mono text-[10px]">Camera Move</span>
               <select
                 value={shot.camera.movement.type}
                 onChange={(e) => setCameraMovement(e.target.value as CameraMovementType, shot.camera.movement.speed)}
                 className="w-full rounded bg-[#090D16] border border-[#273247] hover:border-[#384764] focus:border-[#6658F5] px-2 py-1.5 text-white text-[11px] focus:outline-none font-mono"
               >
                 <optgroup label="Tripod & Static">
-                  <option value="static">⏸️ Static Locked-Off Tripod</option>
+                  <option value="static">⏸️ Static Tripod</option>
                 </optgroup>
                 <optgroup label="Depth & Dolly">
-                  <option value="dolly-in">🎥 Dolly In (Push Toward Subject)</option>
-                  <option value="dolly-out">🎥 Dolly Out (Pull Back Reveal)</option>
-                  <option value="dolly-zoom-vertigo">🌀 Hitchcock Dolly-Zoom (Vertigo Effect)</option>
-                  <option value="steadicam-follow">🏃 Steadicam Lead / Follow Subject</option>
+                  <option value="dolly-in">🎥 Dolly In</option>
+                  <option value="dolly-out">🎥 Dolly Out</option>
+                  <option value="dolly-zoom-vertigo">🌀 Dolly-Zoom (Vertigo)</option>
+                  <option value="steadicam-follow">🏃 Steadicam Follow</option>
                 </optgroup>
                 <optgroup label="Lateral Tracking">
-                  <option value="truck-left">◀️ Truck Left (Lateral Track)</option>
-                  <option value="truck-right">▶️ Truck Right (Lateral Track)</option>
+                  <option value="truck-left">◀️ Truck Left</option>
+                  <option value="truck-right">▶️ Truck Right</option>
                 </optgroup>
                 <optgroup label="Vertical Crane / Pedestal">
-                  <option value="pedestal-up">🔺 Pedestal / Crane Up</option>
-                  <option value="pedestal-down">🔻 Pedestal / Crane Down</option>
-                  <option value="crane-arc">🏗️ Jib / Crane Sweep Arc</option>
+                  <option value="pedestal-up">🔺 Crane Up</option>
+                  <option value="pedestal-down">🔻 Crane Down</option>
+                  <option value="crane-arc">🏗️ Crane Arc</option>
                 </optgroup>
                 <optgroup label="Rotational Pan & Tilt">
-                  <option value="pan-left">⬅️ Pan Left (Horizontal Sweep)</option>
-                  <option value="pan-right">➡️ Pan Right (Horizontal Sweep)</option>
-                  <option value="tilt-up">⬆️ Tilt Up (Vertical Reveal)</option>
-                  <option value="tilt-down">⬇️ Tilt Down (Vertical Sweep)</option>
+                  <option value="pan-left">⬅️ Pan Left</option>
+                  <option value="pan-right">➡️ Pan Right</option>
+                  <option value="tilt-up">⬆️ Tilt Up</option>
+                  <option value="tilt-down">⬇️ Tilt Down</option>
                 </optgroup>
                 <optgroup label="360° Orbital Arcs">
-                  <option value="orbit-clockwise">🔄 Orbit Clockwise Around Subject</option>
-                  <option value="orbit-counter-clockwise">🔄 Orbit Counter-Clockwise</option>
-                  <option value="spiral-orbit-in">🎯 Spiral Orbit Push-In</option>
+                  <option value="orbit-clockwise">🔄 Orbit CW</option>
+                  <option value="orbit-counter-clockwise">🔄 Orbit CCW</option>
+                  <option value="spiral-orbit-in">🎯 Spiral Push-In</option>
                 </optgroup>
                 <optgroup label="Optical & Specialty Rigs">
-                  <option value="rack-focus">🔍 Rack Focus (Foreground ➔ Background)</option>
-                  <option value="handheld-subtle">📹 Handheld Organic Cinema Rig</option>
-                  <option value="whip-pan">⚡ Whip Pan (High-Velocity Blur)</option>
-                  <option value="crash-zoom">💥 Crash Zoom (Snap Telephoto Rush)</option>
-                  <option value="fpv-dive">🦅 FPV Drone Dive (Aerial Plunge)</option>
+                  <option value="rack-focus">🔍 Rack Focus</option>
+                  <option value="handheld-subtle">📹 Handheld</option>
+                  <option value="whip-pan">⚡ Whip Pan</option>
+                  <option value="crash-zoom">💥 Crash Zoom</option>
+                  <option value="fpv-dive">🦅 FPV Dive</option>
                 </optgroup>
               </select>
             </div>
@@ -859,7 +859,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             {/* Direct Orientation & Aim Controls (Dutch Roll, Pitch, Yaw, Look-At Height) */}
             <div className="rounded-xl bg-[#111827] border border-[#273247] p-2.5 space-y-2 font-mono text-[9.5px]">
               <div className="flex items-center justify-between">
-                <span className="text-indigo-300 font-bold">📐 Direct Camera Orientation & Aim</span>
+                <span className="text-indigo-300 font-bold">📐 Aim & Tilt</span>
                 <button
                   type="button"
                   onClick={() =>
@@ -872,14 +872,14 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                   }
                   className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 border border-white/10 text-slate-300 hover:text-white text-[8.5px]"
                 >
-                  Reset Angles
+                  Reset
                 </button>
               </div>
 
               <div className="grid grid-cols-2 gap-2.5 text-slate-400">
                 <div>
                   <div className="flex justify-between mb-0.5">
-                    <span>Dutch Roll Tilt</span>
+                    <span>Dutch Roll</span>
                     <span className="text-white font-bold">{shot.camera.dutchRollDeg ?? 0}°</span>
                   </div>
                   <input
@@ -894,7 +894,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 </div>
                 <div>
                   <div className="flex justify-between mb-0.5">
-                    <span>Pitch Tilt Offset</span>
+                    <span>Pitch</span>
                     <span className="text-white font-bold">{shot.camera.pitchOffsetDeg ?? 0}°</span>
                   </div>
                   <input
@@ -909,7 +909,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 </div>
                 <div>
                   <div className="flex justify-between mb-0.5">
-                    <span>Yaw Pan Offset</span>
+                    <span>Yaw</span>
                     <span className="text-white font-bold">{shot.camera.yawOffsetDeg ?? 0}°</span>
                   </div>
                   <input
@@ -924,7 +924,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 </div>
                 <div>
                   <div className="flex justify-between mb-0.5">
-                    <span>Aim Height Offset</span>
+                    <span>Aim Height</span>
                     <span className="text-white font-bold">
                       {(shot.camera.lookAtHeightOffset ?? 0) >= 0 ? '+' : ''}
                       {(shot.camera.lookAtHeightOffset ?? 0).toFixed(1)}m
@@ -946,7 +946,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             {/* Advanced Trajectory Curve, Shake & Easing Tuning */}
             <div className="rounded-xl bg-[#111827] border border-[#273247] p-2.5 space-y-2 font-mono text-[9.5px]">
               <div className="flex items-center justify-between">
-                <span className="text-emerald-300 font-bold">🛤️ Path Curve, Shake & Motion Easing</span>
+                <span className="text-emerald-300 font-bold">🛤️ Curve & Shake</span>
                 <select
                   value={shot.camera.movement.pacing || 'ease-in-out'}
                   onChange={(e) =>
@@ -956,16 +956,16 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                   }
                   className="rounded bg-[#090D16] border border-[#273247] px-1.5 py-0.5 text-white text-[9px] focus:outline-none"
                 >
-                  <option value="ease-in-out">Smooth Ease-In-Out</option>
-                  <option value="linear">Linear Constant</option>
-                  <option value="ease-in">Ease-In (Accelerate)</option>
-                  <option value="ease-out">Ease-Out (Decelerate)</option>
+                  <option value="ease-in-out">Ease-In-Out</option>
+                  <option value="linear">Linear</option>
+                  <option value="ease-in">Ease-In</option>
+                  <option value="ease-out">Ease-Out</option>
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-2.5 text-slate-400">
                 <div>
                   <div className="flex justify-between mb-0.5">
-                    <span>Curved Dolly Arc</span>
+                    <span>Curve Arc</span>
                     <span className="text-white font-bold">{shot.camera.movement.arcCurve ?? 0}</span>
                   </div>
                   <input
@@ -980,7 +980,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 </div>
                 <div>
                   <div className="flex justify-between mb-0.5">
-                    <span>Handheld Shake</span>
+                    <span>Shake</span>
                     <span className="text-white font-bold">{shot.camera.movement.shakeIntensity ?? 0}%</span>
                   </div>
                   <input
@@ -999,7 +999,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             {/* Camera 3D Path Coordinates Sliders */}
             <div className="space-y-2 pt-2 border-t border-white/5">
               <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
-                <span className="font-bold text-slate-200">Camera 3D Trajectory (Start ➔ End)</span>
+                <span className="font-bold text-slate-200">Camera Path</span>
                 <button
                   type="button"
                   onClick={() => focusCameraOnSubject(selectedActorId !== '__camera__' ? selectedActorId : undefined)}
@@ -1007,15 +1007,15 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                   title="Lock camera look-at target onto selected subject"
                 >
                   <Target className="h-3 w-3 text-cyan-400" />
-                  <span>Aim at Subject</span>
+                  <span>Aim Subject</span>
                 </button>
               </div>
 
               <div className="grid grid-cols-2 gap-2 font-mono text-[9px] text-slate-400">
                 <div className="space-y-1 bg-[#131C2E] p-3 rounded-xl border border-[#273247]">
-                  <span className="text-blue-400 font-bold">Start Position</span>
+                  <span className="text-blue-400 font-bold">Start Pos</span>
                   <div className="flex justify-between">
-                    <span>Lateral X</span>
+                    <span>X</span>
                     <span className="text-white">{Math.round(shot.camera.movement.startPosition.x)}</span>
                   </div>
                   <input
@@ -1032,7 +1032,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                     className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-blue-500"
                   />
                   <div className="flex justify-between">
-                    <span>Depth Z</span>
+                    <span>Z</span>
                     <span className="text-white">{Math.round(shot.camera.movement.startPosition.y)}</span>
                   </div>
                   <input
@@ -1049,7 +1049,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                     className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-blue-500"
                   />
                   <div className="flex justify-between">
-                    <span>Height Y</span>
+                    <span>Y</span>
                     <span className="text-white">{Math.round(shot.camera.movement.startPosition.z ?? 20)}</span>
                   </div>
                   <input
@@ -1068,9 +1068,9 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 </div>
 
                 <div className="space-y-1 bg-[#131C2E] p-3 rounded-xl border border-[#273247]">
-                  <span className="text-emerald-400 font-bold">End Position</span>
+                  <span className="text-emerald-400 font-bold">End Pos</span>
                   <div className="flex justify-between">
-                    <span>Lateral X</span>
+                    <span>X</span>
                     <span className="text-white">{Math.round(shot.camera.movement.endPosition.x)}</span>
                   </div>
                   <input
@@ -1087,7 +1087,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                     className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-emerald-500"
                   />
                   <div className="flex justify-between">
-                    <span>Depth Z</span>
+                    <span>Z</span>
                     <span className="text-white">{Math.round(shot.camera.movement.endPosition.y)}</span>
                   </div>
                   <input
@@ -1104,7 +1104,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                     className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-emerald-500"
                   />
                   <div className="flex justify-between">
-                    <span>Height Y</span>
+                    <span>Y</span>
                     <span className="text-white">{Math.round(shot.camera.movement.endPosition.z ?? 20)}</span>
                   </div>
                   <input
@@ -1126,7 +1126,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
               {/* Camera Look-At Target & Custom Rig Color */}
               <div className="flex items-center justify-between gap-2 bg-[#131C2E] p-3 rounded-xl border border-[#273247] font-mono text-[9px]">
                 <div className="flex items-center gap-2">
-                  <span className="text-slate-300 font-bold">Camera Rig Color:</span>
+                  <span className="text-slate-300 font-bold">Rig Color:</span>
                   <div className="flex items-center gap-1">
                     {['#0284c7', '#f59e0b', '#10b981', '#f43f5e', '#a855f7', '#ffffff'].map((c) => (
                       <button
@@ -1176,10 +1176,10 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             >
               <span className="flex items-center gap-2">
                 <Plus className="h-4 w-4 text-amber-300 shrink-0" />
-                <span>Add Subject or Prop</span>
+                <span>Add Subject</span>
               </span>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-black/45 border border-white/20 text-amber-200">
-                Upload / 200+ Ready-Made
+                Library / Upload
               </span>
             </button>
 
@@ -1198,17 +1198,17 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                     <ChevronRight className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
                   )}
                   <Users className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                  <span className="truncate">Scene Cast Pool ({sceneCastPool.length})</span>
+                  <span className="truncate">Cast Pool ({sceneCastPool.length})</span>
                 </span>
                 <span className="font-mono text-[9.5px] text-slate-400 shrink-0">
-                  {showCastPoolDrawer ? '▾ Hide' : 'Cross-Shot Continuity'}
+                  {showCastPoolDrawer ? '▾ Hide' : 'Saved'}
                 </span>
               </button>
 
               <div className={showCastPoolDrawer ? 'pt-1.5 border-t border-indigo-500/20' : 'hidden'}>
               {sceneCastPool.length === 0 ? (
                 <p className="text-[10px] font-mono text-slate-400 leading-relaxed">
-                  Click <strong className="text-indigo-300">Save</strong> on any stage character below to keep their look &amp; scale ready across shots.
+                  Click <strong className="text-indigo-300">Save</strong> on any stage character below to reuse across shots.
                 </p>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
@@ -1244,7 +1244,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             {/* 3. Placed 3D Objects List (Vertical Stack with Auto-Collapse Accordion) */}
             <div className="space-y-2.5 pt-1 border-t border-white/10">
               <div className="flex items-center justify-between">
-                <span className="font-display font-bold text-xs text-white">Placed on Stage ({shot.actors.length})</span>
+                <span className="font-display font-bold text-xs text-white">On Stage ({shot.actors.length})</span>
                 {shot.actors.length > 0 && (
                   <div className="flex items-center gap-1.5">
                     <button
@@ -1526,8 +1526,8 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             <div className="grid grid-cols-3 gap-1 rounded-xl bg-[#080b12] p-1 border border-white/[0.08]">
               {(
                 [
-                  { id: 'presets' as const, label: '🏛️ Set & Presets' },
-                  { id: 'weather' as const, label: '🌦️ Weather & Fog' },
+                  { id: 'presets' as const, label: '🏛️ Presets' },
+                  { id: 'weather' as const, label: '🌦️ Weather' },
                   { id: 'all' as const, label: '⊞ All' },
                 ]
               ).map((t) => (
@@ -1556,12 +1556,12 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                       <span>{shot.environment?.name || 'Soundstage Studio'}</span>
                     </div>
                     <div className="text-[9px] font-mono text-emerald-400 uppercase tracking-wider">
-                      Category: {shot.environment?.category || 'studio'}
+                      {shot.environment?.category || 'studio'}
                     </div>
                   </div>
                 </div>
                 <span className="rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 font-mono text-[9px] font-bold">
-                  Active Set
+                  Active
                 </span>
               </div>
 
@@ -1582,7 +1582,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="text-[10.5px] font-bold text-emerald-200 truncate">
-                          Set / Environment Reference Image
+                          Set Ref Image
                         </span>
                         {shot.environment?.conceptImageUrl && (
                           <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 border border-emerald-500/40 text-[8.5px] font-mono text-emerald-300">
@@ -1591,7 +1591,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                         )}
                       </div>
                       <p className="text-[9.5px] text-slate-400 leading-tight">
-                        Used in ComfyUI video render (e.g. &lt;picture 4&gt; location plate) without re-uploading.
+                        Used as location plate in ComfyUI render.
                       </p>
                       {shot.environment?.conceptImageName && (
                         <div className="text-[9px] font-mono text-emerald-300 truncate mt-0.5">
@@ -1607,7 +1607,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                       title="Upload reference image for the Set / Environment (used in ComfyUI video render)"
                     >
                       <Upload className="h-3 w-3 text-emerald-300" />
-                      <span>{shot.environment?.conceptImageUrl ? 'Change' : 'Upload Ref'}</span>
+                      <span>{shot.environment?.conceptImageUrl ? 'Change' : 'Upload'}</span>
                       <input
                         type="file"
                         accept="image/*"
@@ -1647,7 +1647,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                     )}
                   </div>
                 </div>
-                <span className="text-[9px] font-mono text-slate-400">Environment Visual & Architectural Cue:</span>
+                <span className="text-[9px] font-mono text-slate-400">Set Prompt:</span>
                 <textarea
                   rows={2}
                   value={shot.environment?.promptDescription || ''}
@@ -1668,9 +1668,9 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-white flex items-center gap-1.5">
                   <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
-                  <span>Synthesize Location with AI</span>
+                  <span>AI Set Builder</span>
                 </span>
-                <span className="font-mono text-[9px] text-slate-400">LLM Reasoner</span>
+                <span className="font-mono text-[9px] text-slate-400">Reasoner</span>
               </div>
 
               <div className="flex items-center gap-1.5">
@@ -1698,7 +1698,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                       <span>...</span>
                     </>
                   ) : (
-                    <span>✨ Synthesize</span>
+                    <span>✨ Build</span>
                   )}
                 </button>
               </div>
@@ -1707,8 +1707,8 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             {/* Cinematic Location Presets */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="font-display font-bold text-xs tracking-wide text-white">Cinematic Location Presets</span>
-                <span className="font-mono text-[9px] text-slate-400">{CINEMATIC_ENVIRONMENT_PRESETS.length} Locations</span>
+                <span className="font-display font-bold text-xs tracking-wide text-white">Set Presets</span>
+                <span className="font-mono text-[9px] text-slate-400">{CINEMATIC_ENVIRONMENT_PRESETS.length} Sets</span>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -1769,7 +1769,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             <div className={envSubTab === 'weather' || envSubTab === 'all' ? 'space-y-3 pt-1' : 'hidden'}>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="font-display font-bold text-xs text-white">Weather Condition</span>
+                  <span className="font-display font-bold text-xs text-white">Weather</span>
                   <span className="font-mono text-[10px] text-emerald-400 uppercase">
                     {shot.environment?.weather || 'clear'}
                   </span>
@@ -1809,7 +1809,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="font-display font-bold text-xs text-white">Time of Day</span>
+                  <span className="font-display font-bold text-xs text-white">Time</span>
                   <span className="font-mono text-[10px] text-amber-400 uppercase">
                     {shot.environment?.timeOfDay || 'night'}
                   </span>
@@ -1849,21 +1849,21 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="font-display font-bold text-xs text-white">Ground Surface</span>
+                  <span className="font-display font-bold text-xs text-white">Floor</span>
                   <span className="font-mono text-[10px] text-cyan-400">
                     {shot.environment?.groundSurface || 'studio-floor'}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-1 font-mono text-[10px]">
                   {[
-                    { id: 'studio-floor', label: '🎬 Soundstage Floor' },
+                    { id: 'studio-floor', label: '🎬 Studio Floor' },
                     { id: 'asphalt-wet', label: '🌧️ Wet Asphalt' },
-                    { id: 'concrete-floor', label: '🏢 Grimy Concrete' },
+                    { id: 'concrete-floor', label: '🏢 Concrete' },
                     { id: 'stone-cobblestone', label: '🧱 Cobblestone' },
-                    { id: 'sand-dunes', label: '🏜️ Desert Sand' },
-                    { id: 'grass-terrain', label: '🌿 Natural Grass' },
-                    { id: 'metal-grate', label: '⚙️ Industrial Grate' },
-                    { id: 'wood-parquet', label: '🪵 Polished Parquet' },
+                    { id: 'sand-dunes', label: '🏜️ Sand' },
+                    { id: 'grass-terrain', label: '🌿 Grass' },
+                    { id: 'metal-grate', label: '⚙️ Metal Grate' },
+                    { id: 'wood-parquet', label: '🪵 Wood Floor' },
                   ].map((surf) => {
                     const active = (shot.environment?.groundSurface || 'studio-floor') === surf.id;
                     return (
@@ -1891,7 +1891,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
 
               <div className="space-y-2 pt-1 border-t border-white/5">
                 <div className="flex items-center justify-between text-[11px] font-mono">
-                  <span className="text-slate-300">Volumetric Fog Density</span>
+                  <span className="text-slate-300">Fog Density</span>
                   <span className="text-white font-bold">
                     {Math.round((shot.environment?.fogDensity ?? 0.15) * 100)}%
                   </span>
@@ -1964,8 +1964,8 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             <div className="grid grid-cols-3 gap-1 rounded-xl bg-[#080b12] p-1 border border-white/[0.08]">
               {(
                 [
-                  { id: 'lights' as const, label: '💡 Stage Lights' },
-                  { id: 'script' as const, label: '📜 Script & Neg' },
+                  { id: 'lights' as const, label: '💡 Lights' },
+                  { id: 'script' as const, label: '📜 Script' },
                   { id: 'all' as const, label: '⊞ All' },
                 ]
               ).map((t) => (
@@ -1987,17 +1987,17 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             <div className={lightSubTab === 'lights' || lightSubTab === 'all' ? 'space-y-3.5' : 'hidden'}>
             {/* Lighting Style */}
             <div className="space-y-1.5">
-              <span className="font-display font-bold text-xs tracking-wide text-white">Lighting Mood Style</span>
+              <span className="font-display font-bold text-xs tracking-wide text-white">Lighting Style</span>
               <div className="grid grid-cols-2 gap-1.5 font-mono text-[10px]">
                 {([
-                  { id: 'cinematic-natural', label: 'Cinematic Natural', icon: '🎬' },
-                  { id: 'low-key-film-noir', label: 'Noir Chiaroscuro', icon: '🌑' },
-                  { id: 'neon-cyberpunk', label: 'Cyberpunk Neon', icon: '🟣' },
-                  { id: 'golden-hour', label: 'Golden Hour Sunset', icon: '🌅' },
-                  { id: 'moonlight-foggy', label: 'Moonlit Foggy Blue', icon: '🌙' },
-                  { id: 'high-key-studio', label: 'High Key Studio', icon: '💡' },
-                  { id: 'practical-candlelight', label: 'Practical Candlelight', icon: '🕯️' },
-                  { id: 'harsh-fluorescent', label: 'Harsh Fluorescent', icon: '⚡' },
+                  { id: 'cinematic-natural', label: 'Cinematic', icon: '🎬' },
+                  { id: 'low-key-film-noir', label: 'Film Noir', icon: '🌑' },
+                  { id: 'neon-cyberpunk', label: 'Cyberpunk', icon: '🟣' },
+                  { id: 'golden-hour', label: 'Golden Hour', icon: '🌅' },
+                  { id: 'moonlight-foggy', label: 'Moonlight', icon: '🌙' },
+                  { id: 'high-key-studio', label: 'High Key', icon: '💡' },
+                  { id: 'practical-candlelight', label: 'Candlelight', icon: '🕯️' },
+                  { id: 'harsh-fluorescent', label: 'Fluorescent', icon: '⚡' },
                 ] as { id: LightingStyle; label: string; icon: string }[]).map((style) => (
                   <button
                     key={style.id}
@@ -2018,30 +2018,30 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             {/* Key Light Direction & Contrast */}
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <span className="text-slate-400 font-mono text-[10px]">Key Light Direction</span>
+                <span className="text-slate-400 font-mono text-[10px]">Light Dir</span>
                 <select
                   value={shot.lighting.direction}
                   onChange={(e) => setLighting(shot.lighting.style, e.target.value as LightingDirection, shot.lighting.contrast)}
                   className="w-full rounded bg-[#090D16] border border-[#273247] hover:border-[#384764] focus:border-[#6658F5] px-2 py-1.5 text-white text-[11px] focus:outline-none font-mono"
                 >
                   <option value="front-soft">Front Soft</option>
-                  <option value="side-key">Side Key (45°)</option>
-                  <option value="rim-backlit">Rim / Backlight</option>
-                  <option value="overhead-top">Overhead Top</option>
-                  <option value="underlit-dramatic">Underlit Dramatic</option>
+                  <option value="side-key">Side Key</option>
+                  <option value="rim-backlit">Backlight</option>
+                  <option value="overhead-top">Overhead</option>
+                  <option value="underlit-dramatic">Underlit</option>
                 </select>
               </div>
 
               <div className="space-y-1">
-                <span className="text-slate-400 font-mono text-[10px]">Contrast Ratio</span>
+                <span className="text-slate-400 font-mono text-[10px]">Contrast</span>
                 <select
                   value={shot.lighting.contrast}
                   onChange={(e) => setLighting(shot.lighting.style, shot.lighting.direction, e.target.value as 'soft' | 'balanced' | 'high-contrast')}
                   className="w-full rounded bg-[#090D16] border border-[#273247] hover:border-[#384764] focus:border-[#6658F5] px-2 py-1.5 text-white text-[11px] focus:outline-none font-mono"
                 >
-                  <option value="soft">Soft (Low Contrast)</option>
-                  <option value="balanced">Balanced Fill</option>
-                  <option value="high-contrast">High Contrast (Chiaroscuro)</option>
+                  <option value="soft">Soft</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="high-contrast">High Contrast</option>
                 </select>
               </div>
             </div>
@@ -2204,8 +2204,8 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             {/* Scene Narrative & Atmosphere Prompt */}
             <div className="space-y-1.5 pt-2 border-t border-white/5">
               <div className="flex items-center justify-between">
-                <span className="font-display font-bold text-xs tracking-wide text-white">Scene Narrative / Atmosphere</span>
-                <span className="font-mono text-[9px] text-indigo-400">Universal Directorial Decomposer</span>
+                <span className="font-display font-bold text-xs tracking-wide text-white">Scene Script</span>
+                <span className="font-mono text-[9px] text-indigo-400">Auto-Stage</span>
               </div>
               <textarea
                 value={shot.sceneDescription}
@@ -2220,15 +2220,15 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white text-xs font-semibold shadow transition-all"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>🧠 Direct 3D Stage from Narrative</span>
+                <span>🧠 Direct Stage</span>
               </button>
             </div>
 
             {/* Restored Editable Negative Prompt */}
             <div className="space-y-1.5 pt-2 border-t border-white/5">
               <div className="flex items-center justify-between">
-                <span className="font-display font-bold text-xs tracking-wide text-rose-300">Negative Prompt (Exclusions)</span>
-                <span className="font-mono text-[9px] text-slate-400">Compiled into Target Engine</span>
+                <span className="font-display font-bold text-xs tracking-wide text-rose-300">Negative Prompt</span>
+                <span className="font-mono text-[9px] text-slate-400">Exclusions</span>
               </div>
               <textarea
                 value={shot.negativePrompt || ''}
@@ -2272,7 +2272,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             <div className="flex items-center justify-between font-mono text-[10px] text-amber-300 font-bold">
               <span className="flex items-center gap-1.5">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                RENDERING 3D PREVIS (24 FPS)...
+                RENDERING PREVIS...
               </span>
               <span>{previsProgress}%</span>
             </div>
@@ -2292,7 +2292,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 title="Open Unified Render, Prompt & Export Studio"
               >
                 <Film className="h-4 w-4" />
-                <span>RENDER & EXPORT STUDIO</span>
+                <span>RENDER & EXPORT</span>
               </button>
             )}
 
@@ -2303,7 +2303,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 title="Quick-render 24fps 3D Previs video in-app"
               >
                 <Zap className="h-3 w-3 text-amber-400" />
-                <span>{previsVideoUrl ? 'Re-Render Previs' : 'Quick Render Previs'}</span>
+                <span>{previsVideoUrl ? 'Re-Render' : 'Render Previs'}</span>
               </button>
 
               {previsVideoUrl && (

@@ -559,7 +559,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-sm font-bold text-white tracking-wide">
-                Render, Prompt &amp; Export Studio
+                Render &amp; Export
               </h1>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
                 {shot.name} • {shot.durationSeconds}s
@@ -580,10 +580,10 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
             title="Download all ComfyUI workflows used in this app (Image-to-3D, Text-to-3D, MiniMax H3 & LTX-2.5)"
           >
             <FileCode className="h-3.5 w-3.5 text-cyan-300" />
-            <span>📥 ComfyUI Workflows Pack</span>
+            <span>📥 Workflows</span>
           </button>
 
-          <span className="text-xs text-slate-400 font-mono">Target Engine:</span>
+          <span className="text-xs text-slate-400 font-mono">Engine:</span>
           <div className="flex items-center bg-black/60 rounded-lg p-0.5 border border-white/15 text-xs font-mono">
             <button
               onClick={() => handleSelectEngine('ltx-2.5')}
@@ -631,7 +631,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
               <div className="flex items-center gap-2">
                 <Video className="h-4 w-4 text-amber-400" />
                 <h2 className="text-sm font-bold text-white tracking-wide">
-                  Reference Previs Video (MP4)
+                  Previs Video
                 </h2>
               </div>
 
@@ -694,7 +694,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   }`}
                 >
                   <Columns className="h-3 w-3" />
-                  <span>Side-by-Side Sync</span>
+                  <span>Compare</span>
                   {previsVideoUrl && finalComfyVideoUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
                 </button>
               </div>
@@ -755,7 +755,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                       className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-indigo-600/90 hover:bg-indigo-500 text-white font-mono text-[10px] font-bold shadow-lg border border-white/20 flex items-center gap-1.5 cursor-pointer"
                     >
                       <RotateCcw className="h-3 w-3" />
-                      <span>Sync Restart Both Videos (0.0s)</span>
+                      <span>Sync Play</span>
                     </button>
                   )}
                 </div>
@@ -875,7 +875,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   ) : (
                     <>
                       <Play className="h-3.5 w-3.5 fill-current" />
-                      <span>Render Previs Video</span>
+                      <span>Render Previs</span>
                     </>
                   )}
                 </button>
@@ -925,7 +925,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-xs font-bold text-white tracking-wide uppercase">
-                      Live ComfyUI MiniMax H3 Bridge (Ref2VA Workflow)
+                      ComfyUI Render Bridge
                     </h3>
                     <button
                       type="button"
@@ -954,7 +954,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   title="Download the Stubelius Ultimate H3 (stuubszzz) ComfyUI workflow (.json) to drag-and-drop into ComfyUI"
                 >
                   <Download className="h-3.5 w-3.5 text-amber-400" />
-                  <span>Download Stubelius H3 Workflow (.json)</span>
+                  <span>Stubelius JSON</span>
                 </a>
                 <button
                   type="button"
@@ -963,7 +963,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   title="Load the most recent completed render from ComfyUI /history into the player"
                 >
                   <Columns className="h-3.5 w-3.5 text-indigo-400" />
-                  <span>Load Latest Render</span>
+                  <span>Load Latest</span>
                 </button>
                 <button
                   type="button"
@@ -980,7 +980,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   ) : (
                     <>
                       <Zap className="h-3.5 w-3.5 fill-current" />
-                      <span>Render in ComfyUI (MiniMax H3)</span>
+                      <span>Render in ComfyUI</span>
                     </>
                   )}
                 </button>
@@ -1293,7 +1293,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 <div className="flex items-center gap-2">
                   <Clock className="h-4 w-4 text-amber-400" />
                   <span className="font-display font-bold text-xs text-slate-200 group-hover:text-white transition-colors uppercase tracking-wider">
-                    Stage Timeline &amp; Choreography Beats ({shot.durationSeconds}s Duration)
+                    Timeline Beats ({shot.durationSeconds}s)
                   </span>
                 </div>
                 <div className="flex items-center gap-1 text-slate-400 font-mono text-[10px]">
@@ -1335,7 +1335,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
               <div className="flex items-center gap-2">
                 <Compass className="h-4 w-4 text-cyan-400" />
                 <h3 className="text-xs font-bold text-white tracking-wide uppercase">
-                  Camera Trajectory &amp; 4×4 Extrinsics ({poseBundle.frameCount} Frames @ {poseBundle.fps}fps)
+                  Camera Matrix ({poseBundle.frameCount}f @ {poseBundle.fps}fps)
                 </h3>
               </div>
               <div className="flex items-center gap-1.5">
@@ -1349,7 +1349,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   title="Copy 4x4 Camera-to-World (c2w) and World-to-Camera (w2c) matrices as JSON"
                 >
                   {copiedMatrix ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3 text-cyan-400" />}
-                  <span>{copiedMatrix ? 'Copied Matrices!' : 'Copy c2w/w2c JSON'}</span>
+                  <span>{copiedMatrix ? 'Copied!' : 'Copy Matrix'}</span>
                 </button>
                 <button
                   onClick={handleDownloadCameraExtrinsics}
@@ -1357,7 +1357,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   title="Download 4x4 Camera Pose Matrices for ComfyUI CameraCtrl / LTXVConditioning"
                 >
                   <Download className="h-3 w-3" />
-                  <span>Camera Matrix (.json)</span>
+                  <span>Matrix JSON</span>
                 </button>
               </div>
             </div>
@@ -1432,7 +1432,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
             <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-gradient-to-r from-blue-950/40 via-indigo-950/20 to-purple-950/40 border border-blue-500/20">
               <div className="flex items-center gap-2">
                 <Brain className="h-4 w-4 text-blue-400" />
-                <span className="font-display font-semibold text-xs text-slate-200">AI Prompt Reasoner:</span>
+                <span className="font-display font-semibold text-xs text-slate-200">AI Reasoner:</span>
                 <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
                   {getReasonerConfig().provider.toUpperCase()}
                 </span>
@@ -1456,7 +1456,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   ) : (
                     <Wand2 className="h-3 w-3" />
                   )}
-                  <span>{isDirectingPrompt ? 'Directing...' : 'Direct & Polish with AI'}</span>
+                  <span>{isDirectingPrompt ? 'Directing...' : 'AI Polish'}</span>
                 </button>
               </div>
             </div>
@@ -1480,7 +1480,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
               <div className="rounded-xl bg-black/50 border border-white/10 p-3 space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[10px] font-mono font-bold text-amber-300 uppercase tracking-wider">
-                    🎨 Scene Object Target Colors ({shot.actors.length})
+                    🎨 Target Colors ({shot.actors.length})
                   </span>
                   <button
                     type="button"
@@ -1500,7 +1500,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                     className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 border border-amber-400/40 text-amber-200 font-mono text-[9px] font-semibold transition-colors"
                     title="Append Object Color Target Map to Positive Prompt"
                   >
-                    + Inject Color Map into Prompt
+                    + Add Color Map
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -1527,7 +1527,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
             {/* Positive Prompt Card */}
             <div className="space-y-1.5 flex-1 flex flex-col">
               <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">
-                Positive Prompt (Camera + Motion + Lighting)
+                Positive Prompt
               </label>
               <div className="flex-1 min-h-[140px] rounded-xl bg-black/60 border border-white/15 p-3 text-xs font-mono text-slate-200 leading-relaxed overflow-y-auto custom-scrollbar select-all">
                 {displayPositivePrompt}
@@ -1538,7 +1538,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="text-[10px] font-mono text-rose-300/90 uppercase tracking-wider font-semibold">
-                  Negative Prompt (Editable Exclusions)
+                  Negative Prompt
                 </label>
                 <button
                   onClick={() => handleCopyPrompt(displayNegativePrompt, true)}
@@ -1578,7 +1578,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white font-mono text-xs border border-white/10 transition-all"
               >
                 {copiedJson ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Code2 className="h-3.5 w-3.5 text-indigo-400" />}
-                <span>{copiedJson ? 'Copied JSON Bundle!' : 'Copy Full JSON Bundle'}</span>
+                <span>{copiedJson ? 'Copied JSON!' : 'Copy JSON'}</span>
               </button>
 
               <button
@@ -1587,7 +1587,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 title="Download complete ShotSpec + Compiled Prompt + Camera Extrinsics JSON package"
               >
                 <Download className="h-3.5 w-3.5 text-indigo-300" />
-                <span>Download Shot Pack (.json)</span>
+                <span>Shot Pack (.json)</span>
               </button>
             </div>
 
@@ -1595,7 +1595,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
             <div className="rounded-xl bg-indigo-950/30 border border-indigo-500/20 p-3 space-y-1 text-[11px] font-mono text-indigo-200">
               <div className="flex items-center gap-1.5 text-indigo-300 font-bold text-xs">
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>How to Use with Video Diffusion Models</span>
+                <span>Quick Guide</span>
               </div>
               <p className="text-[10px] text-slate-300 leading-relaxed">
                 1. Click <strong>&quot;Render Previs Video&quot;</strong> &amp; download the MP4 passes (RGB, OpenPose, Depth).

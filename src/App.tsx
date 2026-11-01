@@ -254,7 +254,7 @@ export default function App() {
             title="3D Previs Stage, Camera Optics & Soundstage Actor Blocking"
           >
             <Box className="h-3.5 w-3.5" />
-            <span>Directing Stage</span>
+            <span>3D Stage</span>
           </button>
 
           <button
@@ -269,7 +269,7 @@ export default function App() {
             title="Render Reference Previs Video (MP4, OpenPose, Depth), AI Prompt Polish & Camera Matrix Export"
           >
             <Download className="h-3.5 w-3.5" />
-            <span>Render, Prompt &amp; Export Studio</span>
+            <span>Render &amp; Export</span>
           </button>
         </div>
 

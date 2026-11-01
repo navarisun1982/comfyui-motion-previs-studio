@@ -199,15 +199,15 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     // Switch to Look/Ref tab
     fireEvent.click(getByRole('tab', { name: /Look\/Ref/i }));
     expect(getByRole('tab', { name: /Look\/Ref/i }).getAttribute('aria-selected')).toBe('true');
-    expect(getByText('ComfyUI Reference Image')).toBeTruthy();
-    expect(getByText('Edit 3D Look by Prompt')).toBeTruthy();
-    expect(getByText('Target Color (Scene ID)')).toBeTruthy();
+    expect(getByText('Reference Image')).toBeTruthy();
+    expect(getByText('3D Look Prompt')).toBeTruthy();
+    expect(getByText('Target Color')).toBeTruthy();
 
     // Switch to Rig/XYZ tab
     fireEvent.click(getByRole('tab', { name: /Rig\/XYZ/i }));
     expect(getByRole('tab', { name: /Rig\/XYZ/i }).getAttribute('aria-selected')).toBe('true');
-    expect(getByText('3D Object Scale')).toBeTruthy();
-    expect(getByText('Socket to Character Bone')).toBeTruthy();
+    expect(getByText('Object Scale')).toBeTruthy();
+    expect(getByText('Bone Socket')).toBeTruthy();
 
     // Switch to All tab
     fireEvent.click(getByRole('tab', { name: /All/i }));

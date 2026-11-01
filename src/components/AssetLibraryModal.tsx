@@ -322,7 +322,7 @@ export const AssetLibraryModal: React.FC = () => {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="font-display text-base sm:text-lg font-bold tracking-wide text-white truncate">
-                  3D Asset Library &amp; AI Generator
+                  3D Library
                 </h2>
                 <span className="rounded-full bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-300 border border-amber-500/30">
                   {allAssets.length} Assets
@@ -374,7 +374,7 @@ export const AssetLibraryModal: React.FC = () => {
               title="Browse 14 curated Free CC0, Sketchfab, Mixamo & AI Animated .GLB websites"
             >
               <Globe className="h-3.5 w-3.5 text-indigo-300" />
-              <span>🌐 .GLB Resources (14)</span>
+              <span>🌐 .GLB Sites</span>
             </button>
 
             {/* AI 3D Generator Studio Button (Image-to-3D #aa77013b) */}
@@ -389,7 +389,7 @@ export const AssetLibraryModal: React.FC = () => {
               title="Open ComfyUI 3D Studio in Image-to-3D mode (#aa77013b)"
             >
               <Sparkles className="h-4 w-4 text-amber-300" />
-              <span>✨ Concept-to-3D Studio</span>
+              <span>✨ Image-to-3D</span>
             </button>
 
             {/* ComfyUI Text-to-3D .GLB Button (#e7a9555b) */}
@@ -404,7 +404,7 @@ export const AssetLibraryModal: React.FC = () => {
               title="Open ComfyUI Text-to-3D .GLB Studio (#e7a9555b)"
             >
               <Zap className="h-3.5 w-3.5 text-amber-300" />
-              <span>✍️ Text-to-3D (.GLB)</span>
+              <span>✍️ Text-to-3D</span>
             </button>
 
             {/* Multi-Select Toggle Button */}
@@ -425,7 +425,7 @@ export const AssetLibraryModal: React.FC = () => {
               title="Toggle multi-selection to place several 3D models at once"
             >
               <CheckSquare className="h-4 w-4" />
-              <span>Select Multiple {selectedAssetIds.size > 0 && `(${selectedAssetIds.size})`}</span>
+              <span>Multi-Select {selectedAssetIds.size > 0 && `(${selectedAssetIds.size})`}</span>
             </button>
 
             {/* Prominent Close Button */}

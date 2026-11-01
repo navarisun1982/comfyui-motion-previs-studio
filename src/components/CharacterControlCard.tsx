@@ -497,7 +497,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10.5px] font-bold text-indigo-200 truncate">
-                    ComfyUI Reference Image
+                    Reference Image
                   </span>
                   {actor.conceptImageUrl && (
                     <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 border border-emerald-500/40 text-[8.5px] font-mono text-emerald-300">
@@ -580,7 +580,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                 )}
                 <span className="text-emerald-400 text-sm leading-none shrink-0">🏃</span>
                 <span className="text-[11.5px] font-semibold text-emerald-300 group-hover:text-emerald-200 tracking-tight truncate">
-                  Ready-Made Motions
+                  Motion Clips
                 </span>
               </button>
 
@@ -610,8 +610,8 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                 {isHumanoid && (
                   <div>
                     <div className="flex items-center justify-between px-1 pb-1 text-[9.5px] font-medium text-slate-400">
-                      <span>1. Category Folder</span>
-                      <span className="text-indigo-300/80 font-mono">2. Pick Action Below</span>
+                      <span>1. Category</span>
+                      <span className="text-indigo-300/80 font-mono">2. Action</span>
                     </div>
                     <div className="grid grid-cols-3 gap-1 px-1">
                       {(
@@ -735,7 +735,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         className="font-semibold text-slate-300"
                         title="Controls whether the selected action travels across the stage floor or stays planted on the current spot"
                       >
-                        Floor Path Mode:
+                        Floor Path:
                       </span>
                       <span className="text-[9px] text-slate-400 font-mono">
                         {travelMode === 'auto'
@@ -986,7 +986,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                   title="Toggle Timing & Direction section"
                 >
                   <Clock className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-                  <span>Timing Window</span>
+                  <span>Timing</span>
                 </button>
 
                 <div className="flex items-center gap-1 shrink-0">
@@ -1274,7 +1274,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                   <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
                 )}
                 <SlidersHorizontal className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
-                <span className="truncate">Appearance &amp; Rig Sliders</span>
+                <span className="truncate">Look &amp; Rig</span>
               </span>
               <span className="font-mono text-[10px] text-slate-400 shrink-0">
                 X:{currentX} Z:{currentDepthZ} <span className="text-slate-600">|</span> {(actor.scale ?? 1.0).toFixed(1)}
@@ -1291,7 +1291,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                     <span className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-300">
                       <Sparkles className="h-3.5 w-3.5 text-amber-400 shrink-0" />
                       <span>
-                        {actor.modelUrl ? '🔒 3D .GLB Mesh (Locked)' : 'Edit 3D Look by Prompt'}
+                        {actor.modelUrl ? '🔒 Locked .GLB' : '3D Look Prompt'}
                       </span>
                     </span>
 
@@ -1401,7 +1401,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-200">
                       <Palette className="h-3.5 w-3.5 text-purple-400" />
-                      <span>Target Color (Scene ID)</span>
+                      <span>Target Color</span>
                     </span>
                     {actor.color && (
                       <button
@@ -1461,7 +1461,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-200">
                         <span>🦴</span>
-                        <span>3D .GLB Auto-Rigging &amp; Bones</span>
+                        <span>Auto-Rig &amp; Bones</span>
                       </span>
                       <div className="flex items-center gap-1">
                         <button
@@ -1527,7 +1527,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                       <div className="rounded-lg border border-amber-500/30 bg-black/60 p-2 space-y-2 text-[9.5px] font-mono">
                         <div className="flex items-center justify-between">
                           <span className="text-amber-300 font-bold">
-                            🎯 Fine-Tune Joint Landmarks
+                            🎯 Joint Tuning
                           </span>
                           <button
                             type="button"
@@ -1764,7 +1764,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-200">
                       <Maximize2 className="h-3.5 w-3.5 text-cyan-400" />
-                      <span>3D Object Scale</span>
+                      <span>Object Scale</span>
                     </span>
                     <span className="font-mono text-[11px] font-bold text-cyan-300">
                       {(actor.scale ?? 1.0).toFixed(2)}x
@@ -1819,7 +1819,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                     <div className="inspector-subcard space-y-2 font-mono">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-sans font-semibold text-slate-200">
-                          Facing Direction (Body Yaw)
+                          Facing Angle
                         </span>
                         <span className="text-[11px] font-bold text-indigo-300">
                           {Math.round(rot.y)}°
@@ -1994,7 +1994,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                       <div className="flex items-center justify-between">
                         <span className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-200">
                           <Link2 className="h-3.5 w-3.5 text-amber-400" />
-                          <span>Socket to Character Bone</span>
+                          <span>Bone Socket</span>
                         </span>
                         {actor.socketToBone && (
                           <span className="font-mono text-[9.5px] text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
