@@ -2667,6 +2667,16 @@ export interface AssetLibraryState {
   /** Last generation failure (e.g. Ollama offline) - shown verbatim, never masked by a fake asset. */
   generationError: string | null;
   isUploading: boolean;
+  is3DStudioOpen: boolean;
+  studioInitialPrompt: string;
+  studioInitialImageUrl?: string;
+  studioTargetActorId?: string;
+  open3DStudio: (opts?: {
+    initialPrompt?: string;
+    initialImageUrl?: string;
+    targetActorId?: string;
+  }) => void;
+  close3DStudio: () => void;
 
   // Actions
   openLibrary: (initialCategory?: AssetCategory) => void;
@@ -2694,6 +2704,21 @@ export const useAssetLibraryStore = create<AssetLibraryState>((set, get) => {
     generationStage: '',
     generationError: null,
     isUploading: false,
+    is3DStudioOpen: false,
+    studioInitialPrompt: '',
+    studioInitialImageUrl: undefined,
+    studioTargetActorId: undefined,
+    open3DStudio: (opts) => {
+      set({
+        is3DStudioOpen: true,
+        studioInitialPrompt: opts?.initialPrompt ?? '',
+        studioInitialImageUrl: opts?.initialImageUrl,
+        studioTargetActorId: opts?.targetActorId,
+      });
+    },
+    close3DStudio: () => {
+      set({ is3DStudioOpen: false });
+    },
 
     openLibrary: (initialCategory = 'all') => {
       set({ isOpen: true, selectedCategory: initialCategory });

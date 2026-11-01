@@ -196,13 +196,26 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     }
   };
 
-  // Initialize Three.js interactive preview
+  // Initialize Three.js interactive preview ONLY when a generated .GLB is ready
+  // (avoids allocating a second WebGL context while uploading images or while ComfyUI is using the GPU)
   useEffect(() => {
-    if (!isOpen || !canvasMountRef.current) return;
+    if (!isOpen || !generatedResult?.blobUrl || !canvasMountRef.current) return;
 
     const container = canvasMountRef.current;
     const w = container.clientWidth || 480;
     const h = container.clientHeight || 420;
+
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true,
+        powerPreference: 'default',
+      });
+    } catch (err) {
+      console.warn('Could not initialize 3D preview WebGLRenderer:', err);
+      return;
+    }
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x090c14);
@@ -211,16 +224,19 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     const camera = new THREE.PerspectiveCamera(38, w / h, 0.1, 100);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(w, h);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    renderer.shadowMap.enabled = false;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
     rendererRef.current = renderer;
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
+
+    const onContextLost = (e: Event) => {
+      e.preventDefault();
+    };
+    renderer.domElement.addEventListener('webglcontextlost', onContextLost, false);
 
     // Studio Lighting for PBR & Vertex-Colored GLB Models
     const ambientLight = new THREE.AmbientLight(0xffffff, 1.35);
@@ -231,8 +247,6 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
     const dirLight = new THREE.DirectionalLight(0xfff5ea, 2.4);
     dirLight.position.set(5, 8, 5);
-    dirLight.castShadow = true;
-    dirLight.shadow.mapSize.set(1024, 1024);
     scene.add(dirLight);
 
     const rimLight = new THREE.DirectionalLight(0x06b6d4, 1.4);
@@ -265,6 +279,36 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     };
     updateCameraRef.current = updateCamera;
     updateCamera();
+
+    // Load generated .GLB mesh into the scene
+    let cancelled = false;
+    loadGltfModel(generatedResult.blobUrl)
+      .then((loaded) => {
+        if (cancelled) return;
+        loaded.scene.traverse((obj) => {
+          if ((obj as THREE.Mesh).isMesh) {
+            const mesh = obj as THREE.Mesh;
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            for (const m of mats) {
+              if (m && 'wireframe' in m) {
+                (m as any).wireframe = isWireframe;
+              }
+            }
+          }
+        });
+        modelGroup.add(loaded.scene);
+
+        const box = new THREE.Box3().setFromObject(loaded.scene);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z, 1.0);
+        orbitRef.current.radius = maxDim * 1.65;
+        targetLookAtRef.current.copy(center);
+        updateCamera();
+      })
+      .catch((err) => {
+        console.error('Failed to display generated GLB in preview:', err);
+      });
 
     // Mouse Drag Orbit
     const onMouseDown = (e: MouseEvent) => {
@@ -306,11 +350,15 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     const render = () => {
       if (!running) return;
       animFrameRef.current = requestAnimationFrame(render);
-      if (autoSpinRef.current && !isDraggingRef.current && modelGroupRef.current?.children.length) {
+      if (autoSpinRef.current && !isDraggingRef.current && modelGroup.children.length) {
         orbitRef.current.theta += 0.0045;
         updateCamera();
       }
-      renderer.render(scene, camera);
+      try {
+        renderer.render(scene, camera);
+      } catch {
+        // ignore transient context loss
+      }
     };
     render();
 
@@ -328,8 +376,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     ro.observe(container);
 
     return () => {
+      cancelled = true;
       running = false;
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+      renderer.domElement.removeEventListener('webglcontextlost', onContextLost, false);
       container.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
@@ -338,55 +388,24 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       renderer.dispose();
       container.innerHTML = '';
     };
-  }, [isOpen]);
+  }, [isOpen, generatedResult?.blobUrl]);
 
-  // Mount generated .GLB mesh into the Three.js viewport when `generatedResult` or `isWireframe` changes
+  // Toggle wireframe on already-mounted mesh
   useEffect(() => {
     const group = modelGroupRef.current;
     if (!group) return;
-
-    while (group.children.length > 0) {
-      const child = group.children[0];
-      group.remove(child);
-    }
-
-    if (!generatedResult?.blobUrl) return;
-
-    let cancelled = false;
-    loadGltfModel(generatedResult.blobUrl)
-      .then((loaded) => {
-        if (cancelled) return;
-        loaded.scene.traverse((obj) => {
-          if ((obj as THREE.Mesh).isMesh) {
-            const mesh = obj as THREE.Mesh;
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-            for (const m of mats) {
-              if (m && 'wireframe' in m) {
-                (m as any).wireframe = isWireframe;
-              }
-            }
+    group.traverse((obj) => {
+      if ((obj as THREE.Mesh).isMesh) {
+        const mesh = obj as THREE.Mesh;
+        const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const m of mats) {
+          if (m && 'wireframe' in m) {
+            (m as any).wireframe = isWireframe;
           }
-        });
-        group.add(loaded.scene);
-
-        const box = new THREE.Box3().setFromObject(loaded.scene);
-        const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
-        const maxDim = Math.max(size.x, size.y, size.z, 1.0);
-        orbitRef.current.radius = maxDim * 1.65;
-        targetLookAtRef.current.copy(center);
-        updateCameraRef.current?.();
-      })
-      .catch((err) => {
-        console.error('Failed to display generated GLB in preview:', err);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [generatedResult, isWireframe]);
+        }
+      }
+    });
+  }, [isWireframe]);
 
   // Execute ComfyUI 3D .GLB Generation
   const handleGenerateGlb = async () => {
@@ -495,12 +514,15 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
       onClick={(e) => {
         e.stopPropagation();
-        if (e.target === e.currentTarget) onClose();
+      }}
+      onMouseDown={(e) => {
+        e.stopPropagation();
       }}
     >
       <div
         className="relative w-full max-w-5xl h-[90vh] max-h-[880px] bg-[#0b0e17] border border-white/15 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-200 font-sans"
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         {/* Studio Settings Modal Overlay */}
         {showSettingsModal && (
@@ -1041,17 +1063,39 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
             {/* 3D WebGL Canvas Container */}
             <div ref={canvasMountRef} className="flex-1 w-full h-full cursor-grab active:cursor-grabbing" />
 
-            {/* Empty State Guidance Overlay when no .GLB is generated yet */}
-            {!generatedResult && !isGenerating && (
+            {/* Staged Image / Empty State Guidance Overlay when no .GLB is generated yet */}
+            {!generatedResult && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-6">
-                <div className="max-w-md rounded-2xl border border-white/10 bg-black/75 backdrop-blur-md p-5 text-center space-y-2">
-                  <Sparkles className="h-7 w-7 text-cyan-400 mx-auto" />
-                  <div className="text-sm font-bold text-white">
-                    Upload an Image &amp; Click &ldquo;Generate 3D .GLB in ComfyUI&rdquo;
-                  </div>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Your local ComfyUI server (<code className="text-cyan-300">http://127.0.0.1:8188</code>) will remove the background with <strong>BiRefNet</strong>, reconstruct the 3D geometry and textures using <strong>Pixal3D</strong> or <strong>TRELLIS.2</strong>, and load the resulting <code className="text-cyan-300">.GLB</code> model right here.
-                  </p>
+                <div className="max-w-md rounded-2xl border border-white/15 bg-[#0d111c]/95 backdrop-blur-md p-5 text-center space-y-3 shadow-2xl">
+                  {referenceImageUrl ? (
+                    <>
+                      <img
+                        src={referenceImageUrl}
+                        alt="Staged Reference"
+                        className="h-44 w-44 object-contain mx-auto rounded-xl border border-cyan-500/40 bg-black/60 p-2 shadow-lg"
+                      />
+                      <div className="text-sm font-bold text-emerald-300">
+                        {isGenerating
+                          ? `Reconstructing 3D .GLB in ComfyUI (${elapsedSec}s)...`
+                          : 'Reference Image Ready for 3D Conversion'}
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        {isGenerating
+                          ? generationStage || 'Running ComfyUI 3D pipeline...'
+                          : 'Click "Generate 3D .GLB in ComfyUI" on the left to reconstruct the 3D mesh and load the interactive 3D turntable.'}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-7 w-7 text-cyan-400 mx-auto" />
+                      <div className="text-sm font-bold text-white">
+                        Upload an Image &amp; Click &ldquo;Generate 3D .GLB in ComfyUI&rdquo;
+                      </div>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        Your local ComfyUI server (<code className="text-cyan-300">http://127.0.0.1:8188</code>) will remove the background with <strong>BiRefNet</strong>, reconstruct the 3D geometry and textures using <strong>Pixal3D</strong> or <strong>TRELLIS.2</strong>, and load the resulting <code className="text-cyan-300">.GLB</code> model right here.
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
             )}

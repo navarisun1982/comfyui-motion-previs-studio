@@ -28,6 +28,8 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { DebuggerTogglePill } from './components/DebuggerTogglePill';
+import { AIGenerator3D } from './components/AIGenerator3D';
+import { useAssetLibraryStore } from './stores/useAssetLibraryStore';
 
 import { ShotBible } from './components/ShotBible';
 
@@ -112,6 +114,21 @@ export default function App() {
   const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateStatus | null>(null);
   const [checkingUpdateHeader, setCheckingUpdateHeader] = useState<boolean>(false);
   const { toggleOpen: toggleDebugger } = useLogStore();
+  const {
+    is3DStudioOpen,
+    studioInitialPrompt,
+    studioInitialImageUrl,
+    studioTargetActorId,
+    close3DStudio,
+  } = useAssetLibraryStore(
+    useShallow((s) => ({
+      is3DStudioOpen: s.is3DStudioOpen,
+      studioInitialPrompt: s.studioInitialPrompt,
+      studioInitialImageUrl: s.studioInitialImageUrl,
+      studioTargetActorId: s.studioTargetActorId,
+      close3DStudio: s.close3DStudio,
+    }))
+  );
   const {
     connectionStatus: comfyConnectionStatus,
     setConnectionStatus: setComfyConnectionStatus,
@@ -545,6 +562,15 @@ export default function App() {
           </div>
         )}
       </Suspense>
+
+      {/* Top-level persistent ComfyUI 3D Character & Object Studio (.GLB) */}
+      <AIGenerator3D
+        isOpen={is3DStudioOpen}
+        onClose={close3DStudio}
+        initialPrompt={studioInitialPrompt}
+        initialImageUrl={studioInitialImageUrl}
+        targetActorId={studioTargetActorId}
+      />
     </div>
   );
 }

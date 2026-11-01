@@ -25,7 +25,6 @@ import {
   Globe,
 } from 'lucide-react';
 import { lookupPartGraph } from '../engine/procedural3D/partGraph';
-import { AIGenerator3D } from './AIGenerator3D';
 import { GlbResourcesDirectory } from './GlbResourcesDirectory';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -60,6 +59,8 @@ export const AssetLibraryModal: React.FC = () => {
     generationProgress,
     generationStage,
     generationError,
+    is3DStudioOpen,
+    open3DStudio,
   } = useAssetLibraryStore(
     useShallow((s) => ({
       isOpen: s.isOpen,
@@ -77,6 +78,8 @@ export const AssetLibraryModal: React.FC = () => {
       generationProgress: s.generationProgress,
       generationStage: s.generationStage,
       generationError: s.generationError,
+      is3DStudioOpen: s.is3DStudioOpen,
+      open3DStudio: s.open3DStudio,
     }))
   );
 
@@ -85,8 +88,6 @@ export const AssetLibraryModal: React.FC = () => {
   // Generator Panel state
   const [showGenerator, setShowGenerator] = useState(false);
   const [showResourcesDrawer, setShowResourcesDrawer] = useState(false);
-  const [showAiStudio, setShowAiStudio] = useState(false);
-  const [studioInitialPrompt, setStudioInitialPrompt] = useState<string>('');
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const reasonerLabel = describeReasoner();
   const [genPrompt, setGenPrompt] = useState('');
@@ -116,7 +117,7 @@ export const AssetLibraryModal: React.FC = () => {
 
   // Allow closing the 3D Asset Library with Escape key when no nested modal is active
   useEffect(() => {
-    if (!isOpen || showAiStudio || showSettingsModal) return;
+    if (!isOpen || is3DStudioOpen || showSettingsModal) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         closeLibrary();
@@ -124,7 +125,7 @@ export const AssetLibraryModal: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, showAiStudio, showSettingsModal, closeLibrary]);
+  }, [isOpen, is3DStudioOpen, showSettingsModal, closeLibrary]);
 
   const handleReasonWithLlm = async (asset: Asset3DItem, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -257,9 +258,7 @@ export const AssetLibraryModal: React.FC = () => {
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
       onClick={(e) => {
-        if (e.target === e.currentTarget && !showAiStudio && !showSettingsModal) {
-          closeLibrary();
-        }
+        e.stopPropagation();
       }}
     >
       <div
@@ -333,11 +332,10 @@ export const AssetLibraryModal: React.FC = () => {
             {/* AI 3D Generator Studio Button */}
             <button
               onClick={() => {
-                setStudioInitialPrompt(genPrompt || searchQuery || '');
-                setShowAiStudio(true);
+                open3DStudio({ initialPrompt: genPrompt || searchQuery || '' });
               }}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-amber-500 via-indigo-600 to-cyan-500 text-white hover:brightness-110 shadow-md shadow-indigo-600/30 transition-all font-mono"
-              title="Open Concept-to-3D Studio with Direct Vision-to-3D & Multi-Pass Sculpting"
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-amber-500 via-indigo-600 to-cyan-500 text-white hover:brightness-110 shadow-md shadow-indigo-600/30 transition-all font-mono cursor-pointer"
+              title="Open ComfyUI 3D Character & Object Studio (.GLB)"
             >
               <Sparkles className="h-4 w-4 text-amber-300" />
               <span>✨ Concept-to-3D Studio</span>
@@ -430,10 +428,9 @@ export const AssetLibraryModal: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => {
-                      setStudioInitialPrompt(genPrompt);
-                      setShowAiStudio(true);
+                      open3DStudio({ initialPrompt: genPrompt });
                     }}
-                    className="flex items-center gap-1 rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-2.5 py-1 text-[11px] font-mono text-indigo-200 hover:bg-indigo-500/25 hover:text-white transition-all"
+                    className="flex items-center gap-1 rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-2.5 py-1 text-[11px] font-mono text-indigo-200 hover:bg-indigo-500/25 hover:text-white transition-all cursor-pointer"
                   >
                     <Sparkles className="h-3 w-3 text-amber-300" />
                     <span>Open Concept-to-3D Studio</span>
@@ -920,13 +917,6 @@ export const AssetLibraryModal: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* Full AI Concept-to-3D Generator Modal */}
-      <AIGenerator3D
-        isOpen={showAiStudio}
-        onClose={() => setShowAiStudio(false)}
-        initialPrompt={studioInitialPrompt}
-      />
 
       {/* Embedded Studio Reasoner Settings Modal */}
       {showSettingsModal && (

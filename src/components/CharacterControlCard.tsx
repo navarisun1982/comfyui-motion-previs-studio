@@ -44,7 +44,7 @@ import {
   Globe,
 } from 'lucide-react';
 import { GlbResourcesDirectory } from './GlbResourcesDirectory';
-import { AIGenerator3D } from './AIGenerator3D';
+import { useAssetLibraryStore } from '../stores/useAssetLibraryStore';
 
 export const OBJECT_TARGET_PALETTE = [
   { hex: '#ef4444', name: 'Red' },
@@ -168,7 +168,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const lookPromptInputRef = useRef<HTMLInputElement | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<CharacterCardSubTab>('motion');
   const [showGlbResources, setShowGlbResources] = useState<boolean>(false);
-  const [showComfy3dStudio, setShowComfy3dStudio] = useState<boolean>(false);
+  const open3DStudio = useAssetLibraryStore((s) => s.open3DStudio);
 
   const kind = actor.kind || 'human';
   const shotDur = shotDurationSeconds || 4;
@@ -513,7 +513,11 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                 onClick={(e) => {
                   e.stopPropagation();
                   onSelectActor(actor.id);
-                  setShowComfy3dStudio(true);
+                  open3DStudio({
+                    initialPrompt: actor.name,
+                    initialImageUrl: actor.conceptImageUrl,
+                    targetActorId: actor.id,
+                  });
                 }}
                 className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/35 border border-cyan-400/45 text-[10px] font-bold text-cyan-200 cursor-pointer transition-colors"
                 title="Turn this character's reference image into a real 3D .GLB model using ComfyUI (Pixal3D / TRELLIS.2 / BiRefNet)"
@@ -1871,16 +1875,6 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
             )}
           </div>
         </div>
-      )}
-
-      {showComfy3dStudio && (
-        <AIGenerator3D
-          isOpen={showComfy3dStudio}
-          onClose={() => setShowComfy3dStudio(false)}
-          initialPrompt={actor.name}
-          initialImageUrl={actor.conceptImageUrl}
-          targetActorId={actor.id}
-        />
       )}
     </div>
   );
