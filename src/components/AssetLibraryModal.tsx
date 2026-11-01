@@ -256,7 +256,11 @@ export const AssetLibraryModal: React.FC = () => {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
-      onClick={closeLibrary}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !showAiStudio && !showSettingsModal) {
+          closeLibrary();
+        }
+      }}
     >
       <div
         className="flex h-[90vh] w-[95vw] max-w-6xl flex-col rounded-2xl border border-white/15 bg-[#0b0d14] text-slate-100 shadow-2xl overflow-hidden"

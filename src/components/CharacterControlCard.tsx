@@ -510,7 +510,11 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
             <div className="flex flex-wrap items-center gap-1 shrink-0">
               <button
                 type="button"
-                onClick={() => setShowComfy3dStudio(true)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectActor(actor.id);
+                  setShowComfy3dStudio(true);
+                }}
                 className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/35 border border-cyan-400/45 text-[10px] font-bold text-cyan-200 cursor-pointer transition-colors"
                 title="Turn this character's reference image into a real 3D .GLB model using ComfyUI (Pixal3D / TRELLIS.2 / BiRefNet)"
               >
@@ -560,16 +564,6 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
               )}
             </div>
           </div>
-
-          {showComfy3dStudio && (
-            <AIGenerator3D
-              isOpen={showComfy3dStudio}
-              onClose={() => setShowComfy3dStudio(false)}
-              initialPrompt={actor.name}
-              initialImageUrl={actor.conceptImageUrl}
-              targetActorId={actor.id}
-            />
-          )}
 
           {/* ================= SUB-TAB 1 (MOTION & STANCE) ================= */}
           <div className={activeSubTab === 'motion' || activeSubTab === 'all' ? 'space-y-2.5' : 'hidden'}>
@@ -1877,6 +1871,16 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {showComfy3dStudio && (
+        <AIGenerator3D
+          isOpen={showComfy3dStudio}
+          onClose={() => setShowComfy3dStudio(false)}
+          initialPrompt={actor.name}
+          initialImageUrl={actor.conceptImageUrl}
+          targetActorId={actor.id}
+        />
       )}
     </div>
   );

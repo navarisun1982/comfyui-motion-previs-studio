@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import * as THREE from 'three';
 import {
   Sparkles,
@@ -125,6 +126,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   }, [isGenerating]);
 
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
     const file = e.target.files?.[0];
     if (!file) return;
     const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
@@ -137,6 +139,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       setGenerationError(null);
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   // Load Custom 3D Workflow from Local URL / Local File Path
@@ -487,14 +490,18 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
   if (!isOpen) return null;
 
-  return (
+  const modalContent = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
       onClick={(e) => {
+        e.stopPropagation();
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative w-full max-w-5xl h-[90vh] max-h-[880px] bg-[#0b0e17] border border-white/15 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-200 font-sans">
+      <div
+        className="relative w-full max-w-5xl h-[90vh] max-h-[880px] bg-[#0b0e17] border border-white/15 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-200 font-sans"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Studio Settings Modal Overlay */}
         {showSettingsModal && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6 overflow-y-auto">
@@ -585,13 +592,17 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                onClick={(e) => e.stopPropagation()}
                 onChange={handleImageFileChange}
                 className="hidden"
               />
 
               {!referenceImageUrl ? (
                 <div
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fileInputRef.current?.click();
+                  }}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
                     e.preventDefault();
@@ -629,7 +640,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     </p>
                     <button
                       type="button"
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fileInputRef.current?.click();
+                      }}
                       className="text-[10px] font-mono px-2 py-1 rounded bg-white/10 hover:bg-white/15 text-slate-200 cursor-pointer"
                     >
                       Replace Image...
@@ -1105,4 +1119,6 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 };

@@ -351,10 +351,9 @@ export async function generate3DGlbInComfy(
 
   // 2. Build the API workflow
   options.onProgress?.(
-    `Preparing ${
-      options.customWorkflowJson
-        ? 'Custom 3D'
-        : options.engineMode === 'trellis2'
+    `Preparing ${options.customWorkflowJson
+      ? 'Custom 3D'
+      : options.engineMode === 'trellis2'
         ? 'TRELLIS.2'
         : 'Pixal3D'
     } (${options.qualityMode === 'fast_vertex' ? 'Fast Vertex-Color' : 'Full PBR'}) workflow...`
@@ -470,9 +469,8 @@ export async function generate3DGlbInComfy(
       const res = await fetch(viewUrl);
       if (res.ok) {
         glbBuffer = await res.arrayBuffer();
-        diskPath = `D:\\ComfyUI\\${extracted.type}\\${
-          extracted.subfolder ? `${extracted.subfolder}\\` : ''
-        }${extracted.filename}`;
+        diskPath = `D:\\ComfyUI\\${extracted.type}\\${extracted.subfolder ? `${extracted.subfolder}\\` : ''
+          }${extracted.filename}`;
       }
     } catch {
       // fallback to local output scan below
@@ -480,9 +478,8 @@ export async function generate3DGlbInComfy(
   }
 
   if (!glbBuffer) {
-    const fallbackUrl = `/api/comfy-glb-output?sinceMs=${startedAtMs}${
-      extracted?.rawPath ? `&path=${encodeURIComponent(extracted.rawPath)}` : ''
-    }`;
+    const fallbackUrl = `/api/comfy-glb-output?sinceMs=${startedAtMs}${extracted?.rawPath ? `&path=${encodeURIComponent(extracted.rawPath)}` : ''
+      }`;
     const res = await fetch(fallbackUrl);
     if (!res.ok) {
       throw new Error(
