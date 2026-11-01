@@ -138,7 +138,6 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
   } = useShotStore();
 
   const openAssetLibrary = useAssetLibraryStore((s) => s.openLibrary);
-  const open3DStudio = useAssetLibraryStore((s) => s.open3DStudio);
 
   const activeTab = activeDeckTab;
   const setActiveTab = setActiveDeckTab;
@@ -912,36 +911,20 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 )}
               </div>
 
-              {/* Direct ComfyUI Image -> 3D .GLB Button + 3D Asset Library Button */}
-              <div className="space-y-1.5">
-                <button
-                  type="button"
-                  onClick={() => open3DStudio()}
-                  className="w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-cyan-600 via-indigo-600 to-violet-600 hover:brightness-110 text-white font-bold text-xs flex items-center justify-between shadow-lg border border-cyan-400/50 transition-all cursor-pointer"
-                >
-                  <span className="flex items-center gap-2">
-                    <Sparkles className="h-3.5 w-3.5 text-cyan-200" />
-                    <span>Image &rarr; 3D .GLB Studio (ComfyUI)</span>
-                  </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-black/45 border border-white/20 text-cyan-200">
-                    Pixal3D • TRELLIS.2
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => openAssetLibrary()}
-                  className="w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-amber-600/90 via-indigo-600/90 to-purple-600/90 hover:from-amber-500 hover:via-indigo-500 hover:to-purple-500 text-white font-bold text-xs flex items-center justify-between shadow-lg border border-amber-400/40 transition-all cursor-pointer"
-                >
-                  <span className="flex items-center gap-2">
-                    <span className="text-sm">📦</span>
-                    <span>Browse 3D Asset Library &amp; AI Studio</span>
-                  </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-black/45 border border-white/20 text-amber-200">
-                    200+ Models
-                  </span>
-                </button>
-              </div>
+              {/* 3D Asset Library Button */}
+              <button
+                type="button"
+                onClick={() => openAssetLibrary()}
+                className="w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-amber-600/90 via-indigo-600/90 to-purple-600/90 hover:from-amber-500 hover:via-indigo-500 hover:to-purple-500 text-white font-bold text-xs flex items-center justify-between shadow-lg border border-amber-400/40 transition-all cursor-pointer"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="text-sm">📦</span>
+                  <span>Browse 3D Asset Library &amp; AI Studio</span>
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-black/45 border border-white/20 text-amber-200">
+                  200+ Models
+                </span>
+              </button>
               </div>
             </div>
 
