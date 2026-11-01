@@ -61,6 +61,7 @@ export const AssetLibraryModal: React.FC = () => {
     generationError,
     is3DStudioOpen,
     open3DStudio,
+    saveGeneratedGlbToLibrary,
   } = useAssetLibraryStore(
     useShallow((s) => ({
       isOpen: s.isOpen,
@@ -80,6 +81,7 @@ export const AssetLibraryModal: React.FC = () => {
       generationError: s.generationError,
       is3DStudioOpen: s.is3DStudioOpen,
       open3DStudio: s.open3DStudio,
+      saveGeneratedGlbToLibrary: s.saveGeneratedGlbToLibrary,
     }))
   );
 
@@ -114,6 +116,44 @@ export const AssetLibraryModal: React.FC = () => {
     const id = window.setInterval(() => setElapsedSec(Math.round((Date.now() - started) / 1000)), 500);
     return () => window.clearInterval(id);
   }, [isGenerating]);
+
+  // Automatically discover and import any previously generated .GLB files in D:\ComfyUI\output\3d
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    fetch('/api/comfy-glb-output?list=1')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data || !Array.isArray(data.items)) return;
+        for (const item of data.items) {
+          const rawBase = String(item.filename || 'Character')
+            .replace(/\.(glb|gltf)$/i, '')
+            .replace(/_\d+$/g, '')
+            .replace(/[_-]+/g, ' ')
+            .trim();
+          const cleanTitle = rawBase
+            ? rawBase.charAt(0).toUpperCase() + rawBase.slice(1)
+            : 'ComfyUI 3D Model';
+          const modelId = `comfy-disk-${String(item.filename).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+          saveGeneratedGlbToLibrary({
+            modelId,
+            blobUrl: item.downloadUrl,
+            name: cleanTitle,
+            actorCategory: 'human',
+            sizeBytes: item.sizeBytes,
+            rigType: 'auto',
+            showBones: false,
+            engineUsed: 'pixal3d',
+          });
+        }
+      })
+      .catch(() => {
+        // Ignore if running in static build without local middleware
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, saveGeneratedGlbToLibrary]);
 
   // Allow closing the 3D Asset Library with Escape key when no nested modal is active
   useEffect(() => {

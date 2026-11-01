@@ -2643,7 +2643,7 @@ const getSafeCustomAssets = (): Asset3DItem[] => {
       let changed = false;
       const rehydrated = await Promise.all(
         loaded.map(async (a) => {
-          if (a.modelId || (a.modelUrl && a.modelUrl.startsWith('model://'))) {
+          if (!a.modelUrl?.startsWith('/api/comfy-glb-output') && (a.modelId || (a.modelUrl && a.modelUrl.startsWith('model://')))) {
             const key = a.modelId || a.modelUrl!;
             const activeUrl = await getModelBlobUrl(key);
             if (activeUrl && activeUrl !== a.modelUrl) {

@@ -213,8 +213,13 @@ export async function getModelBuffer(idOrUrl: string): Promise<ArrayBuffer | nul
     }
   }
 
-  // 4. Blob or HTTP URL fetch
-  if (idOrUrl.startsWith('blob:') || idOrUrl.startsWith('http://') || idOrUrl.startsWith('https://')) {
+  // 4. Blob, HTTP, or local API URL fetch
+  if (
+    idOrUrl.startsWith('blob:') ||
+    idOrUrl.startsWith('http://') ||
+    idOrUrl.startsWith('https://') ||
+    idOrUrl.startsWith('/api/comfy-glb-output')
+  ) {
     try {
       const resp = await fetch(idOrUrl);
       if (resp.ok) {
@@ -236,8 +241,13 @@ export async function getModelBuffer(idOrUrl: string): Promise<ArrayBuffer | nul
 export async function getModelBlobUrl(idOrUrl: string): Promise<string> {
   if (!idOrUrl) return '';
 
-  // Direct blob or HTTP URL
-  if (idOrUrl.startsWith('blob:') || idOrUrl.startsWith('http://') || idOrUrl.startsWith('https://')) {
+  // Direct blob, HTTP, or local API URL
+  if (
+    idOrUrl.startsWith('blob:') ||
+    idOrUrl.startsWith('http://') ||
+    idOrUrl.startsWith('https://') ||
+    idOrUrl.startsWith('/api/comfy-glb-output')
+  ) {
     return idOrUrl;
   }
 

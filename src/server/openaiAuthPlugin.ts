@@ -91,9 +91,50 @@ function attachLocalWorkflowMiddleware(middlewares: { use: (fn: (req: any, res: 
       }
       try {
         const parsedUrl = new URL(rawUrl, 'http://127.0.0.1:5173');
+        const listMode = parsedUrl.searchParams.get('list') === '1';
         const explicitPath = (parsedUrl.searchParams.get('path') || '').trim();
         const sinceMs = Number(parsedUrl.searchParams.get('sinceMs') || '0');
         const comfyOutputDirs = ['D:\\ComfyUI\\output\\3d', 'D:\\ComfyUI\\output', 'D:\\ComfyUI\\temp'];
+
+        if (listMode) {
+          const items: Array<{
+            filename: string;
+            path: string;
+            sizeBytes: number;
+            mtimeMs: number;
+            downloadUrl: string;
+          }> = [];
+          const seen = new Set<string>();
+          const collectDir = (dir: string, depth = 0) => {
+            if (depth > 2 || !fs.existsSync(dir)) return;
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                collectDir(full, depth + 1);
+              } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.glb')) {
+                const norm = full.toLowerCase();
+                if (seen.has(norm)) continue;
+                seen.add(norm);
+                const stat = fs.statSync(full);
+                items.push({
+                  filename: entry.name,
+                  path: full,
+                  sizeBytes: stat.size,
+                  mtimeMs: stat.mtimeMs,
+                  downloadUrl: `/api/comfy-glb-output?path=${encodeURIComponent(full)}`,
+                });
+              }
+            }
+          };
+          for (const d of ['D:\\ComfyUI\\output\\3d', 'D:\\ComfyUI\\output']) {
+            collectDir(d, 0);
+          }
+          items.sort((a, b) => b.mtimeMs - a.mtimeMs);
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ items }));
+          return;
+        }
 
         let targetFile = '';
         if (explicitPath && fs.existsSync(explicitPath)) {
