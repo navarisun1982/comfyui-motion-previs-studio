@@ -1,0 +1,1425 @@
+{
+  "3": {
+    "inputs": {
+      "seed": 56,
+      "steps": 12,
+      "cfg": 7.5,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "108",
+        0
+      ],
+      "positive": [
+        "314",
+        0
+      ],
+      "negative": [
+        "315",
+        0
+      ],
+      "latent_image": [
+        "87",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler",
+      "cnr_id": "comfy-core",
+      "ver": "0.17.0"
+    }
+  },
+  "4": {
+    "inputs": {
+      "algorithm": "basic",
+      "threshold": 0.6,
+      "voxel": [
+        "119",
+        0
+      ]
+    },
+    "class_type": "VoxelToMesh",
+    "_meta": {
+      "title": "Voxel to Mesh",
+      "cnr_id": "comfy-core",
+      "ver": "0.17.0"
+    }
+  },
+  "12": {
+    "inputs": {
+      "seed": 43,
+      "steps": 12,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "318",
+        0
+      ],
+      "positive": [
+        "98",
+        0
+      ],
+      "negative": [
+        "98",
+        1
+      ],
+      "latent_image": [
+        "98",
+        2
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler",
+      "cnr_id": "comfy-core",
+      "ver": "0.17.0"
+    }
+  },
+  "15": {
+    "inputs": {
+      "clip_name": "dino_v3_L_naf_fp32.safetensors"
+    },
+    "class_type": "CLIPVisionLoader",
+    "_meta": {
+      "title": "Load CLIP Vision",
+      "cnr_id": "comfy-core",
+      "ver": "0.21.1"
+    }
+  },
+  "18": {
+    "inputs": {
+      "seed": 42,
+      "steps": 20,
+      "cfg": 7.5,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 1,
+      "model": [
+        "126",
+        0
+      ],
+      "positive": [
+        "91",
+        0
+      ],
+      "negative": [
+        "91",
+        1
+      ],
+      "latent_image": [
+        "91",
+        2
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler",
+      "cnr_id": "comfy-core",
+      "ver": "0.17.0"
+    }
+  },
+  "23": {
+    "inputs": {
+      "seed": 42,
+      "steps": 12,
+      "cfg": 7.5,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "126",
+        0
+      ],
+      "positive": [
+        "94",
+        0
+      ],
+      "negative": [
+        "94",
+        1
+      ],
+      "latent_image": [
+        "94",
+        2
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler",
+      "cnr_id": "comfy-core",
+      "ver": "0.17.0"
+    }
+  },
+  "40": {
+    "inputs": {
+      "unet_name": "trellis_2_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "55": {
+    "inputs": {
+      "model_name": "moge_2_vitl_normal_fp16.safetensors"
+    },
+    "class_type": "LoadMoGeModel",
+    "_meta": {
+      "title": "Load MoGe Model",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "56": {
+    "inputs": {
+      "resolution_level": 9,
+      "fov_x_degrees": 0,
+      "batch_size": 4,
+      "force_projection": true,
+      "apply_mask": true,
+      "refine_steps": 3,
+      "moge_model": [
+        "55",
+        0
+      ],
+      "image": [
+        "302",
+        0
+      ]
+    },
+    "class_type": "MoGeInference",
+    "_meta": {
+      "title": "Run MoGe Inference",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "87": {
+    "inputs": {
+      "batch_size": 1
+    },
+    "class_type": "EmptyTrellis2LatentStructure",
+    "_meta": {
+      "title": "Empty Trellis2 Latent Structure",
+      "cnr_id": "comfy-core",
+      "ver": "0.21.1"
+    }
+  },
+  "91": {
+    "inputs": {
+      "positive": [
+        "314",
+        0
+      ],
+      "negative": [
+        "315",
+        0
+      ],
+      "voxel": [
+        "119",
+        0
+      ]
+    },
+    "class_type": "Trellis2ShapeStage",
+    "_meta": {
+      "title": "Trellis2 Shape Stage",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "92": {
+    "inputs": {
+      "samples": [
+        "23",
+        0
+      ],
+      "vae": [
+        "117",
+        0
+      ]
+    },
+    "class_type": "VaeDecodeShapeTrellis",
+    "_meta": {
+      "title": "Trellis2 VAE Decode Shape",
+      "cnr_id": "comfy-core",
+      "ver": "0.17.0"
+    }
+  },
+  "93": {
+    "inputs": {
+      "samples": [
+        "12",
+        0
+      ],
+      "vae": [
+        "118",
+        0
+      ],
+      "shape_subdivides": [
+        "92",
+        1
+      ]
+    },
+    "class_type": "VaeDecodeTextureTrellis",
+    "_meta": {
+      "title": "Trellis2 VAE Decode Texture",
+      "cnr_id": "comfy-core",
+      "ver": "0.21.1"
+    }
+  },
+  "94": {
+    "inputs": {
+      "target_resolution": 1536,
+      "positive": [
+        "91",
+        0
+      ],
+      "negative": [
+        "91",
+        1
+      ],
+      "shape_latent": [
+        "18",
+        0
+      ],
+      "vae": [
+        "117",
+        0
+      ]
+    },
+    "class_type": "Trellis2UpsampleStage",
+    "_meta": {
+      "title": "Trellis2 Upsample Stage",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "98": {
+    "inputs": {
+      "positive": [
+        "94",
+        0
+      ],
+      "negative": [
+        "94",
+        1
+      ],
+      "shape_latent": [
+        "23",
+        0
+      ]
+    },
+    "class_type": "Trellis2TextureStage",
+    "_meta": {
+      "title": "Trellis2 Texture Stage",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "108": {
+    "inputs": {
+      "shift": 5,
+      "model": [
+        "125",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "ModelSamplingSD3",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "117": {
+    "inputs": {
+      "vae_name": "trellis_2_shape_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "118": {
+    "inputs": {
+      "vae_name": "trellis_2_texture_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "119": {
+    "inputs": {
+      "resolution": "32",
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "117",
+        0
+      ]
+    },
+    "class_type": "VaeDecodeStructureTrellis2",
+    "_meta": {
+      "title": "Trellis2 VAE Decode Structure",
+      "cnr_id": "comfy-core",
+      "ver": "0.17.0"
+    }
+  },
+  "125": {
+    "inputs": {
+      "multiplier": 0.7,
+      "model": [
+        "199",
+        0
+      ]
+    },
+    "class_type": "RescaleCFG",
+    "_meta": {
+      "title": "RescaleCFG",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "126": {
+    "inputs": {
+      "multiplier": 0.5,
+      "model": [
+        "279",
+        0
+      ]
+    },
+    "class_type": "RescaleCFG",
+    "_meta": {
+      "title": "RescaleCFG",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "147": {
+    "inputs": {
+      "texture_size": [
+        "288",
+        0
+      ],
+      "mesh": [
+        "196",
+        0
+      ],
+      "voxel_colors": [
+        "93",
+        0
+      ],
+      "reference_mesh": [
+        "92",
+        0
+      ]
+    },
+    "class_type": "BakeTextureFromVoxel",
+    "_meta": {
+      "title": "Bake Texture From Voxel",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "164": {
+    "inputs": {
+      "images": [
+        "147",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Base Color",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "186": {
+    "inputs": {
+      "target_face_count": 700000,
+      "placement_mode": "midpoint",
+      "mesh": [
+        "241",
+        0
+      ]
+    },
+    "class_type": "DecimateMesh",
+    "_meta": {
+      "title": "Decimate Mesh",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "192": {
+    "inputs": {
+      "bg_removal_model": [
+        "193",
+        0
+      ],
+      "image": [
+        "332",
+        0
+      ]
+    },
+    "class_type": "RemoveBackground",
+    "_meta": {
+      "title": "Remove Background",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "193": {
+    "inputs": {
+      "bg_removal_name": "birefnet.safetensors"
+    },
+    "class_type": "LoadBackgroundRemovalModel",
+    "_meta": {
+      "title": "Load Background Removal Model",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "196": {
+    "inputs": {
+      "segmenter": "pec",
+      "resolution": [
+        "288",
+        0
+      ],
+      "padding": 1,
+      "weld_distance": 0.0002,
+      "mesh": [
+        "238",
+        0
+      ]
+    },
+    "class_type": "UnwrapMesh",
+    "_meta": {
+      "title": "Unwrap Mesh UVs",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "199": {
+    "inputs": {
+      "cfg": 1,
+      "start_percent": 0.667,
+      "end_percent": 1,
+      "model": [
+        "318",
+        0
+      ]
+    },
+    "class_type": "CFGOverride",
+    "_meta": {
+      "title": "CFG Override",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "202": {
+    "inputs": {
+      "mesh": [
+        "92",
+        0
+      ]
+    },
+    "class_type": "GetMeshInfo",
+    "_meta": {
+      "title": "Get Mesh Info",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "207": {
+    "inputs": {
+      "images": [
+        "147",
+        1
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Metallic",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "208": {
+    "inputs": {
+      "images": [
+        "147",
+        2
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Roughness",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "210": {
+    "inputs": {
+      "mesh": [
+        "196",
+        0
+      ],
+      "base_color": [
+        "164",
+        0
+      ],
+      "metallic": [
+        "207",
+        0
+      ],
+      "roughness": [
+        "208",
+        0
+      ],
+      "occlusion": [
+        "235",
+        0
+      ],
+      "normal_map": [
+        "226",
+        0
+      ]
+    },
+    "class_type": "ApplyTextureToMesh",
+    "_meta": {
+      "title": "Apply Texture to Mesh",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "224": {
+    "inputs": {
+      "resolution": 2048,
+      "cage_distance": 0.05,
+      "ignore_backfaces": true,
+      "low_poly": [
+        "196",
+        0
+      ],
+      "high_poly": [
+        "241",
+        0
+      ]
+    },
+    "class_type": "BakeNormalMapFromMesh",
+    "_meta": {
+      "title": "Bake Normal Map from Mesh",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "226": {
+    "inputs": {
+      "images": [
+        "224",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Normal",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "233": {
+    "inputs": {
+      "resolution": 1024,
+      "samples": 64,
+      "max_distance": 0.71,
+      "strength": 1,
+      "bias": 0.01,
+      "low_poly": [
+        "196",
+        0
+      ],
+      "high_poly": [
+        "241",
+        0
+      ]
+    },
+    "class_type": "BakeAmbientOcclusion",
+    "_meta": {
+      "title": "Bake Ambient Occlusion",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "235": {
+    "inputs": {
+      "images": [
+        "233",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Ambiant Occlusion",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "238": {
+    "inputs": {
+      "crease_angle": 180,
+      "mesh": [
+        "186",
+        0
+      ]
+    },
+    "class_type": "MeshSmoothNormals",
+    "_meta": {
+      "title": "Smooth Mesh Normals",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "241": {
+    "inputs": {
+      "resolution": 768,
+      "sign_mode": "solid",
+      "sign_mode.fill": 20,
+      "sign_mode.qef": false,
+      "band": 1,
+      "project_back": 0,
+      "fix_poles": false,
+      "smooth_iters": 20,
+      "drop_small_components": 0.01,
+      "precluster_max_verts": 20000000,
+      "mesh": [
+        "202",
+        0
+      ]
+    },
+    "class_type": "RemeshMesh",
+    "_meta": {
+      "title": "Remesh Mesh (Narrow-Band DC)",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "242": {
+    "inputs": {
+      "axis": "horizontal",
+      "unit": "degrees",
+      "moge_geometry": [
+        "56",
+        0
+      ]
+    },
+    "class_type": "MoGeGeometryToFOV",
+    "_meta": {
+      "title": "Get FoV from MoGe Geometry",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "246": {
+    "inputs": {
+      "viewport_state": {
+        "image": "",
+        "mask": "",
+        "normal": "",
+        "camera_info": {
+          "position": {
+            "x": -4.205884589283882,
+            "y": 1.1157480806660611,
+            "z": 0.1297675482148001
+          },
+          "target": {
+            "x": -0.18539216968998093,
+            "y": -0.12940291071409174,
+            "z": 0.06007585330276396
+          },
+          "zoom": 1,
+          "cameraType": "perspective",
+          "quaternion": {
+            "x": -0.10668291923795062,
+            "y": -0.6930662193889555,
+            "z": -0.10484969119215684,
+            "w": 0.7051840274294919
+          },
+          "fov": 35,
+          "aspect": 1,
+          "near": 0.01,
+          "far": 10000,
+          "frustum": {
+            "left": -5,
+            "right": 5,
+            "top": 5,
+            "bottom": -5
+          }
+        },
+        "recording": "",
+        "model_3d_info": [
+          {
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "quaternion": {
+              "x": 0,
+              "y": 0,
+              "z": 0,
+              "w": 1
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            }
+          }
+        ]
+      },
+      "width": 1024,
+      "height": 1024,
+      "model_3d": [
+        "247",
+        0
+      ]
+    },
+    "class_type": "Preview3DAdvanced",
+    "_meta": {
+      "title": "Preview 3D (Advanced)",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "247": {
+    "inputs": {
+      "mesh": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "MeshToFile3D",
+    "_meta": {
+      "title": "Create 3D File (from Mesh)",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "252": {
+    "inputs": {
+      "mesh": [
+        "238",
+        0
+      ],
+      "voxel_colors": [
+        "93",
+        0
+      ]
+    },
+    "class_type": "PaintMesh",
+    "_meta": {
+      "title": "Paint Mesh",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "260": {
+    "inputs": {
+      "crease_angle": 180,
+      "mesh": [
+        "210",
+        0
+      ]
+    },
+    "class_type": "MeshSmoothNormals",
+    "_meta": {
+      "title": "Smooth Mesh Normals",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "261": {
+    "inputs": {
+      "resolution": 1024,
+      "mesh": [
+        "196",
+        0
+      ]
+    },
+    "class_type": "RenderUVAtlas",
+    "_meta": {
+      "title": "Render UV Atlas",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "262": {
+    "inputs": {
+      "images": [
+        "261",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "279": {
+    "inputs": {
+      "cfg": 1,
+      "start_percent": 0.769,
+      "end_percent": 1,
+      "model": [
+        "318",
+        0
+      ]
+    },
+    "class_type": "CFGOverride",
+    "_meta": {
+      "title": "CFG Override",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "282": {
+    "inputs": {
+      "mesh": [
+        "252",
+        0
+      ]
+    },
+    "class_type": "MeshToFile3D",
+    "_meta": {
+      "title": "Create 3D File (from Mesh)",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "285": {
+    "inputs": {
+      "mesh": [
+        "260",
+        0
+      ]
+    },
+    "class_type": "MeshToFile3D",
+    "_meta": {
+      "title": "Create 3D File (from Mesh)",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "288": {
+    "inputs": {
+      "value": 4096
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Texture Resolution",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "298": {
+    "inputs": {
+      "camera_angle_x": [
+        "242",
+        0
+      ],
+      "clip_vision_model": [
+        "15",
+        0
+      ],
+      "image": [
+        "302",
+        0
+      ]
+    },
+    "class_type": "Pixal3DConditioning",
+    "_meta": {
+      "title": "Pixal3D Conditioning",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "299": {
+    "inputs": {
+      "clip_vision_model": [
+        "15",
+        0
+      ],
+      "image": [
+        "302",
+        0
+      ]
+    },
+    "class_type": "Trellis2Conditioning",
+    "_meta": {
+      "title": "Trellis2 Conditioning",
+      "cnr_id": "comfy-core",
+      "ver": "0.17.0"
+    }
+  },
+  "302": {
+    "inputs": {
+      "images": [
+        "312",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "303": {
+    "inputs": {
+      "mask": [
+        "192",
+        0
+      ]
+    },
+    "class_type": "MaskPreview",
+    "_meta": {
+      "title": "Preview Mask",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "312": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "pad_factor": 1.1,
+      "grow_mask": 0,
+      "background": "#000000",
+      "images": [
+        "332",
+        0
+      ],
+      "masks": [
+        "303",
+        0
+      ]
+    },
+    "class_type": "ImageCropToMask",
+    "_meta": {
+      "title": "Crop Image to Mask",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "314": {
+    "inputs": {
+      "switch": [
+        "316",
+        0
+      ],
+      "on_false": [
+        "298",
+        0
+      ],
+      "on_true": [
+        "299",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "If/Else Switch",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "315": {
+    "inputs": {
+      "switch": [
+        "316",
+        0
+      ],
+      "on_false": [
+        "298",
+        1
+      ],
+      "on_true": [
+        "299",
+        1
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "If/Else Switch",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "316": {
+    "inputs": {
+      "value": false
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Boolean (Switch to Trellis2)",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "318": {
+    "inputs": {
+      "switch": [
+        "316",
+        0
+      ],
+      "on_false": [
+        "319",
+        0
+      ],
+      "on_true": [
+        "40",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "If/Else Switch",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "319": {
+    "inputs": {
+      "unet_name": "pixal3d_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "322": {
+    "inputs": {
+      "filename_prefix": "3d/ComfyUI",
+      "viewport_state": {
+        "image": "",
+        "mask": "",
+        "normal": "",
+        "camera_info": {
+          "position": {
+            "x": -0.4191624382340112,
+            "y": 0.24724913257307254,
+            "z": -0.6323753872701127
+          },
+          "target": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "zoom": 1,
+          "cameraType": "perspective",
+          "quaternion": {
+            "x": 0.045258895092672446,
+            "y": 0.9456217453869525,
+            "z": 0.15019867514799198,
+            "w": -0.28494123087070433
+          },
+          "fov": 75,
+          "aspect": 1,
+          "near": 0.01,
+          "far": 10000,
+          "frustum": {
+            "left": -5,
+            "right": 5,
+            "top": 5,
+            "bottom": -5
+          }
+        },
+        "recording": "",
+        "model_3d_info": [
+          {
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "quaternion": {
+              "x": 0,
+              "y": 0,
+              "z": 0,
+              "w": 1
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            }
+          }
+        ]
+      },
+      "width": 1024,
+      "height": 1024,
+      "model_3d": [
+        "285",
+        0
+      ]
+    },
+    "class_type": "Save3DAdvanced",
+    "_meta": {
+      "title": "Save 3D (Advanced)",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "323": {
+    "inputs": {
+      "viewport_state": {
+        "image": "",
+        "mask": "",
+        "normal": "",
+        "camera_info": {
+          "position": {
+            "x": 0.7047751005301044,
+            "y": 0.42168644022017504,
+            "z": 0.8787292073148107
+          },
+          "target": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "zoom": 1,
+          "cameraType": "perspective",
+          "quaternion": {
+            "x": -0.1680663851258547,
+            "y": 0.32628879780344955,
+            "z": 0.05907174748185281,
+            "w": 0.9283317506517527
+          },
+          "fov": 75,
+          "aspect": 1,
+          "near": 0.01,
+          "far": 10000,
+          "frustum": {
+            "left": -5,
+            "right": 5,
+            "top": 5,
+            "bottom": -5
+          }
+        },
+        "recording": "",
+        "model_3d_info": [
+          {
+            "position": {
+              "x": 0,
+              "y": 0,
+              "z": 0
+            },
+            "quaternion": {
+              "x": 0,
+              "y": 0,
+              "z": 0,
+              "w": 1
+            },
+            "scale": {
+              "x": 1,
+              "y": 1,
+              "z": 1
+            }
+          }
+        ]
+      },
+      "width": 1024,
+      "height": 1024,
+      "model_3d": [
+        "282",
+        0
+      ]
+    },
+    "class_type": "Preview3DAdvanced",
+    "_meta": {
+      "title": "Preview 3D (Advanced)",
+      "cnr_id": "comfy-core",
+      "ver": "0.33.0"
+    }
+  },
+  "324": {
+    "inputs": {
+      "unet_name": "Zimage\\z-image-turbo_fp8_scaled_e4m3fn_KJ.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model",
+      "cnr_id": "comfy-core",
+      "ver": "0.43.0"
+    }
+  },
+  "325": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP",
+      "cnr_id": "comfy-core",
+      "ver": "0.43.0"
+    }
+  },
+  "326": {
+    "inputs": {
+      "vae_name": "flux.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE",
+      "cnr_id": "comfy-core",
+      "ver": "0.43.0"
+    }
+  },
+  "327": {
+    "inputs": {
+      "text": "A single full object: a highly detailed medieval fantasy treasure chest, three-quarter front view, centered in the frame, fully visible including all edges, isolated on a clean neutral studio background, realistic material details, soft diffuse lighting, no floor clutter, no other objects, no text.",
+      "clip": [
+        "325",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "YOUR TEXT PROMPT - Describe 3D object",
+      "cnr_id": "comfy-core",
+      "ver": "0.43.0"
+    }
+  },
+  "328": {
+    "inputs": {
+      "conditioning": [
+        "327",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "Conditioning Zero Out",
+      "cnr_id": "comfy-core",
+      "ver": "0.43.0"
+    }
+  },
+  "329": {
+    "inputs": {
+      "shift": 3,
+      "sampling": "flow",
+      "model": [
+        "324",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "ModelSamplingAuraFlow",
+      "cnr_id": "comfy-core",
+      "ver": "0.43.0"
+    }
+  },
+  "330": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "EmptySD3LatentImage",
+      "cnr_id": "comfy-core",
+      "ver": "0.43.0"
+    }
+  },
+  "331": {
+    "inputs": {
+      "seed": 123456789,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "329",
+        0
+      ],
+      "positive": [
+        "327",
+        0
+      ],
+      "negative": [
+        "328",
+        0
+      ],
+      "latent_image": [
+        "330",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "Z-Image Turbo - Generate Image",
+      "cnr_id": "comfy-core",
+      "ver": "0.43.0"
+    }
+  },
+  "332": {
+    "inputs": {
+      "samples": [
+        "331",
+        0
+      ],
+      "vae": [
+        "326",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode",
+      "cnr_id": "comfy-core",
+      "ver": "0.43.0"
+    }
+  },
+  "333": {
+    "inputs": {
+      "images": [
+        "332",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Generated image preview",
+      "cnr_id": "comfy-core",
+      "ver": "0.43.0"
+    }
+  }
+}

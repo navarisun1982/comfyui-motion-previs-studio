@@ -15,8 +15,12 @@ import {
   Dice5,
   FolderOpen,
   RotateCw,
+  FileCode,
+  Lock,
+  Plus,
 } from 'lucide-react';
 import { ReasonerSettingsPanel } from './ReasonerSettingsPanel';
+import { BundledWorkflowsModal } from './BundledWorkflowsModal';
 import { useShotStore } from '../stores/useShotStore';
 import { useAssetLibraryStore } from '../stores/useAssetLibraryStore';
 import { useComfyStore } from '../stores/useComfyStore';
@@ -35,7 +39,9 @@ import {
 import {
   Comfy3DEngineMode,
   Comfy3DQualityMode,
+  Comfy3DGenerationMode,
   Comfy3DGenerationResult,
+  format3DStudioTextPrompt,
   generate3DGlbInComfy,
 } from '../services/comfy3dGenerator';
 import {
@@ -49,6 +55,7 @@ export interface AIGenerator3DProps {
   initialPrompt?: string;
   initialImageUrl?: string;
   targetActorId?: string;
+  initialMode?: Comfy3DGenerationMode;
   onApplyToScene?: (actorId: string) => void;
 }
 
@@ -58,6 +65,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   initialPrompt = '',
   initialImageUrl,
   targetActorId,
+  initialMode,
   onApplyToScene,
 }) => {
   const addActor = useShotStore((s) => s.addActor);
@@ -67,10 +75,17 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   const comfyStatus = useComfyStore((s) => s.connectionStatus);
   const comfyStats = useComfyStore((s) => s.systemStats);
 
+  // Unified Mode Switcher: Image-to-3D (#aa77013b) vs Text-to-3D (#e7a9555b)
+  const [generationMode, setGenerationMode] = useState<Comfy3DGenerationMode>(
+    initialMode || (initialPrompt && !initialImageUrl ? 'text-to-3d' : 'image-to-3d')
+  );
+  const [textPrompt, setTextPrompt] = useState<string>(initialPrompt || '');
+
   // Input & Actor Metadata
   const [actorName, setActorName] = useState(initialPrompt || 'Hero Character');
   const [actorCategory, setActorCategory] = useState<'human' | 'creature' | 'prop'>('human');
   const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(initialImageUrl || null);
+  const [showWorkflowsPackModal, setShowWorkflowsPackModal] = useState<boolean>(false);
 
   // ComfyUI 3D Workflow Controls (#aa77013b-18f1-4679-9678-6d455d3536c5)
   const [engineMode, setEngineMode] = useState<Comfy3DEngineMode>('pixal3d');
@@ -136,11 +151,21 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (initialPrompt && !actorName) setActorName(initialPrompt);
+    if (initialMode) {
+      setGenerationMode(initialMode);
+    } else if (initialPrompt && !initialImageUrl) {
+      setGenerationMode('text-to-3d');
+    } else if (initialImageUrl) {
+      setGenerationMode('image-to-3d');
+    }
+    if (initialPrompt) {
+      setTextPrompt(initialPrompt);
+      if (!actorName || actorName === 'Hero Character') setActorName(initialPrompt);
+    }
     if (initialImageUrl && !referenceImageUrl) {
       setReferenceImageUrl(initialImageUrl);
     }
-  }, [initialPrompt, initialImageUrl]);
+  }, [initialPrompt, initialImageUrl, initialMode]);
 
   // Elapsed timer during generation
   useEffect(() => {
@@ -532,10 +557,28 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     });
   }, [isWireframe]);
 
-  // Execute ComfyUI 3D .GLB Generation
+  // Once a 3D object is created, lock its creation inputs (mode, prompt, image, engine settings)
+  const isCreationLocked = Boolean(generatedResult);
+
+  // Reset Studio to start a brand-new 3D object
+  const handleStartNew3DObject = () => {
+    setGeneratedResult(null);
+    setRigInfo(null);
+    setCustomLandmarks(null);
+    setGenerationError(null);
+    setStepProgress(null);
+    setGenerationStage('');
+  };
+
+  // Execute ComfyUI 3D .GLB Generation (Image-to-3D #aa77013b OR Text-to-3D #e7a9555b)
   const handleGenerateGlb = async () => {
-    if (!referenceImageUrl) {
+    if (isCreationLocked) return;
+    if (generationMode === 'image-to-3d' && !referenceImageUrl) {
       setGenerationError('Please upload a reference character or object image first.');
+      return;
+    }
+    if (generationMode === 'text-to-3d' && !textPrompt.trim()) {
+      setGenerationError('Please enter a text description of the 3D object or character first.');
       return;
     }
     if (workflowSource === 'custom' && !customWorkflowJson.trim()) {
@@ -548,12 +591,24 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     setIsGenerating(true);
     setGenerationError(null);
     setStepProgress(null);
-    setGenerationStage('Connecting to local ComfyUI & uploading reference image...');
+    setGenerationStage(
+      generationMode === 'text-to-3d'
+        ? 'Connecting to local ComfyUI & queueing Text-to-3D workflow (#e7a9555b)...'
+        : 'Connecting to local ComfyUI & uploading reference image (#aa77013b)...'
+    );
 
     try {
+      const effectiveActorName =
+        actorName.trim() ||
+        (generationMode === 'text-to-3d'
+          ? textPrompt.trim().slice(0, 36) || '3D Object'
+          : 'Hero Character');
+
       const result = await generate3DGlbInComfy({
-        imageDataUrl: referenceImageUrl,
-        actorName: actorName.trim() || 'Hero Character',
+        generationMode,
+        imageDataUrl: generationMode === 'image-to-3d' ? referenceImageUrl || undefined : undefined,
+        textPrompt: generationMode === 'text-to-3d' ? textPrompt.trim() : undefined,
+        actorName: effectiveActorName,
         engineMode,
         qualityMode,
         removeBackground,
@@ -571,16 +626,23 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       });
 
       setGeneratedResult(result);
+      if (!actorName.trim() || actorName === 'Hero Character') {
+        setActorName(effectiveActorName);
+      }
+
+      const resolvedConceptImage =
+        generationMode === 'text-to-3d'
+          ? result.generatedConceptImageUrl || undefined
+          : referenceImageUrl || undefined;
 
       // Automatically save the generated 3D .GLB character/object into the 3D Asset Library
-      const cleanName = actorName.trim() || 'Hero Character';
       saveGeneratedGlbToLibrary({
         modelId: result.modelId,
         blobUrl: result.blobUrl,
-        name: cleanName,
+        name: effectiveActorName,
         actorCategory,
         sizeBytes: result.sizeBytes,
-        conceptImageUrl: referenceImageUrl || undefined,
+        conceptImageUrl: resolvedConceptImage,
         rigType,
         rigLandmarks: customLandmarks || undefined,
         showBones,
@@ -617,13 +679,17 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   const handleSaveToLibrary = async () => {
     if (!generatedResult) return;
     const cleanName = actorName.trim() || 'ComfyUI 3D Character';
+    const resolvedConceptImage =
+      generationMode === 'text-to-3d'
+        ? generatedResult.generatedConceptImageUrl || undefined
+        : referenceImageUrl || undefined;
     saveGeneratedGlbToLibrary({
       modelId: generatedResult.modelId,
       blobUrl: generatedResult.blobUrl,
       name: cleanName,
       actorCategory,
       sizeBytes: generatedResult.sizeBytes,
-      conceptImageUrl: referenceImageUrl || undefined,
+      conceptImageUrl: resolvedConceptImage,
       rigType,
       rigLandmarks: customLandmarks || rigInfo?.landmarks,
       showBones,
@@ -634,11 +700,15 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   };
 
   // Add or apply generated .GLB character/object to active 3D scene
-  // Auto-syncs `conceptImageUrl: referenceImageUrl` so <picture 1> is immediately bound for MiniMax H3 video rendering,
+  // Auto-syncs `conceptImageUrl` so <picture 1> is immediately bound for MiniMax H3 video rendering,
   // and ensures the 3D Asset Library entry is updated and both modals close so the rigged .GLB appears immediately on stage.
   const handleAddToScene = () => {
     if (!generatedResult) return;
     const cleanName = actorName.trim() || 'ComfyUI 3D Character';
+    const resolvedConceptImage =
+      generationMode === 'text-to-3d'
+        ? generatedResult.generatedConceptImageUrl || undefined
+        : referenceImageUrl || undefined;
 
     // Ensure the 3D Asset Library has the latest name, category, and rig configuration
     saveGeneratedGlbToLibrary({
@@ -647,7 +717,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       name: cleanName,
       actorCategory,
       sizeBytes: generatedResult.sizeBytes,
-      conceptImageUrl: referenceImageUrl || undefined,
+      conceptImageUrl: resolvedConceptImage,
       rigType,
       rigLandmarks: customLandmarks || rigInfo?.landmarks,
       showBones,
@@ -659,7 +729,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         name: cleanName,
         kind: actorCategory,
         modelUrl: generatedResult.blobUrl,
-        conceptImageUrl: referenceImageUrl || undefined,
+        conceptImageUrl: resolvedConceptImage,
         sculpt: undefined,
         partGraph: undefined,
         rigType,
@@ -669,7 +739,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     } else {
       addActor(cleanName, actorCategory, cleanName, {
         modelUrl: generatedResult.blobUrl,
-        conceptImageUrl: referenceImageUrl || undefined,
+        conceptImageUrl: resolvedConceptImage,
         rigType,
         rigLandmarks: customLandmarks || rigInfo?.landmarks,
         showBones,
@@ -711,6 +781,12 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
           </div>
         )}
 
+        {/* Bundled ComfyUI Workflows Pack Modal */}
+        <BundledWorkflowsModal
+          isOpen={showWorkflowsPackModal}
+          onClose={() => setShowWorkflowsPackModal(false)}
+        />
+
         {/* Header Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 border-b border-white/10 bg-[#111624] shrink-0">
           <div className="flex items-center gap-3">
@@ -723,16 +799,31 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                   ComfyUI 3D Character &amp; Object Studio (.GLB)
                 </h2>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/35 font-semibold">
-                  Pixal3D • TRELLIS.2 • BiRefNet
+                  {generationMode === 'text-to-3d'
+                    ? 'Z-Image Turbo • Pixal3D • TRELLIS.2 (#e7a9555b)'
+                    : 'Pixal3D • TRELLIS.2 • BiRefNet (#aa77013b)'}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Turn any character or object concept image into a real textured 3D <code className="text-cyan-300">.GLB</code> mesh via local ComfyUI
+                {generationMode === 'text-to-3d'
+                  ? 'Generate a 3D .GLB character or object directly from a text prompt via ComfyUI workflow #e7a9555b'
+                  : 'Turn any character or object concept image into a real textured 3D .GLB mesh via ComfyUI workflow #aa77013b'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
+            {/* Download All Bundled ComfyUI Workflows Button */}
+            <button
+              type="button"
+              onClick={() => setShowWorkflowsPackModal(true)}
+              className="flex items-center gap-1.5 text-[11px] font-mono font-semibold text-cyan-200 hover:text-white bg-cyan-500/15 hover:bg-cyan-500/25 px-2.5 py-1.5 rounded-lg border border-cyan-400/40 transition-all cursor-pointer"
+              title="Download all ComfyUI workflows used in this app (Image-to-3D, Text-to-3D, MiniMax H3 & LTX-2.5)"
+            >
+              <FileCode className="h-3.5 w-3.5 text-cyan-300" />
+              <span>📥 Workflows Pack</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setShowSettingsModal(true)}
@@ -765,104 +856,226 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
         {/* Main Two-Column Body */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 min-h-0 overflow-hidden">
-          {/* LEFT COLUMN (5 Cols): Image Input + ComfyUI 3D Controls */}
+          {/* LEFT COLUMN (5 Cols): Mode Switcher + Mutually Exclusive Input + ComfyUI 3D Controls */}
           <div className="lg:col-span-5 border-r border-white/10 bg-[#0d111c] p-4 overflow-y-auto space-y-3.5">
-            {/* 1. Reference Image Upload */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-[11px] font-mono uppercase tracking-wider text-slate-300 font-bold flex items-center gap-1.5">
-                  <Upload className="h-3.5 w-3.5 text-cyan-400" />
-                  1. Character / Object Reference Image
-                </label>
-                {referenceImageUrl && (
+            {/* Creation Locked Banner (Once a 3D .GLB is created, its creation inputs cannot be edited) */}
+            {isCreationLocked && (
+              <div className="rounded-xl border border-amber-500/45 bg-amber-950/25 p-3 space-y-2 font-mono">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 text-xs font-bold text-amber-200">
+                    <Lock className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                    <span>3D Object Created — Creation Inputs Locked</span>
+                  </span>
                   <button
                     type="button"
-                    onClick={() => {
-                      setReferenceImageUrl(null);
-                      setGeneratedResult(null);
-                    }}
-                    className="text-[11px] text-rose-400 hover:text-rose-300 font-medium cursor-pointer"
+                    onClick={handleStartNew3DObject}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-[10.5px] font-bold shadow cursor-pointer shrink-0"
+                    title="Clear current 3D object and start creating a brand-new 3D object"
                   >
-                    Clear Image
+                    <Plus className="h-3 w-3 stroke-[3]" />
+                    <span>New 3D Object</span>
                   </button>
-                )}
+                </div>
+                <p className="text-[10.5px] text-slate-300 leading-relaxed font-sans">
+                  Once a 3D <code className="text-cyan-300">.GLB</code> object is created, its mesh &amp; generation prompt are locked. Place it on the 3D Stage, download the <code className="text-cyan-300">.GLB</code>, or click <strong>New 3D Object</strong> to create another.
+                </p>
               </div>
+            )}
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onClick={(e) => e.stopPropagation()}
-                onChange={handleImageFileChange}
-                className="hidden"
-              />
-
-              {!referenceImageUrl ? (
-                <div
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    fileInputRef.current?.click();
+            {/* 0. Unified Mode Switcher: Image-to-3D (#aa77013b) vs Text-to-3D (#e7a9555b) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-mono uppercase tracking-wider text-slate-300 font-bold">
+                  1. Choose 3D Creation Mode (Mutually Exclusive)
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-black/60 border border-white/15 font-mono text-xs">
+                <button
+                  type="button"
+                  disabled={isCreationLocked || isGenerating}
+                  onClick={() => {
+                    setGenerationMode('image-to-3d');
+                    setGenerationError(null);
                   }}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const file = e.dataTransfer.files?.[0];
-                    if (file && file.type.startsWith('image/')) {
-                      const reader = new FileReader();
-                      reader.onload = () => setReferenceImageUrl(reader.result as string);
-                      reader.readAsDataURL(file);
-                    }
-                  }}
-                  className="border-2 border-dashed border-cyan-500/35 hover:border-cyan-400/70 rounded-xl p-5 flex flex-col items-center justify-center gap-2 cursor-pointer bg-cyan-950/10 hover:bg-cyan-950/20 transition-all text-center"
+                  className={`py-2 px-2.5 rounded-lg font-bold transition-all flex flex-col items-start gap-0.5 text-left ${
+                    isCreationLocked || isGenerating ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                  } ${
+                    generationMode === 'image-to-3d'
+                      ? 'bg-gradient-to-r from-cyan-600/40 to-indigo-600/40 border border-cyan-400 text-white shadow'
+                      : 'bg-transparent border border-transparent text-slate-400 hover:text-white'
+                  }`}
                 >
-                  <Upload className="h-6 w-6 text-cyan-400" />
-                  <div className="text-xs font-semibold text-white">
-                    Click or Drag &amp; Drop Character / Object Image
-                  </div>
-                  <span className="text-[10px] text-slate-400">
-                    Supports any PNG, JPG, or WebP concept image — BiRefNet removes the background automatically in ComfyUI
+                  <span className="text-[11px] flex items-center gap-1.5">
+                    <span>🖼️ Image-to-3D</span>
                   </span>
-                </div>
-              ) : (
-                <div className="relative rounded-xl overflow-hidden border border-white/15 bg-black/60 p-2 flex items-center gap-3">
-                  <img
-                    src={referenceImageUrl}
-                    alt="Reference"
-                    className="h-24 w-24 object-contain rounded-lg bg-[#141824] border border-white/10 shrink-0"
-                  />
-                  <div className="flex-1 min-w-0 space-y-1.5">
-                    <div className="text-xs font-bold text-emerald-300 flex items-center gap-1">
-                      <Check className="h-3.5 w-3.5 shrink-0" />
-                      <span>Reference Image Staged</span>
-                    </div>
-                    <p className="text-[10px] text-slate-400 leading-relaxed">
-                      This image will be reconstructed into a 3D <code className="text-cyan-300">.GLB</code> mesh and automatically linked as the character&apos;s ComfyUI Reference Image (<code className="text-amber-300">&lt;picture 1&gt;</code>).
-                    </p>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        fileInputRef.current?.click();
-                      }}
-                      className="text-[10px] font-mono px-2 py-1 rounded bg-white/10 hover:bg-white/15 text-slate-200 cursor-pointer"
-                    >
-                      Replace Image...
-                    </button>
-                  </div>
-                </div>
-              )}
+                  <span className="text-[9.5px] text-cyan-300/90 font-normal">
+                    Image Only • #aa77013b
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isCreationLocked || isGenerating}
+                  onClick={() => {
+                    setGenerationMode('text-to-3d');
+                    setGenerationError(null);
+                  }}
+                  className={`py-2 px-2.5 rounded-lg font-bold transition-all flex flex-col items-start gap-0.5 text-left ${
+                    isCreationLocked || isGenerating ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                  } ${
+                    generationMode === 'text-to-3d'
+                      ? 'bg-gradient-to-r from-amber-500/35 to-indigo-600/40 border border-amber-400 text-white shadow'
+                      : 'bg-transparent border border-transparent text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span className="text-[11px] flex items-center gap-1.5">
+                    <span>✍️ Text-to-3D</span>
+                  </span>
+                  <span className="text-[9.5px] text-amber-300/90 font-normal">
+                    Text Prompt Only • #e7a9555b
+                  </span>
+                </button>
+              </div>
             </div>
 
+            {/* 1A. IMAGE-TO-3D INPUT (Shown ONLY when generationMode === 'image-to-3d') */}
+            {generationMode === 'image-to-3d' ? (
+              <div className={`space-y-1.5 ${isCreationLocked ? 'opacity-60 pointer-events-none' : ''}`}>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-mono uppercase tracking-wider text-slate-300 font-bold flex items-center gap-1.5">
+                    <Upload className="h-3.5 w-3.5 text-cyan-400" />
+                    2. Character / Object Reference Image (No Text Prompt Needed)
+                  </label>
+                  {referenceImageUrl && !isCreationLocked && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReferenceImageUrl(null);
+                        setGeneratedResult(null);
+                      }}
+                      className="text-[11px] text-rose-400 hover:text-rose-300 font-medium cursor-pointer"
+                    >
+                      Clear Image
+                    </button>
+                  )}
+                </div>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  disabled={isCreationLocked || isGenerating}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={handleImageFileChange}
+                  className="hidden"
+                />
+
+                {!referenceImageUrl ? (
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isCreationLocked && !isGenerating) fileInputRef.current?.click();
+                    }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (isCreationLocked || isGenerating) return;
+                      const file = e.dataTransfer.files?.[0];
+                      if (file && file.type.startsWith('image/')) {
+                        const reader = new FileReader();
+                        reader.onload = () => setReferenceImageUrl(reader.result as string);
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                    className="border-2 border-dashed border-cyan-500/35 hover:border-cyan-400/70 rounded-xl p-5 flex flex-col items-center justify-center gap-2 cursor-pointer bg-cyan-950/10 hover:bg-cyan-950/20 transition-all text-center"
+                  >
+                    <Upload className="h-6 w-6 text-cyan-400" />
+                    <div className="text-xs font-semibold text-white">
+                      Click or Drag &amp; Drop Character / Object Image
+                    </div>
+                    <span className="text-[10px] text-slate-400">
+                      Supports any PNG, JPG, or WebP concept image — BiRefNet removes the background automatically in ComfyUI
+                    </span>
+                  </div>
+                ) : (
+                  <div className="relative rounded-xl overflow-hidden border border-white/15 bg-black/60 p-2 flex items-center gap-3">
+                    <img
+                      src={referenceImageUrl}
+                      alt="Reference"
+                      className="h-24 w-24 object-contain rounded-lg bg-[#141824] border border-white/10 shrink-0"
+                    />
+                    <div className="flex-1 min-w-0 space-y-1.5">
+                      <div className="text-xs font-bold text-emerald-300 flex items-center gap-1">
+                        <Check className="h-3.5 w-3.5 shrink-0" />
+                        <span>Reference Image Staged</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        This image will be reconstructed into a 3D <code className="text-cyan-300">.GLB</code> mesh and automatically linked as the character&apos;s ComfyUI Reference Image (<code className="text-amber-300">&lt;picture 1&gt;</code>).
+                      </p>
+                      {!isCreationLocked && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            fileInputRef.current?.click();
+                          }}
+                          className="text-[10px] font-mono px-2 py-1 rounded bg-white/10 hover:bg-white/15 text-slate-200 cursor-pointer"
+                        >
+                          Replace Image...
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* 1B. TEXT-TO-3D INPUT (Shown ONLY when generationMode === 'text-to-3d') */
+              <div className={`space-y-2 rounded-xl border border-amber-500/35 bg-amber-950/15 p-3 ${isCreationLocked ? 'opacity-60 pointer-events-none' : ''}`}>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-mono uppercase tracking-wider text-amber-200 font-bold flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                    2. Describe 3D Object / Character (No Image Needed)
+                  </label>
+                  <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Node 327 • Z-Image Turbo
+                  </span>
+                </div>
+
+                <textarea
+                  rows={3}
+                  disabled={isCreationLocked || isGenerating}
+                  value={textPrompt}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setTextPrompt(val);
+                    if (!actorName || actorName === 'Hero Character') {
+                      setActorName(val.slice(0, 34) || '3D Object');
+                    }
+                  }}
+                  placeholder="e.g. a weathered medieval treasure chest with iron bands, or an armored sci-fi scout character..."
+                  className="w-full rounded-lg bg-black/75 border border-amber-500/30 px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 font-mono leading-relaxed resize-none"
+                />
+
+                <div className="text-[10px] text-slate-400 leading-relaxed font-mono bg-black/50 rounded-lg p-2 border border-white/5">
+                  <span className="text-amber-300 font-semibold">Studio Isolation Prompt (#e7a9555b): </span>
+                  <span className="text-slate-300">
+                    {format3DStudioTextPrompt(textPrompt || 'your described 3D object')}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* 2. Actor Name & Category */}
-            <div className="rounded-xl border border-white/10 bg-black/40 p-3 space-y-2.5">
+            <div className={`rounded-xl border border-white/10 bg-black/40 p-3 space-y-2.5 ${isCreationLocked ? 'opacity-60 pointer-events-none' : ''}`}>
               <div className="text-[11px] font-mono uppercase tracking-wider text-slate-300 font-bold">
-                2. Actor Name &amp; Stage Category
+                3. Actor Name &amp; Stage Category
               </div>
               <input
                 type="text"
+                disabled={isCreationLocked || isGenerating}
                 value={actorName}
                 onChange={(e) => setActorName(e.target.value)}
-                placeholder="e.g. Elven Archer, Cyberpunk Scout, Sci-Fi Rover..."
+                placeholder="e.g. Elven Archer, Medieval Chest, Sci-Fi Rover..."
                 className="w-full rounded-lg bg-black/70 border border-white/15 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
               />
               <div className="grid grid-cols-3 gap-1.5 text-[11px] font-mono">
@@ -876,6 +1089,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                   <button
                     key={cat.id}
                     type="button"
+                    disabled={isCreationLocked || isGenerating}
                     onClick={() => setActorCategory(cat.id)}
                     className={`py-1.5 px-2 rounded-lg font-semibold border transition-all cursor-pointer truncate ${
                       actorCategory === cat.id
@@ -889,15 +1103,16 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
               </div>
             </div>
 
-            {/* 3. ComfyUI 3D Engine & Quality Controls (#aa77013b) */}
-            <div className="rounded-xl border border-indigo-500/30 bg-indigo-950/15 p-3 space-y-3 font-mono text-xs">
+            {/* 3. ComfyUI 3D Engine & Quality Controls */}
+            <div className={`rounded-xl border border-indigo-500/30 bg-indigo-950/15 p-3 space-y-3 font-mono text-xs ${isCreationLocked ? 'opacity-60 pointer-events-none' : ''}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-bold text-indigo-200 uppercase tracking-wider">
-                  3. ComfyUI 3D Engine &amp; Mesh Settings
+                  4. ComfyUI 3D Engine &amp; Mesh Settings
                 </span>
                 <div className="flex rounded-lg bg-black/60 p-0.5 border border-white/10 text-[10px]">
                   <button
                     type="button"
+                    disabled={isCreationLocked || isGenerating}
                     onClick={() => setWorkflowSource('builtin')}
                     className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${
                       workflowSource === 'builtin'
@@ -905,10 +1120,11 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    Built-in (#aa77013b)
+                    {generationMode === 'text-to-3d' ? 'Built-in (#e7a9555b)' : 'Built-in (#aa77013b)'}
                   </button>
                   <button
                     type="button"
+                    disabled={isCreationLocked || isGenerating}
                     onClick={() => setWorkflowSource('custom')}
                     className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${
                       workflowSource === 'custom'
@@ -1129,29 +1345,52 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
               </div>
             </div>
 
-            {/* 4. Generate 3D .GLB Button */}
-            <button
-              type="button"
-              onClick={handleGenerateGlb}
-              disabled={isGenerating || !referenceImageUrl}
-              className="w-full py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider text-white bg-gradient-to-r from-cyan-500 via-indigo-600 to-violet-600 hover:brightness-110 disabled:opacity-40 shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Generating 3D .GLB in ComfyUI ({elapsedSec}s)...</span>
-                </>
-              ) : (
-                <>
-                  <Zap className="h-4 w-4" />
-                  <span>
-                    {generatedResult
-                      ? 'Re-Generate 3D .GLB in ComfyUI'
-                      : 'Generate 3D .GLB in ComfyUI'}
-                  </span>
-                </>
-              )}
-            </button>
+            {/* 4. Generate 3D .GLB Button (Locked once a 3D object is created) */}
+            {!isCreationLocked ? (
+              <button
+                type="button"
+                onClick={handleGenerateGlb}
+                disabled={
+                  isGenerating ||
+                  (generationMode === 'image-to-3d' ? !referenceImageUrl : !textPrompt.trim())
+                }
+                className="w-full py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider text-white bg-gradient-to-r from-cyan-500 via-indigo-600 to-violet-600 hover:brightness-110 disabled:opacity-40 shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>
+                      {generationMode === 'text-to-3d'
+                        ? `Generating Text-to-3D .GLB (#e7a9555b • ${elapsedSec}s)...`
+                        : `Generating Image-to-3D .GLB (#aa77013b • ${elapsedSec}s)...`}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="h-4 w-4" />
+                    <span>
+                      {generationMode === 'text-to-3d'
+                        ? 'Generate Text-to-3D .GLB in ComfyUI (#e7a9555b)'
+                        : 'Generate Image-to-3D .GLB in ComfyUI (#aa77013b)'}
+                    </span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <div className="w-full py-2.5 px-4 rounded-xl font-mono text-xs font-bold text-emerald-300 bg-emerald-950/30 border border-emerald-500/40 flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5">
+                  <Lock className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>✓ 3D .GLB Created &amp; Saved to Library</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleStartNew3DObject}
+                  className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[10.5px] font-semibold cursor-pointer"
+                >
+                  + New Object
+                </button>
+              </div>
+            )}
 
             {/* Live Progress Banner */}
             {isGenerating && (
@@ -1267,11 +1506,11 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
             {/* 3D WebGL Canvas Container */}
             <div ref={canvasMountRef} className="flex-1 w-full h-full cursor-grab active:cursor-grabbing" />
 
-            {/* Staged Image / Empty State Guidance Overlay when no .GLB is generated yet */}
+            {/* Staged Image / Text Prompt / Empty State Guidance Overlay when no .GLB is generated yet */}
             {!generatedResult && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-6">
                 <div className="max-w-md rounded-2xl border border-white/15 bg-[#0d111c]/95 backdrop-blur-md p-5 text-center space-y-3 shadow-2xl">
-                  {referenceImageUrl ? (
+                  {generationMode === 'image-to-3d' && referenceImageUrl ? (
                     <>
                       <img
                         src={referenceImageUrl}
@@ -1281,22 +1520,51 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                       <div className="text-sm font-bold text-emerald-300">
                         {isGenerating
                           ? `Reconstructing 3D .GLB in ComfyUI (${elapsedSec}s)...`
-                          : 'Reference Image Ready for 3D Conversion'}
+                          : 'Reference Image Ready for 3D Conversion (#aa77013b)'}
                       </div>
                       <p className="text-xs text-slate-300 leading-relaxed">
                         {isGenerating
-                          ? generationStage || 'Running ComfyUI 3D pipeline...'
-                          : 'Click "Generate 3D .GLB in ComfyUI" on the left to reconstruct the 3D mesh and load the interactive 3D turntable.'}
+                          ? generationStage || 'Running ComfyUI Image-to-3D pipeline...'
+                          : 'Click "Generate Image-to-3D .GLB in ComfyUI" on the left to reconstruct the 3D mesh and load the interactive 3D turntable.'}
+                      </p>
+                    </>
+                  ) : generationMode === 'text-to-3d' && textPrompt.trim() ? (
+                    <>
+                      <div className="h-14 w-14 rounded-2xl bg-amber-500/15 border border-amber-400/40 flex items-center justify-center mx-auto">
+                        <Sparkles className="h-7 w-7 text-amber-400" />
+                      </div>
+                      <div className="text-sm font-bold text-amber-300">
+                        {isGenerating
+                          ? `Generating Text-to-3D .GLB in ComfyUI (${elapsedSec}s)...`
+                          : 'Text Prompt Ready for 3D Generation (#e7a9555b)'}
+                      </div>
+                      <div className="rounded-xl bg-black/60 border border-amber-500/30 p-2.5 text-[11px] font-mono text-amber-100">
+                        &ldquo;{textPrompt.trim()}&rdquo;
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        {isGenerating
+                          ? generationStage || 'Running Z-Image Turbo + Pixal3D/TRELLIS.2 pipeline...'
+                          : 'Click "Generate Text-to-3D .GLB in ComfyUI (#e7a9555b)" on the left to synthesize the isolated 2D studio image and reconstruct the 3D .GLB mesh.'}
                       </p>
                     </>
                   ) : (
                     <>
                       <Sparkles className="h-7 w-7 text-cyan-400 mx-auto" />
                       <div className="text-sm font-bold text-white">
-                        Upload an Image &amp; Click &ldquo;Generate 3D .GLB in ComfyUI&rdquo;
+                        {generationMode === 'text-to-3d'
+                          ? 'Describe a 3D Object & Click "Generate Text-to-3D .GLB"'
+                          : 'Upload an Image & Click "Generate Image-to-3D .GLB"'}
                       </div>
                       <p className="text-xs text-slate-400 leading-relaxed">
-                        Your local ComfyUI server (<code className="text-cyan-300">http://127.0.0.1:8188</code>) will remove the background with <strong>BiRefNet</strong>, reconstruct the 3D geometry and textures using <strong>Pixal3D</strong> or <strong>TRELLIS.2</strong>, and load the resulting <code className="text-cyan-300">.GLB</code> model right here.
+                        {generationMode === 'text-to-3d' ? (
+                          <>
+                            Workflow <code className="text-amber-300">#e7a9555b</code> synthesizes a clean 3/4 studio concept image using <strong>Z-Image Turbo (Qwen-3-4B + Flux VAE)</strong>, removes the background with <strong>BiRefNet</strong>, reconstructs a 3D <code className="text-cyan-300">.GLB</code> mesh with <strong>Pixal3D / TRELLIS.2</strong>, and saves it automatically to your 3D Asset Library.
+                          </>
+                        ) : (
+                          <>
+                            Workflow <code className="text-cyan-300">#aa77013b</code> removes the background with <strong>BiRefNet</strong>, reconstructs the 3D geometry and textures using <strong>Pixal3D</strong> or <strong>TRELLIS.2</strong>, and saves the resulting <code className="text-cyan-300">.GLB</code> model automatically to your 3D Asset Library.
+                          </>
+                        )}
                       </p>
                     </>
                   )}

@@ -1,8 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildComfy3DWorkflow,
+  buildComfyTextTo3DWorkflow,
+  format3DStudioTextPrompt,
   extractGlbOutputFromHistory,
+  extractPreviewImageFromHistory,
 } from '../src/services/comfy3dGenerator';
+import { BUNDLED_WORKFLOWS_CATALOG } from '../src/services/bundledWorkflowsCatalog';
 import { useAssetLibraryStore } from '../src/stores/useAssetLibraryStore';
 import { storeModelBuffer, toPersistentModelUri } from '../src/services/modelStorage';
 
@@ -170,6 +174,75 @@ describe('comfy3dGenerator', () => {
       .getState()
       .customAssets.filter((a) => a.modelId === 'model-test-hero-1').length;
     expect(countAfter).toBe(1);
+  });
+
+  it('builds Text-to-3D workflow (#e7a9555b) with Z-Image Turbo + Pixal3D/TRELLIS.2 and studio isolation prompt', () => {
+    const formatted = format3DStudioTextPrompt('a weathered medieval treasure chest');
+    expect(formatted).toContain('A single full object: a weathered medieval treasure chest');
+    expect(formatted).toContain('isolated on a clean neutral studio background');
+
+    const { api, outputNodeIds } = buildComfyTextTo3DWorkflow({
+      generationMode: 'text-to-3d',
+      textPrompt: 'a weathered medieval treasure chest',
+      actorName: 'Treasure Chest',
+      engineMode: 'pixal3d',
+      qualityMode: 'fast_vertex',
+      removeBackground: true,
+      textureResolution: 2048,
+      seed: 54321,
+    });
+
+    expect(outputNodeIds).toEqual(['322']);
+    // Stage 1: Z-Image Turbo nodes (324-333) are present and wired
+    expect(api['324']).toBeDefined();
+    expect(api['325']).toBeDefined();
+    expect(api['326']).toBeDefined();
+    expect(api['327'].inputs.text).toContain('a weathered medieval treasure chest');
+    expect(api['331'].inputs.seed).toBe(54321);
+    expect(api['332']).toBeDefined();
+    expect(api['333']).toBeDefined();
+    // Stage 2: BiRefNet & Pixal3D are wired directly from VAEDecode (332)
+    expect(api['192'].inputs.image).toEqual(['332', 0]);
+    expect(api['319']).toBeDefined();
+    expect(api['40']).toBeUndefined();
+    expect(api['322'].inputs.model_3d).toEqual(['282', 0]);
+  });
+
+  it('extracts generated 2D concept preview image from Node 333 in #e7a9555b history', () => {
+    const mockHistory = {
+      outputs: {
+        '333': {
+          images: [
+            {
+              filename: 'ComfyUI_temp_zimage_00001_.png',
+              subfolder: '',
+              type: 'temp',
+            },
+          ],
+        },
+      },
+    };
+    const preview = extractPreviewImageFromHistory(mockHistory, ['333', '302']);
+    expect(preview).toEqual({
+      filename: 'ComfyUI_temp_zimage_00001_.png',
+      subfolder: '',
+      type: 'temp',
+    });
+  });
+
+  it('bundles all 5 official ComfyUI workflows (Image-to-3D, Text-to-3D, MiniMax H3, LTX-2.5) for user download', () => {
+    expect(BUNDLED_WORKFLOWS_CATALOG.length).toBe(5);
+    const ids = BUNDLED_WORKFLOWS_CATALOG.map((w) => w.id);
+    expect(ids).toContain('comfy-image-to-3d-glb');
+    expect(ids).toContain('comfy-text-to-3d-glb');
+    expect(ids).toContain('minimax-h3-ref2va');
+    expect(ids).toContain('h3-stubelius-ultimate');
+    expect(ids).toContain('ltx25-stubelius-vfx');
+
+    for (const wf of BUNDLED_WORKFLOWS_CATALOG) {
+      expect(wf.apiPayload).toBeDefined();
+      expect(Object.keys(wf.apiPayload).length).toBeGreaterThan(5);
+    }
   });
 });
 

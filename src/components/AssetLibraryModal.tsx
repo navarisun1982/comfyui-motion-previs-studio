@@ -377,30 +377,34 @@ export const AssetLibraryModal: React.FC = () => {
               <span>🌐 .GLB Resources (14)</span>
             </button>
 
-            {/* AI 3D Generator Studio Button */}
+            {/* AI 3D Generator Studio Button (Image-to-3D #aa77013b) */}
             <button
               onClick={() => {
-                open3DStudio({ initialPrompt: genPrompt || searchQuery || '' });
+                open3DStudio({
+                  initialMode: 'image-to-3d',
+                  initialPrompt: genPrompt || searchQuery || '',
+                });
               }}
               className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-amber-500 via-indigo-600 to-cyan-500 text-white hover:brightness-110 shadow-md shadow-indigo-600/30 transition-all font-mono cursor-pointer"
-              title="Open ComfyUI 3D Character & Object Studio (.GLB)"
+              title="Open ComfyUI 3D Studio in Image-to-3D mode (#aa77013b)"
             >
               <Sparkles className="h-4 w-4 text-amber-300" />
               <span>✨ Concept-to-3D Studio</span>
             </button>
 
-            {/* Quick Text-to-3D Bar Toggle Button */}
+            {/* ComfyUI Text-to-3D .GLB Button (#e7a9555b) */}
             <button
-              onClick={() => setShowGenerator(!showGenerator)}
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold font-mono transition-all ${
-                showGenerator
-                  ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/30'
-                  : 'bg-white/10 text-white hover:bg-white/15 border border-white/10'
-              }`}
-              title="Toggle inline Quick Text-to-3D prompt generator"
+              onClick={() => {
+                open3DStudio({
+                  initialMode: 'text-to-3d',
+                  initialPrompt: genPrompt || searchQuery || '',
+                });
+              }}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold font-mono transition-all bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/50 cursor-pointer"
+              title="Open ComfyUI Text-to-3D .GLB Studio (#e7a9555b)"
             >
               <Zap className="h-3.5 w-3.5 text-amber-300" />
-              <span>Quick Text-to-3D</span>
+              <span>✍️ Text-to-3D (.GLB)</span>
             </button>
 
             {/* Multi-Select Toggle Button */}
@@ -682,13 +686,15 @@ export const AssetLibraryModal: React.FC = () => {
               </div>
               <button
                 onClick={() => {
-                  setGenPrompt(searchQuery);
-                  setShowGenerator(true);
+                  open3DStudio({
+                    initialMode: 'text-to-3d',
+                    initialPrompt: searchQuery,
+                  });
                 }}
-                className="rounded-xl bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 text-xs font-semibold flex items-center gap-1.5 shadow"
+                className="rounded-xl bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 text-xs font-semibold flex items-center gap-1.5 shadow cursor-pointer"
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>Generate &ldquo;{searchQuery}&rdquo; with AI</span>
+                <span>Generate &ldquo;{searchQuery}&rdquo; in 3D (.GLB #e7a9555b)</span>
               </button>
             </div>
           ) : (
@@ -854,30 +860,32 @@ export const AssetLibraryModal: React.FC = () => {
                             )}
                           </button>
 
-                          {/* Reason with LLM Button */}
-                          <button
-                            type="button"
-                            disabled={isReasoning || isGenerating}
-                            onClick={(e) => handleReasonWithLlm(asset, e)}
-                            className={`rounded-lg p-1.5 transition-all border ${
-                              isReasoning
-                                ? 'bg-amber-500/20 border-amber-400 text-amber-300'
-                                : reasonedGraph
-                                ? 'bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30 text-cyan-300 hover:text-white'
-                                : 'bg-indigo-600/20 hover:bg-indigo-600/40 border-indigo-500/30 text-indigo-300 hover:text-white'
-                            }`}
-                            title={
-                              reasonedGraph
-                                ? 'Re-reason this 3D shape with the active LLM'
-                                : 'Reason with LLM to build authentic 3D parts & materials'
-                            }
-                          >
-                            {isReasoning ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />
-                            ) : (
-                              <Sparkles className="h-3.5 w-3.5" />
-                            )}
-                          </button>
+                          {/* Reason with LLM Button — hidden on created/uploaded .GLB models since created 3D meshes are locked */}
+                          {!asset.modelUrl && !asset.modelId && !asset.isCustom && (
+                            <button
+                              type="button"
+                              disabled={isReasoning || isGenerating}
+                              onClick={(e) => handleReasonWithLlm(asset, e)}
+                              className={`rounded-lg p-1.5 transition-all border ${
+                                isReasoning
+                                  ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                                  : reasonedGraph
+                                  ? 'bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/30 text-cyan-300 hover:text-white'
+                                  : 'bg-indigo-600/20 hover:bg-indigo-600/40 border-indigo-500/30 text-indigo-300 hover:text-white'
+                              }`}
+                              title={
+                                reasonedGraph
+                                  ? 'Re-reason this 3D shape with the active LLM'
+                                  : 'Reason with LLM to build authentic 3D parts & materials'
+                              }
+                            >
+                              {isReasoning ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />
+                              ) : (
+                                <Sparkles className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          )}
                         </>
                       )}
 

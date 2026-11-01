@@ -1,4 +1,5 @@
-import builtin3dTemplateRaw from '../../workflows/templates/comfy_image_to_3d_glb.api.json';
+import builtinImageTo3dTemplateRaw from '../../workflows/templates/comfy_image_to_3d_glb.api.json';
+import builtinTextTo3dTemplateRaw from '../../workflows/templates/comfy_text_to_3d_glb.api.json';
 import { ApiNode, ApiWorkflow } from '../pipeline/templateTypes';
 import { convertUiWorkflowToApi } from '../pipeline/customWorkflowResolver';
 import { defaultComfyClient } from './comfyClient';
@@ -6,11 +7,14 @@ import { registerModelFile } from './modelStorage';
 import { loadGltfModel } from '../engine/gltfModelLoader';
 import * as THREE from 'three';
 
+export type Comfy3DGenerationMode = 'image-to-3d' | 'text-to-3d';
 export type Comfy3DEngineMode = 'pixal3d' | 'trellis2';
 export type Comfy3DQualityMode = 'fast_vertex' | 'full_pbr';
 
 export interface Comfy3DGenerationOptions {
-  imageDataUrl: string;
+  generationMode?: Comfy3DGenerationMode;
+  imageDataUrl?: string;
+  textPrompt?: string;
   actorName?: string;
   engineMode: Comfy3DEngineMode;
   qualityMode: Comfy3DQualityMode;
@@ -41,10 +45,24 @@ export interface Comfy3DGenerationResult {
   sizeBytes: number;
   engineUsed: Comfy3DEngineMode | 'custom';
   qualityUsed: Comfy3DQualityMode;
+  generationModeUsed: Comfy3DGenerationMode;
+  generatedConceptImageUrl?: string;
   bboxSize: { x: number; y: number; z: number };
 }
 
-const NODE_STAGE_LABELS: Record<string, string> = {
+export const NODE_STAGE_LABELS: Record<string, string> = {
+  // Text-to-3D Stage 1: Z-Image Turbo 2D Concept Synthesis (#e7a9555b-5121-42bd-8bc4-a36e6eb34fc7)
+  '324': 'Loading Z-Image Turbo FP8 diffusion model...',
+  '325': 'Loading Qwen-3 4B text encoder...',
+  '326': 'Loading Flux VAE...',
+  '327': 'Encoding 3D object text prompt...',
+  '328': 'Preparing zeroed negative conditioning...',
+  '329': 'Configuring AuraFlow sampling shift...',
+  '330': 'Allocating 1024×1024 studio latent canvas...',
+  '331': 'Generating 2D studio concept image from text (Z-Image Turbo)...',
+  '332': 'Decoding generated concept image from latent space...',
+  '333': 'Capturing generated 2D concept image preview...',
+  // Image-to-3D & Shared 3D Reconstruction Stages (#aa77013b-18f1-4679-9678-6d455d3536c5)
   '122': 'Loading reference image into ComfyUI...',
   '193': 'Loading BiRefNet background removal model...',
   '192': 'Removing background (BiRefNet AI)...',
@@ -82,6 +100,21 @@ const NODE_STAGE_LABELS: Record<string, string> = {
 };
 
 /**
+ * Formats a user's object/character text prompt into the studio isolation prompt
+ * expected by Node 327 of `#e7a9555b-5121-42bd-8bc4-a36e6eb34fc7`.
+ */
+export function format3DStudioTextPrompt(rawPrompt: string): string {
+  const clean = (rawPrompt || '').trim();
+  if (!clean) {
+    return 'A single full object: a highly detailed 3D asset, three-quarter front view, centered in the frame, fully visible including all edges, isolated on a clean neutral studio background, realistic material details, soft diffuse lighting, no floor clutter, no other objects, no text.';
+  }
+  if (/^a single full object\s*:/i.test(clean) || /isolated on a clean neutral studio background/i.test(clean)) {
+    return clean;
+  }
+  return `A single full object: ${clean.replace(/\.+$/, '')}, three-quarter front view, centered in the frame, fully visible including all edges, isolated on a clean neutral studio background, realistic material details, soft diffuse lighting, no floor clutter, no other objects, no text.`;
+}
+
+/**
  * Convert a base64 Data URL or HTTP URL into a Blob for uploading to ComfyUI `/upload/image`.
  */
 export async function imageUrlToBlob(imageUrl: string): Promise<Blob> {
@@ -103,6 +136,196 @@ export async function imageUrlToBlob(imageUrl: string): Promise<Blob> {
     throw new Error(`Failed to read reference image (${res.status}).`);
   }
   return await res.blob();
+}
+
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  if (typeof FileReader !== 'undefined') {
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+  const ab = await blob.arrayBuffer();
+  const bytes = new Uint8Array(ab);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const b64 = typeof btoa === 'function' ? btoa(binary) : Buffer.from(ab).toString('base64');
+  return `data:${blob.type || 'image/png'};base64,${b64}`;
+}
+
+function applyShared3DBranchOptimizations(
+  api: ApiWorkflow,
+  options: Omit<Comfy3DGenerationOptions, 'imageDataUrl' | 'onProgress'>,
+  safeSeed: number,
+  cleanPrefix: string
+): void {
+  // Set seeds on 3D KSampler nodes (3, 12, 18, 23)
+  for (const samplerId of ['3', '12', '18', '23']) {
+    if (api[samplerId] && typeof api[samplerId].inputs.seed === 'number') {
+      api[samplerId].inputs.seed = safeSeed;
+    }
+  }
+
+  // Set texture resolution on Node 288
+  if (api['288']) {
+    api['288'].inputs.value = options.textureResolution;
+  }
+
+  // Set filename_prefix on Save3DAdvanced (Node 322)
+  if (api['322']) {
+    api['322'].inputs.filename_prefix = `3d/${cleanPrefix}`;
+  }
+
+  // Configure 3D Engine Branch (Pixal3D vs. TRELLIS.2) and prune the inactive 5GB model branch
+  // so ComfyUI only loads the selected diffusion model into VRAM!
+  if (options.engineMode === 'trellis2') {
+    if (api['316']) api['316'].inputs.value = true;
+    if (api['3']) {
+      api['3'].inputs.positive = ['299', 0];
+      api['3'].inputs.negative = ['299', 1];
+    }
+    if (api['91']) {
+      api['91'].inputs.positive = ['299', 0];
+      api['91'].inputs.negative = ['299', 1];
+    }
+    if (api['199']) api['199'].inputs.model = ['40', 0];
+    if (api['279']) api['279'].inputs.model = ['40', 0];
+    if (api['12']) api['12'].inputs.model = ['40', 0];
+
+    for (const unusedId of ['319', '298', '242', '56', '55', '314', '315', '316', '318']) {
+      delete api[unusedId];
+    }
+  } else {
+    // Pixal3D mode
+    if (api['316']) api['316'].inputs.value = false;
+    if (api['3']) {
+      api['3'].inputs.positive = ['298', 0];
+      api['3'].inputs.negative = ['298', 1];
+    }
+    if (api['91']) {
+      api['91'].inputs.positive = ['298', 0];
+      api['91'].inputs.negative = ['298', 1];
+    }
+    if (api['199']) api['199'].inputs.model = ['319', 0];
+    if (api['279']) api['279'].inputs.model = ['319', 0];
+    if (api['12']) api['12'].inputs.model = ['319', 0];
+
+    for (const unusedId of ['40', '299', '314', '315', '316', '318']) {
+      delete api[unusedId];
+    }
+  }
+
+  // Always remove extra UI-only Preview3DAdvanced nodes (246, 323) so ComfyUI only writes the final GLB once
+  delete api['246'];
+  delete api['247'];
+  delete api['323'];
+
+  // Configure Quality Mode: Fast Vertex-Color GLB vs. Full PBR Texture-Baked GLB
+  if (options.qualityMode === 'fast_vertex') {
+    if (api['322']) {
+      api['322'].inputs.model_3d = ['282', 0];
+    }
+    for (const bakeNodeId of [
+      '196',
+      '147',
+      '164',
+      '207',
+      '208',
+      '210',
+      '224',
+      '226',
+      '233',
+      '235',
+      '260',
+      '261',
+      '262',
+      '285',
+      '288',
+    ]) {
+      delete api[bakeNodeId];
+    }
+  } else {
+    delete api['282'];
+    delete api['252'];
+  }
+}
+
+/**
+ * Build and optimize the ComfyUI API workflow for Text-to-3D `.GLB` generation
+ * using `#e7a9555b-5121-42bd-8bc4-a36e6eb34fc7` (Z-Image Turbo + Pixal3D / TRELLIS.2).
+ */
+export function buildComfyTextTo3DWorkflow(
+  options: Omit<Comfy3DGenerationOptions, 'imageDataUrl' | 'onProgress'>
+): { api: ApiWorkflow; outputNodeIds: string[]; formattedPrompt: string } {
+  const safeSeed = Math.max(1, Math.floor(Number(options.seed) || 42));
+  const cleanPrefix = (options.actorName || options.textPrompt || 'Object3D')
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 32) || 'Object3D';
+  const formattedPrompt = format3DStudioTextPrompt(options.textPrompt || options.actorName || '3D object');
+
+  // 1. Custom Local 3D Workflow JSON override if supplied
+  if (options.customWorkflowJson && options.customWorkflowJson.trim()) {
+    const parsed = JSON.parse(options.customWorkflowJson);
+    const api: ApiWorkflow = Array.isArray(parsed?.nodes)
+      ? convertUiWorkflowToApi(parsed)
+      : (parsed as ApiWorkflow);
+    const clone: ApiWorkflow = JSON.parse(JSON.stringify(api));
+    const outputNodeIds: string[] = [];
+
+    for (const [nodeId, node] of Object.entries(clone)) {
+      const ct = node.class_type;
+      if (ct === 'CLIPTextEncode' && typeof node.inputs?.text === 'string') {
+        node.inputs.text = formattedPrompt;
+      }
+      if (
+        (ct === 'KSampler' || ct === 'RandomNoise' || ct === 'easy seed') &&
+        ('seed' in node.inputs || 'noise_seed' in node.inputs)
+      ) {
+        if (typeof node.inputs.seed === 'number') node.inputs.seed = safeSeed;
+        if (typeof node.inputs.noise_seed === 'number') node.inputs.noise_seed = safeSeed;
+      }
+      if (
+        ct === 'Save3DAdvanced' ||
+        ct === 'SaveGLB' ||
+        ct === '[Comfy3D] Save 3D Mesh' ||
+        ct === 'Preview3DAdvanced'
+      ) {
+        outputNodeIds.push(nodeId);
+        if ('filename_prefix' in node.inputs) {
+          node.inputs.filename_prefix = `3d/${cleanPrefix}`;
+        }
+      }
+    }
+
+    return { api: clone, outputNodeIds, formattedPrompt };
+  }
+
+  // 2. Built-in ComfyUI Text-to-3D Workflow (#e7a9555b-5121-42bd-8bc4-a36e6eb34fc7)
+  const api: ApiWorkflow = JSON.parse(JSON.stringify(builtinTextTo3dTemplateRaw));
+
+  // Inject prompt on Node 327 ("YOUR TEXT PROMPT - Describe 3D object")
+  if (api['327']) {
+    api['327'].inputs.text = formattedPrompt;
+  }
+
+  // Inject seed on Node 331 ("Z-Image Turbo - Generate Image")
+  if (api['331']) {
+    api['331'].inputs.seed = safeSeed;
+  }
+
+  // Apply shared 3D branch optimizations (Pixal3D vs TRELLIS.2, Fast Vertex vs Full PBR)
+  applyShared3DBranchOptimizations(api, options, safeSeed, cleanPrefix);
+
+  return {
+    api,
+    outputNodeIds: ['322'],
+    formattedPrompt,
+  };
 }
 
 /**
@@ -164,28 +387,11 @@ export function buildComfy3DWorkflow(
   }
 
   // 2. Built-in ComfyUI Core 3D Workflow (#aa77013b-18f1-4679-9678-6d455d3536c5: Pixal3D / TRELLIS.2)
-  const api: ApiWorkflow = JSON.parse(JSON.stringify(builtin3dTemplateRaw));
+  const api: ApiWorkflow = JSON.parse(JSON.stringify(builtinImageTo3dTemplateRaw));
 
   // Set uploaded image on Node 122 (LoadImage)
   if (api['122']) {
     api['122'].inputs.image = uploadedImageFilename;
-  }
-
-  // Set seeds on KSampler nodes (3, 12, 18, 23)
-  for (const samplerId of ['3', '12', '18', '23']) {
-    if (api[samplerId] && typeof api[samplerId].inputs.seed === 'number') {
-      api[samplerId].inputs.seed = safeSeed;
-    }
-  }
-
-  // Set texture resolution on Node 288
-  if (api['288']) {
-    api['288'].inputs.value = options.textureResolution;
-  }
-
-  // Set filename_prefix on Save3DAdvanced (Node 322)
-  if (api['322']) {
-    api['322'].inputs.filename_prefix = `3d/${cleanPrefix}`;
   }
 
   // Configure Background Removal (BiRefNet) vs Direct Image Alpha Mask
@@ -203,84 +409,7 @@ export function buildComfy3DWorkflow(
     delete api['248'];
   }
 
-  // Configure 3D Engine Branch (Pixal3D vs. TRELLIS.2) and prune the inactive 5GB model branch
-  // so ComfyUI only loads the selected diffusion model into VRAM!
-  if (options.engineMode === 'trellis2') {
-    if (api['316']) api['316'].inputs.value = true;
-    // Wire Trellis2Conditioning (299) and Trellis2 UNETLoader (40) directly
-    if (api['3']) {
-      api['3'].inputs.positive = ['299', 0];
-      api['3'].inputs.negative = ['299', 1];
-    }
-    if (api['91']) {
-      api['91'].inputs.positive = ['299', 0];
-      api['91'].inputs.negative = ['299', 1];
-    }
-    if (api['199']) api['199'].inputs.model = ['40', 0];
-    if (api['279']) api['279'].inputs.model = ['40', 0];
-    if (api['12']) api['12'].inputs.model = ['40', 0];
-
-    // Prune unused Pixal3D + MoGe nodes so VRAM isn't wasted
-    for (const unusedId of ['319', '298', '242', '56', '55', '314', '315', '316', '318']) {
-      delete api[unusedId];
-    }
-  } else {
-    // Pixal3D mode
-    if (api['316']) api['316'].inputs.value = false;
-    if (api['3']) {
-      api['3'].inputs.positive = ['298', 0];
-      api['3'].inputs.negative = ['298', 1];
-    }
-    if (api['91']) {
-      api['91'].inputs.positive = ['298', 0];
-      api['91'].inputs.negative = ['298', 1];
-    }
-    if (api['199']) api['199'].inputs.model = ['319', 0];
-    if (api['279']) api['279'].inputs.model = ['319', 0];
-    if (api['12']) api['12'].inputs.model = ['319', 0];
-
-    // Prune unused Trellis2 UNETLoader (40) and Trellis2Conditioning (299)
-    for (const unusedId of ['40', '299', '314', '315', '316', '318']) {
-      delete api[unusedId];
-    }
-  }
-
-  // Always remove extra UI-only Preview3DAdvanced nodes (246, 323) so ComfyUI only writes the final GLB once
-  delete api['246'];
-  delete api['247'];
-  delete api['323'];
-
-  // Configure Quality Mode: Fast Vertex-Color GLB vs. Full PBR Texture-Baked GLB
-  if (options.qualityMode === 'fast_vertex') {
-    // Connect Save3DAdvanced (322) directly to Node 282 (MeshToFile3D from PaintMesh 252)
-    if (api['322']) {
-      api['322'].inputs.model_3d = ['282', 0];
-    }
-    // Prune slow UV unwrap & PBR texture baking nodes
-    for (const bakeNodeId of [
-      '196',
-      '147',
-      '164',
-      '207',
-      '208',
-      '210',
-      '224',
-      '226',
-      '233',
-      '235',
-      '260',
-      '261',
-      '262',
-      '285',
-      '288',
-    ]) {
-      delete api[bakeNodeId];
-    }
-  } else {
-    // Full PBR mode: Save3DAdvanced (322) uses Node 285 (PBR textured mesh)
-    delete api['282'];
-    delete api['252'];
-  }
+  applyShared3DBranchOptimizations(api, options, safeSeed, cleanPrefix);
 
   return {
     api,
@@ -337,34 +466,85 @@ export function extractGlbOutputFromHistory(
 }
 
 /**
- * Execute the full Image-to-3D `.GLB` workflow in ComfyUI and register the resulting `.GLB` model
- * in the Studio's Three.js GLTF cache.
+ * Extracts the generated 2D concept image metadata from a Text-to-3D `/history` entry (Node 333 or 302).
+ */
+export function extractPreviewImageFromHistory(
+  historyEntry: Record<string, any>,
+  preferredNodeIds: string[] = ['333', '302']
+): { filename: string; subfolder: string; type: 'output' | 'temp' } | null {
+  const outputs = historyEntry?.outputs;
+  if (!outputs || typeof outputs !== 'object') return null;
+
+  for (const nodeId of preferredNodeIds) {
+    const out = outputs[nodeId];
+    const imgs = out?.images;
+    if (Array.isArray(imgs) && imgs.length > 0 && imgs[0]?.filename) {
+      return {
+        filename: imgs[0].filename,
+        subfolder: imgs[0].subfolder || '',
+        type: imgs[0].type === 'output' ? 'output' : 'temp',
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Execute the full Image-to-3D (`#aa77013b`) or Text-to-3D (`#e7a9555b`) `.GLB` workflow in ComfyUI
+ * and register the resulting `.GLB` model in the Studio's Three.js GLTF cache.
  */
 export async function generate3DGlbInComfy(
   options: Comfy3DGenerationOptions
 ): Promise<Comfy3DGenerationResult> {
   const startedAtMs = Date.now();
-  options.onProgress?.('Uploading reference image to ComfyUI...');
+  const mode: Comfy3DGenerationMode = options.generationMode || 'image-to-3d';
 
-  // 1. Convert reference image to Blob & upload to ComfyUI /upload/image
-  const imageBlob = await imageUrlToBlob(options.imageDataUrl);
-  const uploadName = `ref3d_${Date.now()}.png`;
-  const uploaded = await defaultComfyClient.uploadImage(imageBlob, uploadName);
+  let api: ApiWorkflow;
+  let outputNodeIds: string[];
 
-  // 2. Build the API workflow
-  options.onProgress?.(
-    `Preparing ${options.customWorkflowJson
-      ? 'Custom 3D'
-      : options.engineMode === 'trellis2'
-        ? 'TRELLIS.2'
-        : 'Pixal3D'
-    } (${options.qualityMode === 'fast_vertex' ? 'Fast Vertex-Color' : 'Full PBR'}) workflow...`
-  );
-  const { api, outputNodeIds } = buildComfy3DWorkflow(uploaded.name, options);
+  if (mode === 'text-to-3d') {
+    const rawPrompt = (options.textPrompt || '').trim();
+    if (!rawPrompt) {
+      throw new Error('Please enter a text prompt describing the 3D object or character to generate.');
+    }
+    options.onProgress?.(
+      `Preparing Text-to-3D (#e7a9555b • Z-Image Turbo + ${
+        options.engineMode === 'trellis2' ? 'TRELLIS.2' : 'Pixal3D'
+      }) workflow...`
+    );
+    const built = buildComfyTextTo3DWorkflow(options);
+    api = built.api;
+    outputNodeIds = built.outputNodeIds;
+  } else {
+    if (!options.imageDataUrl) {
+      throw new Error('Please upload a reference image for Image-to-3D generation.');
+    }
+    options.onProgress?.('Uploading reference image to ComfyUI...');
+    const imageBlob = await imageUrlToBlob(options.imageDataUrl);
+    const uploadName = `ref3d_${Date.now()}.png`;
+    const uploaded = await defaultComfyClient.uploadImage(imageBlob, uploadName);
 
-  // 3. Queue prompt & watch execution
+    options.onProgress?.(
+      `Preparing ${
+        options.customWorkflowJson
+          ? 'Custom 3D'
+          : options.engineMode === 'trellis2'
+          ? 'TRELLIS.2'
+          : 'Pixal3D'
+      } (${options.qualityMode === 'fast_vertex' ? 'Fast Vertex-Color' : 'Full PBR'}) workflow...`
+    );
+    const built = buildComfy3DWorkflow(uploaded.name, options);
+    api = built.api;
+    outputNodeIds = built.outputNodeIds;
+  }
+
+  // Queue prompt & watch execution
   const { promptId } = await defaultComfyClient.submitPrompt(api as any);
-  options.onProgress?.('Queued in ComfyUI — starting 3D reconstruction...');
+  options.onProgress?.(
+    mode === 'text-to-3d'
+      ? 'Queued in ComfyUI — synthesizing 2D concept image & 3D mesh...'
+      : 'Queued in ComfyUI — starting 3D reconstruction...'
+  );
 
   // Track progress via WebSocket + periodic /history fallback poll
   await new Promise<void>((resolve, reject) => {
@@ -449,13 +629,34 @@ export async function generate3DGlbInComfy(
     }, 2500);
   });
 
-  // 4. Retrieve the generated .GLB file from ComfyUI
+  // Retrieve the generated .GLB file (and for Text-to-3D, the generated concept image from Node 333)
   options.onProgress?.('Fetching generated .GLB 3D mesh from ComfyUI...');
   const historyEntry = (await defaultComfyClient.getPromptHistory(promptId)) as Record<
     string,
     any
   > | null;
   const extracted = historyEntry ? extractGlbOutputFromHistory(historyEntry, outputNodeIds) : null;
+
+  let generatedConceptImageUrl: string | undefined;
+  if (mode === 'text-to-3d' && historyEntry) {
+    const previewImg = extractPreviewImageFromHistory(historyEntry, ['333', '302']);
+    if (previewImg) {
+      try {
+        const imgViewUrl = defaultComfyClient.getViewUrl(
+          previewImg.filename,
+          previewImg.subfolder,
+          previewImg.type
+        );
+        const imgRes = await fetch(imgViewUrl);
+        if (imgRes.ok) {
+          const imgBlob = await imgRes.blob();
+          generatedConceptImageUrl = await blobToDataUrl(imgBlob);
+        }
+      } catch {
+        // Optional thumbnail preview
+      }
+    }
+  }
 
   let glbBuffer: ArrayBuffer | null = null;
   let glbFilename = extracted?.filename || `${options.actorName || 'character'}_${Date.now()}.glb`;
@@ -471,8 +672,9 @@ export async function generate3DGlbInComfy(
       const res = await fetch(viewUrl);
       if (res.ok) {
         glbBuffer = await res.arrayBuffer();
-        diskPath = `D:\\ComfyUI\\${extracted.type}\\${extracted.subfolder ? `${extracted.subfolder}\\` : ''
-          }${extracted.filename}`;
+        diskPath = `D:\\ComfyUI\\${extracted.type}\\${
+          extracted.subfolder ? `${extracted.subfolder}\\` : ''
+        }${extracted.filename}`;
       }
     } catch {
       // fallback to local output scan below
@@ -480,8 +682,9 @@ export async function generate3DGlbInComfy(
   }
 
   if (!glbBuffer) {
-    const fallbackUrl = `/api/comfy-glb-output?sinceMs=${startedAtMs}${extracted?.rawPath ? `&path=${encodeURIComponent(extracted.rawPath)}` : ''
-      }`;
+    const fallbackUrl = `/api/comfy-glb-output?sinceMs=${startedAtMs}${
+      extracted?.rawPath ? `&path=${encodeURIComponent(extracted.rawPath)}` : ''
+    }`;
     const res = await fetch(fallbackUrl);
     if (!res.ok) {
       throw new Error(
@@ -496,7 +699,7 @@ export async function generate3DGlbInComfy(
     glbBuffer = await res.arrayBuffer();
   }
 
-  // 5. Register the .GLB in Three.js GLTF cache and inspect geometry stats
+  // Register the .GLB in Three.js GLTF cache and inspect geometry stats
   options.onProgress?.('Loading .GLB mesh into 3D Studio viewport...');
   const glbFile = new File([glbBuffer], glbFilename, { type: 'model/gltf-binary' });
   const registered = await registerModelFile(glbFile);
@@ -533,6 +736,8 @@ export async function generate3DGlbInComfy(
     sizeBytes: glbBuffer.byteLength,
     engineUsed: options.customWorkflowJson ? 'custom' : options.engineMode,
     qualityUsed: options.qualityMode,
+    generationModeUsed: mode,
+    generatedConceptImageUrl,
     bboxSize: loaded?.size
       ? { x: loaded.size.x, y: loaded.size.y, z: loaded.size.z }
       : { x: 1, y: 1.8, z: 1 },

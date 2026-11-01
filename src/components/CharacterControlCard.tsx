@@ -1285,94 +1285,111 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
               <div className="p-2.5 space-y-2.5 border-t border-white/[0.06]">
                 {/* SUB-TAB 3: LOOK, .GLB & COLOR SWATCHES */}
                 <div className={activeSubTab === 'look' || activeSubTab === 'all' ? 'space-y-2.5' : 'hidden'}>
-                {/* 1. Edit 3D Look by Prompt & Attach .GLB */}
+                {/* 1. Edit 3D Look by Prompt & Attach .GLB (Locked once a .GLB 3D object is created) */}
                 <div className="inspector-subcard space-y-2">
                   <div className="flex items-center justify-between gap-1.5">
                     <span className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-300">
                       <Sparkles className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                      <span>Edit 3D Look by Prompt</span>
+                      <span>
+                        {actor.modelUrl ? '🔒 3D .GLB Mesh (Locked)' : 'Edit 3D Look by Prompt'}
+                      </span>
                     </span>
 
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <label
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[#161c2a] hover:bg-[#1e2638] border border-white/[0.1] text-[10px] font-medium text-slate-200 hover:text-white cursor-pointer transition-colors"
-                        title="Attach or replace with a custom .GLB / .GLTF 3D model"
-                      >
-                        <input
-                          type="file"
-                          accept=".glb,.gltf"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (file) onAttachGlbFile(actor.id, file);
-                          }}
-                        />
-                        <Upload className="h-3 w-3 text-slate-300" />
-                        <span>{actor.modelUrl ? 'Replace .GLB' : 'Attach .GLB'}</span>
-                      </label>
+                      {!actor.modelUrl && (
+                        <>
+                          <label
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[#161c2a] hover:bg-[#1e2638] border border-white/[0.1] text-[10px] font-medium text-slate-200 hover:text-white cursor-pointer transition-colors"
+                            title="Attach a custom .GLB / .GLTF 3D model"
+                          >
+                            <input
+                              type="file"
+                              accept=".glb,.gltf"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) onAttachGlbFile(actor.id, file);
+                              }}
+                            />
+                            <Upload className="h-3 w-3 text-slate-300" />
+                            <span>Attach .GLB</span>
+                          </label>
 
-                      <button
-                        type="button"
-                        onClick={() => setShowGlbResources((prev) => !prev)}
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] font-medium transition-colors cursor-pointer ${
-                          showGlbResources
-                            ? 'bg-indigo-600 text-white border-indigo-400'
-                            : 'bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-200 border-indigo-500/35'
-                        }`}
-                        title="Browse 14 curated Free CC0, Sketchfab, Mixamo & AI Animated .GLB websites"
-                      >
-                        <Globe className="h-3 w-3 text-indigo-300" />
-                        <span>.GLB Sites</span>
-                      </button>
+                          <button
+                            type="button"
+                            onClick={() => setShowGlbResources((prev) => !prev)}
+                            className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[10px] font-medium transition-colors cursor-pointer ${
+                              showGlbResources
+                                ? 'bg-indigo-600 text-white border-indigo-400'
+                                : 'bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-200 border-indigo-500/35'
+                            }`}
+                            title="Browse 14 curated Free CC0, Sketchfab, Mixamo & AI Animated .GLB websites"
+                          >
+                            <Globe className="h-3 w-3 text-indigo-300" />
+                            <span>.GLB Sites</span>
+                          </button>
 
-                      <button
-                        type="button"
-                        disabled={refiningActorId === actor.id || !(actor.token || actor.name || '').trim()}
-                        onClick={() => onRefineObjectByPrompt(actor)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/35 disabled:opacity-40 border border-amber-500/45 text-amber-200 text-[10px] font-semibold transition-colors cursor-pointer"
-                        title="Rebuild 3D appearance using prompt"
-                      >
-                        {refiningActorId === actor.id ? (
-                          <>
-                            <Loader2 className="h-3 w-3 animate-spin text-amber-300" />
-                            <span>Editing...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Box className="h-3 w-3 text-amber-300" />
-                            <span>Edit 3D</span>
-                          </>
-                        )}
-                      </button>
+                          <button
+                            type="button"
+                            disabled={refiningActorId === actor.id || !(actor.token || actor.name || '').trim()}
+                            onClick={() => onRefineObjectByPrompt(actor)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/35 disabled:opacity-40 border border-amber-500/45 text-amber-200 text-[10px] font-semibold transition-colors cursor-pointer"
+                            title="Rebuild 3D appearance using prompt"
+                          >
+                            {refiningActorId === actor.id ? (
+                              <>
+                                <Loader2 className="h-3 w-3 animate-spin text-amber-300" />
+                                <span>Editing...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Box className="h-3 w-3 text-amber-300" />
+                                <span>Edit 3D</span>
+                              </>
+                            )}
+                          </button>
+                        </>
+                      )}
+                      {actor.modelUrl && (
+                        <span className="px-2 py-0.5 rounded bg-emerald-500/15 border border-emerald-400/40 text-[9.5px] font-mono text-emerald-200 font-semibold">
+                          ✓ Authentic .GLB
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  <div className="relative">
-                    <input
-                      ref={lookPromptInputRef}
-                      type="text"
-                      value={actor.token}
-                      onChange={(e) => onUpdateActor(actor.id, { token: e.target.value })}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          onRefineObjectByPrompt(actor);
-                        }
-                      }}
-                      placeholder="Describe 3D look / wearables (e.g. wearing a trench coat)..."
-                      className="w-full rounded-lg bg-[#0d111a] border border-white/[0.09] pl-2.5 pr-7 py-1.5 text-slate-200 text-[11px] font-mono placeholder-slate-500 focus:outline-none focus:border-amber-400/70"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => lookPromptInputRef.current?.focus()}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                      title="Edit 3D appearance description"
-                    >
-                      <Pencil className="h-3 w-3" />
-                    </button>
-                  </div>
+                  {actor.modelUrl ? (
+                    <div className="rounded-lg bg-[#0d111a] border border-white/[0.08] px-2.5 py-1.5 text-[10.5px] font-mono text-slate-400 leading-relaxed">
+                      3D <code className="text-cyan-300">.GLB</code> mesh is locked after creation. You can position, rotate, scale, and animate its rig on stage.
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <input
+                        ref={lookPromptInputRef}
+                        type="text"
+                        value={actor.token}
+                        onChange={(e) => onUpdateActor(actor.id, { token: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            onRefineObjectByPrompt(actor);
+                          }
+                        }}
+                        placeholder="Describe 3D look / wearables (e.g. wearing a trench coat)..."
+                        className="w-full rounded-lg bg-[#0d111a] border border-white/[0.09] pl-2.5 pr-7 py-1.5 text-slate-200 text-[11px] font-mono placeholder-slate-500 focus:outline-none focus:border-amber-400/70"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => lookPromptInputRef.current?.focus()}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                        title="Edit 3D appearance description"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
 
-                  {showGlbResources && (
+                  {showGlbResources && !actor.modelUrl && (
                     <div className="pt-1">
                       <GlbResourcesDirectory compact defaultExpanded />
                     </div>

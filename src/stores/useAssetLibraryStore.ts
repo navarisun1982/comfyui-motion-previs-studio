@@ -2696,10 +2696,12 @@ export interface AssetLibraryState {
   studioInitialPrompt: string;
   studioInitialImageUrl?: string;
   studioTargetActorId?: string;
+  studioInitialMode?: 'image-to-3d' | 'text-to-3d';
   open3DStudio: (opts?: {
     initialPrompt?: string;
     initialImageUrl?: string;
     targetActorId?: string;
+    initialMode?: 'image-to-3d' | 'text-to-3d';
   }) => void;
   close3DStudio: () => void;
 
@@ -2734,12 +2736,14 @@ export const useAssetLibraryStore = create<AssetLibraryState>((set, get) => {
     studioInitialPrompt: '',
     studioInitialImageUrl: undefined,
     studioTargetActorId: undefined,
+    studioInitialMode: undefined,
     open3DStudio: (opts) => {
       set({
         is3DStudioOpen: true,
         studioInitialPrompt: opts?.initialPrompt ?? '',
         studioInitialImageUrl: opts?.initialImageUrl,
         studioTargetActorId: opts?.targetActorId,
+        studioInitialMode: opts?.initialMode,
       });
     },
     close3DStudio: () => {

@@ -14,6 +14,7 @@ import {
   syncActiveMinimaxTemplateToRegistry,
 } from '../pipeline/customWorkflowResolver';
 import { CustomWorkflowConfigBar } from './CustomWorkflowConfigBar';
+import { BundledWorkflowsModal } from './BundledWorkflowsModal';
 import {
   Film,
   Download,
@@ -76,6 +77,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   const [isDirectingPrompt, setIsDirectingPrompt] = useState(false);
   const [aiDirectorFeedback, setAiDirectorFeedback] = useState<string | null>(null);
   const [showTimelineDetails, setShowTimelineDetails] = useState(true);
+  const [showWorkflowsPackModal, setShowWorkflowsPackModal] = useState(false);
 
   // ComfyUI Live Bridge State (MiniMax H3 Ref2VA & LTX-2.5)
   const {
@@ -532,6 +534,12 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
   return (
     <div className="flex flex-col h-full bg-[#0a0c12] text-slate-200 overflow-y-auto custom-scrollbar font-sans">
+      {/* Bundled ComfyUI Workflows Pack Modal */}
+      <BundledWorkflowsModal
+        isOpen={showWorkflowsPackModal}
+        onClose={() => setShowWorkflowsPackModal(false)}
+      />
+
       {/* Top Header Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 border-b border-white/10 bg-[#0f121b] shrink-0">
         <div className="flex items-center gap-3">
@@ -563,8 +571,18 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
           </div>
         </div>
 
-        {/* Engine Switcher */}
-        <div className="flex items-center gap-2">
+        {/* Engine Switcher & ComfyUI Workflows Pack */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowWorkflowsPackModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 border border-cyan-400/40 text-xs font-mono font-semibold transition-all cursor-pointer"
+            title="Download all ComfyUI workflows used in this app (Image-to-3D, Text-to-3D, MiniMax H3 & LTX-2.5)"
+          >
+            <FileCode className="h-3.5 w-3.5 text-cyan-300" />
+            <span>📥 ComfyUI Workflows Pack</span>
+          </button>
+
           <span className="text-xs text-slate-400 font-mono">Target Engine:</span>
           <div className="flex items-center bg-black/60 rounded-lg p-0.5 border border-white/15 text-xs font-mono">
             <button

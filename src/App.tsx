@@ -119,6 +119,7 @@ export default function App() {
     studioInitialPrompt,
     studioInitialImageUrl,
     studioTargetActorId,
+    studioInitialMode,
     close3DStudio,
   } = useAssetLibraryStore(
     useShallow((s) => ({
@@ -126,6 +127,7 @@ export default function App() {
       studioInitialPrompt: s.studioInitialPrompt,
       studioInitialImageUrl: s.studioInitialImageUrl,
       studioTargetActorId: s.studioTargetActorId,
+      studioInitialMode: s.studioInitialMode,
       close3DStudio: s.close3DStudio,
     }))
   );
@@ -570,6 +572,7 @@ export default function App() {
         initialPrompt={studioInitialPrompt}
         initialImageUrl={studioInitialImageUrl}
         targetActorId={studioTargetActorId}
+        initialMode={studioInitialMode}
       />
     </div>
   );
