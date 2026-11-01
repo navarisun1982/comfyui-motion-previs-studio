@@ -8,6 +8,12 @@ import {
 import { ChevronDown, ChevronRight, Sun, Moon, RotateCcw, Plus, Trash2 } from 'lucide-react';
 
 const FOV_MAP: Record<FocalLength, number> = {
+  '12mm': 122,
+  '14mm': 114,
+  '40mm': 56,
+  '70mm': 34,
+  '100mm': 24,
+  '200mm': 12,
   '18mm': 100,
   '24mm': 84,
   '35mm': 63,

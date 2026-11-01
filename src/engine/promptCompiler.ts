@@ -49,6 +49,20 @@ export function formatCameraMovement(type: CameraMovementType, speed: string): s
       return `subtle organic handheld camera feel, breathing cinematic realism with gentle natural stabilization`;
     case 'whip-pan':
       return `rapid whip-pan transition, fast motion blur swish`;
+    case 'rack-focus':
+      return `cinematic rack focus transition, smoothly shifting critical optical focus plane from foreground to background`;
+    case 'crash-zoom':
+      return `rapid crash-zoom snap telephoto rush, high-energy focal length punch-in toward the focal subject`;
+    case 'fpv-dive':
+      return `dynamic FPV drone aerial dive, sweeping three-dimensional plunge with banked horizon roll`;
+    case 'dolly-zoom-vertigo':
+      return `Hitchcock dolly-zoom vertigo effect, camera physically moving backward while lens simultaneously zooms in, keeping subject scale constant while background perspective warps dramatically`;
+    case 'steadicam-follow':
+      return `fluid Steadicam tracking rig following the subject at a ${speedPhrase} pace, maintaining constant framing distance with smooth gimbal stabilization`;
+    case 'crane-arc':
+      return `sweeping jib crane arc movement, camera rising and curving gracefully across the set with rich multi-plane parallax`;
+    case 'spiral-orbit-in':
+      return `tightening spiral orbit camera movement, circling around the subject while progressively pushing closer into an intimate frame`;
     case 'static':
     default:
       return `locked-off tripod shot, completely stable, motionless camera frame`;
@@ -57,18 +71,30 @@ export function formatCameraMovement(type: CameraMovementType, speed: string): s
 
 export function formatLens(focalLength: FocalLength, aperture: string): string {
   switch (focalLength) {
+    case '12mm':
+      return `extreme ultra-wide 12mm rectilinear cinema lens, 122-degree dramatic spatial depth, towering close foregrounds, deep focus`;
+    case '14mm':
+      return `ultra-wide 14mm cinema prime lens, 114-degree sweeping architectural scale, dramatic perspective convergence`;
     case '18mm':
       return `ultra-wide 18mm lens, broad expansive field of view, subtle wide-angle perspective distortion at edges, deep focus`;
     case '24mm':
       return `wide 24mm lens, environmental framing with cinematic presence, crisp background context`;
     case '35mm':
       return `classic 35mm cinema prime lens, natural human perspective, gentle background separation at ${aperture}`;
+    case '40mm':
+      return `40mm anamorphic cinema prime lens, classic widescreen storytelling perspective, oval bokeh highlights at ${aperture}`;
     case '50mm':
       return `50mm lens, standard focal length prime, zero perspective distortion, natural cinematic depth of field at ${aperture}`;
+    case '70mm':
+      return `70mm large-format IMAX cinema lens, rich medium-telephoto dimensionality, razor-sharp subject presence at ${aperture}`;
     case '85mm':
       return `85mm telephoto portrait lens, creamy shallow depth of field, compressed background bokeh at ${aperture}, isolated subject`;
+    case '100mm':
+      return `100mm macro-portrait cinema prime lens, intimate detail rendering, velvety background melt at ${aperture}`;
     case '135mm':
       return `135mm long telephoto lens, extreme cinematic background compression, soft creamy bokeh`;
+    case '200mm':
+      return `200mm super-telephoto cinema lens, dramatic axial background compression, shallow razor-thin focal plane at ${aperture}`;
     default:
       return `${focalLength} lens, cinematic optics`;
   }

@@ -177,3 +177,118 @@ export function createIKHandleGizmo(
   setLayerRecursively(handleGroup, 1);
   return handleGroup;
 }
+
+/**
+ * Builds a compact, detailed ARRI/RED-style 3D Cinema Camera Rig (~35% of the legacy box size)
+ * with matte box, telephoto barrel, dual coaxial top magazines, side OLED monitor, and hit proxy.
+ * Placed inside a child group ('CinemaRigModelGroup') at y = 1.5 so user gizmoScale (0.25x - 1.5x)
+ * scales the physical rig cleanly around its optical center.
+ */
+export function buildCompactCinemaCameraRig(): THREE.Group {
+  const rigModel = new THREE.Group();
+  rigModel.name = 'CinemaRigModelGroup';
+  rigModel.position.set(0, 1.5, 0);
+
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: 0x1e293b,
+    emissive: 0xd4af37,
+    emissiveIntensity: 0.14,
+    roughness: 0.32,
+    metalness: 0.82,
+  });
+
+  const goldMat = new THREE.MeshStandardMaterial({
+    color: 0xd4af37,
+    emissive: 0xd4af37,
+    emissiveIntensity: 0.25,
+    roughness: 0.18,
+    metalness: 0.9,
+  });
+
+  const darkCarbonMat = new THREE.MeshStandardMaterial({
+    color: 0x0f172a,
+    roughness: 0.4,
+    metalness: 0.7,
+  });
+
+  // 1. Compact Cinema Body (~1.35 x 1.0 x 1.75 — ~35% of legacy 4x3x5 box)
+  const camBody = new THREE.Mesh(new THREE.BoxGeometry(1.35, 1.0, 1.75), bodyMat);
+  camBody.userData.isCamera = true;
+  rigModel.add(camBody);
+
+  const camEdges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(1.38, 1.03, 1.78)),
+    new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.9 })
+  );
+  camEdges.name = 'CameraRigEdges';
+  camEdges.raycast = () => {};
+  rigModel.add(camEdges);
+
+  // 2. Dual Coaxial Top Magazines / Film Reels
+  const reelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.26, 20);
+  reelGeo.rotateZ(Math.PI / 2);
+  const frontReel = new THREE.Mesh(reelGeo, darkCarbonMat);
+  frontReel.position.set(0, 0.66, 0.12);
+  frontReel.userData.isCamera = true;
+  rigModel.add(frontReel);
+
+  const rearReel = new THREE.Mesh(reelGeo, darkCarbonMat);
+  rearReel.position.set(0, 0.66, -0.48);
+  rearReel.userData.isCamera = true;
+  rigModel.add(rearReel);
+
+  // 3. Top Carry Handle Bar
+  const topHandle = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.95), goldMat);
+  topHandle.position.set(0, 0.86, -0.18);
+  topHandle.userData.isCamera = true;
+  rigModel.add(topHandle);
+
+  // 4. Prime Lens Barrel (+Z forward)
+  const lensMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.42, 0.85, 20), goldMat);
+  lensMesh.rotation.x = Math.PI / 2;
+  lensMesh.position.set(0, 0, 1.22);
+  lensMesh.userData.isCamera = true;
+  rigModel.add(lensMesh);
+
+  // 5. Cinema Matte Box Sunshade & Front Optical Glass Element
+  const matteBox = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.80, 0.36), darkCarbonMat);
+  matteBox.position.set(0, 0, 1.72);
+  matteBox.userData.isCamera = true;
+  rigModel.add(matteBox);
+
+  const matteEdges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(1.14, 0.82, 0.38)),
+    new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.85 })
+  );
+  matteEdges.position.set(0, 0, 1.72);
+  matteEdges.name = 'CameraMatteEdges';
+  matteEdges.raycast = () => {};
+  rigModel.add(matteEdges);
+
+  const glassMesh = new THREE.Mesh(
+    new THREE.CircleGeometry(0.33, 20),
+    new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.55 })
+  );
+  glassMesh.position.set(0, 0, 1.91);
+  glassMesh.raycast = () => {};
+  rigModel.add(glassMesh);
+
+  // 6. Operator Side OLED Viewfinder Monitor (-X side)
+  const monitorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.40, 0.58), darkCarbonMat);
+  monitorMesh.position.set(-0.82, 0.12, -0.10);
+  monitorMesh.rotation.y = -0.25;
+  monitorMesh.userData.isCamera = true;
+  rigModel.add(monitorMesh);
+
+  // 7. Invisible Grab Hit Proxy around the compact rig
+  const camHitProxy = new THREE.Mesh(
+    new THREE.BoxGeometry(2.5, 2.1, 3.2),
+    new THREE.MeshBasicMaterial({ visible: false })
+  );
+  camHitProxy.position.set(0, 0.1, 0.4);
+  camHitProxy.name = '__camera_hit_proxy__';
+  camHitProxy.userData = { isCamera: true };
+  rigModel.add(camHitProxy);
+
+  return rigModel;
+}

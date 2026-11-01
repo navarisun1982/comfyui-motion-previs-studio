@@ -81,6 +81,10 @@ interface ShotState {
   updateCameraPositionAtTime: (time: number, position: Point3D, duration: number, forceMode?: 'base' | 'keyframe') => void;
   removeCameraKeyframe: (keyframeId: string) => void;
   setCameraColor: (color: string) => void;
+  updateCameraOptions: (updates: Partial<ShotSpec['camera']>) => void;
+  updateCameraLens: (updates: Partial<ShotSpec['camera']['lens']>) => void;
+  updateCameraMovementOptions: (updates: Partial<ShotSpec['camera']['movement']>) => void;
+  applyCameraFramingPreset: (preset: 'face-cu' | 'medium-bust' | 'cowboy' | 'ots-right' | 'ots-left' | 'hero-low' | 'birds-eye' | 'wide-establish', actorId?: string) => void;
   
   // Actors & Scene Objects
   sceneCastPool: Actor[];
@@ -876,6 +880,187 @@ export const useShotStore = create<ShotState>((set, get) => {
       };
       logger.action(`Removed camera keyframe ${keyframeId}`);
       commitShot(updated);
+    },
+
+    updateCameraOptions: (updates) => {
+      const { shot } = get();
+      const updated: ShotSpec = {
+        ...shot,
+        camera: {
+          ...shot.camera,
+          ...updates,
+        },
+      };
+      logger.action('Updated camera options', updates);
+      commitShot(updated);
+    },
+
+    updateCameraLens: (updates) => {
+      const { shot } = get();
+      const updated: ShotSpec = {
+        ...shot,
+        camera: {
+          ...shot.camera,
+          lens: {
+            ...shot.camera.lens,
+            ...updates,
+          },
+        },
+      };
+      logger.action('Updated camera lens optics', updates);
+      commitShot(updated);
+    },
+
+    updateCameraMovementOptions: (updates) => {
+      const { shot } = get();
+      const updated: ShotSpec = {
+        ...shot,
+        camera: {
+          ...shot.camera,
+          movement: {
+            ...shot.camera.movement,
+            ...updates,
+          },
+        },
+      };
+      logger.action('Updated camera trajectory tuning', updates);
+      commitShot(updated);
+    },
+
+    applyCameraFramingPreset: (preset, actorId) => {
+      const { shot, selectedActorId } = get();
+      const targetId = actorId && actorId !== '__camera__' ? actorId : selectedActorId && selectedActorId !== '__camera__' ? selectedActorId : undefined;
+      const targetActor =
+        shot.actors.find((a) => a.id === targetId) ||
+        shot.actors.find((a) => !a.kind || a.kind === 'human') ||
+        shot.actors[0];
+
+      const actorPos = targetActor
+        ? interpolateTrajectoryPosition(targetActor.trajectory, 0, shot.durationSeconds)
+        : { x: 50, y: 50 };
+      const ax = actorPos.x;
+      const ay = actorPos.y;
+      const clamp = (v: number) => Math.max(4, Math.min(96, Math.round(v)));
+
+      let nextCamera: ShotSpec['camera'] = {
+        ...shot.camera,
+        dutchRollDeg: 0,
+        pitchOffsetDeg: 0,
+        yawOffsetDeg: 0,
+        trackTargetActorId: targetActor?.id,
+      };
+
+      if (preset === 'face-cu') {
+        nextCamera = {
+          ...nextCamera,
+          shotType: 'close-up',
+          angle: 'eye-level',
+          trackTargetBone: 'head',
+          lookAtHeightOffset: 0.2,
+          lens: { ...nextCamera.lens, focalLength: '85mm', customFocalLengthMm: undefined, aperture: 'f/1.4', focusDistanceMeters: 8 },
+          movement: {
+            ...nextCamera.movement,
+            startPosition: { x: clamp(ax), y: clamp(ay + 10), z: 32 },
+            endPosition: { x: clamp(ax), y: clamp(ay + 8), z: 32 },
+            targetLookAt: { x: clamp(ax), y: clamp(ay) },
+          },
+        };
+      } else if (preset === 'medium-bust') {
+        nextCamera = {
+          ...nextCamera,
+          shotType: 'medium-close-up',
+          angle: 'eye-level',
+          trackTargetBone: 'chest',
+          lookAtHeightOffset: 0,
+          lens: { ...nextCamera.lens, focalLength: '50mm', customFocalLengthMm: undefined, aperture: 'f/2.0', focusDistanceMeters: 14 },
+          movement: {
+            ...nextCamera.movement,
+            startPosition: { x: clamp(ax), y: clamp(ay + 16), z: 28 },
+            endPosition: { x: clamp(ax), y: clamp(ay + 14), z: 28 },
+            targetLookAt: { x: clamp(ax), y: clamp(ay) },
+          },
+        };
+      } else if (preset === 'cowboy') {
+        nextCamera = {
+          ...nextCamera,
+          shotType: 'medium-wide',
+          angle: 'eye-level',
+          trackTargetBone: 'pelvis',
+          lookAtHeightOffset: -0.2,
+          lens: { ...nextCamera.lens, focalLength: '35mm', customFocalLengthMm: undefined, aperture: 'f/2.8', focusDistanceMeters: 22 },
+          movement: {
+            ...nextCamera.movement,
+            startPosition: { x: clamp(ax - 4), y: clamp(ay + 24), z: 22 },
+            endPosition: { x: clamp(ax + 2), y: clamp(ay + 20), z: 22 },
+            targetLookAt: { x: clamp(ax), y: clamp(ay) },
+          },
+        };
+      } else if (preset === 'ots-right' || preset === 'ots-left') {
+        const sideOffset = preset === 'ots-right' ? 9 : -9;
+        nextCamera = {
+          ...nextCamera,
+          shotType: 'medium-close-up',
+          angle: 'eye-level',
+          trackTargetBone: 'head',
+          lookAtHeightOffset: 0.1,
+          lens: { ...nextCamera.lens, focalLength: '50mm', customFocalLengthMm: undefined, aperture: 'f/2.0', focusDistanceMeters: 15 },
+          movement: {
+            ...nextCamera.movement,
+            startPosition: { x: clamp(ax + sideOffset), y: clamp(ay + 15), z: 30 },
+            endPosition: { x: clamp(ax + sideOffset * 0.8), y: clamp(ay + 13), z: 30 },
+            targetLookAt: { x: clamp(ax - sideOffset * 0.25), y: clamp(ay) },
+          },
+        };
+      } else if (preset === 'hero-low') {
+        nextCamera = {
+          ...nextCamera,
+          shotType: 'medium',
+          angle: 'low-angle',
+          trackTargetBone: 'chest',
+          lookAtHeightOffset: 0.8,
+          pitchOffsetDeg: 10,
+          lens: { ...nextCamera.lens, focalLength: '24mm', customFocalLengthMm: undefined, aperture: 'f/2.8', focusDistanceMeters: 14 },
+          movement: {
+            ...nextCamera.movement,
+            startPosition: { x: clamp(ax), y: clamp(ay + 14), z: 8 },
+            endPosition: { x: clamp(ax), y: clamp(ay + 11), z: 6 },
+            targetLookAt: { x: clamp(ax), y: clamp(ay) },
+          },
+        };
+      } else if (preset === 'birds-eye') {
+        nextCamera = {
+          ...nextCamera,
+          shotType: 'wide',
+          angle: 'overhead-gods-eye',
+          trackTargetBone: 'pelvis',
+          lookAtHeightOffset: 0,
+          lens: { ...nextCamera.lens, focalLength: '24mm', customFocalLengthMm: undefined, aperture: 'f/5.6', focusDistanceMeters: 28 },
+          movement: {
+            ...nextCamera.movement,
+            startPosition: { x: clamp(ax), y: clamp(ay + 4), z: 95 },
+            endPosition: { x: clamp(ax), y: clamp(ay + 2), z: 88 },
+            targetLookAt: { x: clamp(ax), y: clamp(ay) },
+          },
+        };
+      } else if (preset === 'wide-establish') {
+        nextCamera = {
+          ...nextCamera,
+          shotType: 'extreme-wide',
+          angle: 'eye-level',
+          trackTargetBone: 'chest',
+          lookAtHeightOffset: 0,
+          lens: { ...nextCamera.lens, focalLength: '18mm', customFocalLengthMm: undefined, aperture: 'f/5.6', focusDistanceMeters: 36 },
+          movement: {
+            ...nextCamera.movement,
+            startPosition: { x: clamp(ax - 12), y: clamp(ay + 38), z: 32 },
+            endPosition: { x: clamp(ax + 8), y: clamp(ay + 30), z: 26 },
+            targetLookAt: { x: clamp(ax), y: clamp(ay) },
+          },
+        };
+      }
+
+      logger.action(`Applied 1-click camera framing preset: ${preset}`);
+      commitShot({ ...shot, camera: nextCamera });
     },
 
     setCameraColor: (color) => {

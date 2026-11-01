@@ -14,13 +14,19 @@ export interface StageViewfinderOverlaysProps {
 export function updateFrustumGeometry(
   fovDeg: number,
   aspect: number,
-  distance: number = 35
+  distance: number = 24,
+  focusDistance?: number
 ): THREE.BufferGeometry {
+  if (distance <= 0.1) {
+    const emptyGeo = new THREE.BufferGeometry();
+    emptyGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+    return emptyGeo;
+  }
   const fovRad = (fovDeg * Math.PI) / 180;
   const hHalf = Math.tan(fovRad / 2) * distance;
   const wHalf = hHalf * aspect;
 
-  const vertices = new Float32Array([
+  const baseVerts: number[] = [
     // Apex to 4 corners (forward along +Z)
     0, 0, 0,  -wHalf,  hHalf, distance,
     0, 0, 0,   wHalf,  hHalf, distance,
@@ -31,8 +37,24 @@ export function updateFrustumGeometry(
      wHalf,  hHalf, distance,   wHalf, -hHalf, distance,
      wHalf, -hHalf, distance,  -wHalf, -hHalf, distance,
     -wHalf, -hHalf, distance,  -wHalf,  hHalf, distance,
-  ]);
+  ];
 
+  // Optional Optical Focus Distance Plane Slice inside Frustum
+  if (focusDistance && focusDistance > 1 && focusDistance < distance - 0.5) {
+    const fhHalf = Math.tan(fovRad / 2) * focusDistance;
+    const fwHalf = fhHalf * aspect;
+    baseVerts.push(
+      -fwHalf,  fhHalf, focusDistance,   fwHalf,  fhHalf, focusDistance,
+       fwHalf,  fhHalf, focusDistance,   fwHalf, -fhHalf, focusDistance,
+       fwHalf, -fhHalf, focusDistance,  -fwHalf, -fhHalf, focusDistance,
+      -fwHalf, -fhHalf, focusDistance,  -fwHalf,  fhHalf, focusDistance,
+      // Focus crosshair ticks
+      -fwHalf * 0.15, 0, focusDistance,  fwHalf * 0.15, 0, focusDistance,
+      0, -fhHalf * 0.15, focusDistance,  0, fhHalf * 0.15, focusDistance
+    );
+  }
+
+  const vertices = new Float32Array(baseVerts);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
   return geo;

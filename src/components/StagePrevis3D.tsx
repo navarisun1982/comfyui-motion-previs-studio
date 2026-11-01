@@ -57,6 +57,7 @@ import { StageTopViewRadar } from './stage/StageTopViewRadar';
 import {
   disposeObject3D,
   createIKHandleGizmo,
+  buildCompactCinemaCameraRig,
 } from './stage/stageGizmoHelpers';
 import {
   Play,
@@ -77,12 +78,43 @@ import {
 } from 'lucide-react';
 
 const FOV_MAP: Record<FocalLength, number> = {
+  '12mm': 122,
+  '14mm': 114,
+  '40mm': 56,
+  '70mm': 34,
+  '100mm': 24,
+  '200mm': 12,
   '18mm': 100,
   '24mm': 84,
   '35mm': 63,
   '50mm': 47,
   '85mm': 28,
   '135mm': 18,
+};
+
+function computeCameraFovDeg(lens: {
+  focalLength: FocalLength;
+  customFocalLengthMm?: number;
+  sensorSize?: string;
+}): number {
+  const mm = lens.customFocalLengthMm ?? (parseInt(lens.focalLength, 10) || 35);
+  const sensorWidthMm =
+    lens.sensorSize === 'imax-65mm'
+      ? 52.5
+      : lens.sensorSize === 'anamorphic'
+      ? 44.0
+      : lens.sensorSize === 'super35'
+      ? 24.89
+      : lens.sensorSize === 'micro-four-thirds'
+      ? 17.3
+      : 36.0;
+  if (!lens.customFocalLengthMm && (!lens.sensorSize || lens.sensorSize === 'full-frame')) {
+    return FOV_MAP[lens.focalLength] || 63;
+  }
+  const fovRad = 2 * Math.atan(sensorWidthMm / (2 * Math.max(8, mm)));
+  return Math.max(8, Math.min(135, Math.round((fovRad * 180) / Math.PI)));
+}
+export const _FOV_HELPER_READY = {
 };
 
 const ASPECT_RATIOS: Record<AspectRatio, number> = {
@@ -562,58 +594,20 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
     // Camera Gizmo Group (represented in stage view - Layer 1 Gizmo Only)
     const cameraGizmoGroup = new THREE.Group();
-    const camBodyMat = new THREE.MeshStandardMaterial({
-      color: 0x1e293b,
-      emissive: 0xd4af37,
-      emissiveIntensity: 0.18,
-      roughness: 0.3,
-      metalness: 0.8,
-    });
-    const camBody = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 5), camBodyMat);
-    camBody.position.y = 1.5;
-    camBody.userData.isCamera = true;
-    cameraGizmoGroup.add(camBody);
-
-    // Golden edge highlight on camera body so it stands out clearly on dark stages
-    const camEdges = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.BoxGeometry(4.08, 3.08, 5.08)),
-      new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.9 })
-    );
-    camEdges.position.y = 1.5;
-    camEdges.raycast = () => {};
-    cameraGizmoGroup.add(camEdges);
-
-    // Lens Barrel (pointing forward +Z)
-    const lensMat = new THREE.MeshStandardMaterial({
-      color: 0xd4af37,
-      emissive: 0xd4af37,
-      emissiveIntensity: 0.25,
-      roughness: 0.1,
-      metalness: 0.9,
-    });
-    const lensMesh = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 3, 16), lensMat);
-    lensMesh.rotation.x = Math.PI / 2;
-    lensMesh.position.set(0, 1.5, 3.5);
-    lensMesh.userData.isCamera = true;
-    cameraGizmoGroup.add(lensMesh);
-
-    // Generous invisible hit proxy around camera body & lens for effortless grabbing
-    const camHitProxy = new THREE.Mesh(
-      new THREE.BoxGeometry(6.8, 5.6, 8.8),
-      new THREE.MeshBasicMaterial({ visible: false })
-    );
-    camHitProxy.position.set(0, 1.5, 1.2);
-    camHitProxy.name = '__camera_hit_proxy__';
-    camHitProxy.userData = { isCamera: true };
-    cameraGizmoGroup.add(camHitProxy);
+    const compactRigModel = buildCompactCinemaCameraRig();
+    const initGizmoScale = shot.camera.gizmoScale ?? 1.0;
+    compactRigModel.scale.setScalar(initGizmoScale);
+    cameraGizmoGroup.add(compactRigModel);
 
     // Frustum Lines (pointing forward +Z directly matching camera line of sight)
-    const fov = FOV_MAP[shot.camera.lens.focalLength] || 63;
+    const fov = computeCameraFovDeg(shot.camera.lens);
     const aspect = ASPECT_RATIOS[shot.aspectRatio] || 16 / 9;
-    const frustumGeo = updateFrustumGeometry(fov, aspect, 35);
+    const initFrustumLen = shot.camera.frustumLength ?? 24;
+    const initFocusDist = shot.camera.showFocusPlane !== false ? (shot.camera.lens.focusDistanceMeters ?? 12) : undefined;
+    const frustumGeo = updateFrustumGeometry(fov, aspect, initFrustumLen, initFocusDist);
     const frustumMat = new THREE.LineBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.8 });
     const frustumLine = new THREE.LineSegments(frustumGeo, frustumMat);
-    frustumLine.position.set(0, 1.5, 4);
+    frustumLine.position.set(0, 1.5, 1.92 * initGizmoScale);
     frustumLine.raycast = () => {};
     cameraGizmoGroup.add(frustumLine);
     frustumMeshRef.current = frustumLine;
@@ -632,7 +626,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     // Camera Floor Anchor Ring & Vertical Pedestal Drop-Line (Layer 1 Gizmo Only)
     const cameraFloorAnchor = new THREE.Group();
     cameraFloorAnchor.name = 'CameraFloorAnchor';
-    const floorRingGeo = new THREE.RingGeometry(1.9, 2.5, 32);
+    const floorRingGeo = new THREE.RingGeometry(0.85, 1.18, 32);
     floorRingGeo.rotateX(-Math.PI / 2);
     const floorRingMat = new THREE.MeshBasicMaterial({
       color: 0xf59e0b,
@@ -645,7 +639,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     floorRingMesh.userData = { isCamera: true };
     cameraFloorAnchor.add(floorRingMesh);
 
-    const floorHitGeo = new THREE.CircleGeometry(2.8, 24);
+    const floorHitGeo = new THREE.CircleGeometry(1.45, 24);
     floorHitGeo.rotateX(-Math.PI / 2);
     const floorHitMesh = new THREE.Mesh(floorHitGeo, new THREE.MeshBasicMaterial({ visible: false }));
     floorHitMesh.position.y = 0.03;
@@ -1684,20 +1678,41 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     syncPositions(currentTimeRef.current);
   }, [shot.actors, shot.vfxReference?.referenceMode, shot.vfxReference?.enabled, selectedActorId]);
 
-  // 7. Update Frustum Geometry on Lens / Aspect Change
+  // 7. Update Frustum Geometry & Compact Rig Scale on Lens / Aspect / Camera Options Change
   useEffect(() => {
-    const fov = FOV_MAP[shot.camera.lens.focalLength] || 63;
+    const fov = computeCameraFovDeg(shot.camera.lens);
     const aspect = ASPECT_RATIOS[shot.aspectRatio] || 16 / 9;
+    const gizmoScale = shot.camera.gizmoScale ?? 1.0;
+    const frustumLen = shot.camera.frustumLength ?? 24;
+    const focusDist = shot.camera.showFocusPlane !== false ? (shot.camera.lens.focusDistanceMeters ?? 12) : undefined;
+
+    if (cameraGizmoGroupRef.current) {
+      const rigModel = cameraGizmoGroupRef.current.getObjectByName('CinemaRigModelGroup');
+      if (rigModel) {
+        rigModel.scale.setScalar(gizmoScale);
+      }
+    }
 
     if (frustumMeshRef.current) {
+      frustumMeshRef.current.position.set(0, 1.5, 1.92 * gizmoScale);
       frustumMeshRef.current.geometry.dispose();
-      frustumMeshRef.current.geometry = updateFrustumGeometry(fov, aspect, 35);
+      frustumMeshRef.current.geometry = updateFrustumGeometry(fov, aspect, frustumLen, focusDist);
       setLayerRecursively(frustumMeshRef.current, 1);
     }
 
     const camHex = shot.camera.color || '#f59e0b';
     if (frustumMeshRef.current && (frustumMeshRef.current.material as THREE.LineBasicMaterial)?.color) {
       (frustumMeshRef.current.material as THREE.LineBasicMaterial).color.set(camHex);
+    }
+    if (cameraGizmoGroupRef.current) {
+      const rigEdges = cameraGizmoGroupRef.current.getObjectByName('CameraRigEdges') as THREE.LineSegments | undefined;
+      if (rigEdges && (rigEdges.material as THREE.LineBasicMaterial)?.color) {
+        (rigEdges.material as THREE.LineBasicMaterial).color.set(camHex);
+      }
+      const matteEdges = cameraGizmoGroupRef.current.getObjectByName('CameraMatteEdges') as THREE.LineSegments | undefined;
+      if (matteEdges && (matteEdges.material as THREE.LineBasicMaterial)?.color) {
+        (matteEdges.material as THREE.LineBasicMaterial).color.set(camHex);
+      }
     }
     if (cameraFloorAnchorRef.current) {
       cameraFloorAnchorRef.current.traverse((child) => {
@@ -1713,7 +1728,17 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       vfCameraRef.current.updateProjectionMatrix();
       updateSizesRef.current?.();
     }
-  }, [shot.camera.lens.focalLength, shot.aspectRatio, shot.camera.color]);
+  }, [
+    shot.camera.lens.focalLength,
+    shot.camera.lens.customFocalLengthMm,
+    shot.camera.lens.sensorSize,
+    shot.camera.lens.focusDistanceMeters,
+    shot.camera.gizmoScale,
+    shot.camera.frustumLength,
+    shot.camera.showFocusPlane,
+    shot.aspectRatio,
+    shot.camera.color,
+  ]);
 
   // 8. Update Trajectory Curve Line in Stage View
   useEffect(() => {
@@ -1820,9 +1845,38 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       targetX += Math.sin(ratio * Math.PI) * 20;
     }
 
+    // Smart Subject Tracking & Follow Lock (when trackTargetActorId is active)
+    let effectiveCamX = camPos.x;
+    let effectiveCamZ = camPos.z;
+    if (liveShot.camera.trackTargetActorId) {
+      const trackedActor = liveShot.actors.find((a) => a.id === liveShot.camera.trackTargetActorId);
+      if (trackedActor) {
+        const trackedNow = getActorPositionAtTime(trackedActor, t);
+        const trackedScale = trackedActor.scale ?? 1.0;
+        const bone = liveShot.camera.trackTargetBone || 'head';
+        const boneHeight =
+          bone === 'head'
+            ? 4.35 * trackedScale
+            : bone === 'chest'
+            ? 3.45 * trackedScale
+            : bone === 'pelvis'
+            ? 2.55 * trackedScale
+            : 0.45 * trackedScale;
+        targetX = trackedNow.x;
+        targetZ = trackedNow.z;
+        targetY = trackedNow.y + boneHeight;
+
+        if (liveShot.camera.followActorMovement || liveShot.camera.movement.type === 'steadicam-follow') {
+          const trackedStart = getActorPositionAtTime(trackedActor, 0);
+          effectiveCamX += trackedNow.x - trackedStart.x;
+          effectiveCamZ += trackedNow.z - trackedStart.z;
+        }
+      }
+    }
+
     const angle = liveShot.camera.angle;
     let effectiveCamY = camPos.y;
-    let effectiveTargetY = targetY;
+    let effectiveTargetY = targetY + (liveShot.camera.lookAtHeightOffset ?? 0);
 
     if (angle === 'low-angle') {
       effectiveTargetY += 1.1;
@@ -1836,22 +1890,37 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       effectiveTargetY = 0.5;
     }
 
+    // Procedural Handheld Camera Shake
+    const rawShake = liveShot.camera.movement.shakeIntensity ?? (liveShot.camera.movement.type === 'handheld-subtle' ? 28 : 0);
+    const shakeAmp = (rawShake / 100) * 0.45;
+    const shakePitchRad = shakeAmp > 0 ? (Math.sin(t * 9.5) * 0.6 + Math.cos(t * 17.3) * 0.4) * 0.04 * (rawShake / 40) : 0;
+    const shakeYawRad = shakeAmp > 0 ? (Math.cos(t * 7.8) * 0.6 + Math.sin(t * 14.1) * 0.4) * 0.04 * (rawShake / 40) : 0;
+    const shakeRollRad = shakeAmp > 0 ? Math.sin(t * 6.2) * 0.025 * (rawShake / 40) : 0;
+
     const targetLookAt = new THREE.Vector3(targetX, effectiveTargetY, targetZ);
 
-    const isDirectlyOverhead = angle === 'overhead-gods-eye' || (Math.abs(camPos.x - targetX) < 0.1 && Math.abs(camPos.z - targetZ) < 0.1);
+    const isDirectlyOverhead = angle === 'overhead-gods-eye' || (Math.abs(effectiveCamX - targetX) < 0.1 && Math.abs(effectiveCamZ - targetZ) < 0.1);
     const safeUp = isDirectlyOverhead ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0);
 
+    const totalRollDeg =
+      (liveShot.camera.dutchRollDeg ?? 0) +
+      (liveShot.camera.angle === 'dutch-angle' ? -15 : 0) +
+      (liveShot.camera.movement.type === 'fpv-dive' ? Math.sin(ratio * Math.PI) * 18 : 0);
+    const totalPitchRad = THREE.MathUtils.degToRad(liveShot.camera.pitchOffsetDeg ?? 0) + shakePitchRad;
+    const totalYawRad = THREE.MathUtils.degToRad(liveShot.camera.yawOffsetDeg ?? 0) + shakeYawRad;
+    const totalRollRad = THREE.MathUtils.degToRad(totalRollDeg) + shakeRollRad;
+
     if (cameraGizmoGroupRef.current) {
-      cameraGizmoGroupRef.current.position.set(camPos.x, effectiveCamY, camPos.z);
+      cameraGizmoGroupRef.current.position.set(effectiveCamX, effectiveCamY, effectiveCamZ);
       cameraGizmoGroupRef.current.up.copy(safeUp);
       cameraGizmoGroupRef.current.lookAt(targetLookAt);
-      if (liveShot.camera.angle === 'dutch-angle') {
-        cameraGizmoGroupRef.current.rotateZ(THREE.MathUtils.degToRad(-15));
-      }
+      if (Math.abs(totalYawRad) > 0.0001) cameraGizmoGroupRef.current.rotateY(totalYawRad);
+      if (Math.abs(totalPitchRad) > 0.0001) cameraGizmoGroupRef.current.rotateX(totalPitchRad);
+      if (Math.abs(totalRollRad) > 0.0001) cameraGizmoGroupRef.current.rotateZ(totalRollRad);
     }
 
     if (cameraFloorAnchorRef.current) {
-      cameraFloorAnchorRef.current.position.set(camPos.x, 0, camPos.z);
+      cameraFloorAnchorRef.current.position.set(effectiveCamX, 0, effectiveCamZ);
       const dropLine = cameraFloorAnchorRef.current.getObjectByName('CameraDropLine');
       if (dropLine) {
         dropLine.scale.y = Math.max(0.1, effectiveCamY + 1.5);
@@ -1860,9 +1929,15 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
     if (trajectoryLineRef.current) {
       const hasCamKfs = Boolean(liveShot.camera.movement.keyframes && liveShot.camera.movement.keyframes.length > 0);
+      const hasArcOrOrbit =
+        Math.abs(liveShot.camera.movement.arcCurve ?? 0) > 0.5 ||
+        liveShot.camera.movement.type === 'orbit-clockwise' ||
+        liveShot.camera.movement.type === 'orbit-counter-clockwise' ||
+        liveShot.camera.movement.type === 'spiral-orbit-in' ||
+        liveShot.camera.movement.type === 'crane-arc';
       const pts: THREE.Vector3[] = [];
-      if (hasCamKfs) {
-        const steps = 16;
+      if (hasCamKfs || hasArcOrOrbit) {
+        const steps = 24;
         for (let i = 0; i <= steps; i++) {
           const tau = (i / steps) * liveDur;
           const p = getCameraPositionAtTime(tau);
@@ -1880,12 +1955,30 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     }
 
     if (vfCameraRef.current) {
-      vfCameraRef.current.position.set(camPos.x, effectiveCamY + 1.5, camPos.z);
+      vfCameraRef.current.position.set(effectiveCamX, effectiveCamY + 1.5, effectiveCamZ);
       vfCameraRef.current.up.copy(safeUp);
       vfCameraRef.current.lookAt(targetLookAt);
+      if (Math.abs(totalYawRad) > 0.0001) vfCameraRef.current.rotateY(totalYawRad);
+      if (Math.abs(totalPitchRad) > 0.0001) vfCameraRef.current.rotateX(totalPitchRad);
+      if (Math.abs(totalRollRad) > 0.0001) vfCameraRef.current.rotateZ(totalRollRad);
 
-      if (liveShot.camera.angle === 'dutch-angle') {
-        vfCameraRef.current.rotateZ(THREE.MathUtils.degToRad(-15));
+      const baseFov = computeCameraFovDeg(liveShot.camera.lens);
+      if (liveShot.camera.movement.type === 'dolly-zoom-vertigo') {
+        const startPos3 = getCameraPositionAtTime(0);
+        const startDist = Math.max(2, Math.hypot(startPos3.x - targetX, startPos3.z - targetZ));
+        const curDist = Math.max(2, Math.hypot(effectiveCamX - targetX, effectiveCamZ - targetZ));
+        const halfBaseRad = THREE.MathUtils.degToRad(baseFov / 2);
+        const vertigoFov = THREE.MathUtils.radToDeg(2 * Math.atan((Math.tan(halfBaseRad) * startDist) / curDist));
+        vfCameraRef.current.fov = Math.max(10, Math.min(125, vertigoFov));
+        vfCameraRef.current.updateProjectionMatrix();
+      } else if (liveShot.camera.movement.type === 'crash-zoom') {
+        const punch = Math.min(1, ratio * 2.2);
+        const smoothPunch = punch * punch * (3 - 2 * punch);
+        vfCameraRef.current.fov = Math.max(12, baseFov * (1 - smoothPunch * 0.55));
+        vfCameraRef.current.updateProjectionMatrix();
+      } else if (Math.abs(vfCameraRef.current.fov - baseFov) > 0.2) {
+        vfCameraRef.current.fov = baseFov;
+        vfCameraRef.current.updateProjectionMatrix();
       }
     }
 

@@ -13,6 +13,9 @@ export interface CameraTrajectoryData {
   endPosition: Point3D;
   keyframes?: CameraKeyframe[];
   type?: string;
+  pacing?: 'linear' | 'ease-in-out' | 'ease-in' | 'ease-out';
+  arcCurve?: number;
+  shakeIntensity?: number;
 }
 
 /**
@@ -165,16 +168,45 @@ export function interpolateCameraPosition(
   let threeZ = (stagePos.y - 50) * 1.0;
   let threeY = (stagePos.z ?? 50) * 0.3;
 
+  // Apply curved dolly arc bend if arcCurve is non-zero
+  const arcBend = cameraMovement.arcCurve ?? 0;
+  if (Math.abs(arcBend) > 0.5 && rawKeyframes.length === 0) {
+    const ratio = clampedTime / safeDuration;
+    const parabola = 4 * ratio * (1 - ratio); // peaks at 1.0 when ratio = 0.5
+    const dx = cameraMovement.endPosition.x - cameraMovement.startPosition.x;
+    const dz = cameraMovement.endPosition.y - cameraMovement.startPosition.y;
+    const len = Math.hypot(dx, dz);
+    if (len > 0.5) {
+      const nx = -dz / len;
+      const nz = dx / len;
+      threeX += nx * (arcBend * 0.45) * parabola;
+      threeZ += nz * (arcBend * 0.45) * parabola;
+    } else {
+      threeX += (arcBend * 0.45) * parabola;
+    }
+  }
+
   // Orbit adjustments if orbital trajectory
-  if (cameraMovement.type === 'orbit-clockwise' || cameraMovement.type === 'orbit-counter-clockwise') {
+  if (
+    cameraMovement.type === 'orbit-clockwise' ||
+    cameraMovement.type === 'orbit-counter-clockwise' ||
+    cameraMovement.type === 'spiral-orbit-in'
+  ) {
     const ratio = clampedTime / safeDuration;
     const startX = (cameraMovement.startPosition.x - 50) * 1.0;
     const startZ = (cameraMovement.startPosition.y - 50) * 1.0;
-    const angleOffset = (cameraMovement.type === 'orbit-clockwise' ? 1 : -1) * ratio * Math.PI * 1.2;
-    const radius = Math.sqrt(startX * startX + startZ * startZ) || 30;
+    const dir = cameraMovement.type === 'orbit-counter-clockwise' ? -1 : 1;
+    const angleOffset = dir * ratio * Math.PI * (cameraMovement.type === 'spiral-orbit-in' ? 1.5 : 1.2);
+    const baseRadius = Math.sqrt(startX * startX + startZ * startZ) || 30;
+    const radius = cameraMovement.type === 'spiral-orbit-in' ? baseRadius * (1 - ratio * 0.55) : baseRadius;
     const baseAngle = Math.atan2(startZ, startX);
     threeX = Math.cos(baseAngle + angleOffset) * radius;
     threeZ = Math.sin(baseAngle + angleOffset) * radius;
+  } else if (cameraMovement.type === 'crane-arc') {
+    const ratio = clampedTime / safeDuration;
+    const parabola = 4 * ratio * (1 - ratio);
+    threeY += parabola * 6.5;
+    threeX += Math.sin(ratio * Math.PI) * 5.0;
   }
 
   return { x: threeX, y: threeY, z: threeZ };

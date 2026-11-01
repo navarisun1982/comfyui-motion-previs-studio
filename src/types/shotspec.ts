@@ -2,13 +2,13 @@ import { z } from 'zod';
 export * from './environment';
 import { EnvironmentSpecSchema, CINEMATIC_ENVIRONMENT_PRESETS } from './environment';
 
-export const FocalLengthSchema = z.enum(['18mm', '24mm', '35mm', '50mm', '85mm', '135mm']);
+export const FocalLengthSchema = z.enum(['12mm', '14mm', '18mm', '24mm', '35mm', '40mm', '50mm', '70mm', '85mm', '100mm', '135mm', '200mm']);
 export type FocalLength = z.infer<typeof FocalLengthSchema>;
 
-export const SensorSizeSchema = z.enum(['full-frame', 'super35', 'anamorphic']);
+export const SensorSizeSchema = z.enum(['full-frame', 'super35', 'anamorphic', 'imax-65mm', 'micro-four-thirds']);
 export type SensorSize = z.infer<typeof SensorSizeSchema>;
 
-export const ApertureSchema = z.enum(['f/1.4', 'f/2.8', 'f/5.6', 'f/11']);
+export const ApertureSchema = z.enum(['f/1.2', 'f/1.4', 'f/2.0', 'f/2.8', 'f/4.0', 'f/5.6', 'f/8.0', 'f/11', 'f/16', 'f/22']);
 export type Aperture = z.infer<typeof ApertureSchema>;
 
 export const ShotTypeSchema = z.enum([
@@ -49,7 +49,7 @@ export const CameraMovementTypeSchema = z.enum([
   'zoom-in',
   'zoom-out',
   'handheld-subtle',
-  'whip-pan',
+  'whip-pan', 'rack-focus', 'crash-zoom', 'fpv-dive', 'dolly-zoom-vertigo', 'steadicam-follow', 'crane-arc', 'spiral-orbit-in',
 ]);
 export type CameraMovementType = z.infer<typeof CameraMovementTypeSchema>;
 
@@ -256,15 +256,15 @@ export const ShotSpecSchema = z.object({
     lens: z.object({
       focalLength: FocalLengthSchema.default('35mm'),
       sensorSize: SensorSizeSchema.default('full-frame'),
-      aperture: ApertureSchema.default('f/2.8'),
+      aperture: ApertureSchema.default('f/2.8'), customFocalLengthMm: z.number().min(10).max(200).optional(), focusDistanceMeters: z.number().min(1).max(60).optional(),
     }),
     shotType: ShotTypeSchema.default('medium'),
     angle: CameraAngleSchema.default('eye-level'),
-    color: z.string().optional(),
+    color: z.string().optional(), gizmoScale: z.number().min(0.2).max(2.0).optional(), frustumLength: z.number().min(0).max(80).optional(), showFocusPlane: z.boolean().optional(), dutchRollDeg: z.number().min(-60).max(60).optional(), pitchOffsetDeg: z.number().min(-60).max(60).optional(), yawOffsetDeg: z.number().min(-90).max(90).optional(), lookAtHeightOffset: z.number().min(-5).max(8).optional(), trackTargetActorId: z.string().optional(), trackTargetBone: z.enum(['head', 'chest', 'pelvis', 'feet']).optional(), followActorMovement: z.boolean().optional(),
     movement: z.object({
       type: CameraMovementTypeSchema.default('dolly-in'),
       speed: MovementSpeedSchema.default('slow-cinematic'),
-      pacing: z.enum(['linear', 'ease-in-out', 'ease-in', 'ease-out']).default('ease-in-out').optional(),
+      pacing: z.enum(['linear', 'ease-in-out', 'ease-in', 'ease-out']).default('ease-in-out').optional(), arcCurve: z.number().min(-50).max(50).optional(), shakeIntensity: z.number().min(0).max(100).optional(),
       startPosition: Point3DSchema.default({ x: 50, y: 85, z: 20 }),
       endPosition: Point3DSchema.default({ x: 50, y: 65, z: 20 }),
       targetLookAt: Point2DSchema.default({ x: 50, y: 50 }),

@@ -8,6 +8,8 @@ import {
   CameraMovementType,
   MovementSpeed,
   AspectRatio,
+  SensorSize,
+  Aperture,
   LightingStyle,
   LightingDirection,
 } from '../types/shotspec';
@@ -43,6 +45,16 @@ import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
 import { CharacterControlCard, OBJECT_TARGET_PALETTE } from './CharacterControlCard';
 
 const LENS_OPTICS_INFO: Record<FocalLength, { fov: string; label: string; impact: string }> = {
+  '12mm': {
+    fov: '122°',
+    label: 'Extreme Wide',
+    impact: 'Hyper-expansive rectilinear field; monumental architectural scale & dramatic close-up perspective.',
+  },
+  '14mm': {
+    fov: '114°',
+    label: 'Ultra-Wide Prime',
+    impact: 'Sweeping wide perspective with dynamic leading lines and deep environmental immersion.',
+  },
   '18mm': {
     fov: '100°',
     label: 'Ultra-Wide',
@@ -58,20 +70,40 @@ const LENS_OPTICS_INFO: Record<FocalLength, { fov: string; label: string; impact
     label: 'Director Standard',
     impact: 'Classic narrative cinema field of view; balances character emotion with setting.',
   },
+  '40mm': {
+    fov: '56°',
+    label: 'Anamorphic Sweet-Spot',
+    impact: 'Beloved cinema prime between 35mm & 50mm; intimate presence with natural spatial context.',
+  },
   '50mm': {
     fov: '47°',
     label: 'Human Eye',
     impact: 'Natural perspective with zero distortion; truthful spatial proportions.',
+  },
+  '70mm': {
+    fov: '34°',
+    label: 'IMAX Medium-Tele',
+    impact: 'Large-format three-dimensional subject pop with subtle background compression.',
   },
   '85mm': {
     fov: '28°',
     label: 'Portrait Prime',
     impact: 'Flattering facial geometry & intimate subject isolation against soft background.',
   },
+  '100mm': {
+    fov: '24°',
+    label: 'Macro Portrait',
+    impact: 'Razor-sharp emotional detail & velvety bokeh separation for close-ups.',
+  },
   '135mm': {
     fov: '18°',
     label: 'Telephoto',
     impact: 'Strong axial compression; pulls distant backgrounds right behind the subject.',
+  },
+  '200mm': {
+    fov: '12°',
+    label: 'Super-Telephoto',
+    impact: 'Extreme optical compression & voyeuristic isolation; flattens depth into painterly layers.',
   },
 };
 
@@ -111,6 +143,10 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
     setCameraPositions,
     setCameraTargetLookAt,
     setCameraColor,
+    updateCameraOptions,
+    updateCameraLens,
+    updateCameraMovementOptions,
+    applyCameraFramingPreset,
     setCameraMovement,
     setCameraAngle,
     setShotType,
@@ -404,33 +440,296 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             </div>
 
             <div className={cameraSubTab === 'optics' || cameraSubTab === 'all' ? 'space-y-3.5' : 'hidden'}>
-            {/* Focal Length & Lens with FOV Degrees & Optical Impact */}
+            {/* 1. Compact 3D Stage Camera Gizmo Scale & Frustum Controls */}
+            <div className="rounded-xl bg-[#0b101b] border border-[#243046] p-2.5 space-y-2">
+              <div className="flex items-center justify-between text-[10px] font-mono">
+                <span className="font-bold text-amber-300 flex items-center gap-1">
+                  🎥 3D Stage Camera Rig Size
+                </span>
+                <div className="flex items-center gap-1">
+                  {[
+                    { label: 'Mini 0.5x', val: 0.5 },
+                    { label: 'Compact 1x', val: 1.0 },
+                    { label: 'Large 1.4x', val: 1.4 },
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => updateCameraOptions({ gizmoScale: preset.val })}
+                      className={`px-1.5 py-0.5 rounded text-[9px] border transition-all ${
+                        Math.abs((shot.camera.gizmoScale ?? 1.0) - preset.val) < 0.08
+                          ? 'bg-amber-500/25 border-amber-400 text-amber-200 font-bold'
+                          : 'bg-[#131C2E] border-[#273247] text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 text-[9.5px] font-mono text-slate-400">
+                <div>
+                  <div className="flex justify-between mb-0.5">
+                    <span>Rig Scale</span>
+                    <span className="text-white font-bold">{(shot.camera.gizmoScale ?? 1.0).toFixed(2)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.25}
+                    max={1.5}
+                    step={0.05}
+                    value={shot.camera.gizmoScale ?? 1.0}
+                    onChange={(e) => updateCameraOptions({ gizmoScale: Number(e.target.value) })}
+                    className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-amber-400"
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between mb-0.5">
+                    <span>Frustum Cone</span>
+                    <span className="text-white font-bold">
+                      {(shot.camera.frustumLength ?? 24) === 0 ? 'Hidden' : `${shot.camera.frustumLength ?? 24}m`}
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={55}
+                    step={1}
+                    value={shot.camera.frustumLength ?? 24}
+                    onChange={(e) => updateCameraOptions({ frustumLength: Number(e.target.value) })}
+                    className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-amber-400"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Expanded 12 Cinema Prime Lenses + Continuous Zoom Slider */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="font-display font-bold text-xs tracking-wide text-white">Camera Prime Lens</span>
+                <span className="font-display font-bold text-xs tracking-wide text-white">Camera Prime Lens (12 Primes)</span>
                 <span className="font-mono text-[10px] text-blue-400 font-bold">
-                  {shot.camera.lens.focalLength} • {activeLensInfo.fov} FOV ({activeLensInfo.label})
+                  {shot.camera.lens.customFocalLengthMm ? `${shot.camera.lens.customFocalLengthMm}mm Zoom` : shot.camera.lens.focalLength} • {activeLensInfo.fov} FOV ({activeLensInfo.label})
                 </span>
               </div>
-              <div className="grid grid-cols-6 gap-1 font-mono text-[10px]">
-                {(['18mm', '24mm', '35mm', '50mm', '85mm', '135mm'] as FocalLength[]).map((fl) => (
+              <div className="grid grid-cols-6 gap-1 font-mono text-[9.5px]">
+                {(
+                  [
+                    '12mm',
+                    '14mm',
+                    '18mm',
+                    '24mm',
+                    '35mm',
+                    '40mm',
+                    '50mm',
+                    '70mm',
+                    '85mm',
+                    '100mm',
+                    '135mm',
+                    '200mm',
+                  ] as FocalLength[]
+                ).map((fl) => (
                   <button
                     key={fl}
-                    onClick={() => setFocalLength(fl)}
-                    className={`rounded py-1.5 text-center transition-all flex flex-col items-center ${
-                      shot.camera.lens.focalLength === fl
+                    onClick={() => {
+                      setFocalLength(fl);
+                      updateCameraLens({ focalLength: fl, customFocalLengthMm: undefined });
+                    }}
+                    className={`rounded py-1 text-center transition-all flex flex-col items-center ${
+                      shot.camera.lens.focalLength === fl && !shot.camera.lens.customFocalLengthMm
                         ? 'bg-gradient-to-b from-[#6658F5] to-[#5243E2] text-white font-bold shadow-[0_2px_8px_rgba(102,88,245,0.4)] border border-[#8E84FF]/60'
                         : 'bg-[#131C2E] text-[#98A5BC] hover:text-white hover:bg-[#1A2436] border border-[#273247]'
                     }`}
                   >
                     <span>{fl}</span>
-                    <span className="text-[8px] opacity-75">{LENS_OPTICS_INFO[fl].fov}</span>
+                    <span className="text-[7.5px] opacity-75">{LENS_OPTICS_INFO[fl].fov}</span>
                   </button>
                 ))}
               </div>
+
+              {/* Continuous Custom Focal Length / Zoom Slider + Sensor + Aperture + Focus Distance */}
+              <div className="rounded-xl bg-[#111827] border border-[#273247] p-2.5 space-y-2 font-mono text-[9.5px]">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div>
+                    <div className="flex justify-between text-slate-400 mb-0.5">
+                      <span>Zoom Lens (10–200mm)</span>
+                      <span className="text-indigo-300 font-bold">
+                        {shot.camera.lens.customFocalLengthMm ?? parseInt(shot.camera.lens.focalLength, 10)}mm
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={10}
+                      max={200}
+                      step={1}
+                      value={shot.camera.lens.customFocalLengthMm ?? parseInt(shot.camera.lens.focalLength, 10)}
+                      onChange={(e) => updateCameraLens({ customFocalLengthMm: Number(e.target.value) })}
+                      className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex justify-between text-slate-400 mb-0.5">
+                      <span>Focus Plane Dist</span>
+                      <button
+                        type="button"
+                        onClick={() => updateCameraOptions({ showFocusPlane: shot.camera.showFocusPlane === false })}
+                        className={`text-[8.5px] px-1 rounded ${
+                          shot.camera.showFocusPlane !== false
+                            ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                            : 'bg-slate-800 text-slate-500'
+                        }`}
+                        title="Toggle 3D Focus Plane slice inside frustum"
+                      >
+                        {shot.camera.lens.focusDistanceMeters ?? 12}m {shot.camera.showFocusPlane !== false ? '• ON' : '• OFF'}
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min={2}
+                      max={50}
+                      step={1}
+                      value={shot.camera.lens.focusDistanceMeters ?? 12}
+                      onChange={(e) => updateCameraLens({ focusDistanceMeters: Number(e.target.value) })}
+                      className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-cyan-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div className="space-y-0.5">
+                    <span className="text-slate-400 text-[9px]">Sensor Format</span>
+                    <select
+                      value={shot.camera.lens.sensorSize || 'full-frame'}
+                      onChange={(e) => updateCameraLens({ sensorSize: e.target.value as SensorSize })}
+                      className="w-full rounded bg-[#090D16] border border-[#273247] px-2 py-1 text-white text-[10px] focus:outline-none"
+                    >
+                      <option value="full-frame">Full-Frame 35mm (VistaVision)</option>
+                      <option value="super35">Super 35mm (Hollywood Standard)</option>
+                      <option value="anamorphic">Anamorphic 2x CinemaScope</option>
+                      <option value="imax-65mm">IMAX 65mm Large Format</option>
+                      <option value="micro-four-thirds">Micro Four Thirds (Deep DoF)</option>
+                    </select>
+                  </div>
+                  <div className="space-y-0.5">
+                    <span className="text-slate-400 text-[9px]">Aperture / T-Stop (DoF)</span>
+                    <select
+                      value={shot.camera.lens.aperture || 'f/2.8'}
+                      onChange={(e) => updateCameraLens({ aperture: e.target.value as Aperture })}
+                      className="w-full rounded bg-[#090D16] border border-[#273247] px-2 py-1 text-white text-[10px] focus:outline-none"
+                    >
+                      <option value="f/1.2">f/1.2 (Razor-Thin Bokeh)</option>
+                      <option value="f/1.4">f/1.4 (Fast Cinema Prime)</option>
+                      <option value="f/2.0">f/2.0 (Soft Subject Isolation)</option>
+                      <option value="f/2.8">f/2.8 (Narrative Sweet Spot)</option>
+                      <option value="f/4.0">f/4.0 (Balanced Studio DoF)</option>
+                      <option value="f/5.6">f/5.6 (Crisp Context)</option>
+                      <option value="f/8.0">f/8.0 (Deep Environmental)</option>
+                      <option value="f/11">f/11 (Architectural Deep)</option>
+                      <option value="f/16">f/16 (Hyper-Focal Sharpness)</option>
+                      <option value="f/22">f/22 (Infinite Split-Diopter)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               <div className="rounded-md bg-blue-950/30 border border-blue-500/20 px-2.5 py-1.5 text-[10px] text-blue-200/90 font-mono">
                 <strong className="text-blue-400">Optical Impact:</strong> {activeLensInfo.impact}
               </div>
+            </div>
+
+            {/* 3. Smart Subject Tracking & 1-Click Auto-Framing Presets */}
+            <div className="rounded-xl bg-[#0e1628] border border-cyan-500/30 p-2.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10px] font-bold text-cyan-300 flex items-center gap-1">
+                  <Target className="h-3 w-3 text-cyan-400" />
+                  1-Click Auto-Framing & Subject Lock
+                </span>
+                {shot.camera.trackTargetActorId && (
+                  <button
+                    type="button"
+                    onClick={() => updateCameraOptions({ trackTargetActorId: undefined, followActorMovement: false })}
+                    className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30"
+                  >
+                    Unlock Aim
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-4 gap-1 font-mono text-[9px]">
+                {(
+                  [
+                    { id: 'face-cu' as const, label: '👤 Face CU' },
+                    { id: 'medium-bust' as const, label: '👔 Med Bust' },
+                    { id: 'cowboy' as const, label: '🤠 Cowboy' },
+                    { id: 'ots-right' as const, label: '📐 OTS Right' },
+                    { id: 'ots-left' as const, label: '📐 OTS Left' },
+                    { id: 'hero-low' as const, label: '🦸 Hero Low' },
+                    { id: 'birds-eye' as const, label: '🦅 Bird Eye' },
+                    { id: 'wide-establish' as const, label: '🌄 Wide Set' },
+                  ]
+                ).map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => applyCameraFramingPreset(p.id, selectedActorId)}
+                    className="py-1 px-1.5 rounded bg-[#131C2E] hover:bg-cyan-500/25 border border-[#273247] hover:border-cyan-400/50 text-slate-200 hover:text-white transition-all truncate"
+                    title={`Snap camera position, lens & aim to ${p.label}`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-1 font-mono text-[9.5px]">
+                <div className="space-y-0.5">
+                  <span className="text-slate-400 text-[9px]">Lock Look-At to Subject</span>
+                  <select
+                    value={shot.camera.trackTargetActorId || ''}
+                    onChange={(e) =>
+                      updateCameraOptions({
+                        trackTargetActorId: e.target.value ? e.target.value : undefined,
+                      })
+                    }
+                    className="w-full rounded bg-[#090D16] border border-[#273247] px-2 py-1 text-white text-[10px] focus:outline-none"
+                  >
+                    <option value="">🔓 Free Stage Aim (Manual)</option>
+                    {shot.actors.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        🎯 Track: {a.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-0.5">
+                  <span className="text-slate-400 text-[9px]">Target Body Zone</span>
+                  <select
+                    value={shot.camera.trackTargetBone || 'head'}
+                    onChange={(e) =>
+                      updateCameraOptions({
+                        trackTargetBone: e.target.value as 'head' | 'chest' | 'pelvis' | 'feet',
+                      })
+                    }
+                    className="w-full rounded bg-[#090D16] border border-[#273247] px-2 py-1 text-white text-[10px] focus:outline-none"
+                  >
+                    <option value="head">👁️ Head / Eyeline (4.4m)</option>
+                    <option value="chest">🫀 Upper Chest / Heart (3.5m)</option>
+                    <option value="pelvis">🧍 Center Pelvis / Waist (2.6m)</option>
+                    <option value="feet">👟 Ground / Footsteps (0.5m)</option>
+                  </select>
+                </div>
+              </div>
+
+              {shot.camera.trackTargetActorId && (
+                <label className="flex items-center justify-between pt-1 text-[9.5px] font-mono text-emerald-300 cursor-pointer">
+                  <span>🏃 Follow Subject Movement Across Stage (Steadicam Lock)</span>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(shot.camera.followActorMovement)}
+                    onChange={(e) => updateCameraOptions({ followActorMovement: e.target.checked })}
+                    className="rounded accent-emerald-400"
+                  />
+                </label>
+              )}
             </div>
 
             {/* Aspect Ratio & Shot Framing (with Extreme-Wide restored) */}
@@ -507,9 +806,9 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             </div>
 
             <div className={cameraSubTab === 'trajectory' || cameraSubTab === 'all' ? 'space-y-3.5' : 'hidden'}>
-            {/* All 17 Categorized Camera Movements (Restored from CameraDeck!) */}
+            {/* All 21 Categorized Camera Movements */}
             <div className="space-y-1">
-              <span className="text-slate-400 font-mono text-[10px]">Camera Movement Archetype (17 Rigs)</span>
+              <span className="text-slate-400 font-mono text-[10px]">Camera Movement Archetype (21 Cinema Rigs)</span>
               <select
                 value={shot.camera.movement.type}
                 onChange={(e) => setCameraMovement(e.target.value as CameraMovementType, shot.camera.movement.speed)}
@@ -521,6 +820,8 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 <optgroup label="Depth & Dolly">
                   <option value="dolly-in">🎥 Dolly In (Push Toward Subject)</option>
                   <option value="dolly-out">🎥 Dolly Out (Pull Back Reveal)</option>
+                  <option value="dolly-zoom-vertigo">🌀 Hitchcock Dolly-Zoom (Vertigo Effect)</option>
+                  <option value="steadicam-follow">🏃 Steadicam Lead / Follow Subject</option>
                 </optgroup>
                 <optgroup label="Lateral Tracking">
                   <option value="truck-left">◀️ Truck Left (Lateral Track)</option>
@@ -529,6 +830,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 <optgroup label="Vertical Crane / Pedestal">
                   <option value="pedestal-up">🔺 Pedestal / Crane Up</option>
                   <option value="pedestal-down">🔻 Pedestal / Crane Down</option>
+                  <option value="crane-arc">🏗️ Jib / Crane Sweep Arc</option>
                 </optgroup>
                 <optgroup label="Rotational Pan & Tilt">
                   <option value="pan-left">⬅️ Pan Left (Horizontal Sweep)</option>
@@ -539,6 +841,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 <optgroup label="360° Orbital Arcs">
                   <option value="orbit-clockwise">🔄 Orbit Clockwise Around Subject</option>
                   <option value="orbit-counter-clockwise">🔄 Orbit Counter-Clockwise</option>
+                  <option value="spiral-orbit-in">🎯 Spiral Orbit Push-In</option>
                 </optgroup>
                 <optgroup label="Optical & Specialty Rigs">
                   <option value="rack-focus">🔍 Rack Focus (Foreground ➔ Background)</option>
@@ -548,6 +851,146 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                   <option value="fpv-dive">🦅 FPV Drone Dive (Aerial Plunge)</option>
                 </optgroup>
               </select>
+            </div>
+
+            {/* Direct Orientation & Aim Controls (Dutch Roll, Pitch, Yaw, Look-At Height) */}
+            <div className="rounded-xl bg-[#111827] border border-[#273247] p-2.5 space-y-2 font-mono text-[9.5px]">
+              <div className="flex items-center justify-between">
+                <span className="text-indigo-300 font-bold">📐 Direct Camera Orientation & Aim</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateCameraOptions({
+                      dutchRollDeg: 0,
+                      pitchOffsetDeg: 0,
+                      yawOffsetDeg: 0,
+                      lookAtHeightOffset: 0,
+                    })
+                  }
+                  className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 border border-white/10 text-slate-300 hover:text-white text-[8.5px]"
+                >
+                  Reset Angles
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 text-slate-400">
+                <div>
+                  <div className="flex justify-between mb-0.5">
+                    <span>Dutch Roll Tilt</span>
+                    <span className="text-white font-bold">{shot.camera.dutchRollDeg ?? 0}°</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={-45}
+                    max={45}
+                    step={1}
+                    value={shot.camera.dutchRollDeg ?? 0}
+                    onChange={(e) => updateCameraOptions({ dutchRollDeg: Number(e.target.value) })}
+                    className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-indigo-500"
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between mb-0.5">
+                    <span>Pitch Tilt Offset</span>
+                    <span className="text-white font-bold">{shot.camera.pitchOffsetDeg ?? 0}°</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={-45}
+                    max={45}
+                    step={1}
+                    value={shot.camera.pitchOffsetDeg ?? 0}
+                    onChange={(e) => updateCameraOptions({ pitchOffsetDeg: Number(e.target.value) })}
+                    className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-indigo-500"
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between mb-0.5">
+                    <span>Yaw Pan Offset</span>
+                    <span className="text-white font-bold">{shot.camera.yawOffsetDeg ?? 0}°</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={-60}
+                    max={60}
+                    step={1}
+                    value={shot.camera.yawOffsetDeg ?? 0}
+                    onChange={(e) => updateCameraOptions({ yawOffsetDeg: Number(e.target.value) })}
+                    className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-indigo-500"
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between mb-0.5">
+                    <span>Aim Height Offset</span>
+                    <span className="text-white font-bold">
+                      {(shot.camera.lookAtHeightOffset ?? 0) >= 0 ? '+' : ''}
+                      {(shot.camera.lookAtHeightOffset ?? 0).toFixed(1)}m
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={-3.0}
+                    max={4.0}
+                    step={0.2}
+                    value={shot.camera.lookAtHeightOffset ?? 0}
+                    onChange={(e) => updateCameraOptions({ lookAtHeightOffset: Number(e.target.value) })}
+                    className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-cyan-400"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Advanced Trajectory Curve, Shake & Easing Tuning */}
+            <div className="rounded-xl bg-[#111827] border border-[#273247] p-2.5 space-y-2 font-mono text-[9.5px]">
+              <div className="flex items-center justify-between">
+                <span className="text-emerald-300 font-bold">🛤️ Path Curve, Shake & Motion Easing</span>
+                <select
+                  value={shot.camera.movement.pacing || 'ease-in-out'}
+                  onChange={(e) =>
+                    updateCameraMovementOptions({
+                      pacing: e.target.value as 'linear' | 'ease-in-out' | 'ease-in' | 'ease-out',
+                    })
+                  }
+                  className="rounded bg-[#090D16] border border-[#273247] px-1.5 py-0.5 text-white text-[9px] focus:outline-none"
+                >
+                  <option value="ease-in-out">Smooth Ease-In-Out</option>
+                  <option value="linear">Linear Constant</option>
+                  <option value="ease-in">Ease-In (Accelerate)</option>
+                  <option value="ease-out">Ease-Out (Decelerate)</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2.5 text-slate-400">
+                <div>
+                  <div className="flex justify-between mb-0.5">
+                    <span>Curved Dolly Arc</span>
+                    <span className="text-white font-bold">{shot.camera.movement.arcCurve ?? 0}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={-40}
+                    max={40}
+                    step={1}
+                    value={shot.camera.movement.arcCurve ?? 0}
+                    onChange={(e) => updateCameraMovementOptions({ arcCurve: Number(e.target.value) })}
+                    className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-emerald-400"
+                  />
+                </div>
+                <div>
+                  <div className="flex justify-between mb-0.5">
+                    <span>Handheld Shake</span>
+                    <span className="text-white font-bold">{shot.camera.movement.shakeIntensity ?? 0}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={2}
+                    value={shot.camera.movement.shakeIntensity ?? 0}
+                    onChange={(e) => updateCameraMovementOptions({ shakeIntensity: Number(e.target.value) })}
+                    className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-amber-400"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Camera 3D Path Coordinates Sliders */}
