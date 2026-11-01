@@ -99,6 +99,9 @@ interface ShotState {
       actionDescription?: string;
       sculpt?: any;
       partGraph?: any;
+      rigType?: Actor['rigType'];
+      rigLandmarks?: any;
+      showBones?: boolean;
     }
   ) => void;
   removeActor: (actorId: string) => void;
@@ -1491,6 +1494,9 @@ export const useShotStore = create<ShotState>((set, get) => {
         conceptImageUrl: options?.conceptImageUrl,
         sculpt: options?.sculpt,
         partGraph: options?.partGraph || options?.sculpt,
+        rigType: options?.rigType,
+        rigLandmarks: options?.rigLandmarks,
+        showBones: options?.showBones,
       };
       logger.action(`Added ${kind} to stage: "${defaultName}"`, newActor);
       const updated: ShotSpec = { ...shot, actors: [...shot.actors, newActor] };

@@ -181,6 +181,9 @@ export const ActorSchema = z.object({
   rotation: Point3DSchema.optional(),
   socketToBone: ActorSocketSchema.optional(),
   color: z.string().optional(),
+  rigType: z.enum(['auto', 'humanoid', 'quadruped', 'spine_flex', 'rigid_prop']).optional(),
+  rigLandmarks: z.any().optional(),
+  showBones: z.boolean().optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 export type ActorGait = 'auto' | 'walk' | 'run' | 'sneak' | 'idle' | 'none';

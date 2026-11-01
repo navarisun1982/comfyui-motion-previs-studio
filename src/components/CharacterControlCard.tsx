@@ -12,6 +12,8 @@ import {
   getReadyMadeMotionsForCategory,
   findReadyMadeMotionById,
   HumanoidMotionGroup,
+  DEFAULT_HUMANOID_LANDMARKS,
+  AutoRigType,
 } from '../engine/kinematics';
 import { interpolateTrajectoryPosition } from '../engine/trajectoryMath';
 import {
@@ -167,6 +169,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const lookPromptInputRef = useRef<HTMLInputElement | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<CharacterCardSubTab>('motion');
   const [showGlbResources, setShowGlbResources] = useState<boolean>(false);
+  const [showRigLandmarksDrawer, setShowRigLandmarksDrawer] = useState<boolean>(false);
 
   const kind = actor.kind || 'human';
   const shotDur = shotDurationSeconds || 4;
@@ -183,7 +186,15 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const kfs = actor.trajectory.keyframes || [];
   const lastKfTime = kfs.length > 0 ? kfs[kfs.length - 1].time : 0;
 
-  const objCategory = detectObjectPoseCategory(actor);
+  const rawCategory = detectObjectPoseCategory(actor);
+  const objCategory =
+    actor.rigType === 'humanoid'
+      ? 'humanoid'
+      : actor.rigType === 'quadruped'
+      ? 'quadruped'
+      : actor.rigType === 'rigid_prop' && rawCategory === 'humanoid'
+      ? 'environment_prop'
+      : rawCategory;
   const isHumanoid = objCategory === 'humanoid';
   const objPresets = !isHumanoid ? getObjectPosePresetsForCategory(objCategory) : [];
   const rot: Point3D = actor.rotation || { x: 0, y: 0, z: 0 };
@@ -1427,6 +1438,223 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
 
                 {/* SUB-TAB 4: RIG, XYZ TRANSFORM, SCALE & BONE SOCKETS */}
                 <div className={activeSubTab === 'rig' || activeSubTab === 'all' ? 'space-y-2.5' : 'hidden'}>
+                {/* .GLB Automatic Bone Rigging, Skeleton Overlay & Landmark Fine-Tuner */}
+                {actor.modelUrl && (
+                  <div className="inspector-subcard space-y-2 border border-indigo-500/35 bg-[#0f1422]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-[11px] font-semibold text-indigo-200">
+                        <span>🦴</span>
+                        <span>3D .GLB Auto-Rigging &amp; Bones</span>
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => onUpdateActor(actor.id, { showBones: !actor.showBones })}
+                          className={`px-2 py-0.5 rounded text-[9.5px] font-mono font-semibold border transition-all cursor-pointer ${
+                            actor.showBones
+                              ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
+                              : 'bg-black/50 border-white/15 text-slate-300 hover:text-white'
+                          }`}
+                          title="Toggle 3D skeleton bone & joint overlay on stage"
+                        >
+                          {actor.showBones ? '🦴 Bones ON' : '🦴 Show Bones'}
+                        </button>
+                        {actor.rigType !== 'rigid_prop' && (
+                          <button
+                            type="button"
+                            onClick={() => setShowRigLandmarksDrawer((v) => !v)}
+                            className={`px-2 py-0.5 rounded text-[9.5px] font-mono font-semibold border transition-all cursor-pointer ${
+                              showRigLandmarksDrawer
+                                ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                                : 'bg-black/50 border-white/15 text-slate-300 hover:text-white'
+                            }`}
+                            title="Fine-tune silhouette joint landmarks (shoulders, wrists, hips, ankles)"
+                          >
+                            🎯 Joints
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Rig Type Selector */}
+                    <div className="grid grid-cols-5 gap-1">
+                      {(
+                        [
+                          { id: 'auto', label: '✨ Auto' },
+                          { id: 'humanoid', label: '🧍 Human' },
+                          { id: 'quadruped', label: '🐾 Animal' },
+                          { id: 'spine_flex', label: '🐍 Spine' },
+                          { id: 'rigid_prop', label: '📦 Rigid' },
+                        ] as { id: AutoRigType; label: string }[]
+                      ).map((opt) => {
+                        const activeRig = actor.rigType || 'auto';
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => onUpdateActor(actor.id, { rigType: opt.id })}
+                            className={`py-1 px-1 rounded text-[9.5px] font-semibold border text-center transition-all cursor-pointer ${
+                              activeRig === opt.id
+                                ? 'bg-cyan-500/25 border-cyan-400 text-cyan-100'
+                                : 'bg-black/40 border-white/10 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Interactive Joint Landmark Fine-Tuner Drawer */}
+                    {showRigLandmarksDrawer && actor.rigType !== 'rigid_prop' && (
+                      <div className="rounded-lg border border-amber-500/30 bg-black/60 p-2 space-y-2 text-[9.5px] font-mono">
+                        <div className="flex items-center justify-between">
+                          <span className="text-amber-300 font-bold">
+                            🎯 Fine-Tune Joint Landmarks
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onUpdateActor(actor.id, { rigLandmarks: undefined })}
+                            className="px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-cyan-200 border border-cyan-500/30 cursor-pointer"
+                          >
+                            ↺ Reset Auto-Fit
+                          </button>
+                        </div>
+                        {(() => {
+                          const lm = {
+                            ...DEFAULT_HUMANOID_LANDMARKS,
+                            ...(actor.rigLandmarks || {}),
+                          };
+                          return (
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="flex flex-col gap-0.5 text-slate-300">
+                                <span>Shoulder Y: {Math.round(lm.shoulderY * 100)}%</span>
+                                <input
+                                  type="range"
+                                  min={0.68}
+                                  max={0.86}
+                                  step={0.005}
+                                  value={lm.shoulderY}
+                                  onChange={(e) =>
+                                    onUpdateActor(actor.id, {
+                                      rigLandmarks: { ...lm, shoulderY: Number(e.target.value) },
+                                    })
+                                  }
+                                  className="accent-amber-400"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-0.5 text-slate-300">
+                                <span>Shoulder X: {Math.round(lm.shoulderSpanX * 100)}%</span>
+                                <input
+                                  type="range"
+                                  min={0.09}
+                                  max={0.24}
+                                  step={0.005}
+                                  value={lm.shoulderSpanX}
+                                  onChange={(e) =>
+                                    onUpdateActor(actor.id, {
+                                      rigLandmarks: { ...lm, shoulderSpanX: Number(e.target.value) },
+                                    })
+                                  }
+                                  className="accent-amber-400"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-0.5 text-slate-300">
+                                <span>Wrist Span X: {Math.round(lm.wristPos[0] * 100)}%</span>
+                                <input
+                                  type="range"
+                                  min={0.14}
+                                  max={0.46}
+                                  step={0.005}
+                                  value={lm.wristPos[0]}
+                                  onChange={(e) => {
+                                    const wx = Number(e.target.value);
+                                    onUpdateActor(actor.id, {
+                                      rigLandmarks: {
+                                        ...lm,
+                                        wristPos: [wx, lm.wristPos[1], lm.wristPos[2]],
+                                        elbowPos: [
+                                          (lm.shoulderSpanX + wx) * 0.5,
+                                          lm.elbowPos[1],
+                                          lm.elbowPos[2],
+                                        ],
+                                      },
+                                    });
+                                  }}
+                                  className="accent-amber-400"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-0.5 text-slate-300">
+                                <span>Wrist Height Y: {Math.round(lm.wristPos[1] * 100)}%</span>
+                                <input
+                                  type="range"
+                                  min={0.42}
+                                  max={0.82}
+                                  step={0.005}
+                                  value={lm.wristPos[1]}
+                                  onChange={(e) => {
+                                    const wy = Number(e.target.value);
+                                    onUpdateActor(actor.id, {
+                                      rigLandmarks: {
+                                        ...lm,
+                                        wristPos: [lm.wristPos[0], wy, lm.wristPos[2]],
+                                        elbowPos: [
+                                          lm.elbowPos[0],
+                                          (lm.shoulderY + wy) * 0.5,
+                                          lm.elbowPos[2],
+                                        ],
+                                      },
+                                    });
+                                  }}
+                                  className="accent-amber-400"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-0.5 text-slate-300">
+                                <span>Hips / Groin Y: {Math.round(lm.hipsY * 100)}%</span>
+                                <input
+                                  type="range"
+                                  min={0.42}
+                                  max={0.62}
+                                  step={0.005}
+                                  value={lm.hipsY}
+                                  onChange={(e) =>
+                                    onUpdateActor(actor.id, {
+                                      rigLandmarks: { ...lm, hipsY: Number(e.target.value) },
+                                    })
+                                  }
+                                  className="accent-amber-400"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-0.5 text-slate-300">
+                                <span>Leg Width X: {Math.round(lm.anklePos[0] * 100)}%</span>
+                                <input
+                                  type="range"
+                                  min={0.04}
+                                  max={0.22}
+                                  step={0.005}
+                                  value={lm.anklePos[0]}
+                                  onChange={(e) => {
+                                    const ax = Number(e.target.value);
+                                    onUpdateActor(actor.id, {
+                                      rigLandmarks: {
+                                        ...lm,
+                                        anklePos: [ax, lm.anklePos[1], lm.anklePos[2]],
+                                        kneePos: [ax * 0.95, lm.kneePos[1], lm.kneePos[2]],
+                                        hipSpanX: Math.max(0.06, ax * 0.85),
+                                      },
+                                    });
+                                  }}
+                                  className="accent-amber-400"
+                                />
+                              </label>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* 3. Transform & Position: 3-Column Stage X, Height Y, Depth Z Cards */}
                 <div className="grid grid-cols-3 gap-1.5 font-mono">
                   {/* Stage X */}

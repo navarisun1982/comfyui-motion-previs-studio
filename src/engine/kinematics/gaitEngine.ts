@@ -189,7 +189,15 @@ export function evaluateGait(
   const applyFootRoll = createFootRollController(rig);
 
   // Base ankle height for flat foot contact (0.056*h on Mixamo Y-Bot, 0.028*h on fallback rigs)
-  const ankBaseRatio = root.userData?.isMannequinRig ? 0.056 : 0.028;
+  const ankBaseRatio =
+    root.userData?.isMannequinRig || root.userData?.isAutoRiggedGlb ? 0.055 : 0.028;
+  const isAutoRig = Boolean(root.userData?.isAutoRiggedGlb);
+  const autoWristX = isAutoRig
+    ? THREE.MathUtils.clamp((root.userData?.naturalWristX ?? 0.18) * 0.78, 0.145, 0.25)
+    : 0.145;
+  const autoAnkleX = isAutoRig
+    ? THREE.MathUtils.clamp(root.userData?.naturalAnkleX ?? 0.085, 0.056, 0.14)
+    : 0.056;
 
   // 1. IDLE BREATHING & NATURAL CONTRAPPOSTO WEIGHT SHIFT
   if (effectiveGait === 'idle') {
@@ -230,22 +238,24 @@ export function evaluateGait(
     root.updateMatrixWorld(true);
 
     // Relaxed natural arms with soft elbow bend (never locked straight)
-    solveLimbIK(
-      rig,
-      'leftArm',
-      rigPoint(0.145, 0.52 + breathe * 0.004, 0.025),
-      rigPoint(0.28, 0.63, -0.22)
-    );
-    solveLimbIK(
-      rig,
-      'rightArm',
-      rigPoint(-0.145, 0.52 + breathe * 0.004, 0.025),
-      rigPoint(-0.28, 0.63, -0.22)
-    );
+    if (!isAutoRig || root.userData?.rigLandmarks?.detectedStance === 't-pose') {
+      solveLimbIK(
+        rig,
+        'leftArm',
+        rigPoint(autoWristX, 0.52 + breathe * 0.004, 0.025),
+        rigPoint(autoWristX + 0.135, 0.63, -0.22)
+      );
+      solveLimbIK(
+        rig,
+        'rightArm',
+        rigPoint(-autoWristX, 0.52 + breathe * 0.004, 0.025),
+        rigPoint(-(autoWristX + 0.135), 0.63, -0.22)
+      );
+    }
 
     // Grounded natural foot stance
-    solveLimbIK(rig, 'leftLeg', rigPoint(0.056, ankBaseRatio, 0.01), rigPoint(0.08, 0.30, 0.55));
-    solveLimbIK(rig, 'rightLeg', rigPoint(-0.056, ankBaseRatio, -0.01), rigPoint(-0.08, 0.30, 0.55));
+    solveLimbIK(rig, 'leftLeg', rigPoint(autoAnkleX, ankBaseRatio, 0.01), rigPoint(autoAnkleX + 0.02, 0.30, 0.55));
+    solveLimbIK(rig, 'rightLeg', rigPoint(-autoAnkleX, ankBaseRatio, -0.01), rigPoint(-(autoAnkleX + 0.02), 0.30, 0.55));
     applyFootRoll(0, 0);
     solveLookAt(rig, rigPoint(0, 0.88, 2.5));
     root.updateMatrixWorld(true);
@@ -319,7 +329,11 @@ export function evaluateGait(
   // 4. ASYMMETRIC BIOMECHANICAL LEG TRAJECTORIES & HEEL-TO-TOE ANKLE ROLL
   const halfStride = cfg.strideLengthRatio * 0.5 * env;
   const liftMax = cfg.liftHeightRatio * env;
-  const hipTrackRatio = effectiveGait === 'run' ? 0.048 : 0.055; // Narrow, natural human step track
+  const hipTrackRatio = isAutoRig
+    ? autoAnkleX
+    : effectiveGait === 'run'
+    ? 0.048
+    : 0.055; // Narrow, natural human step track
   const stanceSplit = cfg.stanceRatio; // e.g. 0.60 walk, 0.38 run
 
   const evaluateSingleLeg = (
@@ -429,9 +443,10 @@ export function evaluateGait(
       // Athletic ~90 deg bent-elbow runner pump: hands stay high between hip pocket (0.60) and upper ribcage (0.72)
       const handZ = 0.07 + swingCos * cfg.armSwingRatio;
       const handY = 0.63 + forwardAmount * 0.085 - backAmount * 0.03;
-      const handX = xSign * (0.135 - forwardAmount * 0.045); // Slight cross-body inward pump on forward drive
+      const baseRunX = isAutoRig ? Math.max(0.135, autoWristX * 0.92) : 0.135;
+      const handX = xSign * (baseRunX - forwardAmount * 0.045); // Slight cross-body inward pump on forward drive
       const elbowPole: [number, number, number] = [
-        xSign * 0.27,
+        xSign * (baseRunX + 0.135),
         0.58 - forwardAmount * 0.03,
         handZ - 0.28,
       ];
@@ -442,8 +457,9 @@ export function evaluateGait(
       // Low tactical stealth balance arms held slightly forward and bent
       const handZ = 0.12 + swingCos * cfg.armSwingRatio;
       const handY = 0.56 + forwardAmount * 0.03;
-      const handX = xSign * 0.155;
-      const elbowPole: [number, number, number] = [xSign * 0.28, 0.58, handZ - 0.24];
+      const baseSneakX = isAutoRig ? Math.max(0.155, autoWristX) : 0.155;
+      const handX = xSign * baseSneakX;
+      const elbowPole: [number, number, number] = [xSign * (baseSneakX + 0.125), 0.58, handZ - 0.24];
       return { hand: [handX, handY, handZ], elbowPole };
     }
 
@@ -451,9 +467,10 @@ export function evaluateGait(
     // Hand grazes past hip at y=0.525, rises softly to y=0.575 on forward swing (keeping a soft 24-38 deg elbow bend!)
     const handZ = 0.02 + swingCos * cfg.armSwingRatio;
     const handY = 0.528 + forwardAmount * 0.048 + backAmount * 0.012;
-    const handX = xSign * (0.142 - forwardAmount * 0.022);
+    const baseWalkX = isAutoRig ? Math.max(0.142, autoWristX) : 0.142;
+    const handX = xSign * (baseWalkX - forwardAmount * 0.022);
     const elbowPole: [number, number, number] = [
-      xSign * 0.26,
+      xSign * (baseWalkX + 0.12),
       0.63,
       handZ - 0.24,
     ];

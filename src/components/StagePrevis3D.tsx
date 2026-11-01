@@ -46,6 +46,7 @@ import {
   evaluateReadyMadeHumanoidClip,
   evaluateReadyMadeObjectClip,
   getReadyMadeMotionsForCategory,
+  setRigOverlayVisible,
 } from '../engine/kinematics';
 import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
 
@@ -1565,27 +1566,33 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         mesh.userData.modelUrl !== actor.modelUrl ||
         mesh.userData.isGhostMode !== isGhostMode ||
         mesh.userData.customColor !== actor.color ||
-        mesh.userData.partGraph !== (actor.sculpt || actor.partGraph);
+        mesh.userData.partGraph !== (actor.sculpt || actor.partGraph) ||
+        mesh.userData.rigType !== actor.rigType ||
+        mesh.userData.rigLandmarks !== actor.rigLandmarks;
 
       if (needsFullRebuild) {
         if (mesh) {
           scene.remove(mesh);
           disposeObject3D(mesh);
         }
-        mesh = createSubjectMesh(
-          actor.name,
-          actor.kind || 'human',
-          color,
-          isGhostMode,
-          subtitle,
+        mesh = createSubjectMesh({
+          name: actor.name,
+          kind: actor.kind || 'human',
+          colorHex: color,
+          isGhostWireframe: isGhostMode,
+          subtitleBadge: subtitle,
           isSelected,
-          actor.conceptImageUrl,
-          actor.token,
-          actor.modelUrl,
-          actor.sculpt || actor.partGraph,
-          actor.posePreset,
-          actor.pose
-        );
+          conceptImageUrl: actor.conceptImageUrl,
+          tokenPrompt: actor.token,
+          modelUrl: actor.modelUrl,
+          partGraph: actor.sculpt || actor.partGraph,
+          sculpt: actor.sculpt || actor.partGraph,
+          actorPosePreset: actor.posePreset,
+          actorPose: actor.pose,
+          rigType: actor.rigType,
+          rigLandmarks: actor.rigLandmarks,
+          showBones: actor.showBones,
+        });
         mesh.userData.actorId = actor.id;
         mesh.userData.kind = actorKind;
         mesh.userData.name = actorName;
@@ -1595,6 +1602,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         mesh.userData.isSelected = isSelected;
         mesh.userData.isGhostMode = isGhostMode;
         mesh.userData.customColor = actor.color;
+        mesh.userData.rigType = actor.rigType;
+        mesh.userData.rigLandmarks = actor.rigLandmarks;
+        mesh.userData.showBones = actor.showBones;
         if (!Number.isNaN(parsedCustomColor) && !isGhostMode) {
           mesh.userData.customColorHex = parsedCustomColor;
           applyObjectTargetColor(mesh, parsedCustomColor);
@@ -1645,13 +1655,17 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
             baseRingGroup.visible = Boolean(isSelected || isGhostMode);
           }
         }
+        if (mesh.userData.showBones !== actor.showBones) {
+          mesh.userData.showBones = actor.showBones;
+          setRigOverlayVisible(mesh, Boolean(actor.showBones));
+        }
         if (mesh.userData.rig) {
           if (mesh.userData.posePreset !== actor.posePreset || mesh.userData.pose !== actor.pose) {
             if (actor.pose) {
               applyBonePose(mesh.userData.rig, actor.pose);
-            } else if (actor.posePreset) {
+            } else if (actor.posePreset && POSE_PRESETS[actor.posePreset]) {
               applyPosePreset(mesh.userData.rig, actor.posePreset);
-            } else {
+            } else if (mesh.userData.autoRigType === 'humanoid' || !mesh.userData.autoRigType) {
               applyPosePreset(mesh.userData.rig, 'neutral-stand');
             }
             mesh.userData.posePreset = actor.posePreset;
@@ -1882,7 +1896,11 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       const mesh = actorMeshesRef.current.get(actor.id);
       if (mesh) {
         const actorPos = getActorPositionAtTime(actor, t);
-        const isHuman = detectObjectPoseCategory(actor) === 'humanoid';
+        const isHuman =
+          actor.rigType === 'humanoid' ||
+          (!actor.rigType || actor.rigType === 'auto'
+            ? detectObjectPoseCategory(actor) === 'humanoid'
+            : false);
         const isActorMode = liveShot.vfxReference?.enabled && liveShot.vfxReference?.referenceMode === 'actor-motion';
         const cadenceY = isHuman && isActorMode ? Math.sin(t * 8 + idx * 1.5) * 0.35 : 0;
         mesh.position.set(actorPos.x, actorPos.y + cadenceY, actorPos.z);
@@ -2018,15 +2036,23 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           const clayOpt = liveShot.claymationMode ? { claymationFps: liveShot.claymationFps || 12 } : undefined;
           const currentPoseResult = interpolateActorPoseAtTime(actor.trajectory, actor.pose, t, liveDur, clayOpt);
           const activeObjClip = currentPoseResult?.motionClip || actor.motionClip;
-          if (activeObjClip) {
+          const isActivelyPosing =
+            activeGizmoDragRef.current?.actorId === actor.id ||
+            activeIKHandleRef.current?.actorId === actor.id;
+          if (!isActivelyPosing && activeObjClip) {
             evaluateReadyMadeObjectClip(
               mesh,
               activeObjClip,
               t,
               currentPoseResult?.motionCycles ?? actor.motionCycles ?? 1
             );
+          } else if (!isActivelyPosing && mesh.userData.rig && currentPoseResult?.pose) {
+            applyBonePose(mesh.userData.rig, currentPoseResult.pose);
           } else if (actor.posePreset) {
             applyNonHumanMeshPoseArticulation(mesh, actor.posePreset);
+          }
+          if (mesh.userData.rig) {
+            mesh.userData.rig.root.updateMatrixWorld(true);
           }
         }
       }

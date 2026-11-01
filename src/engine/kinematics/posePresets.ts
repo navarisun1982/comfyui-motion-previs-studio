@@ -159,6 +159,25 @@ export const POSE_PRESETS: Record<string, PosePreset> = {
     description: 'Relaxed natural stance with arms resting gently along sides.',
     apply: (rig: HumanoidRig) => {
       resetToRestPose(rig);
+      if (rig.root.userData?.isAutoRiggedGlb) {
+        const landmarks = rig.root.userData?.rigLandmarks;
+        if (landmarks?.detectedStance === 't-pose') {
+          const wX = Math.max(0.16, (rig.root.userData?.naturalWristX ?? 0.22) * 0.65);
+          solveLimbIK(
+            rig,
+            'leftArm',
+            rigPoint(rig, wX, 0.53, 0.02),
+            rigPoint(rig, wX + 0.12, 0.63, -0.22),
+          );
+          solveLimbIK(
+            rig,
+            'rightArm',
+            rigPoint(rig, -wX, 0.53, 0.02),
+            rigPoint(rig, -(wX + 0.12), 0.63, -0.22),
+          );
+        }
+        return;
+      }
       const restoreFlatFeet = createFlatFootRestorer(rig);
       const ankY = rig.root.userData?.isMannequinRig ? 0.056 : 0.02;
 

@@ -10,6 +10,11 @@ import {
   applyPosePreset,
   applyBonePose,
   dressAndTextureHumanoidRig,
+  autoRigGltfScene,
+  resolveAutoRigType,
+  AutoRigType,
+  RigLandmarks,
+  POSE_PRESETS,
 } from '../kinematics';
 import {
   extractCharacterFeaturesFromModelOutput,
@@ -38,6 +43,9 @@ export interface CreateSubjectMeshOptions {
   actorPosePreset?: string;
   actorPose?: any;
   showLabels?: boolean;
+  rigType?: AutoRigType;
+  rigLandmarks?: Partial<RigLandmarks>;
+  showBones?: boolean;
 }
 
 /**
@@ -156,21 +164,94 @@ export function createSubjectMesh(
       };
     };
 
+    const scaleAndAutoRigGltfForStage = (sceneRoot: THREE.Group): THREE.Vector3 => {
+      sceneRoot.updateMatrixWorld(true);
+      const resolvedRigType = resolveAutoRigType(sceneRoot, {
+        rigType: opts.rigType,
+        categoryHint: kind,
+        nameHint: name,
+        promptHint: tokenPrompt,
+      });
+
+      const rawBox = new THREE.Box3().setFromObject(sceneRoot);
+      const rawSize = rawBox.getSize(new THREE.Vector3());
+      const targetStageSpan =
+        resolvedRigType === 'humanoid'
+          ? 5.06
+          : resolvedRigType === 'quadruped'
+          ? 3.8
+          : resolvedRigType === 'spine_flex'
+          ? 4.2
+          : 3.2;
+
+      const currentRefDim =
+        resolvedRigType === 'humanoid' || resolvedRigType === 'spine_flex'
+          ? Math.max(0.1, rawSize.y)
+          : Math.max(0.1, Math.max(rawSize.x, rawSize.y, rawSize.z));
+
+      const scaleMult = targetStageSpan / currentRefDim;
+      if (Math.abs(scaleMult - 1.0) > 0.02) {
+        sceneRoot.children.forEach((child) => {
+          child.scale.multiplyScalar(scaleMult);
+          child.position.multiplyScalar(scaleMult);
+        });
+        sceneRoot.updateMatrixWorld(true);
+        const reBox = new THREE.Box3().setFromObject(sceneRoot);
+        const reCenter = reBox.getCenter(new THREE.Vector3());
+        sceneRoot.children.forEach((child) => {
+          child.position.x -= reCenter.x;
+          child.position.z -= reCenter.z;
+          child.position.y -= reBox.min.y;
+        });
+        sceneRoot.updateMatrixWorld(true);
+      }
+
+      const autoRigRes = autoRigGltfScene(sceneRoot, {
+        rigType: resolvedRigType,
+        categoryHint: kind,
+        nameHint: name,
+        promptHint: tokenPrompt,
+        landmarks: opts.rigLandmarks,
+        showBones: opts.showBones,
+      });
+
+      group.userData.autoRigResult = autoRigRes;
+      group.userData.autoRigType = autoRigRes.rigType;
+      if (autoRigRes.rig) {
+        group.userData.rig = autoRigRes.rig;
+        if (actorPose) {
+          applyBonePose(autoRigRes.rig, actorPose);
+        } else if (actorPosePreset && POSE_PRESETS[actorPosePreset]) {
+          applyPosePreset(autoRigRes.rig, actorPosePreset);
+        } else if (autoRigRes.rigType === 'humanoid') {
+          applyPosePreset(autoRigRes.rig, 'neutral-stand');
+        }
+      }
+
+      const finalBox = new THREE.Box3().setFromObject(sceneRoot);
+      return finalBox.getSize(new THREE.Vector3());
+    };
+
     const cached = getCachedGltfModel(modelUrl);
     if (cached) {
+      const finalSize = scaleAndAutoRigGltfForStage(cached.scene);
       group.add(cached.scene);
       attachGltfAnimations(cached.scene, cached.animations);
-      const size = cached.size;
-      const baseRadius = Math.max(2.4, Math.max(size.x, size.z) * 0.55);
+      const baseRadius = Math.max(2.4, Math.max(finalSize.x, finalSize.z) * 0.55);
       group.add(createBaseRing(baseRadius, colorHex, isGhostWireframe, isSelected));
       const banner = createSpriteBanner(
         name || kind.toUpperCase() || '3D MODEL',
-        subtitleBadge || 'GLB 3D MODEL',
+        subtitleBadge ||
+          (group.userData.autoRigType === 'humanoid'
+            ? 'RIGGED 3D CHARACTER'
+            : group.userData.autoRigType === 'quadruped'
+            ? 'RIGGED 3D CREATURE'
+            : 'GLB 3D MODEL'),
         isGhostWireframe,
         showLabels,
         colorHex
       );
-      banner.position.y = Math.max(1.8, size.y + 0.25);
+      banner.position.y = Math.max(1.8, finalSize.y + 0.25);
       group.add(banner);
       return group;
     }
@@ -200,13 +281,14 @@ export function createSubjectMesh(
         if (typeof group.userData.customColorHex === 'number') {
           applyObjectTargetColor(result.scene, group.userData.customColorHex);
         }
+        const finalSize = scaleAndAutoRigGltfForStage(result.scene);
         group.add(result.scene);
         attachGltfAnimations(result.scene, result.animations);
 
         // Dynamically adjust banner position to match real model height
         group.children.forEach((child) => {
           if (child instanceof THREE.Sprite) {
-            child.position.y = Math.max(1.8, result.size.y + 0.25);
+            child.position.y = Math.max(1.8, finalSize.y + 0.25);
           }
         });
       })

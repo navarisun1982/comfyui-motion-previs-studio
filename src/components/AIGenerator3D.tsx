@@ -22,6 +22,17 @@ import { useAssetLibraryStore } from '../stores/useAssetLibraryStore';
 import { useComfyStore } from '../stores/useComfyStore';
 import { loadGltfModel } from '../engine/gltfModelLoader';
 import {
+  autoRigGltfScene,
+  setRigOverlayVisible,
+  AutoRigType,
+  AutoRigResult,
+  RigLandmarks,
+  evaluateGait,
+  evaluateReadyMadeHumanoidClip,
+  evaluateReadyMadeObjectClip,
+  resetToRestPose,
+} from '../engine/kinematics';
+import {
   Comfy3DEngineMode,
   Comfy3DQualityMode,
   Comfy3DGenerationResult,
@@ -89,6 +100,22 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   const [appliedSuccess, setAppliedSuccess] = useState(false);
   const [savedLibrarySuccess, setSavedLibrarySuccess] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  // Automatic Bone Rigging & Live Motion Preview Controls
+  const [rigType, setRigType] = useState<AutoRigType>('auto');
+  const [showBones, setShowBones] = useState<boolean>(true);
+  const [previewMotion, setPreviewMotion] = useState<
+    'bind' | 'idle' | 'walk' | 'run' | 'wave' | 'fight'
+  >('bind');
+  const [showLandmarkEditor, setShowLandmarkEditor] = useState<boolean>(false);
+  const [rigInfo, setRigInfo] = useState<AutoRigResult | null>(null);
+  const [customLandmarks, setCustomLandmarks] = useState<Partial<RigLandmarks> | null>(null);
+
+  const previewMotionRef = useRef(previewMotion);
+  previewMotionRef.current = previewMotion;
+  const showBonesRef = useRef(showBones);
+  showBonesRef.current = showBones;
+  const loadedSceneRef = useRef<THREE.Group | null>(null);
 
   // 3D Canvas Mount Ref
   const canvasMountRef = useRef<HTMLDivElement>(null);
@@ -280,7 +307,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     updateCameraRef.current = updateCamera;
     updateCamera();
 
-    // Load generated .GLB mesh into the scene
+    // Load generated .GLB mesh into the scene and run automatic bone rigging
     let cancelled = false;
     loadGltfModel(generatedResult.blobUrl)
       .then((loaded) => {
@@ -297,6 +324,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
           }
         });
         modelGroup.add(loaded.scene);
+        loadedSceneRef.current = loaded.scene;
 
         const box = new THREE.Box3().setFromObject(loaded.scene);
         const center = box.getCenter(new THREE.Vector3());
@@ -305,6 +333,17 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         orbitRef.current.radius = maxDim * 1.65;
         targetLookAtRef.current.copy(center);
         updateCamera();
+
+        // Automatically fit skeleton & volumetric skin weights
+        const rigRes = autoRigGltfScene(loaded.scene, {
+          rigType,
+          categoryHint: actorCategory,
+          nameHint: actorName,
+          landmarks: customLandmarks || undefined,
+          showBones: showBonesRef.current,
+        });
+        setRigOverlayVisible(loaded.scene, showBonesRef.current, true);
+        setRigInfo(rigRes);
       })
       .catch((err) => {
         console.error('Failed to display generated GLB in preview:', err);
@@ -350,6 +389,69 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     const render = () => {
       if (!running) return;
       animFrameRef.current = requestAnimationFrame(render);
+      const tSec = performance.now() / 1000;
+      const activeScene = loadedSceneRef.current;
+      const activeRig = activeScene?.userData?.rig;
+      const activeRigType = activeScene?.userData?.autoRigType;
+      const motion = previewMotionRef.current;
+
+      if (activeScene && activeRig) {
+        if (motion === 'bind') {
+          resetToRestPose(activeRig);
+        } else if (activeRigType === 'humanoid') {
+          if (motion === 'idle') {
+            evaluateGait(activeRig, tSec, { gait: 'idle', speed: 0 });
+          } else if (motion === 'walk') {
+            evaluateGait(activeRig, tSec, { gait: 'walk', speed: 1.5 });
+          } else if (motion === 'run') {
+            evaluateGait(activeRig, tSec, { gait: 'run', speed: 2.8 });
+          } else if (motion === 'wave') {
+            evaluateReadyMadeHumanoidClip(
+              activeRig,
+              'human-wave-greet',
+              tSec,
+              (tSec % 2.4) / 2.4,
+              false,
+              1
+            );
+          } else if (motion === 'fight') {
+            evaluateReadyMadeHumanoidClip(
+              activeRig,
+              'human-combo-punch',
+              tSec,
+              (tSec % 2.0) / 2.0,
+              false,
+              1
+            );
+          }
+        } else if (activeRigType === 'quadruped') {
+          const clipMap: Record<string, string> = {
+            idle: 'quad-alert-idle',
+            walk: 'quad-trot-forward',
+            run: 'quad-gallop-charge',
+            wave: 'quad-stalk-prowl',
+            fight: 'quad-pounce-leap',
+          };
+          evaluateReadyMadeObjectClip(activeScene, clipMap[motion] || 'quad-trot-forward', tSec, 1);
+        } else if (activeRigType === 'spine_flex') {
+          resetToRestPose(activeRig);
+          const sway = Math.sin(tSec * 3.0) * 0.22;
+          const spine = activeRig.bones.get('Spine');
+          const chest = activeRig.bones.get('Chest');
+          const neck = activeRig.bones.get('Neck');
+          const head = activeRig.bones.get('Head');
+          if (spine) spine.rotation.z = sway * 0.5;
+          if (chest) chest.rotation.z = sway * 0.8;
+          if (neck) neck.rotation.z = -sway * 0.6;
+          if (head) head.rotation.z = -sway * 0.9;
+        }
+        activeScene.updateMatrixWorld(true);
+        const overlay = activeScene.getObjectByName('__auto_rig_skeleton_helper__');
+        if (overlay && typeof overlay.userData?.updateLines === 'function') {
+          overlay.userData.updateLines();
+        }
+      }
+
       if (autoSpinRef.current && !isDraggingRef.current && modelGroup.children.length) {
         orbitRef.current.theta += 0.0045;
         updateCamera();
@@ -389,6 +491,28 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       container.innerHTML = '';
     };
   }, [isOpen, generatedResult?.blobUrl]);
+
+  // Re-run auto-rigging live when rigType, actorCategory, or customLandmarks change
+  useEffect(() => {
+    const activeScene = loadedSceneRef.current;
+    if (!activeScene) return;
+    const rigRes = autoRigGltfScene(activeScene, {
+      rigType,
+      categoryHint: actorCategory,
+      nameHint: actorName,
+      landmarks: customLandmarks || undefined,
+      showBones,
+    });
+    setRigOverlayVisible(activeScene, showBones, true);
+    setRigInfo(rigRes);
+  }, [rigType, actorCategory, customLandmarks]);
+
+  // Toggle bone overlay visibility on already-mounted mesh
+  useEffect(() => {
+    const activeScene = loadedSceneRef.current;
+    if (!activeScene) return;
+    setRigOverlayVisible(activeScene, showBones, true);
+  }, [showBones]);
 
   // Toggle wireframe on already-mounted mesh
   useEffect(() => {
@@ -491,11 +615,17 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         kind: actorCategory,
         modelUrl: generatedResult.blobUrl,
         conceptImageUrl: referenceImageUrl || undefined,
+        rigType,
+        rigLandmarks: customLandmarks || rigInfo?.landmarks,
+        showBones,
       });
     } else {
       addActor(cleanName, actorCategory, cleanName, {
         modelUrl: generatedResult.blobUrl,
         conceptImageUrl: referenceImageUrl || undefined,
+        rigType,
+        rigLandmarks: customLandmarks || rigInfo?.landmarks,
+        showBones,
       });
     }
 
@@ -1024,6 +1154,18 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                       {generatedResult.vertexCount.toLocaleString()} verts •{' '}
                       {generatedResult.triangleCount.toLocaleString()} tris
                     </span>
+                    {rigInfo && (
+                      <span className="px-2.5 py-1 rounded-lg bg-indigo-500/25 border border-indigo-400/40 text-indigo-200 text-[10.5px] font-mono font-semibold">
+                        🦴{' '}
+                        {rigInfo.rigType === 'humanoid'
+                          ? `Humanoid Rig (${rigInfo.boneCount} Bones • ${rigInfo.landmarks.detectedStance?.toUpperCase() || 'AUTO'})`
+                          : rigInfo.rigType === 'quadruped'
+                          ? `Quadruped Rig (${rigInfo.boneCount} Bones)`
+                          : rigInfo.rigType === 'spine_flex'
+                          ? `Flex Spine Rig (${rigInfo.boneCount} Bones)`
+                          : 'Rigid Prop Pivot'}
+                      </span>
+                    )}
                   </>
                 ) : (
                   <span className="px-2.5 py-1 rounded-lg bg-black/70 border border-white/10 text-slate-400 text-[11px] font-mono">
@@ -1033,6 +1175,20 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
               </div>
 
               <div className="flex items-center gap-1.5 pointer-events-auto">
+                {generatedResult && rigInfo && rigInfo.boneCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowBones((v) => !v)}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10.5px] font-mono font-semibold cursor-pointer ${
+                      showBones
+                        ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
+                        : 'bg-black/70 border-white/15 text-slate-400 hover:text-white'
+                    }`}
+                    title="Show or hide 3D skeleton bones & joint markers inside the mesh"
+                  >
+                    <span>🦴 {showBones ? 'Bones ON' : 'Bones OFF'}</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setAutoSpin((v) => !v)}
@@ -1097,6 +1253,394 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     </>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Auto-Rigging, Live Motion Preview & Joint Landmark Tuner Bar */}
+            {generatedResult && (
+              <div className="px-4 py-2.5 border-t border-white/10 bg-[#0c101b] space-y-2 shrink-0">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  {/* Rig Type Selector */}
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mr-1">
+                      Skeleton Rig:
+                    </span>
+                    {(
+                      [
+                        { id: 'auto', label: '✨ Auto' },
+                        { id: 'humanoid', label: '🧍 Humanoid (19-Bone)' },
+                        { id: 'quadruped', label: '🐾 Animal (4-Leg)' },
+                        { id: 'spine_flex', label: '🐍 Flex Spine' },
+                        { id: 'rigid_prop', label: '📦 Rigid Prop' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setRigType(opt.id)}
+                        className={`px-2 py-1 rounded-md text-[10px] font-semibold border transition-all cursor-pointer ${
+                          rigType === opt.id
+                            ? 'bg-cyan-500/25 border-cyan-400 text-cyan-100'
+                            : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Fine-Tune Joint Landmarks Toggle */}
+                  {rigInfo && rigInfo.rigType !== 'rigid_prop' && (
+                    <button
+                      type="button"
+                      onClick={() => setShowLandmarkEditor((v) => !v)}
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-mono font-semibold border transition-all cursor-pointer ${
+                        showLandmarkEditor
+                          ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                          : 'bg-white/5 border-white/15 text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      🎯 {showLandmarkEditor ? 'Hide Joint Tuner' : 'Adjust Joint Landmarks'}
+                    </button>
+                  )}
+                </div>
+
+                {/* Live Motion Preview Buttons */}
+                {rigInfo && rigInfo.rigType !== 'rigid_prop' && (
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mr-1">
+                      Test Motion:
+                    </span>
+                    {(
+                      [
+                        { id: 'bind', label: '🧍 Bind Pose' },
+                        { id: 'idle', label: '🫁 Idle Breathe' },
+                        {
+                          id: 'walk',
+                          label: rigInfo.rigType === 'quadruped' ? '🐾 Trot' : '🚶 Walk',
+                        },
+                        {
+                          id: 'run',
+                          label: rigInfo.rigType === 'quadruped' ? '🐎 Gallop' : '🏃 Run',
+                        },
+                        {
+                          id: 'wave',
+                          label: rigInfo.rigType === 'quadruped' ? '🐺 Stalk' : '👋 Wave',
+                        },
+                        {
+                          id: 'fight',
+                          label: rigInfo.rigType === 'quadruped' ? '🦁 Pounce' : '🥊 Fight',
+                        },
+                      ] as const
+                    ).map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setPreviewMotion(m.id)}
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all cursor-pointer ${
+                          previewMotion === m.id
+                            ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
+                            : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Interactive Joint Landmark Fine-Tuner Sliders */}
+                {showLandmarkEditor && rigInfo && rigInfo.rigType !== 'rigid_prop' && (
+                  <div className="rounded-lg border border-amber-500/30 bg-black/60 p-2.5 space-y-2 text-[10px] font-mono">
+                    <div className="flex items-center justify-between">
+                      <span className="text-amber-300 font-bold">
+                        🎯 Silhouette Joint Landmark Fine-Tuner (Symmetrical L/R)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCustomLandmarks(null)}
+                        className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-cyan-200 border border-cyan-500/30 cursor-pointer"
+                      >
+                        ↺ Reset Auto-Fit
+                      </button>
+                    </div>
+
+                    {rigInfo.rigType === 'humanoid' ? (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        <label className="flex flex-col gap-0.5 text-slate-300">
+                          <span>
+                            Shoulder Height:{' '}
+                            {Math.round(
+                              ((customLandmarks?.shoulderY ?? rigInfo.landmarks.shoulderY) || 0.78) *
+                                100
+                            )}
+                            %
+                          </span>
+                          <input
+                            type="range"
+                            min={0.68}
+                            max={0.86}
+                            step={0.005}
+                            value={customLandmarks?.shoulderY ?? rigInfo.landmarks.shoulderY}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setCustomLandmarks((prev) => ({
+                                ...(prev || rigInfo.landmarks),
+                                shoulderY: val,
+                              }));
+                            }}
+                            className="accent-amber-400"
+                          />
+                        </label>
+
+                        <label className="flex flex-col gap-0.5 text-slate-300">
+                          <span>
+                            Shoulder Width:{' '}
+                            {Math.round(
+                              ((customLandmarks?.shoulderSpanX ??
+                                rigInfo.landmarks.shoulderSpanX) ||
+                                0.145) * 100
+                            )}
+                            %
+                          </span>
+                          <input
+                            type="range"
+                            min={0.09}
+                            max={0.24}
+                            step={0.005}
+                            value={
+                              customLandmarks?.shoulderSpanX ?? rigInfo.landmarks.shoulderSpanX
+                            }
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setCustomLandmarks((prev) => ({
+                                ...(prev || rigInfo.landmarks),
+                                shoulderSpanX: val,
+                              }));
+                            }}
+                            className="accent-amber-400"
+                          />
+                        </label>
+
+                        <label className="flex flex-col gap-0.5 text-slate-300">
+                          <span>
+                            Wrist Span X:{' '}
+                            {Math.round(
+                              ((customLandmarks?.wristPos?.[0] ??
+                                rigInfo.landmarks.wristPos[0]) ||
+                                0.28) * 100
+                            )}
+                            %
+                          </span>
+                          <input
+                            type="range"
+                            min={0.14}
+                            max={0.46}
+                            step={0.005}
+                            value={customLandmarks?.wristPos?.[0] ?? rigInfo.landmarks.wristPos[0]}
+                            onChange={(e) => {
+                              const wx = Number(e.target.value);
+                              const curW = customLandmarks?.wristPos ?? rigInfo.landmarks.wristPos;
+                              const shX =
+                                customLandmarks?.shoulderSpanX ?? rigInfo.landmarks.shoulderSpanX;
+                              const curE = customLandmarks?.elbowPos ?? rigInfo.landmarks.elbowPos;
+                              setCustomLandmarks((prev) => ({
+                                ...(prev || rigInfo.landmarks),
+                                wristPos: [wx, curW[1], curW[2]],
+                                elbowPos: [(shX + wx) * 0.5, curE[1], curE[2]],
+                              }));
+                            }}
+                            className="accent-amber-400"
+                          />
+                        </label>
+
+                        <label className="flex flex-col gap-0.5 text-slate-300">
+                          <span>
+                            Wrist Height Y:{' '}
+                            {Math.round(
+                              ((customLandmarks?.wristPos?.[1] ??
+                                rigInfo.landmarks.wristPos[1]) ||
+                                0.52) * 100
+                            )}
+                            %
+                          </span>
+                          <input
+                            type="range"
+                            min={0.42}
+                            max={0.82}
+                            step={0.005}
+                            value={customLandmarks?.wristPos?.[1] ?? rigInfo.landmarks.wristPos[1]}
+                            onChange={(e) => {
+                              const wy = Number(e.target.value);
+                              const curW = customLandmarks?.wristPos ?? rigInfo.landmarks.wristPos;
+                              const shY =
+                                customLandmarks?.shoulderY ?? rigInfo.landmarks.shoulderY;
+                              const curE = customLandmarks?.elbowPos ?? rigInfo.landmarks.elbowPos;
+                              setCustomLandmarks((prev) => ({
+                                ...(prev || rigInfo.landmarks),
+                                wristPos: [curW[0], wy, curW[2]],
+                                elbowPos: [curE[0], (shY + wy) * 0.5, curE[2]],
+                              }));
+                            }}
+                            className="accent-amber-400"
+                          />
+                        </label>
+
+                        <label className="flex flex-col gap-0.5 text-slate-300">
+                          <span>
+                            Hips / Groin Y:{' '}
+                            {Math.round(
+                              ((customLandmarks?.hipsY ?? rigInfo.landmarks.hipsY) || 0.52) * 100
+                            )}
+                            %
+                          </span>
+                          <input
+                            type="range"
+                            min={0.42}
+                            max={0.62}
+                            step={0.005}
+                            value={customLandmarks?.hipsY ?? rigInfo.landmarks.hipsY}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setCustomLandmarks((prev) => ({
+                                ...(prev || rigInfo.landmarks),
+                                hipsY: val,
+                              }));
+                            }}
+                            className="accent-amber-400"
+                          />
+                        </label>
+
+                        <label className="flex flex-col gap-0.5 text-slate-300">
+                          <span>
+                            Leg Stance X:{' '}
+                            {Math.round(
+                              ((customLandmarks?.anklePos?.[0] ??
+                                rigInfo.landmarks.anklePos[0]) ||
+                                0.09) * 100
+                            )}
+                            %
+                          </span>
+                          <input
+                            type="range"
+                            min={0.04}
+                            max={0.22}
+                            step={0.005}
+                            value={customLandmarks?.anklePos?.[0] ?? rigInfo.landmarks.anklePos[0]}
+                            onChange={(e) => {
+                              const ax = Number(e.target.value);
+                              const curA = customLandmarks?.anklePos ?? rigInfo.landmarks.anklePos;
+                              const curK = customLandmarks?.kneePos ?? rigInfo.landmarks.kneePos;
+                              setCustomLandmarks((prev) => ({
+                                ...(prev || rigInfo.landmarks),
+                                anklePos: [ax, curA[1], curA[2]],
+                                kneePos: [ax * 0.95, curK[1], curK[2]],
+                                hipSpanX: Math.max(0.06, ax * 0.85),
+                              }));
+                            }}
+                            className="accent-amber-400"
+                          />
+                        </label>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-2">
+                        <label className="flex flex-col gap-0.5 text-slate-300">
+                          <span>
+                            Spine Height:{' '}
+                            {Math.round(
+                              ((customLandmarks?.quadSpineY ??
+                                rigInfo.landmarks.quadSpineY ??
+                                0.58) ||
+                                0.58) * 100
+                            )}
+                            %
+                          </span>
+                          <input
+                            type="range"
+                            min={0.4}
+                            max={0.78}
+                            step={0.01}
+                            value={
+                              customLandmarks?.quadSpineY ?? rigInfo.landmarks.quadSpineY ?? 0.58
+                            }
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setCustomLandmarks((prev) => ({
+                                ...(prev || rigInfo.landmarks),
+                                quadSpineY: val,
+                              }));
+                            }}
+                            className="accent-amber-400"
+                          />
+                        </label>
+
+                        <label className="flex flex-col gap-0.5 text-slate-300">
+                          <span>
+                            Front Leg Z:{' '}
+                            {Math.round(
+                              ((customLandmarks?.quadFrontLegZ ??
+                                rigInfo.landmarks.quadFrontLegZ ??
+                                0.24) ||
+                                0.24) * 100
+                            )}
+                            %
+                          </span>
+                          <input
+                            type="range"
+                            min={-0.45}
+                            max={0.45}
+                            step={0.01}
+                            value={
+                              customLandmarks?.quadFrontLegZ ??
+                              rigInfo.landmarks.quadFrontLegZ ??
+                              0.24
+                            }
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setCustomLandmarks((prev) => ({
+                                ...(prev || rigInfo.landmarks),
+                                quadFrontLegZ: val,
+                              }));
+                            }}
+                            className="accent-amber-400"
+                          />
+                        </label>
+
+                        <label className="flex flex-col gap-0.5 text-slate-300">
+                          <span>
+                            Back Leg Z:{' '}
+                            {Math.round(
+                              ((customLandmarks?.quadBackLegZ ??
+                                rigInfo.landmarks.quadBackLegZ ??
+                                -0.24) ||
+                                -0.24) * 100
+                            )}
+                            %
+                          </span>
+                          <input
+                            type="range"
+                            min={-0.45}
+                            max={0.45}
+                            step={0.01}
+                            value={
+                              customLandmarks?.quadBackLegZ ??
+                              rigInfo.landmarks.quadBackLegZ ??
+                              -0.24
+                            }
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setCustomLandmarks((prev) => ({
+                                ...(prev || rigInfo.landmarks),
+                                quadBackLegZ: val,
+                              }));
+                            }}
+                            className="accent-amber-400"
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
