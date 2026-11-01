@@ -215,21 +215,36 @@ export function createSubjectMesh(
         showBones: opts.showBones,
       });
 
+      // Disable CPU triangle raycasting on all imported high-poly GLTF child meshes
+      // so StagePrevis3D uses the lightweight `__actor_hit_proxy__` cylinder in O(1) time.
+      sceneRoot.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          child.raycast = () => {};
+        }
+      });
+
       group.userData.autoRigResult = autoRigRes;
       group.userData.autoRigType = autoRigRes.rigType;
+      group.userData.isAutoRiggedGlb = Boolean(sceneRoot.userData?.isAutoRiggedGlb);
       if (autoRigRes.rig) {
         group.userData.rig = autoRigRes.rig;
         if (actorPose) {
           applyBonePose(autoRigRes.rig, actorPose);
-        } else if (actorPosePreset && POSE_PRESETS[actorPosePreset]) {
+        } else if (
+          actorPosePreset &&
+          POSE_PRESETS[actorPosePreset] &&
+          (!sceneRoot.userData?.isAutoRiggedGlb || actorPosePreset !== 'neutral-stand')
+        ) {
           applyPosePreset(autoRigRes.rig, actorPosePreset);
-        } else if (autoRigRes.rigType === 'humanoid') {
+        } else if (autoRigRes.rigType === 'humanoid' && !sceneRoot.userData?.isAutoRiggedGlb) {
           applyPosePreset(autoRigRes.rig, 'neutral-stand');
         }
       }
 
       const finalBox = new THREE.Box3().setFromObject(sceneRoot);
-      return finalBox.getSize(new THREE.Vector3());
+      const finalSize = finalBox.getSize(new THREE.Vector3());
+      group.userData.modelSize = finalSize;
+      return finalSize;
     };
 
     const cached = getCachedGltfModel(modelUrl);
@@ -282,8 +297,24 @@ export function createSubjectMesh(
           applyObjectTargetColor(result.scene, group.userData.customColorHex);
         }
         const finalSize = scaleAndAutoRigGltfForStage(result.scene);
+        if (group.userData.actorId) {
+          result.scene.traverse((child) => {
+            child.userData.actorId = group.userData.actorId;
+          });
+        }
         group.add(result.scene);
+        group.updateMatrixWorld(true);
         attachGltfAnimations(result.scene, result.animations);
+
+        // Update hit proxy cylinder to match the loaded GLB dimensions
+        const hitProxy = group.getObjectByName('__actor_hit_proxy__') as THREE.Mesh | undefined;
+        if (hitProxy) {
+          const hitRadius = Math.max(0.55, Math.min(2.2, Math.max(finalSize.x, finalSize.z) * 0.42));
+          const hitHeight = Math.max(1.5, finalSize.y);
+          hitProxy.geometry.dispose();
+          hitProxy.geometry = new THREE.CylinderGeometry(hitRadius, hitRadius, hitHeight, 12);
+          hitProxy.position.y = hitHeight * 0.5;
+        }
 
         // Dynamically adjust banner position to match real model height
         group.children.forEach((child) => {

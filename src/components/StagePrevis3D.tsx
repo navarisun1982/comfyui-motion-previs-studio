@@ -1000,7 +1000,11 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
       const actorMesh = actorMeshesRef.current.get(selId);
       const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
-      if (!rig || !showPosingHandlesRef.current) {
+      const isAutoGlb = Boolean(actorMesh?.userData?.isAutoRiggedGlb);
+      const allowGizmosForActor = isAutoGlb
+        ? Boolean(actorMesh?.userData?.showBones || selectedBoneRef.current)
+        : showPosingHandlesRef.current;
+      if (!rig || !allowGizmosForActor) {
         if (handlesGroup) handlesGroup.visible = false;
         if (discsGroup) discsGroup.visible = false;
         if (gizmoGroup) gizmoGroup.visible = false;
@@ -1308,6 +1312,12 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     }
   }, [showGrid]);
 
+  // Stable signature of actor identities/kinds/tokens so dragging an actor's position
+  // NEVER triggers expensive 2048x2048 shadow-map light rebuilds or 3D environment rebuilds!
+  const envActorsSignature = shot.actors
+    .map((a) => `${a.id}:${a.name}:${a.kind || ''}:${a.token || ''}`)
+    .join('|');
+
   // 5. Update Lighting Rig in 3D Space
   useEffect(() => {
     const lightsGroup = lightsGroupRef.current;
@@ -1482,7 +1492,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       lightsGroup.add(pSystem);
       hearthParticlesRef.current = pSystem;
     }
-  }, [shot.lighting, shot.environment, shot.sceneDescription, shot.actors]);
+  }, [shot.lighting, shot.environment, shot.sceneDescription, envActorsSignature]);
 
   // 5b. Update Environment Visuals (Ground surface, sky color, fog, perimeter structures)
   useEffect(() => {
@@ -1507,7 +1517,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       sceneDescription: shot.sceneDescription,
       actors: shot.actors,
     });
-  }, [shot.environment, shot.sceneDescription, shot.actors]);
+  }, [shot.environment, shot.sceneDescription, envActorsSignature]);
 
   // 6. Update Actor Meshes in 3D Scene
   useEffect(() => {
@@ -1550,6 +1560,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       const actorToken = (actor.token || '').trim();
       const actorName = (actor.name || '').trim();
       const actorKind = (actor.kind || 'human').trim();
+      const rigLandmarksSig = actor.rigLandmarks ? JSON.stringify(actor.rigLandmarks) : '';
 
       const needsFullRebuild =
         !mesh ||
@@ -1562,7 +1573,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         mesh.userData.customColor !== actor.color ||
         mesh.userData.partGraph !== (actor.sculpt || actor.partGraph) ||
         mesh.userData.rigType !== actor.rigType ||
-        mesh.userData.rigLandmarks !== actor.rigLandmarks;
+        mesh.userData.rigLandmarksSig !== rigLandmarksSig;
 
       if (needsFullRebuild) {
         if (mesh) {
@@ -1598,6 +1609,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         mesh.userData.customColor = actor.color;
         mesh.userData.rigType = actor.rigType;
         mesh.userData.rigLandmarks = actor.rigLandmarks;
+        mesh.userData.rigLandmarksSig = rigLandmarksSig;
         mesh.userData.showBones = actor.showBones;
         if (!Number.isNaN(parsedCustomColor) && !isGhostMode) {
           mesh.userData.customColorHex = parsedCustomColor;
@@ -1612,12 +1624,17 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           }
         });
 
-        // Tight anatomical hit proxy cylinder matching actual body width (0.45m radius)
-        // so clicking away from the character NEVER accidentally grabs invisible empty air around it!
-        const hitCylGeo = new THREE.CylinderGeometry(0.45, 0.45, 5.1, 12);
+        // Fast O(1) hit proxy cylinder matching actual body width & height
+        // so selecting/dragging a 100k-vertex GLB model takes 0.001ms instead of CPU-skinning triangles!
+        const modelSize = mesh.userData.modelSize as THREE.Vector3 | undefined;
+        const hitRadius = modelSize
+          ? Math.max(0.55, Math.min(2.2, Math.max(modelSize.x, modelSize.z) * 0.42))
+          : 0.48;
+        const hitHeight = modelSize ? Math.max(1.5, modelSize.y) : 5.1;
+        const hitCylGeo = new THREE.CylinderGeometry(hitRadius, hitRadius, hitHeight, 12);
         const hitCylMat = new THREE.MeshBasicMaterial({ visible: false });
         const hitProxy = new THREE.Mesh(hitCylGeo, hitCylMat);
-        hitProxy.position.y = 2.55;
+        hitProxy.position.y = hitHeight * 0.5;
         hitProxy.name = '__actor_hit_proxy__';
         hitProxy.userData = { isHitProxy: true, actorId: actor.id };
         setLayerRecursively(hitProxy, 0);
@@ -1633,10 +1650,12 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         if (mesh.userData.rig) {
           if (actor.pose) {
             applyBonePose(mesh.userData.rig, actor.pose);
-          } else if (actor.posePreset) {
+          } else if (actor.posePreset && (!mesh.userData.isAutoRiggedGlb || actor.posePreset !== 'neutral-stand')) {
             applyPosePreset(mesh.userData.rig, actor.posePreset);
-          } else {
+          } else if (!mesh.userData.isAutoRiggedGlb) {
             applyPosePreset(mesh.userData.rig, 'neutral-stand');
+          } else {
+            resetToRestPose(mesh.userData.rig);
           }
         }
         actorMeshesRef.current.set(actor.id, mesh);
@@ -1657,10 +1676,16 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           if (mesh.userData.posePreset !== actor.posePreset || mesh.userData.pose !== actor.pose) {
             if (actor.pose) {
               applyBonePose(mesh.userData.rig, actor.pose);
-            } else if (actor.posePreset && POSE_PRESETS[actor.posePreset]) {
+            } else if (
+              actor.posePreset &&
+              POSE_PRESETS[actor.posePreset] &&
+              (!mesh.userData.isAutoRiggedGlb || actor.posePreset !== 'neutral-stand')
+            ) {
               applyPosePreset(mesh.userData.rig, actor.posePreset);
-            } else if (mesh.userData.autoRigType === 'humanoid' || !mesh.userData.autoRigType) {
+            } else if (!mesh.userData.isAutoRiggedGlb && (mesh.userData.autoRigType === 'humanoid' || !mesh.userData.autoRigType)) {
               applyPosePreset(mesh.userData.rig, 'neutral-stand');
+            } else {
+              resetToRestPose(mesh.userData.rig);
             }
             mesh.userData.posePreset = actor.posePreset;
             mesh.userData.pose = actor.pose;
@@ -2071,12 +2096,22 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           if (!isActivelyPosing && !handledByReadyMadeClip) {
             if (currentPoseResult?.pose) {
               applyBonePose(mesh.userData.rig, currentPoseResult.pose);
-            } else if (currentPoseResult?.posePreset && POSE_PRESETS[currentPoseResult.posePreset]) {
+            } else if (
+              currentPoseResult?.posePreset &&
+              POSE_PRESETS[currentPoseResult.posePreset] &&
+              (!mesh.userData.isAutoRiggedGlb || currentPoseResult.posePreset !== 'neutral-stand')
+            ) {
               applyPosePreset(mesh.userData.rig, currentPoseResult.posePreset);
-            } else if (actor.posePreset && POSE_PRESETS[actor.posePreset]) {
+            } else if (
+              actor.posePreset &&
+              POSE_PRESETS[actor.posePreset] &&
+              (!mesh.userData.isAutoRiggedGlb || actor.posePreset !== 'neutral-stand')
+            ) {
               applyPosePreset(mesh.userData.rig, actor.posePreset);
-            } else if (actor.posePreset && !POSE_PRESETS[actor.posePreset]) {
+            } else if (actor.posePreset && !POSE_PRESETS[actor.posePreset] && !mesh.userData.isAutoRiggedGlb) {
               applyPosePreset(mesh.userData.rig, 'neutral-stand');
+            } else if (mesh.userData.isAutoRiggedGlb) {
+              resetToRestPose(mesh.userData.rig);
             }
           }
 
@@ -2819,14 +2854,14 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       }
     }
 
-    // If a joint disc was clicked: record pending joint disc selection, and enable floor drag
+    // If a joint disc was clicked: record pending joint disc selection ONLY (do NOT floor-drag the actor!)
     if (clickedDisc) {
       hitInteractiveRef.current = true;
       pendingClickedDiscRef.current = clickedDisc;
-      clickedActorId = (clickedDisc.userData?.actorId as string) || selectedActorId || null;
-      if (closestDiscHit) {
-        clickedHitPoint = closestDiscHit.hit.point.clone();
+      if (stageControlsRef.current) {
+        stageControlsRef.current.enabled = false;
       }
+      return;
     }
 
     // 3. IK Handles
@@ -2960,14 +2995,16 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         };
       }
 
-      // Place drag plane at the grabbed point; if grabY is near/above the 3D Stage camera eye level or near the horizon,
-      // tilt the drag plane normal toward the viewer so downward/horizontal cursor rays NEVER shoot to infinity!
-      const grabY = clickedHitPoint ? clickedHitPoint.y : currentPos3D.y + (clickedCamera ? 1.5 : 0);
+      // For actors on the stage floor, always drag on a pure horizontal plane (0, 1, 0) at the actor's base elevation
+      // unless the camera ray is pointing nearly parallel to or above the horizon (rayY >= -0.03).
+      const grabY = clickedCamera
+        ? (clickedHitPoint ? clickedHitPoint.y : currentPos3D.y + 1.5)
+        : currentPos3D.y;
       const planeNormal = new THREE.Vector3(0, 1, 0);
       if (stageCameraRef.current) {
         const camY = stageCameraRef.current.position.y;
         const rayY = raycasterRef.current.ray.direction.y;
-        if (grabY >= camY - 2.5 || rayY > -0.25) {
+        if (grabY >= camY - 1.0 || rayY >= -0.03) {
           const camDir = new THREE.Vector3();
           stageCameraRef.current.getWorldDirection(camDir);
           planeNormal.set(-camDir.x, Math.max(0.4, -camDir.y), -camDir.z).normalize();
@@ -4026,7 +4063,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
             </button>
 
             <button
-              onClick={() => setShowPosingHandles(!showPosingHandles)}
+              onClick={() => {
+                const next = !showPosingHandles;
+                setShowPosingHandles(next);
+                if (activeActor && selectedActorId && selectedActorId !== '__camera__') {
+                  updateActor(selectedActorId, { showBones: next });
+                }
+              }}
               className={`flex items-center gap-1 rounded-lg px-2 py-1 border transition-all ${
                 showPosingHandles
                   ? 'border-[#20C997]/50 text-[#5CE8BE] bg-[#20C997]/15 font-semibold'

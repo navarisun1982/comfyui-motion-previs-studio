@@ -858,7 +858,9 @@ export const useShotStore = create<ShotState>((set, get) => {
         }
       }
 
-      logger.action(`Camera keyframed at ${clampedTime.toFixed(1)}s`, position);
+      if (!isGestureActive) {
+        logger.action(`Camera keyframed at ${clampedTime.toFixed(1)}s`, position);
+      }
       const updated: ShotSpec = {
         ...shot,
         camera: { ...shot.camera, movement: newMov },
@@ -1212,7 +1214,9 @@ export const useShotStore = create<ShotState>((set, get) => {
       const updatedActors = shot.actors.map((a) =>
         a.id === actorId ? { ...a, trajectory: updatedTrajectory } : a
       );
-      logger.action(`Updated "${target.name}" position at ${time.toFixed(1)}s`, position);
+      if (!isGestureActive) {
+        logger.action(`Updated "${target.name}" position at ${time.toFixed(1)}s`, position);
+      }
       const updated: ShotSpec = { ...shot, actors: updatedActors };
       commitShot(updated);
     },

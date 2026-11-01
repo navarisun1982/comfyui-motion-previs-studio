@@ -188,5 +188,25 @@ describe('Universal 3D Auto-Rigging & Volumetric Skinning Engine', () => {
     evaluateReadyMadeObjectClip(quadGroup, 'quad-gallop-charge', 0.35, 1);
     expect(frontLeftLeg.rotation.x).not.toBeCloseTo(initialRotX, 4);
   });
+
+  it('disables CPU triangle raycasting on auto-skinned meshes and caches skin weights on geometry', () => {
+    const group = createSyntheticHumanoidGroup('a-pose');
+    const firstMesh = group.children[0] as THREE.Mesh;
+    const srcGeom = firstMesh.geometry;
+
+    autoRigGltfScene(group, { rigType: 'humanoid', showBones: true });
+
+    // 1. Source geometry must cache computed skin weights for instant reuse
+    expect(srcGeom.userData.__cachedAutoSkin).toBeDefined();
+    expect(srcGeom.userData.__cachedLandmarks_humanoid).toBeDefined();
+
+    // 2. Raycasting the auto-rigged group must return 0 triangle intersections from SkinnedMesh
+    const raycaster = new THREE.Raycaster(
+      new THREE.Vector3(0, 3.2, 5),
+      new THREE.Vector3(0, 0, -1)
+    );
+    const hits = raycaster.intersectObjects(group.children, true);
+    expect(hits.length).toBe(0);
+  });
 });
 

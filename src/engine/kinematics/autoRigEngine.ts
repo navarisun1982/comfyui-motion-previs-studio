@@ -242,6 +242,18 @@ export function detectMeshRigLandmarks(
   rigType: ResolvedRigType = 'humanoid',
   overrides?: Partial<RigLandmarks>
 ): RigLandmarks {
+  let primaryGeom: THREE.BufferGeometry | null = null;
+  sceneRoot.traverse((child) => {
+    if (!primaryGeom && (child as THREE.Mesh).isMesh && !child.name.startsWith('__')) {
+      primaryGeom = (child as THREE.Mesh).geometry || null;
+    }
+  });
+  const cacheKey = `__cachedLandmarks_${rigType}`;
+  if (primaryGeom && (primaryGeom as THREE.BufferGeometry).userData?.[cacheKey]) {
+    const cachedBase = (primaryGeom as THREE.BufferGeometry).userData[cacheKey] as RigLandmarks;
+    return { ...cachedBase, ...overrides };
+  }
+
   const samples = sampleSceneVerticesLocal(sceneRoot);
   if (samples.length < 20) {
     return { ...DEFAULT_HUMANOID_LANDMARKS, ...overrides };
@@ -303,9 +315,11 @@ export function detectMeshRigLandmarks(
       quadBackLegX: legX,
       quadBackLegZ: backZ,
       detectedStance: 'quadruped',
-      ...overrides,
     };
-    return landmarks;
+    if (primaryGeom) {
+      (primaryGeom as THREE.BufferGeometry).userData[cacheKey] = landmarks;
+    }
+    return { ...landmarks, ...overrides };
   }
 
   // HUMANOID SILHOUETTE SLICE SCANNER
@@ -456,7 +470,7 @@ export function detectMeshRigLandmarks(
 
   const hipSpanX = THREE.MathUtils.clamp((kneeX + torsoHalfW * 0.75) * 0.5, 0.065, 0.135);
 
-  return {
+  const detectedBase: RigLandmarks = {
     hipsY,
     spineY,
     chestY,
@@ -470,6 +484,12 @@ export function detectMeshRigLandmarks(
     kneePos: [kneeX, 0.27, kneeZ],
     anklePos: [ankleX, 0.055, ankleZ],
     detectedStance,
+  };
+  if (primaryGeom) {
+    (primaryGeom as THREE.BufferGeometry).userData[cacheKey] = detectedBase;
+  }
+  return {
+    ...detectedBase,
     ...overrides,
   };
 }
@@ -969,102 +989,123 @@ function skinSceneMeshesToRig(
   let skinnedCount = 0;
   const vLocal = new THREE.Vector3();
   const vModel = new THREE.Vector3();
+  const skinCacheKey = `${rigType}::${H.toFixed(3)}::${JSON.stringify(landmarks)}`;
 
   for (const mesh of meshesToConvert) {
-    const geom = mesh.geometry ? mesh.geometry.clone() : null;
+    const srcGeom = mesh.geometry;
+    const geom = srcGeom ? srcGeom.clone() : null;
     const posAttr = geom?.attributes?.position;
     if (!geom || !posAttr || posAttr.count === 0) continue;
 
-    const meshToModel = new THREE.Matrix4().multiplyMatrices(invRootMat, mesh.matrixWorld);
-    const vCount = posAttr.count;
-    const skinIndices = new Uint16Array(vCount * 4);
-    const skinWeights = new Float32Array(vCount * 4);
+    const cachedSkin = srcGeom?.userData?.__cachedAutoSkin as
+      | { key: string; skinIndexAttr: THREE.Uint16BufferAttribute; skinWeightAttr: THREE.Float32BufferAttribute }
+      | undefined;
 
-    for (let i = 0; i < vCount; i++) {
-      vLocal.fromBufferAttribute(posAttr, i);
-      vModel.copy(vLocal).applyMatrix4(meshToModel);
+    if (cachedSkin && cachedSkin.key === skinCacheKey && cachedSkin.skinIndexAttr.count === posAttr.count) {
+      geom.setAttribute('skinIndex', cachedSkin.skinIndexAttr);
+      geom.setAttribute('skinWeight', cachedSkin.skinWeightAttr);
+    } else {
+      const meshToModel = new THREE.Matrix4().multiplyMatrices(invRootMat, mesh.matrixWorld);
+      const vCount = posAttr.count;
+      const skinIndices = new Uint16Array(vCount * 4);
+      const skinWeights = new Float32Array(vCount * 4);
 
-      // Find top 4 influencing bones using topology-aware capsule envelope weights
-      let b0 = 0, b1 = 0, b2 = 0, b3 = 0;
-      let w0 = 0, w1 = 0, w2 = 0, w3 = 0;
+      for (let i = 0; i < vCount; i++) {
+        vLocal.fromBufferAttribute(posAttr, i);
+        vModel.copy(vLocal).applyMatrix4(meshToModel);
 
-      for (let s = 0; s < segments.length; s++) {
-        const seg = segments[s];
+        // Find top 4 influencing bones using topology-aware capsule envelope weights
+        let b0 = 0, b1 = 0, b2 = 0, b3 = 0;
+        let w0 = 0, w1 = 0, w2 = 0, w3 = 0;
 
-        // 1. Sagittal Left/Right Anti-Cross-Bleed Gate
-        let penalty = 1.0;
-        if (seg.side === 'left' && vModel.x < -0.012 * H) {
-          penalty *= 0.002;
-        } else if (seg.side === 'right' && vModel.x > 0.012 * H) {
-          penalty *= 0.002;
-        }
+        for (let s = 0; s < segments.length; s++) {
+          const seg = segments[s];
 
-        // 2. Humanoid Arm vs Torso/Thigh Separation Gate
-        if (rigType === 'humanoid') {
-          const absX = Math.abs(vModel.x);
-          if (seg.region === 'arm' && absX < armSeamX * 0.78) {
-            penalty *= 0.02;
-          } else if (seg.region === 'torso' && absX > armSeamX * 1.15 && vModel.y < landmarks.shoulderY * H) {
-            penalty *= 0.08;
-          } else if (seg.region === 'leg' && vModel.y > hipsHeight * 1.06) {
-            penalty *= 0.01;
-          } else if (seg.region === 'head' && vModel.y < (landmarks.neckY - 0.05) * H) {
-            penalty *= 0.005;
+          // 1. Sagittal Left/Right Anti-Cross-Bleed Gate
+          let penalty = 1.0;
+          if (seg.side === 'left' && vModel.x < -0.012 * H) {
+            penalty *= 0.002;
+          } else if (seg.side === 'right' && vModel.x > 0.012 * H) {
+            penalty *= 0.002;
+          }
+
+          // 2. Humanoid Arm vs Torso/Thigh Separation Gate
+          if (rigType === 'humanoid') {
+            const absX = Math.abs(vModel.x);
+            if (seg.region === 'arm' && absX < armSeamX * 0.78) {
+              penalty *= 0.02;
+            } else if (seg.region === 'torso' && absX > armSeamX * 1.15 && vModel.y < landmarks.shoulderY * H) {
+              penalty *= 0.08;
+            } else if (seg.region === 'leg' && vModel.y > hipsHeight * 1.06) {
+              penalty *= 0.01;
+            } else if (seg.region === 'head' && vModel.y < (landmarks.neckY - 0.05) * H) {
+              penalty *= 0.005;
+            }
+          }
+
+          const dSq = distToSegmentSq(vModel, seg.start, seg.end);
+          const rSq = seg.radius * seg.radius;
+          const normalizedDistSq = dSq / Math.max(1e-6, rSq);
+          const weight = (1.0 / Math.pow(1.0 + normalizedDistSq * 1.35, 2.6)) * penalty;
+
+          // Accumulate if same boneIndex already in top 4
+          if (w0 > 0 && b0 === seg.boneIndex) {
+            w0 = Math.max(w0, weight);
+            continue;
+          }
+          if (w1 > 0 && b1 === seg.boneIndex) {
+            w1 = Math.max(w1, weight);
+            continue;
+          }
+
+          if (weight > w0) {
+            b3 = b2; w3 = w2;
+            b2 = b1; w2 = w1;
+            b1 = b0; w1 = w0;
+            b0 = seg.boneIndex; w0 = weight;
+          } else if (weight > w1) {
+            b3 = b2; w3 = w2;
+            b2 = b1; w2 = w1;
+            b1 = seg.boneIndex; w1 = weight;
+          } else if (weight > w2) {
+            b3 = b2; w3 = w2;
+            b2 = seg.boneIndex; w2 = weight;
+          } else if (weight > w3) {
+            b3 = seg.boneIndex; w3 = weight;
           }
         }
 
-        const dSq = distToSegmentSq(vModel, seg.start, seg.end);
-        const rSq = seg.radius * seg.radius;
-        const normalizedDistSq = dSq / Math.max(1e-6, rSq);
-        const weight = (1.0 / Math.pow(1.0 + normalizedDistSq * 1.35, 2.6)) * penalty;
-
-        // Accumulate if same boneIndex already in top 4
-        if (w0 > 0 && b0 === seg.boneIndex) {
-          w0 = Math.max(w0, weight);
-          continue;
-        }
-        if (w1 > 0 && b1 === seg.boneIndex) {
-          w1 = Math.max(w1, weight);
-          continue;
-        }
-
-        if (weight > w0) {
-          b3 = b2; w3 = w2;
-          b2 = b1; w2 = w1;
-          b1 = b0; w1 = w0;
-          b0 = seg.boneIndex; w0 = weight;
-        } else if (weight > w1) {
-          b3 = b2; w3 = w2;
-          b2 = b1; w2 = w1;
-          b1 = seg.boneIndex; w1 = weight;
-        } else if (weight > w2) {
-          b3 = b2; w3 = w2;
-          b2 = seg.boneIndex; w2 = weight;
-        } else if (weight > w3) {
-          b3 = seg.boneIndex; w3 = weight;
+        const sum = w0 + w1 + w2 + w3;
+        const base = i * 4;
+        if (sum > 1e-8) {
+          const invSum = 1.0 / sum;
+          skinIndices[base] = b0;
+          skinIndices[base + 1] = b1;
+          skinIndices[base + 2] = b2;
+          skinIndices[base + 3] = b3;
+          skinWeights[base] = w0 * invSum;
+          skinWeights[base + 1] = w1 * invSum;
+          skinWeights[base + 2] = w2 * invSum;
+          skinWeights[base + 3] = w3 * invSum;
+        } else {
+          skinIndices[base] = 0;
+          skinWeights[base] = 1.0;
         }
       }
 
-      const sum = w0 + w1 + w2 + w3;
-      const base = i * 4;
-      if (sum > 1e-8) {
-        const invSum = 1.0 / sum;
-        skinIndices[base] = b0;
-        skinIndices[base + 1] = b1;
-        skinIndices[base + 2] = b2;
-        skinIndices[base + 3] = b3;
-        skinWeights[base] = w0 * invSum;
-        skinWeights[base + 1] = w1 * invSum;
-        skinWeights[base + 2] = w2 * invSum;
-        skinWeights[base + 3] = w3 * invSum;
-      } else {
-        skinIndices[base] = 0;
-        skinWeights[base] = 1.0;
+      const skinIndexAttr = new THREE.Uint16BufferAttribute(skinIndices, 4);
+      const skinWeightAttr = new THREE.Float32BufferAttribute(skinWeights, 4);
+      geom.setAttribute('skinIndex', skinIndexAttr);
+      geom.setAttribute('skinWeight', skinWeightAttr);
+      if (srcGeom) {
+        srcGeom.userData = srcGeom.userData || {};
+        srcGeom.userData.__cachedAutoSkin = {
+          key: skinCacheKey,
+          skinIndexAttr,
+          skinWeightAttr,
+        };
       }
     }
-
-    geom.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndices, 4));
-    geom.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeights, 4));
 
     const skinnedMesh = new THREE.SkinnedMesh(geom, mesh.material);
     skinnedMesh.name = mesh.name || `SkinnedMesh_${skinnedCount}`;
@@ -1074,6 +1115,10 @@ function skinSceneMeshesToRig(
     skinnedMesh.castShadow = true;
     skinnedMesh.receiveShadow = true;
     skinnedMesh.frustumCulled = false;
+    // CRITICAL PERFORMANCE INVARIANT:
+    // Disable Three.js's O(N_triangles) CPU bone-skinning raycast on high-poly Image-to-3D meshes!
+    // Stage selection & dragging use the fast 12-segment `__actor_hit_proxy__` cylinder instead.
+    skinnedMesh.raycast = () => {};
     skinnedMesh.userData = { ...mesh.userData, isAutoSkinned: true };
 
     if (mesh.parent) {
@@ -1123,6 +1168,7 @@ export function createRigVisualOverlay(rig: HumanoidRig, visible = false): THREE
     sphere.name = '__bone_joint_sphere__';
     sphere.renderOrder = 999;
     sphere.visible = visible;
+    sphere.raycast = () => {};
     sphere.layers.set(1); // Editor gizmo layer 1 on stage
     bone.add(sphere);
   }
@@ -1150,6 +1196,7 @@ export function createRigVisualOverlay(rig: HumanoidRig, visible = false): THREE
   lineSegments.name = '__bone_connector_lines__';
   lineSegments.renderOrder = 998;
   lineSegments.frustumCulled = false;
+  lineSegments.raycast = () => {};
   lineSegments.layers.set(1);
 
   const pA = new THREE.Vector3();
