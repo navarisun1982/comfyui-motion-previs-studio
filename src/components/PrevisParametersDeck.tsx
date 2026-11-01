@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useShotStore, getEffectiveStageLights } from '../stores/useShotStore';
 import {
-  SubjectKind,
   FocalLength,
   ShotType,
   CameraAngle,
@@ -107,6 +106,21 @@ const LENS_OPTICS_INFO: Record<FocalLength, { fov: string; label: string; impact
   },
 };
 
+const PRIME_LENSES: FocalLength[] = [
+  '12mm',
+  '14mm',
+  '18mm',
+  '24mm',
+  '35mm',
+  '40mm',
+  '50mm',
+  '70mm',
+  '85mm',
+  '100mm',
+  '135mm',
+  '200mm',
+];
+
 const ANGLE_PSYCHOLOGY_INFO: Record<CameraAngle, string> = {
   'eye-level': 'Neutral empathy — places the audience on equal footing with the subject.',
   'low-angle': 'Heroic dominance — empowers the subject against the sky or ceiling.',
@@ -182,7 +196,6 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
   const [isSynthesizingEnv, setIsSynthesizingEnv] = useState(false);
   const [envPromptInput, setEnvPromptInput] = useState('');
   const [refiningActorId, setRefiningActorId] = useState<string | null>(null);
-  const [customObjectName, setCustomObjectName] = useState('');
 
   // AI Acting Director, Animation Time Window, Collapsible Cards & Bone Socketing local UI state
   const [generatingActingId, setGeneratingActingId] = useState<string | null>(null);
@@ -193,13 +206,11 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
   const [timingSectionOpenByActor, setTimingSectionOpenByActor] = useState<Record<string, boolean>>({});
   const [humanMotionGroupByActor, setHumanMotionGroupByActor] = useState<Record<string, HumanoidMotionGroup>>({});
   const [motionTravelModeByActor, setMotionTravelModeByActor] = useState<Record<string, 'auto' | 'travel' | 'in-place'>>({});
-  const [showQuickPropsDrawer, setShowQuickPropsDrawer] = useState(false);
   const [socketTargetActorId, setSocketTargetActorId] = useState<string>('');
   const [socketTargetBone, setSocketTargetBone] = useState<HumanoidBone>('RightHand');
 
   // Zero-Scroll Sub-Tabs & Collapsible Vertical Sections State
   const [cameraSubTab, setCameraSubTab] = useState<'optics' | 'trajectory' | 'all'>('optics');
-  const [showAddSubjectDrawer, setShowAddSubjectDrawer] = useState<boolean>(false);
   const [showCastPoolDrawer, setShowCastPoolDrawer] = useState<boolean>(false);
   const [envSubTab, setEnvSubTab] = useState<'presets' | 'weather' | 'all'>('presets');
   const [lightSubTab, setLightSubTab] = useState<'lights' | 'script' | 'all'>('lights');
@@ -311,10 +322,6 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
       }
     }
   }, [selectedActorId, activeTab]);
-
-  const handleAddSubjectKind = (kind: SubjectKind, customName?: string) => {
-    addActor(customName || (kind !== 'human' ? kind.charAt(0).toUpperCase() + kind.slice(1) : undefined), kind);
-  };
 
   const activeLensInfo = LENS_OPTICS_INFO[shot.camera.lens.focalLength] || LENS_OPTICS_INFO['35mm'];
   const activeAngleInfo = ANGLE_PSYCHOLOGY_INFO[shot.camera.angle] || ANGLE_PSYCHOLOGY_INFO['eye-level'];
@@ -503,95 +510,91 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
               </div>
             </div>
 
-            {/* 2. Expanded 12 Cinema Prime Lenses + Continuous Zoom Slider */}
+            {/* 2. Unified Camera Prime & Zoom Lens Slider (10–200mm + 12 Primes) */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <span className="font-display font-bold text-xs tracking-wide text-white">Camera Prime Lens (12 Primes)</span>
+                <span className="font-display font-bold text-xs tracking-wide text-white">Camera Lens (10–200mm & 12 Primes)</span>
                 <span className="font-mono text-[10px] text-blue-400 font-bold">
-                  {shot.camera.lens.customFocalLengthMm ? `${shot.camera.lens.customFocalLengthMm}mm Zoom` : shot.camera.lens.focalLength} • {activeLensInfo.fov} FOV ({activeLensInfo.label})
+                  {shot.camera.lens.customFocalLengthMm ? `${shot.camera.lens.customFocalLengthMm}mm` : shot.camera.lens.focalLength} • {activeLensInfo.fov} FOV ({activeLensInfo.label})
                 </span>
               </div>
-              <div className="grid grid-cols-6 gap-1 font-mono text-[9.5px]">
-                {(
-                  [
-                    '12mm',
-                    '14mm',
-                    '18mm',
-                    '24mm',
-                    '35mm',
-                    '40mm',
-                    '50mm',
-                    '70mm',
-                    '85mm',
-                    '100mm',
-                    '135mm',
-                    '200mm',
-                  ] as FocalLength[]
-                ).map((fl) => (
-                  <button
-                    key={fl}
-                    onClick={() => {
-                      setFocalLength(fl);
-                      updateCameraLens({ focalLength: fl, customFocalLengthMm: undefined });
-                    }}
-                    className={`rounded py-1 text-center transition-all flex flex-col items-center ${
-                      shot.camera.lens.focalLength === fl && !shot.camera.lens.customFocalLengthMm
-                        ? 'bg-gradient-to-b from-[#6658F5] to-[#5243E2] text-white font-bold shadow-[0_2px_8px_rgba(102,88,245,0.4)] border border-[#8E84FF]/60'
-                        : 'bg-[#131C2E] text-[#98A5BC] hover:text-white hover:bg-[#1A2436] border border-[#273247]'
-                    }`}
-                  >
-                    <span>{fl}</span>
-                    <span className="text-[7.5px] opacity-75">{LENS_OPTICS_INFO[fl].fov}</span>
-                  </button>
-                ))}
-              </div>
 
-              {/* Continuous Custom Focal Length / Zoom Slider + Sensor + Aperture + Focus Distance */}
-              <div className="rounded-xl bg-[#111827] border border-[#273247] p-2.5 space-y-2 font-mono text-[9.5px]">
-                <div className="grid grid-cols-2 gap-2.5">
-                  <div>
-                    <div className="flex justify-between text-slate-400 mb-0.5">
-                      <span>Zoom Lens (10–200mm)</span>
-                      <span className="text-indigo-300 font-bold">
-                        {shot.camera.lens.customFocalLengthMm ?? parseInt(shot.camera.lens.focalLength, 10)}mm
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={10}
-                      max={200}
-                      step={1}
-                      value={shot.camera.lens.customFocalLengthMm ?? parseInt(shot.camera.lens.focalLength, 10)}
-                      onChange={(e) => updateCameraLens({ customFocalLengthMm: Number(e.target.value) })}
-                      className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-indigo-500"
-                    />
+              <div className="rounded-xl bg-[#111827] border border-[#273247] p-2.5 space-y-2.5 font-mono text-[9.5px]">
+                {/* Unified Focal Length Slider + 12 Prime Stops */}
+                <div className="space-y-1.5">
+                  <input
+                    type="range"
+                    aria-label="Camera Prime and Zoom Lens Slider"
+                    min={10}
+                    max={200}
+                    step={1}
+                    value={shot.camera.lens.customFocalLengthMm ?? parseInt(shot.camera.lens.focalLength, 10)}
+                    onChange={(e) => {
+                      const mm = Number(e.target.value);
+                      const exactPrime = PRIME_LENSES.find((p) => parseInt(p, 10) === mm);
+                      const nearestPrime = PRIME_LENSES.reduce((prev, curr) =>
+                        Math.abs(parseInt(curr, 10) - mm) < Math.abs(parseInt(prev, 10) - mm) ? curr : prev
+                      );
+                      setFocalLength(nearestPrime);
+                      updateCameraLens({
+                        focalLength: nearestPrime,
+                        customFocalLengthMm: exactPrime ? undefined : mm,
+                      });
+                    }}
+                    className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[#6658F5]"
+                  />
+                  <div className="flex items-center justify-between text-[8.5px]">
+                    {PRIME_LENSES.map((fl) => {
+                      const currentMm = shot.camera.lens.customFocalLengthMm ?? parseInt(shot.camera.lens.focalLength, 10);
+                      const isActive = currentMm === parseInt(fl, 10);
+                      return (
+                        <button
+                          key={fl}
+                          type="button"
+                          onClick={() => {
+                            setFocalLength(fl);
+                            updateCameraLens({ focalLength: fl, customFocalLengthMm: undefined });
+                          }}
+                          title={`${fl} Prime (${LENS_OPTICS_INFO[fl].fov} FOV • ${LENS_OPTICS_INFO[fl].label})`}
+                          className={`px-1 py-0.5 rounded transition-all ${
+                            isActive
+                              ? 'bg-[#6658F5] text-white font-bold shadow-[0_1px_6px_rgba(102,88,245,0.5)]'
+                              : 'text-[#98A5BC] hover:text-white hover:bg-white/5'
+                          }`}
+                        >
+                          {fl.replace('mm', '')}
+                        </button>
+                      );
+                    })}
                   </div>
-                  <div>
-                    <div className="flex justify-between text-slate-400 mb-0.5">
-                      <span>Focus Plane Dist</span>
-                      <button
-                        type="button"
-                        onClick={() => updateCameraOptions({ showFocusPlane: shot.camera.showFocusPlane === false })}
-                        className={`text-[8.5px] px-1 rounded ${
-                          shot.camera.showFocusPlane !== false
-                            ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                            : 'bg-slate-800 text-slate-500'
-                        }`}
-                        title="Toggle 3D Focus Plane slice inside frustum"
-                      >
-                        {shot.camera.lens.focusDistanceMeters ?? 12}m {shot.camera.showFocusPlane !== false ? '• ON' : '• OFF'}
-                      </button>
-                    </div>
-                    <input
-                      type="range"
-                      min={2}
-                      max={50}
-                      step={1}
-                      value={shot.camera.lens.focusDistanceMeters ?? 12}
-                      onChange={(e) => updateCameraLens({ focusDistanceMeters: Number(e.target.value) })}
-                      className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-cyan-400"
-                    />
+                </div>
+
+                {/* Focus Plane Distance */}
+                <div className="pt-1 border-t border-slate-800/80">
+                  <div className="flex justify-between text-slate-400 mb-0.5">
+                    <span>Focus Plane Distance</span>
+                    <button
+                      type="button"
+                      onClick={() => updateCameraOptions({ showFocusPlane: shot.camera.showFocusPlane === false })}
+                      className={`text-[8.5px] px-1.5 py-0.5 rounded ${
+                        shot.camera.showFocusPlane !== false
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                          : 'bg-slate-800 text-slate-500'
+                      }`}
+                      title="Toggle 3D Focus Plane slice inside frustum"
+                    >
+                      {shot.camera.lens.focusDistanceMeters ?? 12}m {shot.camera.showFocusPlane !== false ? '• ON' : '• OFF'}
+                    </button>
                   </div>
+                  <input
+                    type="range"
+                    min={2}
+                    max={50}
+                    step={1}
+                    value={shot.camera.lens.focusDistanceMeters ?? 12}
+                    onChange={(e) => updateCameraLens({ focusDistanceMeters: Number(e.target.value) })}
+                    className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-cyan-400"
+                  />
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 pt-1">
@@ -1165,211 +1168,20 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
         {/* ================= TAB 2: CAST & STAGE (ZERO DUPLICATES + SCENE CAST POOL) ================= */}
         {activeTab === 'staging' && (
           <div className="p-3 space-y-2.5">
-            {/* 1. Unified Add to Stage Card — Individual Vertical Collapsible Panel */}
-            <div className="ui-card space-y-3">
-              <button
-                type="button"
-                onClick={() => setShowAddSubjectDrawer((v) => !v)}
-                className="w-full flex items-center justify-between gap-2 text-left group"
-                title="Expand or collapse Add Subject, Props & 3D Asset Library"
-              >
-                <span className="flex items-center gap-1.5 min-w-0">
-                  {showAddSubjectDrawer || shot.actors.length === 0 ? (
-                    <ChevronDown className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                  ) : (
-                    <ChevronRight className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                  )}
-                  <Plus className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                  <span className="font-display font-bold text-xs tracking-wide text-white group-hover:text-amber-200 transition-colors truncate">
-                    Add Subject or Prop
-                  </span>
-                </span>
-                <span className="font-mono text-[9.5px] px-2 py-0.5 rounded-md bg-white/[0.06] border border-white/10 text-slate-300 shrink-0">
-                  {showAddSubjectDrawer || shot.actors.length === 0 ? '▾ Hide' : '+ 1-Click Place / 200+ Models'}
-                </span>
-              </button>
-
-              <div className={showAddSubjectDrawer || shot.actors.length === 0 ? 'space-y-3 pt-1 border-t border-white/10' : 'hidden'}>
-              {/* 6 Primary Subject Cards */}
-              <div className="grid grid-cols-3 gap-2 font-mono">
-                <button
-                  onClick={() => handleAddSubjectKind('human')}
-                  className="flex items-center gap-2 rounded-xl bg-[#131C2E] border border-blue-500/30 px-2.5 py-2 text-slate-200 hover:bg-blue-600/25 hover:border-blue-400 transition-all text-left"
-                >
-                  <span className="text-lg shrink-0">👤</span>
-                  <div className="min-w-0">
-                    <div className="font-bold text-white text-[11px] leading-tight">Character</div>
-                    <div className="text-[9.5px] text-blue-300/80">IK Rigged</div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => addActor('Standee', 'cutout', 'a cutout standee photo card')}
-                  className="flex items-center gap-2 rounded-xl bg-[#131C2E] border border-purple-500/30 px-2.5 py-2 text-slate-200 hover:bg-purple-600/25 hover:border-purple-400 transition-all text-left"
-                >
-                  <span className="text-lg shrink-0">🖼️</span>
-                  <div className="min-w-0">
-                    <div className="font-bold text-white text-[11px] leading-tight">Standee</div>
-                    <div className="text-[9.5px] text-purple-300/80">2D Cutout</div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleAddSubjectKind('car')}
-                  className="flex items-center gap-2 rounded-xl bg-[#131C2E] border border-amber-500/30 px-2.5 py-2 text-slate-200 hover:bg-amber-600/25 hover:border-amber-400 transition-all text-left"
-                >
-                  <span className="text-lg shrink-0">🚗</span>
-                  <div className="min-w-0">
-                    <div className="font-bold text-white text-[11px] leading-tight">Vehicle</div>
-                    <div className="text-[9.5px] text-amber-300/80">Car Rig</div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleAddSubjectKind('tree')}
-                  className="flex items-center gap-2 rounded-xl bg-[#131C2E] border border-emerald-500/30 px-2.5 py-2 text-slate-200 hover:bg-emerald-600/25 hover:border-emerald-400 transition-all text-left"
-                >
-                  <span className="text-lg shrink-0">🌲</span>
-                  <div className="min-w-0">
-                    <div className="font-bold text-white text-[11px] leading-tight">Tree</div>
-                    <div className="text-[9.5px] text-emerald-300/80">Foliage</div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleAddSubjectKind('table')}
-                  className="flex items-center gap-2 rounded-xl bg-[#131C2E] border border-orange-500/30 px-2.5 py-2 text-slate-200 hover:bg-orange-600/25 hover:border-orange-400 transition-all text-left"
-                >
-                  <span className="text-lg shrink-0">🪑</span>
-                  <div className="min-w-0">
-                    <div className="font-bold text-white text-[11px] leading-tight">Table</div>
-                    <div className="text-[9.5px] text-orange-300/80">Furniture</div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleAddSubjectKind('chair')}
-                  className="flex items-center gap-2 rounded-xl bg-[#131C2E] border border-cyan-500/30 px-2.5 py-2 text-slate-200 hover:bg-cyan-600/25 hover:border-cyan-400 transition-all text-left"
-                >
-                  <span className="text-lg shrink-0">💺</span>
-                  <div className="min-w-0">
-                    <div className="font-bold text-white text-[11px] leading-tight">Chair</div>
-                    <div className="text-[9.5px] text-cyan-300/80">Seat</div>
-                  </div>
-                </button>
-              </div>
-
-              {/* Custom Procedural Object Input + Collapsible Quick Props Drawer */}
-              <div className="space-y-2 pt-2 border-t border-white/10">
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="text"
-                    placeholder="Type any 3D object (Spaceship, Boat, Robot, Sofa)..."
-                    value={customObjectName}
-                    onChange={(e) => setCustomObjectName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && customObjectName.trim()) {
-                        handleAddSubjectKind(customObjectName.trim().toLowerCase(), customObjectName.trim());
-                        setCustomObjectName('');
-                      }
-                    }}
-                    className="flex-1 bg-[#0b0e16] border border-white/15 rounded-lg px-2.5 py-1.5 text-[11px] text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 font-mono"
-                  />
-                  <button
-                    onClick={() => {
-                      if (customObjectName.trim()) {
-                        handleAddSubjectKind(customObjectName.trim().toLowerCase(), customObjectName.trim());
-                        setCustomObjectName('');
-                      }
-                    }}
-                    disabled={!customObjectName.trim()}
-                    className="px-3 py-1.5 rounded-lg bg-director-gold text-director-darkest font-bold text-[11px] disabled:opacity-40 hover:brightness-110 transition-all"
-                  >
-                    + Add
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowQuickPropsDrawer((v) => !v)}
-                    className="ui-btn text-[10.5px] px-2.5 py-1.5"
-                    title="Show quick-add props and greybox primitives"
-                  >
-                    <span>{showQuickPropsDrawer ? '▾ Less' : '+ More Props'}</span>
-                  </button>
-                </div>
-
-                {showQuickPropsDrawer && (
-                  <div className="rounded-lg bg-[#0c0f18] border border-white/10 p-2.5 space-y-2">
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        { label: '🚀 Spaceship', val: 'spaceship' },
-                        { label: '🚤 Boat', val: 'boat' },
-                        { label: '🚁 Helicopter', val: 'helicopter' },
-                        { label: '🏔️ Mountain', val: 'mountain' },
-                        { label: '📺 TV', val: 'tv' },
-                        { label: '🏠 House', val: 'house' },
-                        { label: '🛋️ Sofa', val: 'sofa' },
-                        { label: '🤖 Robot', val: 'robot' },
-                      ].map((item) => (
-                        <button
-                          key={item.val}
-                          onClick={() => handleAddSubjectKind(item.val, item.label.replace(/^[^\s]+\s+/, ''))}
-                          className="ui-chip text-[10.5px]"
-                        >
-                          {item.label}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-1.5 flex-wrap pt-1.5 border-t border-white/10">
-                      <span className="text-[10px] font-mono text-slate-400 mr-1">Greybox:</span>
-                      <button
-                        type="button"
-                        onClick={() => addActor('Cube Block', 'cube', 'a greybox cube blocking prop')}
-                        className="ui-chip text-[10px]"
-                      >
-                        +⬛ Cube
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => addActor('Cylinder', 'cylinder', 'a greybox cylinder column')}
-                        className="ui-chip text-[10px]"
-                      >
-                        +🏛️ Cylinder
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => addActor('Ground Plane', 'plane', 'a ground stage plane')}
-                        className="ui-chip text-[10px]"
-                      >
-                        +📐 Plane
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddSubjectKind('prop')}
-                        className="ui-chip text-[10px]"
-                      >
-                        +📦 Crate
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 3D Asset Library Button */}
-              <button
-                type="button"
-                onClick={() => openAssetLibrary()}
-                className="w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-amber-600/90 via-indigo-600/90 to-purple-600/90 hover:from-amber-500 hover:via-indigo-500 hover:to-purple-500 text-white font-bold text-xs flex items-center justify-between shadow-lg border border-amber-400/40 transition-all cursor-pointer"
-              >
-                <span className="flex items-center gap-2">
-                  <span className="text-sm">📦</span>
-                  <span>Browse 3D Asset Library &amp; AI Studio</span>
-                </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-black/45 border border-white/20 text-amber-200">
-                  200+ Models
-                </span>
-              </button>
-              </div>
-            </div>
+            {/* 1. Single Top Button to Open the 3D Asset Library & AI Studio Popup (No Collapsible Drawer) */}
+            <button
+              type="button"
+              onClick={() => openAssetLibrary()}
+              className="w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-amber-600/90 via-indigo-600/90 to-purple-600/90 hover:from-amber-500 hover:via-indigo-500 hover:to-purple-500 text-white font-bold text-xs flex items-center justify-between shadow-lg border border-amber-400/40 transition-all cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <Plus className="h-4 w-4 text-amber-300 shrink-0" />
+                <span>Add Subject or Prop</span>
+              </span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-black/45 border border-white/20 text-amber-200">
+                Upload / 200+ Ready-Made
+              </span>
+            </button>
 
             {/* 2. Scene Cast Pool — Individual Vertical Collapsible Panel */}
             <div className="rounded-xl bg-[#121A2A] border border-[#6658F5]/35 shadow-sm p-2.5 space-y-2">

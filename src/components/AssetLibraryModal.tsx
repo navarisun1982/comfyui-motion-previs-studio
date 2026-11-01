@@ -635,6 +635,34 @@ export const AssetLibraryModal: React.FC = () => {
           </div>
         </div>
 
+        {/* Quick-Place Stage Essentials Bar (Ready-Made Actors, Primitives & Standees) */}
+        <div className="flex items-center gap-1.5 overflow-x-auto border-b border-white/10 px-6 py-2 bg-[#0c101b] no-scrollbar font-mono text-[10.5px]">
+          <span className="text-amber-300 font-bold whitespace-nowrap mr-1">⚡ Quick Place:</span>
+          {[
+            { label: '👤 Character (IK Rig)', name: undefined, kind: 'human' as const, prompt: undefined },
+            { label: '🖼️ 2D Standee', name: 'Standee', kind: 'cutout' as const, prompt: 'a cutout standee photo card' },
+            { label: '🚗 Vehicle', name: 'Car', kind: 'car' as const, prompt: undefined },
+            { label: '🌲 Tree', name: 'Tree', kind: 'tree' as const, prompt: undefined },
+            { label: '🪑 Table', name: 'Table', kind: 'table' as const, prompt: undefined },
+            { label: '💺 Chair', name: 'Chair', kind: 'chair' as const, prompt: undefined },
+            { label: '⬛ Cube', name: 'Cube Block', kind: 'cube' as const, prompt: 'a greybox cube blocking prop' },
+            { label: '🏛️ Cylinder', name: 'Cylinder', kind: 'cylinder' as const, prompt: 'a greybox cylinder column' },
+            { label: '📐 Plane', name: 'Ground Plane', kind: 'plane' as const, prompt: 'a ground stage plane' },
+          ].map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => {
+                addActor(item.name, item.kind, item.prompt);
+                closeLibrary();
+              }}
+              className="flex items-center gap-1 rounded-lg bg-[#131C2E] hover:bg-indigo-600/30 border border-indigo-500/30 hover:border-indigo-400 px-2.5 py-1 text-slate-200 hover:text-white whitespace-nowrap transition-all cursor-pointer"
+            >
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+
         {/* Categories Bar */}
         <div className="flex items-center gap-1.5 overflow-x-auto border-b border-white/10 px-6 py-2 bg-[#090b12] no-scrollbar">
           {CATEGORIES.map((cat) => {
