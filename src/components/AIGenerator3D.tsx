@@ -845,11 +845,11 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:text-white hover:bg-rose-500/25 hover:border-rose-400/40 text-xs font-semibold transition-colors cursor-pointer"
-              title="Close 3D Generator"
+              aria-label="Close 3D Generator"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:text-white hover:bg-rose-500/25 hover:border-rose-400/40 transition-colors cursor-pointer"
+              title="Close"
             >
               <X className="h-4 w-4" />
-              <span>Close</span>
             </button>
           </div>
         </div>

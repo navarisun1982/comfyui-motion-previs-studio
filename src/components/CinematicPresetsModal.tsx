@@ -246,10 +246,13 @@ export const CinematicPresetsModal: React.FC<CinematicPresetsModalProps> = ({ is
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-director-surface hover:text-white transition-colors"
+            aria-label="Close Presets"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:bg-rose-500/25 hover:border-rose-400/40 hover:text-white transition-colors cursor-pointer"
+            title="Close"
           >
-            <X className="h-5 w-5" />
+            <X className="h-4 w-4" />
           </button>
         </div>
 
@@ -324,13 +327,6 @@ export const CinematicPresetsModal: React.FC<CinematicPresetsModalProps> = ({ is
         {/* Modal Footer */}
         <div className="flex items-center justify-between border-t border-director-border px-6 py-3 bg-director-panel/60 font-mono text-xs text-slate-400">
           <span>Tip: You can fine-tune any camera parameter after applying a preset</span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg px-4 py-1.5 text-slate-300 hover:text-white"
-          >
-            Close
-          </button>
         </div>
       </div>
     </div>

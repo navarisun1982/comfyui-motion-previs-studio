@@ -102,10 +102,11 @@ export const BundledWorkflowsModal: React.FC<BundledWorkflowsModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="flex items-center gap-1 px-2.5 py-2 rounded-xl border border-white/15 bg-white/5 hover:bg-rose-500/25 hover:border-rose-400/40 text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
+              aria-label="Close Workflows Pack"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-rose-500/25 hover:border-rose-400/40 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              title="Close"
             >
               <X className="h-4 w-4" />
-              <span>Close</span>
             </button>
           </div>
         </div>

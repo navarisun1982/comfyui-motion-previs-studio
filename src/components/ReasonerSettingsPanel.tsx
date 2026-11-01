@@ -50,6 +50,7 @@ import {
   Zap,
   Download,
   GitBranch,
+  X,
 } from 'lucide-react';
 import { GlbResourcesDirectory } from './GlbResourcesDirectory';
 import { CustomWorkflowConfigBar } from './CustomWorkflowConfigBar';
@@ -417,15 +418,17 @@ export const ReasonerSettingsPanel: React.FC<{
       }}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-slate-200 tracking-wide">Studio Settings · AI Reasoner, ComfyUI Workflows &amp; 3D Resources</span>
+        <span className="text-xs font-bold text-slate-200 tracking-wide">Studio Settings</span>
         {onClose && (
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg border border-white/15 bg-white/5 hover:bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
+            aria-label="Close Studio Settings"
+            title="Close"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-rose-500/25 hover:border-rose-400/40 text-slate-300 hover:text-white transition-colors cursor-pointer"
             id="reasoner-settings-close"
           >
-            ✕ Close
+            <X className="h-4 w-4" />
           </button>
         )}
       </div>

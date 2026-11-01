@@ -51,9 +51,10 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
 
         {/* Close Button */}
         <button
+          type="button"
           onClick={handleDismiss}
-          className="absolute right-4 top-4 rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
-          title="Close guide"
+          className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:bg-rose-500/25 hover:border-rose-400/40 hover:text-white transition-colors cursor-pointer"
+          title="Close"
           aria-label="Close guide"
         >
           <X className="h-4 w-4" />

@@ -428,16 +428,15 @@ export const AssetLibraryModal: React.FC = () => {
               <span>Multi-Select {selectedAssetIds.size > 0 && `(${selectedAssetIds.size})`}</span>
             </button>
 
-            {/* Prominent Close Button */}
+            {/* Top-Right X Close Button */}
             <button
               type="button"
               onClick={closeLibrary}
               aria-label="Close 3D Asset Library"
-              className="flex items-center gap-1 rounded-lg border border-white/20 bg-white/10 px-2.5 py-1.5 text-xs font-semibold text-slate-200 hover:bg-rose-500/25 hover:border-rose-400/50 hover:text-white transition-colors shrink-0 cursor-pointer"
-              title="Close Library (Esc)"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:bg-rose-500/25 hover:border-rose-400/50 hover:text-white transition-colors shrink-0 cursor-pointer"
+              title="Close (Esc)"
             >
               <X className="h-4 w-4" />
-              <span>Close</span>
             </button>
           </div>
         </div>
@@ -998,14 +997,6 @@ export const AssetLibraryModal: React.FC = () => {
           </div>
           <div className="flex items-center gap-3">
             <span className="hidden sm:inline">ComfyUI Motion Previs Studio • 3D Asset Ecosystem</span>
-            <button
-              type="button"
-              onClick={closeLibrary}
-              className="flex items-center gap-1 rounded-lg border border-white/15 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200 hover:bg-white/15 hover:text-white transition-colors cursor-pointer"
-            >
-              <X className="h-3.5 w-3.5" />
-              <span>Close Library (Esc)</span>
-            </button>
           </div>
         </div>
       </div>
