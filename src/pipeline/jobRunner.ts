@@ -22,6 +22,7 @@ export interface ExecuteJobOptions {
   controlVideoFilename?: string;
   refImageBlobs?: Array<Blob | File | null>;
   refImageFilenames?: [string, string, string, string];
+  refImageDescriptions?: [string, string, string, string];
   icLora?: string;
   icLoraStrength?: number;
   client?: ComfyClient;
@@ -88,11 +89,12 @@ export class JobRunner {
       controlVideoFilename = uploadRes.name;
     }
 
-    const resolvedRefImages: [string, string, string, string] = [
-      options.refImageFilenames?.[0] || 'char1.png',
-      options.refImageFilenames?.[1] || 'char2.png',
-      options.refImageFilenames?.[2] || 'char3.png',
-      options.refImageFilenames?.[3] || 'char4.png',
+    const defaultFallback = options.engine === 'minimax-h3';
+    const resolvedRefImages: [string | undefined, string | undefined, string | undefined, string | undefined] = [
+      options.refImageFilenames?.[0]?.trim() || (defaultFallback ? 'char1.png' : undefined),
+      options.refImageFilenames?.[1]?.trim() || (defaultFallback ? 'char2.png' : undefined),
+      options.refImageFilenames?.[2]?.trim() || (defaultFallback ? 'char3.png' : undefined),
+      options.refImageFilenames?.[3]?.trim() || (defaultFallback ? 'char4.png' : undefined),
     ];
     if (options.refImageBlobs && options.refImageBlobs.length > 0) {
       for (let i = 0; i < 4; i++) {
@@ -139,6 +141,7 @@ export class JobRunner {
       refImage2File: resolvedRefImages[1],
       refImage3File: resolvedRefImages[2],
       refImage4File: resolvedRefImages[3],
+      refImageDescriptions: options.refImageDescriptions,
       icLora: options.icLora,
       icLoraStrength: options.icLoraStrength,
       filenamePrefix: `cmpvs_${options.shot.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_v${options.shot.version}`,

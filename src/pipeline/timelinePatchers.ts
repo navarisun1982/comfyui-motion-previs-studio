@@ -17,6 +17,13 @@ export interface TimelinePatchContext {
   firstFrameFile?: string;
   /** ComfyUI input-folder filename of the uploaded geometric control/previs video (Control). */
   controlVideoFile?: string;
+  /** Optional character/subject reference image filenames in ComfyUI input folder (Slots 1-4). */
+  refImage1File?: string;
+  refImage2File?: string;
+  refImage3File?: string;
+  refImage4File?: string;
+  /** Optional character/subject descriptions corresponding to Slots 1-4 for @ref1..@ref4 substitution. */
+  refImageDescriptions?: [string, string, string, string];
   durationSeconds: number;
   frameRate: number;
 }
@@ -103,6 +110,42 @@ const ltxFirstFramePatcher: TimelinePatcher = {
       result.retakeVideo = ctx.controlVideoFile;
       result.retakeMode = true;
       result.retakeStrength = 0.8;
+      result.motionTrackEnabled = true;
+      result.motionSegments = [
+        {
+          id: 'previs_motion_1',
+          videoFile: ctx.controlVideoFile,
+          start: 0,
+          length: snappedFrames,
+          trimStart: 0,
+        },
+      ];
+    }
+
+    const refFiles = [ctx.refImage1File, ctx.refImage2File, ctx.refImage3File, ctx.refImage4File];
+    const hasAnyRef = refFiles.some((f) => typeof f === 'string' && f.trim().length > 0);
+    if (hasAnyRef) {
+      const existingChars = Array.isArray(data.characters) ? [...data.characters] : [];
+      const nextChars = [0, 1, 2, 3, 4].map((idx) => {
+        const existing = isPlainObject(existingChars[idx]) ? { ...existingChars[idx] } : { images: [], description: '' };
+        const refFile = idx < 4 ? refFiles[idx]?.trim() : undefined;
+        const desc =
+          idx < 4
+            ? ctx.refImageDescriptions?.[idx] ?? (typeof existing.description === 'string' ? existing.description : '')
+            : typeof existing.description === 'string'
+            ? existing.description
+            : '';
+        if (refFile) {
+          return {
+            ...existing,
+            images: [{ b64: '', name: refFile }],
+            description: desc,
+          };
+        }
+        return existing;
+      });
+      result.characters = nextChars;
+      result.reference_mode = 'Ghost Mask (End)';
     }
 
     return result;

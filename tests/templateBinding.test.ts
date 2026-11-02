@@ -340,6 +340,37 @@ describe('bundled production templates', () => {
     expect(timelineData.disable_prompt_relay).toBe(true);
     expect(timelineData.segments[0].type).toBe('image');
     expect(timelineData.segments[0].imageFile).toBe('first_frame_upload.png');
+
+    // Bind Control mode with 3D Previs video + 4 Reference Images & Descriptions
+    const controlRes = bindTemplate(apiRaw, parsed.binding!, {
+      mode: 'control',
+      profile: 'final',
+      prompt: '@ref1 runs through the neon alley toward @ref2',
+      negative: '',
+      seed: 7777,
+      durationSeconds: 5,
+      frameRate: 24,
+      aspectRatio: '16:9',
+      width: 1280,
+      height: 704,
+      filenamePrefix: 'ltx_control_shot',
+      controlVideoFile: 'alley_previs_control.mp4',
+      refImage1File: 'char1.png',
+      refImage2File: 'char2.png',
+      refImage3File: 'char3.png',
+      refImage4File: 'char4.png',
+      refImageDescriptions: ['Agent Mercer in trenchcoat', 'Armored drone', 'Holo briefcase', 'Rainy neon alley'],
+    });
+
+    expect(controlRes.workflow['7'].inputs.use_custom_motion).toBe(true);
+    const controlTimeline = JSON.parse(controlRes.workflow['7'].inputs.timeline_data as string);
+    expect(controlTimeline.motionTrackEnabled).toBe(true);
+    expect(controlTimeline.motionSegments[0].videoFile).toBe('alley_previs_control.mp4');
+    expect(controlTimeline.reference_mode).toBe('Ghost Mask (End)');
+    expect(controlTimeline.characters[0].images[0].name).toBe('char1.png');
+    expect(controlTimeline.characters[0].description).toBe('Agent Mercer in trenchcoat');
+    expect(controlTimeline.characters[3].images[0].name).toBe('char4.png');
+    expect(controlTimeline.characters[3].description).toBe('Rainy neon alley');
   });
 
   it('loads, verifies, and binds h3_stubelius without errors', async () => {

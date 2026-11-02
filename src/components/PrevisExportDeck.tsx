@@ -281,26 +281,29 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       }
 
       // Fetch blob from object URL + resolve any DataURL thumbnails uploaded in Directing Stage into Blobs!
-      setComfyStatusText(
-        targetEngine === 'ltx-2.5'
-          ? 'Step 2/3: Uploading 3D Previs MP4 to ComfyUI (127.0.0.1:8188)...'
-          : 'Step 2/3: Uploading 3D Previs MP4 & Reference Images to ComfyUI (127.0.0.1:8188)...'
-      );
+      setComfyStatusText('Step 2/3: Uploading 3D Previs MP4 & Reference Images to ComfyUI (127.0.0.1:8188)...');
       const previsBlob = await (await fetch(rgbUrl)).blob();
 
       const resolvedRefBlobs: [Blob | null, Blob | null, Blob | null, Blob | null] = [null, null, null, null];
-      if (targetEngine === 'minimax-h3') {
-        for (let i = 0; i < 4; i++) {
-          if (refImageFiles[i]) {
-            resolvedRefBlobs[i] = refImageFiles[i];
-          } else if (refImageThumbs[i]) {
-            try {
-              const res = await fetch(refImageThumbs[i]!);
-              resolvedRefBlobs[i] = await res.blob();
-            } catch {
-              resolvedRefBlobs[i] = null;
-            }
+      const refImageDescriptions: [string, string, string, string] = ['', '', '', ''];
+      for (let i = 0; i < 4; i++) {
+        if (refImageFiles[i]) {
+          resolvedRefBlobs[i] = refImageFiles[i];
+        } else if (refImageThumbs[i]) {
+          try {
+            const res = await fetch(refImageThumbs[i]!);
+            resolvedRefBlobs[i] = await res.blob();
+          } catch {
+            resolvedRefBlobs[i] = null;
           }
+        }
+
+        const slotTarget = refSlotTargets[i];
+        if (slotTarget === 'environment') {
+          refImageDescriptions[i] = shot.environment?.promptDescription || shot.environment?.name || 'Active studio environment';
+        } else if (slotTarget && slotTarget !== 'custom') {
+          const matchedActor = shot.actors.find((a) => a.id === slotTarget);
+          refImageDescriptions[i] = matchedActor?.token || matchedActor?.name || '';
         }
       }
 
@@ -345,8 +348,9 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
         seed: Math.max(0, Math.floor(comfySeed)),
         promptSource: 'compiled',
         controlVideoBlob: previsBlob,
-        refImageBlobs: targetEngine === 'minimax-h3' ? resolvedRefBlobs : undefined,
-        refImageFilenames: targetEngine === 'minimax-h3' ? trimmedRefs : undefined,
+        refImageBlobs: resolvedRefBlobs,
+        refImageFilenames: trimmedRefs,
+        refImageDescriptions,
         onProgress: (pct, title) => {
           setComfyStatusText(`ComfyUI Executing (${pct}%): ${title}`);
         },
@@ -967,7 +971,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   <p className="text-[10px] font-mono text-slate-400">
                     {activeEngineTab === 'ltx-2.5' ? (
                       <>
-                        Template: <span className="text-amber-300 font-semibold">ltx25_stubelius</span> (Distilled 22B INT8 • Node 7 LTXDirectorCS25 Previs Video → Node 15 MP4)
+                        Template: <span className="text-amber-300 font-semibold">ltx25_stubelius</span> (Distilled 22B INT8 • Node 7 LTXDirectorCS25 Previs Video + 4 Ref Images → Node 15 MP4)
                       </>
                     ) : (
                       <>
@@ -1109,7 +1113,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                         {displayObjectTitle}
                       </span>
                       <span className="text-[8.5px] font-mono text-indigo-300 bg-indigo-500/15 border border-indigo-400/30 px-1.5 py-0.2 rounded shrink-0">
-                        &lt;pic {idx + 1}&gt; #{nodeIds[idx]}
+                        {activeEngineTab === 'ltx-2.5' ? `@ref${idx + 1} #7` : `<pic ${idx + 1}> #${nodeIds[idx]}`}
                       </span>
                     </div>
 
@@ -1248,10 +1252,12 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 );
               })}
 
-              {/* Seed Control (Node 142) */}
+              {/* Seed Control (Node 3 for LTX-2.5 / Node 142 for MiniMax H3) */}
               <div className="rounded-xl bg-black/50 border border-white/10 p-2 flex flex-col gap-1">
                 <div className="flex items-center justify-between text-[9px] font-mono">
-                  <span className="text-amber-300 font-bold">SEED (Node 142)</span>
+                  <span className="text-amber-300 font-bold">
+                    {activeEngineTab === 'ltx-2.5' ? 'SEED (Node 3)' : 'SEED (Node 142)'}
+                  </span>
                   <button
                     type="button"
                     onClick={() => setComfySeed(Math.floor(Math.random() * 900000000000000) + 100000000000000)}

@@ -30,6 +30,7 @@ export interface BindValues {
   refImage2File?: string;
   refImage3File?: string;
   refImage4File?: string;
+  refImageDescriptions?: [string, string, string, string];
   icLora?: string;
   icLoraStrength?: number;
   filenamePrefix: string;
@@ -82,6 +83,11 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
     mode: values.mode,
     firstFrameFile: values.firstFrameFile,
     controlVideoFile: values.controlVideoFile,
+    refImage1File: values.refImage1File,
+    refImage2File: values.refImage2File,
+    refImage3File: values.refImage3File,
+    refImage4File: values.refImage4File,
+    refImageDescriptions: values.refImageDescriptions,
     durationSeconds: values.durationSeconds,
     frameRate: values.frameRate,
   };
@@ -91,6 +97,19 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
       const value = resolveTargetValue(binding, field, target, values, workflow, patchCtx);
       workflow[target.node].inputs[target.input] = value;
       applied.push({ field, node: target.node, input: target.input, value });
+
+      // Enable LTXDirectorCS25 motion guidance when a control video is bound to timeline_data
+      if (
+        field === 'timeline' &&
+        workflow[target.node]?.class_type === 'LTXDirectorCS25' &&
+        values.mode === 'control' &&
+        values.controlVideoFile
+      ) {
+        const nodeInputs = workflow[target.node].inputs;
+        if ('use_custom_motion' in nodeInputs) {
+          nodeInputs.use_custom_motion = true;
+        }
+      }
 
       // Keep LTXDirectorCS25 companion frame/second inputs synchronized with durationSeconds
       if (
