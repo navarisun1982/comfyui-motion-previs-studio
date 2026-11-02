@@ -219,7 +219,8 @@ function applyShared3DBranchOptimizations(
     }
   }
 
-  // Always remove extra UI-only Preview3DAdvanced nodes (246, 323) so ComfyUI only writes the final GLB once
+  // Always remove extra UI-only Preview3DAdvanced and dead SaveImage nodes (4, 246, 247, 323) so ComfyUI only writes the final GLB once
+  delete api['4'];
   delete api['246'];
   delete api['247'];
   delete api['323'];

@@ -1127,7 +1127,7 @@ export async function reasonEnvironment(
 
   opts.onStage?.(`Reasoning filming environment with ${describeReasoner(cfg)}...`);
 
-  const modes: JsonMode[] = protocol === 'ollama' ? ['schema'] : ['schema', 'object', 'none'];
+  const modes: JsonMode[] = protocol === 'ollama' ? ['schema', 'object'] : ['schema', 'object', 'none'];
   let text = '';
   try {
     for (let i = 0; i < modes.length; i++) {
@@ -1136,6 +1136,7 @@ export async function reasonEnvironment(
           ? buildOllamaRequest(
               cfg,
               prompt,
+              modes[i],
               ENVIRONMENT_REASONER_SYSTEM_PROMPT,
               ENVIRONMENT_JSON_SCHEMA,
               'Filming location / environment to reason: '

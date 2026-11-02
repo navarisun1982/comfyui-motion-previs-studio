@@ -1562,7 +1562,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
     return () => window.removeEventListener('click', handleClickOutside);
   }, []);
 
-  // Hydrate initial Shot 01A showcase scene when starting from generic fallback
+  // Hydrate initial Shot 01A showcase scene only when starting from the uninitialized generic fallback
   useEffect(() => {
     const current = useShotStore.getState().shot;
     const firstScene = scenes[0];
@@ -1570,10 +1570,12 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
     if (
       firstShotItem &&
       current.id === 'shot-01a' &&
+      current.name === 'Shot 01A Tracking In' &&
       current.actors.length === 1 &&
-      current.actors[0]?.id === 'actor-1'
+      current.actors[0]?.id === 'actor-1' &&
+      current.actors[0]?.token === 'a lone traveler in a weathered jacket'
     ) {
-      const built = buildDefaultShotSpec(firstShotItem);
+      const built = { ...buildDefaultShotSpec(firstShotItem), name: firstShotItem.code };
       useShotStore.getState().loadShot(built);
       if (onSelectShot) {
         onSelectShot(firstShotItem.id, firstShotItem.code, firstScene.name);
@@ -1587,11 +1589,13 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
     safeSetItem(STORAGE_KEYS.SCENES, scenes);
   }, [scenes]);
 
-  // Sync active shot duration & focal length to Left Panel card, and keep shot.name aligned with card's main name (code)
+  // Sync active shot duration & focal length to Left Panel card
   useEffect(() => {
     if (!shot?.id) return;
     const durationStr = `${shot.durationSeconds || 4}s`;
-    const focalStr = shot.camera?.lens?.focalLength || '35mm';
+    const focalStr = shot.camera?.lens?.customFocalLengthMm
+      ? `${Math.round(shot.camera.lens.customFocalLengthMm)}mm`
+      : shot.camera?.lens?.focalLength || '35mm';
 
     setScenes((prev) => {
       let changed = false;
@@ -1615,29 +1619,19 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
       });
       return changed ? next : prev;
     });
-  }, [shot?.id, shot?.durationSeconds, shot?.camera?.lens?.focalLength]);
-
-  // Keep global shot.name synced with the active card's main name (code)
-  useEffect(() => {
-    if (!shot?.id) return;
-    for (const sc of scenes) {
-      const found = sc.shots.find((sh) => sh.id === shot.id);
-      if (found && shot.name !== found.code) {
-        updateShotName(found.code);
-        break;
-      }
-    }
-  }, [shot?.id, scenes, shot?.name, updateShotName]);
+  }, [shot?.id, shot?.durationSeconds, shot?.camera?.lens?.focalLength, shot?.camera?.lens?.customFocalLengthMm]);
 
   const toggleScene = (sceneId: string) => {
     setCollapsedScenes((prev) => ({ ...prev, [sceneId]: !prev[sceneId] }));
   };
 
-  const handleSelectShot = (shotItem: SceneItem['shots'][0]) => {
+  const handleSelectShot = (shotItem: SceneItem['shots'][0], customFallback?: () => ShotSpec) => {
     const parentScene = scenes.find((s) => s.shots.some((sh) => sh.id === shotItem.id));
     if (onSelectShot) onSelectShot(shotItem.id, shotItem.code, parentScene?.name);
-    switchShot(shotItem.id, () => buildDefaultShotSpec(shotItem));
-    updateShotName(shotItem.code);
+    switchShot(
+      shotItem.id,
+      customFallback || (() => ({ ...buildDefaultShotSpec(shotItem), name: shotItem.code }))
+    );
   };
 
   const handleCreateNewScene = () => {
@@ -1763,12 +1757,23 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
       title: `${shotItem.title} (Copy)`,
     };
 
+    const storeState = useShotStore.getState();
+    const sourceSpec =
+      (storeState.shot.id === shotItem.id ? storeState.shot : storeState.shotsById[shotItem.id]) ||
+      buildDefaultShotSpec(shotItem);
+    const clonedSpec: ShotSpec = {
+      ...JSON.parse(JSON.stringify(sourceSpec)),
+      id: duplicatedShot.id,
+      name: duplicatedShot.code,
+      timestamp: Date.now(),
+    };
+
     const updatedScenes = scenes.map((s) =>
       s.id === sceneId ? { ...s, shots: [...s.shots, duplicatedShot] } : s
     );
 
     setScenes(updatedScenes);
-    handleSelectShot(duplicatedShot);
+    handleSelectShot(duplicatedShot, () => clonedSpec);
     setOpenMenuShotId(null);
   };
 

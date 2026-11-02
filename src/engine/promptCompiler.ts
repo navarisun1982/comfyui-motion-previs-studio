@@ -8,140 +8,275 @@ export function formatEnvironment(env?: EnvironmentSpec): string {
     env.weather && env.weather !== 'clear' ? `weather condition ${env.weather}` : '',
     env.timeOfDay ? `time of day ${env.timeOfDay.replace(/-/g, ' ')}` : '',
     env.groundSurface ? `ground surface ${env.groundSurface.replace(/-/g, ' ')}` : '',
-    env.fogDensity && env.fogDensity > 0.25 ? `atmospheric haze and volumetric fog (density ${Math.round(env.fogDensity * 100)}%)` : '',
+    env.fogDensity && env.fogDensity >= 0.015 ? `atmospheric haze and volumetric fog (density ${Math.round(env.fogDensity * 100)}%)` : '',
   ].filter(Boolean);
   return parts.join(', ');
 }
 
-export function formatCameraMovement(type: CameraMovementType, speed: string): string {
+export function formatCameraMovement(
+  type: CameraMovementType,
+  speed: string,
+  movementOpts?: {
+    arcCurve?: number;
+    trackTargetActorId?: string;
+    keyframes?: Array<{ time: number; position: { x: number; y: number; z?: number }; cueLabel?: string }>;
+  }
+): string {
   const speedPhrase = speed === 'slow-cinematic' ? 'slow, controlled' : speed === 'rapid-dynamic' ? 'fast, energetic' : 'steady, continuous';
   
+  let baseMove = '';
   switch (type) {
     case 'dolly-in':
-      return `steady camera dolly-in (dolly in) push, camera physically moving forward toward the subject at a ${speedPhrase} pace, creating increasing emotional intimacy`;
+      baseMove = `steady camera dolly-in (dolly in) push, camera physically moving forward toward the subject at a ${speedPhrase} pace, creating increasing emotional intimacy`;
+      break;
     case 'dolly-out':
-      return `smooth camera dolly-out (dolly out) pull, camera smoothly moving backward away from the subject at a ${speedPhrase} pace, revealing the surrounding environment`;
+      baseMove = `smooth camera dolly-out (dolly out) pull, camera smoothly moving backward away from the subject at a ${speedPhrase} pace, revealing the surrounding environment`;
+      break;
     case 'truck-left':
-      return `smooth horizontal truck left, camera laterally sliding to the left parallel to the action at a ${speedPhrase} pace`;
+      baseMove = `smooth horizontal truck left, camera laterally sliding to the left parallel to the action at a ${speedPhrase} pace`;
+      break;
     case 'truck-right':
-      return `smooth horizontal truck right, camera laterally sliding to the right parallel to the action at a ${speedPhrase} pace`;
+      baseMove = `smooth horizontal truck right, camera laterally sliding to the right parallel to the action at a ${speedPhrase} pace`;
+      break;
     case 'pedestal-up':
-      return `vertical pedestal-up movement, camera physically elevating upward vertically at a ${speedPhrase} pace`;
+      baseMove = `vertical pedestal-up movement, camera physically elevating upward vertically at a ${speedPhrase} pace`;
+      break;
     case 'pedestal-down':
-      return `vertical pedestal-down movement, camera descending downward toward the floor at a ${speedPhrase} pace`;
+      baseMove = `vertical pedestal-down movement, camera descending downward toward the floor at a ${speedPhrase} pace`;
+      break;
     case 'pan-left':
-      return `panning camera rotation to the left, smooth rotational scan across the space`;
+      baseMove = `panning camera rotation to the left, smooth rotational scan across the space`;
+      break;
     case 'pan-right':
-      return `panning camera rotation to the right, sweeping rotational scan across the space`;
+      baseMove = `panning camera rotation to the right, sweeping rotational scan across the space`;
+      break;
     case 'tilt-up':
-      return `tilting camera upward, rotating camera axis up toward the ceiling/sky`;
+      baseMove = `tilting camera upward, rotating camera axis up toward the ceiling/sky`;
+      break;
     case 'tilt-down':
-      return `tilting camera downward, rotating camera axis down toward the subject's feet/ground`;
+      baseMove = `tilting camera downward, rotating camera axis down toward the subject's feet/ground`;
+      break;
     case 'orbit-clockwise':
-      return `smooth 360 orbit camera arc moving clockwise around the focal subject, dynamic volumetric parallax`;
+      baseMove = `smooth 360 orbit camera arc moving clockwise around the focal subject, dynamic volumetric parallax`;
+      break;
     case 'orbit-counter-clockwise':
-      return `smooth circular orbit arc moving counter-clockwise around the focal subject, dynamic volumetric parallax`;
+      baseMove = `smooth circular orbit arc moving counter-clockwise around the focal subject, dynamic volumetric parallax`;
+      break;
     case 'zoom-in':
-      return `optical zoom-in lens compression, focal length narrowing toward subject, background compression`;
+      baseMove = `optical zoom-in lens compression, focal length narrowing toward subject, background compression`;
+      break;
     case 'zoom-out':
-      return `optical zoom-out lens expansion, wide perspective reveal`;
+      baseMove = `optical zoom-out lens expansion, wide perspective reveal`;
+      break;
     case 'handheld-subtle':
-      return `subtle organic handheld camera feel, breathing cinematic realism with gentle natural stabilization`;
+      baseMove = `subtle organic handheld camera feel, breathing cinematic realism with gentle natural stabilization`;
+      break;
     case 'whip-pan':
-      return `rapid whip-pan transition, fast motion blur swish`;
+      baseMove = `rapid whip-pan transition, fast motion blur swish`;
+      break;
     case 'rack-focus':
-      return `cinematic rack focus transition, smoothly shifting critical optical focus plane from foreground to background`;
+      baseMove = `cinematic rack focus transition, smoothly shifting critical optical focus plane from foreground to background`;
+      break;
     case 'crash-zoom':
-      return `rapid crash-zoom snap telephoto rush, high-energy focal length punch-in toward the focal subject`;
+      baseMove = `rapid crash-zoom snap telephoto rush, high-energy focal length punch-in toward the focal subject`;
+      break;
     case 'fpv-dive':
-      return `dynamic FPV drone aerial dive, sweeping three-dimensional plunge with banked horizon roll`;
+      baseMove = `dynamic FPV drone aerial dive, sweeping three-dimensional plunge with banked horizon roll`;
+      break;
     case 'dolly-zoom-vertigo':
-      return `Hitchcock dolly-zoom vertigo effect, camera physically moving backward while lens simultaneously zooms in, keeping subject scale constant while background perspective warps dramatically`;
+      baseMove = `Hitchcock dolly-zoom vertigo effect, camera physically moving backward while lens simultaneously zooms in, keeping subject scale constant while background perspective warps dramatically`;
+      break;
     case 'steadicam-follow':
-      return `fluid Steadicam tracking rig following the subject at a ${speedPhrase} pace, maintaining constant framing distance with smooth gimbal stabilization`;
+      baseMove = `fluid Steadicam tracking rig following the subject at a ${speedPhrase} pace, maintaining constant framing distance with smooth gimbal stabilization`;
+      break;
     case 'crane-arc':
-      return `sweeping jib crane arc movement, camera rising and curving gracefully across the set with rich multi-plane parallax`;
+      baseMove = `sweeping jib crane arc movement, camera rising and curving gracefully across the set with rich multi-plane parallax`;
+      break;
     case 'spiral-orbit-in':
-      return `tightening spiral orbit camera movement, circling around the subject while progressively pushing closer into an intimate frame`;
+      baseMove = `tightening spiral orbit camera movement, circling around the subject while progressively pushing closer into an intimate frame`;
+      break;
     case 'static':
     default:
-      return `locked-off tripod shot, completely stable, motionless camera frame`;
+      baseMove = `locked-off tripod shot, completely stable, motionless camera frame`;
+      break;
   }
+
+  const extras: string[] = [];
+  if (typeof movementOpts?.arcCurve === 'number' && Math.abs(movementOpts.arcCurve) > 0.5) {
+    extras.push(`following a ${movementOpts.arcCurve > 0 ? 'rightward' : 'leftward'} curved arc trajectory`);
+  }
+  if (movementOpts?.trackTargetActorId) {
+    extras.push(`actively tracking the focal subject`);
+  }
+  if (movementOpts?.keyframes && movementOpts.keyframes.length > 0) {
+    extras.push(`passing through ${movementOpts.keyframes.length} choreographed camera waypoint(s)`);
+  }
+  return extras.length > 0 ? `${baseMove}, ${extras.join(', ')}` : baseMove;
 }
 
-export function formatLens(focalLength: FocalLength, aperture: string): string {
+export function formatLens(
+  focalLength: FocalLength,
+  aperture: string,
+  customFocalLengthMm?: number,
+  sensorSize?: string
+): string {
+  const sensorPhrase =
+    sensorSize === 'imax-65mm'
+      ? 'large-format IMAX 65mm sensor'
+      : sensorSize === 'anamorphic-2x'
+      ? '2x anamorphic cinema sensor'
+      : sensorSize === 'super-35'
+      ? 'Super-35 cinema sensor'
+      : sensorSize === 'full-frame'
+      ? 'Full-Frame 35mm sensor'
+      : '';
+  const sensorSuffix = sensorPhrase ? ` on a ${sensorPhrase}` : '';
+
+  if (typeof customFocalLengthMm === 'number' && Number.isFinite(customFocalLengthMm) && `${customFocalLengthMm}mm` !== focalLength) {
+    const mm = Math.round(customFocalLengthMm);
+    const charDesc =
+      mm <= 16
+        ? 'ultra-wide rectilinear perspective with dramatic spatial depth'
+        : mm <= 28
+        ? 'wide-angle cinema framing with strong environmental context'
+        : mm <= 45
+        ? 'natural narrative cinema field of view'
+        : mm <= 65
+        ? 'true-to-eye standard focal length with zero distortion'
+        : mm <= 105
+        ? 'intimate portrait telephoto compression with creamy shallow depth of field'
+        : 'long telephoto axial background compression and subject isolation';
+    return `${mm}mm custom cinema lens${sensorSuffix}, ${charDesc} at ${aperture}`;
+  }
+
   switch (focalLength) {
     case '12mm':
-      return `extreme ultra-wide 12mm rectilinear cinema lens, 122-degree dramatic spatial depth, towering close foregrounds, deep focus`;
+      return `extreme ultra-wide 12mm rectilinear cinema lens${sensorSuffix}, 122-degree dramatic spatial depth, towering close foregrounds, deep focus`;
     case '14mm':
-      return `ultra-wide 14mm cinema prime lens, 114-degree sweeping architectural scale, dramatic perspective convergence`;
+      return `ultra-wide 14mm cinema prime lens${sensorSuffix}, 114-degree sweeping architectural scale, dramatic perspective convergence`;
     case '18mm':
-      return `ultra-wide 18mm lens, broad expansive field of view, subtle wide-angle perspective distortion at edges, deep focus`;
+      return `ultra-wide 18mm lens${sensorSuffix}, broad expansive field of view, subtle wide-angle perspective distortion at edges, deep focus`;
     case '24mm':
-      return `wide 24mm lens, environmental framing with cinematic presence, crisp background context`;
+      return `wide 24mm lens${sensorSuffix}, environmental framing with cinematic presence, crisp background context`;
     case '35mm':
-      return `classic 35mm cinema prime lens, natural human perspective, gentle background separation at ${aperture}`;
+      return `classic 35mm cinema prime lens${sensorSuffix}, natural human perspective, gentle background separation at ${aperture}`;
     case '40mm':
-      return `40mm anamorphic cinema prime lens, classic widescreen storytelling perspective, oval bokeh highlights at ${aperture}`;
+      return `40mm anamorphic cinema prime lens${sensorSuffix}, classic widescreen storytelling perspective, oval bokeh highlights at ${aperture}`;
     case '50mm':
-      return `50mm lens, standard focal length prime, zero perspective distortion, natural cinematic depth of field at ${aperture}`;
+      return `50mm lens${sensorSuffix}, standard focal length prime, zero perspective distortion, natural cinematic depth of field at ${aperture}`;
     case '70mm':
-      return `70mm large-format IMAX cinema lens, rich medium-telephoto dimensionality, razor-sharp subject presence at ${aperture}`;
+      return `70mm large-format IMAX cinema lens${sensorSuffix}, rich medium-telephoto dimensionality, razor-sharp subject presence at ${aperture}`;
     case '85mm':
-      return `85mm telephoto portrait lens, creamy shallow depth of field, compressed background bokeh at ${aperture}, isolated subject`;
+      return `85mm telephoto portrait lens${sensorSuffix}, creamy shallow depth of field, compressed background bokeh at ${aperture}, isolated subject`;
     case '100mm':
-      return `100mm macro-portrait cinema prime lens, intimate detail rendering, velvety background melt at ${aperture}`;
+      return `100mm macro-portrait cinema prime lens${sensorSuffix}, intimate detail rendering, velvety background melt at ${aperture}`;
     case '135mm':
-      return `135mm long telephoto lens, extreme cinematic background compression, soft creamy bokeh`;
+      return `135mm long telephoto lens${sensorSuffix}, extreme cinematic background compression, soft creamy bokeh`;
     case '200mm':
-      return `200mm super-telephoto cinema lens, dramatic axial background compression, shallow razor-thin focal plane at ${aperture}`;
+      return `200mm super-telephoto cinema lens${sensorSuffix}, dramatic axial background compression, shallow razor-thin focal plane at ${aperture}`;
     default:
-      return `${focalLength} lens, cinematic optics`;
+      return `${focalLength} lens${sensorSuffix}, cinematic optics`;
   }
 }
 
-export function formatCameraAngle(angle: CameraAngle, shotType: string): string {
+export function formatCameraAngle(
+  angle: CameraAngle,
+  shotType: string,
+  cameraOpts?: {
+    dutchRollDeg?: number;
+    pitchOffsetDeg?: number;
+    yawOffsetDeg?: number;
+    shakeIntensity?: number;
+  }
+): string {
   const shotPhrase = shotType.replace(/-/g, ' ');
+  let baseAngle = '';
   switch (angle) {
     case 'low-angle':
-      return `${shotPhrase} shot, low-angle perspective looking up at subject, conveying stature and authority`;
+      baseAngle = `${shotPhrase} shot, low-angle perspective looking up at subject, conveying stature and authority`;
+      break;
     case 'high-angle':
-      return `${shotPhrase} shot, high-angle perspective angled downward, vulnerable composition`;
+      baseAngle = `${shotPhrase} shot, high-angle perspective angled downward, vulnerable composition`;
+      break;
     case 'overhead-gods-eye':
-      return `overhead god's eye view, perpendicular top-down vertical perspective`;
+      baseAngle = `overhead god's eye view, perpendicular top-down vertical perspective`;
+      break;
     case 'ground-level':
-      return `ground-level perspective, camera skimming just above the surface`;
+      baseAngle = `ground-level perspective, camera skimming just above the surface`;
+      break;
     case 'dutch-angle':
-      return `${shotPhrase} shot, Dutch tilt angle, canted horizon line evoking psychological tension`;
+      baseAngle = `${shotPhrase} shot, Dutch tilt angle, canted horizon line evoking psychological tension`;
+      break;
     case 'eye-level':
     default:
-      return `${shotPhrase} shot, neutral eye-level framing, balanced horizontal composition`;
+      baseAngle = `${shotPhrase} shot, neutral eye-level framing, balanced horizontal composition`;
+      break;
   }
+
+  const rigNotes: string[] = [];
+  if (cameraOpts?.dutchRollDeg && Math.abs(cameraOpts.dutchRollDeg) >= 2) {
+    rigNotes.push(`canted ${Math.round(cameraOpts.dutchRollDeg)}° Dutch horizon roll`);
+  }
+  if (cameraOpts?.pitchOffsetDeg && Math.abs(cameraOpts.pitchOffsetDeg) >= 2) {
+    rigNotes.push(`${cameraOpts.pitchOffsetDeg > 0 ? 'upward' : 'downward'} ${Math.abs(Math.round(cameraOpts.pitchOffsetDeg))}° pitch offset`);
+  }
+  if (cameraOpts?.yawOffsetDeg && Math.abs(cameraOpts.yawOffsetDeg) >= 2) {
+    rigNotes.push(`${Math.round(cameraOpts.yawOffsetDeg)}° yaw offset`);
+  }
+  if (cameraOpts?.shakeIntensity && cameraOpts.shakeIntensity >= 0.05) {
+    const shakeDesc = cameraOpts.shakeIntensity >= 0.5 ? 'kinetic handheld camera shake' : 'subtle organic handheld micro-shake';
+    rigNotes.push(shakeDesc);
+  }
+  return rigNotes.length > 0 ? `${baseAngle} (${rigNotes.join(', ')})` : baseAngle;
 }
 
-export function formatLighting(style: LightingStyle, direction: LightingDirection, contrast: string): string {
+export function formatLighting(
+  style: LightingStyle,
+  direction: LightingDirection,
+  contrast: string,
+  customLights?: Array<{ name: string; color: string; intensity: number; enabled?: boolean }>
+): string {
   const dirPhrase = direction.replace(/-/g, ' ');
   const contrastPhrase = contrast === 'high-contrast' ? 'stark chiaroscuro contrast' : contrast === 'soft' ? 'soft diffused shadows' : 'balanced cinematic contrast';
   
+  let baseLight = '';
   switch (style) {
     case 'low-key-film-noir':
-      return `low-key film noir lighting, ${dirPhrase} light source with deep rich shadows and ${contrastPhrase}`;
+      baseLight = `low-key film noir lighting, ${dirPhrase} light source with deep rich shadows and ${contrastPhrase}`;
+      break;
     case 'neon-cyberpunk':
-      return `stylized cyberpunk volumetric lighting, saturated neon rim lights and practical street reflections, ${contrastPhrase}`;
+      baseLight = `stylized cyberpunk volumetric lighting, saturated neon rim lights and practical street reflections, ${contrastPhrase}`;
+      break;
     case 'golden-hour':
-      return `warm golden-hour sunlight, long warm shadows, backlit rim glow, ${dirPhrase}`;
+      baseLight = `warm golden-hour sunlight, long warm shadows, backlit rim glow, ${dirPhrase}`;
+      break;
     case 'moonlight-foggy':
-      return `cool atmospheric moonlight through subtle fog, desaturated blue hues, ${dirPhrase}`;
+      baseLight = `cool atmospheric moonlight through subtle fog, desaturated blue hues, ${dirPhrase}`;
+      break;
     case 'practical-candlelight':
-      return `warm flickering candlelight glow, intimate falloff, deep shadow roll-off`;
+      baseLight = `warm flickering candlelight glow, intimate falloff, deep shadow roll-off`;
+      break;
     case 'harsh-fluorescent':
-      return `clinical fluorescent overhead tubes, cool greenish-white tint, industrial atmosphere`;
+      baseLight = `clinical fluorescent overhead tubes, cool greenish-white tint, industrial atmosphere`;
+      break;
     case 'high-key-studio':
-      return `high-key commercial lighting, clean even illumination across the scene, minimal shadows`;
+      baseLight = `high-key commercial lighting, clean even illumination across the scene, minimal shadows`;
+      break;
     case 'cinematic-natural':
     default:
-      return `natural cinematic film lighting, realistic ambient bounce, ${dirPhrase} illumination with ${contrastPhrase}`;
+      baseLight = `natural cinematic film lighting, realistic ambient bounce, ${dirPhrase} illumination with ${contrastPhrase}`;
+      break;
   }
+
+  const activeCustomLights = (customLights || []).filter((l) => l.enabled !== false);
+  if (activeCustomLights.length > 1) {
+    const rigDesc = activeCustomLights
+      .slice(0, 4)
+      .map((l) => `${l.name} (${l.color}, intensity ${l.intensity.toFixed(1)})`)
+      .join(', ');
+    return `${baseLight}, illuminated by multi-point stage rig [${rigDesc}]`;
+  }
+  return baseLight;
 }
 
 /**
@@ -195,37 +330,50 @@ export function buildTemporalTimeline(shot: ShotSpec): TemporalPromptBeat[] {
       const startZone = describeStagePosition(startPos);
       const endZone = describeStagePosition(endPos);
 
-      const kfs = (actor.trajectory?.keyframes || []).filter((k) => k.posePreset || k.cueLabel);
+      const kfs = (actor.trajectory?.keyframes || []).filter((k) => k.posePreset || k.cueLabel || k.gait);
       const openCue = kfs.find((k) => k.time <= t1);
       const midCue = kfs.find((k) => k.time > t1 && k.time <= t2);
       const closeCue = kfs.find((k) => k.time > t2);
 
-      const openPoseStr = openCue ? ` (${cleanCueText(openCue.cueLabel) || `${openCue.posePreset?.replace(/-/g, ' ')} pose`})` : '';
-      const midPoseStr = midCue ? `, transitioning into ${cleanCueText(midCue.cueLabel) || `${midCue.posePreset?.replace(/-/g, ' ')} pose`}` : '';
-      const closePoseStr = closeCue ? `, settling into ${cleanCueText(closeCue.cueLabel) || `${closeCue.posePreset?.replace(/-/g, ' ')} pose`}` : '';
+      const formatCueDetail = (k?: typeof openCue) => {
+        if (!k) return '';
+        const label = cleanCueText(k.cueLabel) || (k.posePreset ? `${k.posePreset.replace(/-/g, ' ')} pose` : '');
+        const gaitNote = k.gait && k.gait !== 'auto' && k.gait !== 'none' ? `${k.gait} gait` : '';
+        return [label, gaitNote].filter(Boolean).join(', ');
+      };
+
+      const openPoseStr = formatCueDetail(openCue) ? ` (${formatCueDetail(openCue)})` : '';
+      const midPoseStr = formatCueDetail(midCue) ? `, transitioning into ${formatCueDetail(midCue)}` : '';
+      const closePoseStr = formatCueDetail(closeCue) ? `, settling into ${formatCueDetail(closeCue)}` : '';
 
       const socketStr = actor.socketToBone ? ` (attached to bone ${actor.socketToBone.boneName})` : '';
+      const exprStr = '';
+      const clipStr = actor.motionClip
+        ? ` [motion clip: ${actor.motionClip.replace(/-/g, ' ')}${actor.motionCycles && actor.motionCycles > 1 ? ` ×${actor.motionCycles} cycles` : ''}]`
+        : actor.motionCycles && actor.motionCycles > 1
+        ? ` [×${actor.motionCycles} cycles]`
+        : '';
 
       if (phase === 'open') {
         if (actStart > t1) {
-          return `${actor.name}${socketStr} holds initial position in the ${startZone}${openPoseStr}`;
+          return `${actor.name}${socketStr}${exprStr} holds initial position in the ${startZone}${openPoseStr}`;
         }
         if (hasDisplacement) {
-          return `${actor.name}${socketStr} begins in the ${startZone} and initiates movement${openPoseStr}: ${actor.actionDescription}`;
+          return `${actor.name}${socketStr}${exprStr} begins in the ${startZone} and initiates movement${openPoseStr}${clipStr}: ${actor.actionDescription}`;
         }
-        return `${actor.name}${socketStr} remains positioned in the ${startZone}: ${actor.actionDescription}`;
+        return `${actor.name}${socketStr}${exprStr} remains positioned in the ${startZone}${clipStr}: ${actor.actionDescription}`;
       }
       if (phase === 'mid') {
         if (hasDisplacement) {
-          return `${actor.name}${socketStr} advances continuously from the ${startZone} toward the ${endZone}${midPoseStr} with fluid, lifelike human biomechanics—grounded heel-to-toe footsteps, natural hip weight transfer, relaxed shoulder counter-rotation, natural elbow flexion, and realistic garment drape`;
+          return `${actor.name}${socketStr}${exprStr} advances continuously from the ${startZone} toward the ${endZone}${midPoseStr} with fluid, lifelike human biomechanics—grounded heel-to-toe footsteps, natural hip weight transfer, relaxed shoulder counter-rotation, natural elbow flexion, and realistic garment drape`;
         }
-        return `${actor.name}${socketStr} stays anchored in the ${startZone} (${actor.actionDescription})`;
+        return `${actor.name}${socketStr}${exprStr} stays anchored in the ${startZone} (${actor.actionDescription})`;
       }
       // close
       if (hasDisplacement) {
-        return `${actor.name}${socketStr} arrives in the ${endZone}${closePoseStr}, settling posture and holding eyeline toward the camera`;
+        return `${actor.name}${socketStr}${exprStr} arrives in the ${endZone}${closePoseStr}, settling posture and holding eyeline toward the camera`;
       }
-      return `${actor.name}${socketStr} holds steady presence in the ${startZone} through the final frame`;
+      return `${actor.name}${socketStr}${exprStr} holds steady presence in the ${startZone} through the final frame`;
     }).join('; ');
   };
 
@@ -260,10 +408,29 @@ export function buildTemporalTimeline(shot: ShotSpec): TemporalPromptBeat[] {
  * - Zero comma-soup/buzzwords ("masterpiece, 8k").
  */
 export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
-  const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed);
-  const lensInfo = formatLens(shot.camera.lens.focalLength, shot.camera.lens.aperture);
-  const angleInfo = formatCameraAngle(shot.camera.angle, shot.camera.shotType);
-  const lightInfo = formatLighting(shot.lighting.style, shot.lighting.direction, shot.lighting.contrast);
+  const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed, {
+    arcCurve: shot.camera.movement.arcCurve,
+    trackTargetActorId: shot.camera.trackTargetActorId,
+    keyframes: shot.camera.movement.keyframes,
+  });
+  const lensInfo = formatLens(
+    shot.camera.lens.focalLength,
+    shot.camera.lens.aperture,
+    shot.camera.lens.customFocalLengthMm,
+    shot.camera.lens.sensorSize
+  );
+  const angleInfo = formatCameraAngle(shot.camera.angle, shot.camera.shotType, {
+    dutchRollDeg: shot.camera.dutchRollDeg,
+    pitchOffsetDeg: shot.camera.pitchOffsetDeg,
+    yawOffsetDeg: shot.camera.yawOffsetDeg,
+    shakeIntensity: shot.camera.movement.shakeIntensity,
+  });
+  const lightInfo = formatLighting(
+    shot.lighting.style,
+    shot.lighting.direction,
+    shot.lighting.contrast,
+    shot.lighting.lights
+  );
   const timeline = buildTemporalTimeline(shot);
 
   const duration = shot.durationSeconds.toFixed(1);
@@ -330,20 +497,39 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
  * - overall_soundscape & non_diegetic_music: Drives the MiniMax H3 audio VAE decoder.
  */
 export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
-  const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed);
-  const lensInfo = formatLens(shot.camera.lens.focalLength, shot.camera.lens.aperture);
-  const angleInfo = formatCameraAngle(shot.camera.angle, shot.camera.shotType);
-  const lightInfo = formatLighting(shot.lighting.style, shot.lighting.direction, shot.lighting.contrast);
+  const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed, {
+    arcCurve: shot.camera.movement.arcCurve,
+    trackTargetActorId: shot.camera.trackTargetActorId,
+    keyframes: shot.camera.movement.keyframes,
+  });
+  const lensInfo = formatLens(
+    shot.camera.lens.focalLength,
+    shot.camera.lens.aperture,
+    shot.camera.lens.customFocalLengthMm,
+    shot.camera.lens.sensorSize
+  );
+  const angleInfo = formatCameraAngle(shot.camera.angle, shot.camera.shotType, {
+    dutchRollDeg: shot.camera.dutchRollDeg,
+    pitchOffsetDeg: shot.camera.pitchOffsetDeg,
+    yawOffsetDeg: shot.camera.yawOffsetDeg,
+    shakeIntensity: shot.camera.movement.shakeIntensity,
+  });
+  const lightInfo = formatLighting(
+    shot.lighting.style,
+    shot.lighting.direction,
+    shot.lighting.contrast,
+    shot.lighting.lights
+  );
   const timeline = buildTemporalTimeline(shot);
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
   const defaultPalette = ['#EF4444', '#06B6D4', '#F59E0B', '#10B981'];
 
-  // Build up to 3 actor subject definitions (<Subject 1..3>) + <Subject 4> environment
+  // Build actor subject definitions (<Subject 1..3>) + <Subject 4> environment
   const subjectDefLines: string[] = [];
   const retentionLines: string[] = [];
   const proxySpatialAnchors: string[] = [];
 
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < Math.min(3, Math.max(1, shot.actors.length)); i++) {
     const actor = shot.actors[i];
     const subjIdx = i + 1;
     if (actor) {
@@ -377,13 +563,15 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
           `<Subject ${subjIdx}> (appears in [Shot 1]): attribute_transfer - strictly retain the ${horizZone} position, scale, and orientation from <Video 1>, rendered with the realistic appearance of <picture ${subjIdx}>.`
         );
       }
-    } else {
-      subjectDefLines.push(
-        `<Subject ${subjIdx}> is an auxiliary scene element defined by <picture ${subjIdx}>, preserving natural material fidelity within the shot.`
-      );
-      retentionLines.push(
-        `<Subject ${subjIdx}> (appears in [Shot 1]): attribute_transfer - preserve reference appearance from <picture ${subjIdx}>.`
-      );
+    }
+  }
+  if (shot.actors.length > 3) {
+    for (let i = 3; i < shot.actors.length; i++) {
+      const extraActor = shot.actors[i];
+      const hex = (extraActor.color || defaultPalette[i % defaultPalette.length]).toUpperCase();
+      const startPos = extraActor.trajectory?.startPosition ?? { x: 50, y: 50 };
+      const horizZone = startPos.x < 40 ? 'screen-left' : startPos.x > 60 ? 'screen-right' : 'center-frame';
+      proxySpatialAnchors.push(`${extraActor.name} (${extraActor.token}) replaces the ${hex} proxy in the ${horizZone}`);
     }
   }
 
@@ -457,10 +645,29 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
  *   sequential cue timetables, spatial volumetric lighting, and optical sensor profiles.
  */
 export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
-  const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed);
-  const lensInfo = formatLens(shot.camera.lens.focalLength, shot.camera.lens.aperture);
-  const angleInfo = formatCameraAngle(shot.camera.angle, shot.camera.shotType);
-  const lightInfo = formatLighting(shot.lighting.style, shot.lighting.direction, shot.lighting.contrast);
+  const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed, {
+    arcCurve: shot.camera.movement.arcCurve,
+    trackTargetActorId: shot.camera.trackTargetActorId,
+    keyframes: shot.camera.movement.keyframes,
+  });
+  const lensInfo = formatLens(
+    shot.camera.lens.focalLength,
+    shot.camera.lens.aperture,
+    shot.camera.lens.customFocalLengthMm,
+    shot.camera.lens.sensorSize
+  );
+  const angleInfo = formatCameraAngle(shot.camera.angle, shot.camera.shotType, {
+    dutchRollDeg: shot.camera.dutchRollDeg,
+    pitchOffsetDeg: shot.camera.pitchOffsetDeg,
+    yawOffsetDeg: shot.camera.yawOffsetDeg,
+    shakeIntensity: shot.camera.movement.shakeIntensity,
+  });
+  const lightInfo = formatLighting(
+    shot.lighting.style,
+    shot.lighting.direction,
+    shot.lighting.contrast,
+    shot.lighting.lights
+  );
   const timeline = buildTemporalTimeline(shot);
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
 

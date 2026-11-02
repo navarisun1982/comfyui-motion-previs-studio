@@ -156,10 +156,24 @@ export class JobRunner {
     let capturedVideoUrl: string | null = null;
     let capturedFilename: string | null = null;
     let isCompleted = false;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let unregister: (() => void) | null = null;
+
+    const cleanupJobListeners = () => {
+      if (pollInterval !== null) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+      if (unregister) {
+        unregister();
+        unregister = null;
+      }
+    };
 
     const finalizeSuccess = async () => {
       if (isCompleted) return;
       isCompleted = true;
+      cleanupJobListeners();
 
       // If video wasn't captured directly via WS packet, check /history
       if (!capturedVideoUrl) {
@@ -208,7 +222,7 @@ export class JobRunner {
     };
 
     // 6. Register WebSocket Listener for this specific prompt_id
-    const unregister = client.registerJobListener({
+    unregister = client.registerJobListener({
       promptId,
       onExecuting: (nodeId) => {
         if (!nodeId) return;
@@ -234,18 +248,22 @@ export class JobRunner {
         finalizeSuccess();
       },
       onInterrupted: () => {
+        isCompleted = true;
+        cleanupJobListeners();
         comfyStore.setJobFailed('Execution interrupted by user.');
         options.onInterrupted?.();
       },
       onError: (msg) => {
+        isCompleted = true;
+        cleanupJobListeners();
         comfyStore.setJobFailed(msg);
         options.onError?.(new Error(msg));
       },
     });
 
-    const pollInterval = setInterval(async () => {
+    pollInterval = setInterval(async () => {
       if (isCompleted) {
-        clearInterval(pollInterval);
+        cleanupJobListeners();
         return;
       }
       const hist = await client.getPromptHistory(promptId);
@@ -255,7 +273,6 @@ export class JobRunner {
         if (outputData) {
           const v = client.extractVideoOutput(outputData);
           if (v) {
-            clearInterval(pollInterval);
             await finalizeSuccess();
           }
         }
@@ -265,9 +282,10 @@ export class JobRunner {
     const handle: ActiveJobHandle = {
       promptId,
       cancel: async () => {
+        isCompleted = true;
+        cleanupJobListeners();
         await client.interrupt();
         await client.deleteQueueItem(promptId);
-        unregister();
         comfyStore.setJobFailed('Cancelled by user');
       },
       getBoundWorkflow: () => boundWorkflow,

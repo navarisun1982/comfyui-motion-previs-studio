@@ -43,7 +43,7 @@ import { logger } from './useLogStore';
 import { recordTrajectoryPositionAtTime, interpolateTrajectoryPosition, recordTrajectoryPoseAtTime } from '../engine/trajectoryMath';
 import { decomposeDirectorialMotion, compileMotionPlan, compileReadyMadeMotionKeyframes, findReadyMadeMotionById, READY_MADE_MOTIONS } from '../engine/kinematics';
 import { STORAGE_KEYS, safeGetItem, safeSetItem, sanitizeShotForStorage } from '../services/storage';
-import { toPersistentModelUri } from '../services/modelStorage';
+import { toPersistentModelUri, offloadLargeImageToIndexedDB, resolveOffloadedImage, resolveOffloadedImageSync } from '../services/modelStorage';
 
 export type PrevisRendererFn = (
   passMode?: 'rgb' | 'depth' | 'openpose' | 'all',
@@ -107,6 +107,7 @@ interface ShotState {
       rigType?: Actor['rigType'];
       rigLandmarks?: any;
       showBones?: boolean;
+      startPosition?: Point3D;
     }
   ) => void;
   removeActor: (actorId: string) => void;
@@ -227,7 +228,24 @@ export const flushShotsPersistence = () => {
   for (const [id, s] of Object.entries(shots)) {
     sanitized[id] = sanitizeShotForStorage(s);
   }
-  safeSetItem(STORAGE_KEYS.SHOTS_CACHE, sanitized);
+  if (!safeSetItem(STORAGE_KEYS.SHOTS_CACHE, sanitized)) {
+    const compact: Record<string, ShotSpec> = {};
+    for (const [id, s] of Object.entries(sanitized)) {
+      compact[id] = {
+        ...s,
+        actors: s.actors.map((a) =>
+          a.conceptImageUrl && a.conceptImageUrl.length > 80_000
+            ? { ...a, conceptImageUrl: undefined }
+            : a
+        ),
+        environment:
+          s.environment?.conceptImageUrl && s.environment.conceptImageUrl.length > 80_000
+            ? { ...s.environment, conceptImageUrl: undefined }
+            : s.environment,
+      };
+    }
+    safeSetItem(STORAGE_KEYS.SHOTS_CACHE, compact);
+  }
 };
 
 const persistShotsMap = (shots: Record<string, ShotSpec>, immediate = false) => {
@@ -257,9 +275,66 @@ const loadCachedShots = (): Record<string, ShotSpec> => {
   const parsed = safeGetItem<Record<string, ShotSpec>>(STORAGE_KEYS.SHOTS_CACHE, {});
   if (typeof parsed === 'object' && parsed !== null) {
     for (const key of Object.keys(parsed)) {
-      if (parsed[key] && !parsed[key].environment) {
-        parsed[key].environment = CINEMATIC_ENVIRONMENT_PRESETS[0].spec;
+      const s = parsed[key];
+      if (!s) continue;
+      if (!s.environment) {
+        s.environment = CINEMATIC_ENVIRONMENT_PRESETS[0].spec;
       }
+      if (s.environment?.conceptImageUrl?.startsWith('refimg://')) {
+        const syncEnvImg = resolveOffloadedImageSync(s.environment.conceptImageUrl);
+        if (syncEnvImg) s.environment.conceptImageUrl = syncEnvImg;
+      }
+      if (Array.isArray(s.actors)) {
+        s.actors = s.actors.map((a) => {
+          if (a.conceptImageUrl?.startsWith('refimg://')) {
+            const syncImg = resolveOffloadedImageSync(a.conceptImageUrl);
+            if (syncImg) return { ...a, conceptImageUrl: syncImg };
+          }
+          return a;
+        });
+      }
+    }
+    if (typeof window !== 'undefined') {
+      setTimeout(async () => {
+        let changed = false;
+        const state = useShotStore.getState();
+        const nextShots: Record<string, ShotSpec> = { ...state.shotsById };
+        for (const [id, s] of Object.entries(nextShots)) {
+          if (!s) continue;
+          let shotChanged = false;
+          let nextEnv = s.environment;
+          if (nextEnv?.conceptImageUrl?.startsWith('refimg://')) {
+            const resolved = await resolveOffloadedImage(nextEnv.conceptImageUrl);
+            if (resolved) {
+              nextEnv = { ...nextEnv, conceptImageUrl: resolved };
+              shotChanged = true;
+            }
+          }
+          const nextActors = await Promise.all(
+            (s.actors || []).map(async (a) => {
+              if (a.conceptImageUrl?.startsWith('refimg://')) {
+                const resolved = await resolveOffloadedImage(a.conceptImageUrl);
+                if (resolved) {
+                  shotChanged = true;
+                  return { ...a, conceptImageUrl: resolved };
+                }
+              }
+              return a;
+            })
+          );
+          if (shotChanged) {
+            changed = true;
+            nextShots[id] = { ...s, actors: nextActors, environment: nextEnv };
+          }
+        }
+        if (changed) {
+          const activeId = useShotStore.getState().shot.id;
+          useShotStore.setState({
+            shotsById: nextShots,
+            shot: nextShots[activeId] || useShotStore.getState().shot,
+          });
+        }
+      }, 120);
     }
     return parsed;
   }
@@ -379,15 +454,56 @@ const loadCachedCastPool = (): Actor[] => {
     return DEFAULT_CAST_POOL;
   }
   const parsed = safeGetItem<Actor[]>(STORAGE_KEYS.CAST_POOL, DEFAULT_CAST_POOL);
-  if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+  if (Array.isArray(parsed) && parsed.length > 0) {
+    const resolvedSync = parsed.map((a) => {
+      if (a.conceptImageUrl?.startsWith('refimg://')) {
+        const syncHit = resolveOffloadedImageSync(a.conceptImageUrl);
+        if (syncHit) return { ...a, conceptImageUrl: syncHit };
+      }
+      return a;
+    });
+    if (typeof window !== 'undefined') {
+      setTimeout(async () => {
+        let changed = false;
+        const currentPool = useShotStore.getState().sceneCastPool;
+        const rehydrated = await Promise.all(
+          currentPool.map(async (a) => {
+            if (a.conceptImageUrl?.startsWith('refimg://')) {
+              const resolved = await resolveOffloadedImage(a.conceptImageUrl);
+              if (resolved) {
+                changed = true;
+                return { ...a, conceptImageUrl: resolved };
+              }
+            }
+            return a;
+          })
+        );
+        if (changed) {
+          useShotStore.setState({ sceneCastPool: rehydrated });
+        }
+      }, 150);
+    }
+    return resolvedSync;
+  }
   return DEFAULT_CAST_POOL;
 };
 
 const persistCastPool = (pool: Actor[]) => {
-  const sanitized = pool.map((a) =>
-    a.modelUrl?.startsWith('blob:') ? { ...a, modelUrl: toPersistentModelUri(a.modelUrl) } : a
-  );
-  safeSetItem(STORAGE_KEYS.CAST_POOL, sanitized);
+  const sanitized = pool.map((a) => {
+    let next = a.modelUrl?.startsWith('blob:') ? { ...a, modelUrl: toPersistentModelUri(a.modelUrl) } : a;
+    if (next.conceptImageUrl?.startsWith('data:') && next.conceptImageUrl.length > 80_000) {
+      next = { ...next, conceptImageUrl: offloadLargeImageToIndexedDB(next.conceptImageUrl) };
+    }
+    return next;
+  });
+  if (!safeSetItem(STORAGE_KEYS.CAST_POOL, sanitized)) {
+    const compact = sanitized.map((a) =>
+      a.conceptImageUrl && a.conceptImageUrl.length > 80_000
+        ? { ...a, conceptImageUrl: undefined }
+        : a
+    );
+    safeSetItem(STORAGE_KEYS.CAST_POOL, compact);
+  }
 };
 
 const initialCachedShots = loadCachedShots();
@@ -1116,6 +1232,8 @@ export const useShotStore = create<ShotState>((set, get) => {
         scale: target.scale,
         conceptImageUrl: target.conceptImageUrl,
         actionDescription: target.actionDescription,
+        sculpt: target.sculpt,
+        partGraph: target.partGraph || target.sculpt,
         rigType: target.rigType,
         rigLandmarks: target.rigLandmarks,
         showBones: target.showBones,
@@ -1670,9 +1788,9 @@ export const useShotStore = create<ShotState>((set, get) => {
           ? 'parked along the road'
           : 'positioned on set in the environment';
 
-      const spawnX = 35 + Math.floor(Math.random() * 30);
-      const spawnY = 35 + Math.floor(Math.random() * 30);
-      const spawnZ = 0; // Default on ground
+      const spawnX = options?.startPosition?.x ?? (35 + Math.floor(Math.random() * 30));
+      const spawnY = options?.startPosition?.y ?? (35 + Math.floor(Math.random() * 30));
+      const spawnZ = options?.startPosition?.z ?? 0; // Default on ground
 
       const newActor: Actor = {
         id: `actor-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -1700,6 +1818,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         selectedActorId: newActor.id,
         activeDeckTab: 'staging',
       });
+      get().addToCastPool(newActor);
     },
 
     removeActor: (actorId) => {

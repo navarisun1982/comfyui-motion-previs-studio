@@ -371,17 +371,20 @@ async function proxyChatCompletions(reqBody) {
   const accountId = accessPayload?.['https://api.openai.com/auth']?.chatgpt_account_id;
   const model = reqBody.model || 'gpt-5.6-sol';
 
-  // Format messages into Codex input items
+  // Format messages into Codex input items (preserving vision images as input_image)
   const messages = Array.isArray(reqBody.messages) ? reqBody.messages : [];
   const input = messages.map(m => {
     let content = m.content;
     if (Array.isArray(content)) {
-      // Vision or structured content
-      content = content.map(part => {
-        if (part.type === 'text') return part.text;
-        if (part.type === 'image_url') return `[Image: ${part.image_url?.url?.slice(0, 50)}...]`;
-        return '';
-      }).join('\n');
+      const items = [];
+      for (const part of content) {
+        if (part.type === 'text' && part.text) {
+          items.push({ type: 'input_text', text: part.text });
+        } else if (part.type === 'image_url' && part.image_url?.url) {
+          items.push({ type: 'input_image', image_url: part.image_url.url });
+        }
+      }
+      content = items.length > 0 ? items : '';
     } else if (typeof content !== 'string') {
       content = JSON.stringify(content);
     }

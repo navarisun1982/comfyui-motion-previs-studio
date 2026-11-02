@@ -232,6 +232,33 @@ export async function getModelBuffer(idOrUrl: string): Promise<ArrayBuffer | nul
     }
   }
 
+  // 5. Auto-synced ComfyUI output disk model fallback (comfy-disk-*)
+  if (id.startsWith('comfy-disk-') && typeof fetch === 'function') {
+    try {
+      const listResp = await fetch('/api/comfy-glb-output?list=1');
+      if (listResp.ok) {
+        const data = await listResp.json();
+        if (data && Array.isArray(data.items)) {
+          const match = data.items.find(
+            (item: any) =>
+              `comfy-disk-${String(item.filename || '').replace(/[^a-zA-Z0-9_-]/g, '_')}` === id ||
+              `comfy-disk-${String(item.filename || '')}` === id
+          );
+          if (match?.downloadUrl) {
+            const fileResp = await fetch(match.downloadUrl);
+            if (fileResp.ok) {
+              const buf = await fileResp.arrayBuffer();
+              await storeModelBuffer(id, buf, match.filename || id);
+              return buf;
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore if running in static build without local middleware
+    }
+  }
+
   return null;
 }
 
@@ -257,7 +284,9 @@ export async function getModelBlobUrl(idOrUrl: string): Promise<string> {
   if (cachedUrl) return cachedUrl;
 
   const buffer = await getModelBuffer(idOrUrl);
-  if (buffer && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && typeof Blob !== 'undefined') {
+  if (!buffer) return '';
+
+  if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function' && typeof Blob !== 'undefined') {
     const blob = new Blob([buffer], { type: 'model/gltf-binary' });
     const url = URL.createObjectURL(blob);
     blobUrlMemoryCache.set(id, url);
@@ -341,6 +370,124 @@ export function toPersistentModelUri(idOrUrl?: string): string | undefined {
   return idOrUrl;
 }
 
+const conceptImageMemoryCache = new Map<string, string>();
+
+function computeFastStringHash(str: string): string {
+  let h1 = 0xdeadbeef ^ str.length;
+  let h2 = 0x41c6ce57 ^ str.length;
+  const step = Math.max(1, Math.floor(str.length / 512));
+  for (let i = 0; i < str.length; i += step) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/**
+ * Offloads a large base64 `data:image/...` string (> 80 KB) into IndexedDB and in-memory cache,
+ * returning a compact `refimg://<id>` URI safe for `localStorage` serialization.
+ */
+export function offloadLargeImageToIndexedDB(dataUrl?: string): string | undefined {
+  if (!dataUrl) return undefined;
+  if (!dataUrl.startsWith('data:') || dataUrl.length <= 80_000) {
+    return dataUrl;
+  }
+
+  const id = `refimg-${computeFastStringHash(dataUrl)}-${dataUrl.length.toString(36)}`;
+  const uri = `refimg://${id}`;
+  conceptImageMemoryCache.set(id, dataUrl);
+  conceptImageMemoryCache.set(uri, dataUrl);
+
+  // Persist asynchronously to IndexedDB
+  void (async () => {
+    const db = await openDB();
+    if (!db) return;
+    try {
+      const buffer = base64ToArrayBuffer(dataUrl);
+      const mimeMatch = /^data:([^;,]+);base64,/i.exec(dataUrl);
+      const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        const record: StoredModelRecord = {
+          id,
+          name: id,
+          buffer,
+          mimeType,
+          sizeBytes: buffer.byteLength,
+          updatedAt: Date.now(),
+        };
+        const req = store.put(record);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    } catch (err) {
+      console.warn('Failed to offload concept image to IndexedDB:', err);
+    }
+  })();
+
+  return uri;
+}
+
+/**
+ * Synchronously resolves a `refimg://<id>` URI from the in-memory cache if available.
+ */
+export function resolveOffloadedImageSync(uriOrUrl?: string): string | undefined {
+  if (!uriOrUrl) return undefined;
+  if (!uriOrUrl.startsWith('refimg://')) return uriOrUrl;
+  const id = uriOrUrl.replace('refimg://', '');
+  return conceptImageMemoryCache.get(id) || conceptImageMemoryCache.get(uriOrUrl) || undefined;
+}
+
+function arrayBufferToBase64DataUrl(buffer: ArrayBuffer, mimeType = 'image/png'): string {
+  if (typeof Buffer !== 'undefined') {
+    return `data:${mimeType};base64,${Buffer.from(buffer).toString('base64')}`;
+  }
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return `data:${mimeType};base64,${btoa(binary)}`;
+}
+
+/**
+ * Asynchronously resolves a `refimg://<id>` URI from memory or IndexedDB back to its full `data:image/...` URL.
+ */
+export async function resolveOffloadedImage(uriOrUrl?: string): Promise<string | undefined> {
+  if (!uriOrUrl) return undefined;
+  if (!uriOrUrl.startsWith('refimg://')) return uriOrUrl;
+  const syncHit = resolveOffloadedImageSync(uriOrUrl);
+  if (syncHit) return syncHit;
+
+  const id = uriOrUrl.replace('refimg://', '');
+  const db = await openDB();
+  if (!db) return undefined;
+
+  try {
+    const record = await new Promise<StoredModelRecord | null>((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.get(id);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+    if (record && record.buffer) {
+      const dataUrl = arrayBufferToBase64DataUrl(record.buffer, record.mimeType || 'image/png');
+      conceptImageMemoryCache.set(id, dataUrl);
+      conceptImageMemoryCache.set(uriOrUrl, dataUrl);
+      return dataUrl;
+    }
+  } catch (err) {
+    console.warn('Failed to resolve offloaded concept image from IndexedDB:', err);
+  }
+  return undefined;
+}
+
 /**
  * Clears in-memory caches (for testing).
  */
@@ -348,4 +495,5 @@ export function clearModelMemoryCache(): void {
   bufferMemoryCache.clear();
   blobUrlMemoryCache.clear();
   blobUrlToModelIdCache.clear();
+  conceptImageMemoryCache.clear();
 }

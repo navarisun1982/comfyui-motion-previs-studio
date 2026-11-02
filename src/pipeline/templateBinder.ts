@@ -91,6 +91,20 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
       const value = resolveTargetValue(binding, field, target, values, workflow, patchCtx);
       workflow[target.node].inputs[target.input] = value;
       applied.push({ field, node: target.node, input: target.input, value });
+
+      // Keep LTXDirectorCS25 companion frame/second inputs synchronized with durationSeconds
+      if (
+        field === 'durationSeconds' &&
+        workflow[target.node]?.class_type === 'LTXDirectorCS25' &&
+        target.input === 'duration_seconds'
+      ) {
+        const nodeInputs = workflow[target.node].inputs;
+        const frames = snapFrames(values.durationSeconds, values.frameRate, binding.frameRule);
+        if ('end_second' in nodeInputs) nodeInputs.end_second = values.durationSeconds;
+        if ('end_frame' in nodeInputs) nodeInputs.end_frame = frames;
+        if ('duration_frames' in nodeInputs) nodeInputs.duration_frames = frames;
+        if ('segment_lengths' in nodeInputs) nodeInputs.segment_lengths = String(frames);
+      }
     }
   }
 

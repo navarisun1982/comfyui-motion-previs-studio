@@ -10,9 +10,10 @@ import {
   buildOpenAiRequest,
   buildGeminiRequest,
   extractResponseText,
+  resolveWireUrl,
   PROVIDERS,
 } from './objectReasoner';
-import { buildTemporalTimeline } from '../engine/promptCompiler';
+import { buildTemporalTimeline, formatEnvironment } from '../engine/promptCompiler';
 
 export interface DirectedPromptResult {
   positivePrompt: string;
@@ -95,12 +96,21 @@ export async function directPromptWithAI(
     .map((b) => `Phase (${b.timeRange}): ${b.cameraAction} | ${b.actorAction}`)
     .join('\n');
 
+  const defaultPalette = ['#EF4444', '#06B6D4', '#F59E0B', '#10B981'];
   const actorDetails = shot.actors
     .map(
-      (a) =>
-        `- Name: ${a.name}, Descriptors: "${a.token}", Scale: ${a.scale ?? 1.0}x, Cue Start: ${a.trajectory?.startTimeSeconds ?? 0}s, Trajectory: (${a.trajectory?.startPosition?.x}, ${a.trajectory?.startPosition?.y}) -> (${a.trajectory?.endPosition?.x}, ${a.trajectory?.endPosition?.y}), Action: "${a.actionDescription}"`
+      (a, idx) =>
+        `- <Subject ${idx + 1}> Name: ${a.name}, Kind: ${a.kind || 'human'}, Previs Hex ID: ${(a.color || defaultPalette[idx % defaultPalette.length]).toUpperCase()}, Descriptors: "${a.token}", Scale: ${a.scale ?? 1.0}x, Cue Start: ${a.trajectory?.startTimeSeconds ?? 0}s, Trajectory: (${a.trajectory?.startPosition?.x}, ${a.trajectory?.startPosition?.y}) -> (${a.trajectory?.endPosition?.x}, ${a.trajectory?.endPosition?.y}), Action: "${a.actionDescription}"${a.motionClip ? `, Motion Clip: ${a.motionClip}` : ''}`
     )
     .join('\n');
+
+  const effectiveLensStr =
+    typeof shot.camera.lens.customFocalLengthMm === 'number' &&
+    `${shot.camera.lens.customFocalLengthMm}mm` !== shot.camera.lens.focalLength
+      ? `${shot.camera.lens.customFocalLengthMm}mm (custom slider, base preset ${shot.camera.lens.focalLength})`
+      : shot.camera.lens.focalLength;
+
+  const envSummary = shot.environment ? formatEnvironment(shot.environment) : 'Standard stage';
 
   const userContent = `DIRECTORIAL SHOT SPECIFICATION:
 Shot Title: "${shot.name}"
@@ -108,13 +118,14 @@ Target Diffusion Engine: ${modelLabel}
 Duration: ${shot.durationSeconds} seconds @ ${shot.frameRate} fps
 Aspect Ratio: ${shot.aspectRatio}
 
-SCENE DESCRIPTION:
+SCENE DESCRIPTION & ENVIRONMENT:
 "${shot.sceneDescription}"
+Environment Details: ${envSummary}
 
 CAMERA & OPTICS:
-- Lens: ${shot.camera.lens.focalLength} (Aperture: ${shot.camera.lens.aperture})
+- Lens: ${effectiveLensStr} (Aperture: ${shot.camera.lens.aperture}, Sensor: ${shot.camera.lens.sensorSize || 'super-35'})
 - Shot Framing: ${shot.camera.shotType}
-- Camera Angle: ${shot.camera.angle}
+- Camera Angle: ${shot.camera.angle}${shot.camera.dutchRollDeg ? ` (Dutch Roll: ${shot.camera.dutchRollDeg}°)` : ''}
 - Movement Type: ${shot.camera.movement.type}
 - Speed & Pacing: ${shot.camera.movement.speed}, ${shot.camera.movement.pacing || 'ease-in-out'}
 
@@ -129,7 +140,7 @@ LIGHTING & ATMOSPHERE:
 CHRONOLOGICAL STAGE TIMELINE BEATS:
 ${timelineSummary}
 
-Generate the optimal, high-fidelity prompt for ${isMiniMax ? 'MiniMax (Hailuo)' : 'LTX-2.5'} following the official prompting standards.`;
+Generate the optimal, high-fidelity prompt for ${isSeedance ? 'Seedance 2.0' : isMiniMax ? 'MiniMax (Hailuo)' : 'LTX-2.5'} following the official prompting standards.`;
 
   let requestUrl = '';
   let requestHeaders: Record<string, string> = {};
@@ -154,7 +165,7 @@ Generate the optimal, high-fidelity prompt for ${isMiniMax ? 'MiniMax (Hailuo)' 
       think: false,
       options: {
         temperature: 0.4,
-        num_predict: 500,
+        num_predict: 2048,
       },
     };
   } else {
@@ -165,7 +176,7 @@ Generate the optimal, high-fidelity prompt for ${isMiniMax ? 'MiniMax (Hailuo)' 
       openAiBody.messages[0].content = systemInstruction;
     }
     openAiBody.temperature = 0.4;
-    openAiBody.max_tokens = 500;
+    openAiBody.max_tokens = 2048;
     requestUrl = req.url;
     requestHeaders = req.headers;
     requestBody = openAiBody;
@@ -173,8 +184,9 @@ Generate the optimal, high-fidelity prompt for ${isMiniMax ? 'MiniMax (Hailuo)' 
 
   let res: Response;
   const timeoutMs = 180_000;
+  const wireUrl = resolveWireUrl(requestUrl, cfg.provider);
   try {
-    res = await fetch(requestUrl, {
+    res = await fetch(wireUrl, {
       method: 'POST',
       headers: requestHeaders,
       body: JSON.stringify(requestBody),

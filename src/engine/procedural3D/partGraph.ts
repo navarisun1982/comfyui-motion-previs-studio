@@ -233,10 +233,9 @@ function geometryFor(part: PartGraphPart): THREE.BufferGeometry {
   switch (part.shape) {
     case 'box': {
       const r = Math.min(w, h, d) * 0.12;
+      if (r < 0.004) return new THREE.BoxGeometry(w, h, d);
       const g = new RoundedBoxGeometry(1, 1, 1, 2, 0.12);
       g.scale(w, h, d);
-      // RoundedBoxGeometry radius is relative to the unit box; keep thin parts crisp.
-      if (r < 0.004) return new THREE.BoxGeometry(w, h, d);
       return g;
     }
     case 'ellipsoid': {

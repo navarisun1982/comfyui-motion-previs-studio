@@ -125,7 +125,7 @@ export const READY_MADE_MOTIONS: ReadyMadeMotionClip[] = [
     defaultDurationSec: 2.0,
     travelsByDefault: false,
     baseGait: 'none',
-    basePosePreset: 'combat-guard',
+    basePosePreset: 'combat-ready',
   },
   {
     id: 'human-sword-slash',
@@ -138,7 +138,7 @@ export const READY_MADE_MOTIONS: ReadyMadeMotionClip[] = [
     defaultDurationSec: 1.8,
     travelsByDefault: false,
     baseGait: 'none',
-    basePosePreset: 'combat-guard',
+    basePosePreset: 'combat-ready',
   },
   {
     id: 'human-aim-fire',
@@ -164,7 +164,7 @@ export const READY_MADE_MOTIONS: ReadyMadeMotionClip[] = [
     defaultDurationSec: 1.6,
     travelsByDefault: true,
     baseGait: 'none',
-    basePosePreset: 'crouch-stealth',
+    basePosePreset: 'crouch-cover',
   },
   {
     id: 'human-hit-stagger',
@@ -230,7 +230,7 @@ export const READY_MADE_MOTIONS: ReadyMadeMotionClip[] = [
     defaultDurationSec: 2.0,
     travelsByDefault: false,
     baseGait: 'none',
-    basePosePreset: 'seated-chair',
+    basePosePreset: 'sitting-chair',
   },
   {
     id: 'human-victory-cheer',
@@ -1298,7 +1298,7 @@ export function evaluateReadyMadeHumanoidClip(
       // On the final cycle end, hold seated-chair; on earlier cycles when safeCycles > 1, sit down & rise back up per cycle
       const isFinalCycleEnd = scaledProgress >= safeCycles - 0.15;
       if (isFinalCycleEnd && u > 0.85) {
-        applyPosePreset(rig, 'seated-chair');
+        applyPosePreset(rig, 'sitting-chair');
         return true;
       }
       resetToRest();

@@ -1,5 +1,5 @@
 import type { ShotSpec } from '../types/shotspec';
-import { toPersistentModelUri } from './modelStorage';
+import { toPersistentModelUri, offloadLargeImageToIndexedDB } from './modelStorage';
 
 export const STORAGE_KEYS = {
   SHOTS_CACHE: 'comfy_ai_director_shots_cache_v1',
@@ -72,6 +72,7 @@ export function sanitizeShotForStorage(shot: ShotSpec): ShotSpec {
   let vfxReference = shot.vfxReference;
   let referenceImage = shot.referenceImage;
   let actors = shot.actors;
+  let environment = shot.environment;
 
   if (vfxReference && vfxReference.videoUrl && vfxReference.videoUrl.startsWith('blob:')) {
     vfxReference = {
@@ -89,16 +90,42 @@ export function sanitizeShotForStorage(shot: ShotSpec): ShotSpec {
     modified = true;
   }
 
-  if (Array.isArray(shot.actors) && shot.actors.some((a) => a.modelUrl?.startsWith('blob:'))) {
+  if (environment?.conceptImageUrl && environment.conceptImageUrl.startsWith('data:') && environment.conceptImageUrl.length > 80_000) {
+    const offloaded = offloadLargeImageToIndexedDB(environment.conceptImageUrl);
+    if (offloaded && offloaded !== environment.conceptImageUrl) {
+      environment = {
+        ...environment,
+        conceptImageUrl: offloaded,
+      };
+      modified = true;
+    }
+  }
+
+  if (
+    Array.isArray(shot.actors) &&
+    shot.actors.some(
+      (a) =>
+        a.modelUrl?.startsWith('blob:') ||
+        (a.conceptImageUrl?.startsWith('data:') && a.conceptImageUrl.length > 80_000)
+    )
+  ) {
     actors = shot.actors.map((a) => {
+      let nextActor = a;
       if (a.modelUrl?.startsWith('blob:')) {
         const persistentUri = toPersistentModelUri(a.modelUrl);
         if (persistentUri && persistentUri !== a.modelUrl) {
           modified = true;
-          return { ...a, modelUrl: persistentUri };
+          nextActor = { ...nextActor, modelUrl: persistentUri };
         }
       }
-      return a;
+      if (a.conceptImageUrl?.startsWith('data:') && a.conceptImageUrl.length > 80_000) {
+        const offloaded = offloadLargeImageToIndexedDB(a.conceptImageUrl);
+        if (offloaded && offloaded !== a.conceptImageUrl) {
+          modified = true;
+          nextActor = { ...nextActor, conceptImageUrl: offloaded };
+        }
+      }
+      return nextActor;
     });
   }
 
@@ -107,6 +134,7 @@ export function sanitizeShotForStorage(shot: ShotSpec): ShotSpec {
   return {
     ...shot,
     actors,
+    environment,
     vfxReference,
     referenceImage,
   };

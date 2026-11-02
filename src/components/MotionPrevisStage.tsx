@@ -48,6 +48,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     removeActor,
     updateActorPositionAtTime,
     updateCameraPositionAtTime,
+    updateVfxReference,
     selectedActorId,
     setSelectedActorId,
     setActiveDeckTab,
@@ -213,8 +214,13 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [duration]);
 
-  // Dispatch recenter whenever active shot changes to ensure 3D soundstage is immediately centered
+  // Dispatch recenter and reset shot-local timeline state whenever active shot changes
   useEffect(() => {
+    setMarkers([]);
+    setTrimStartPct(0);
+    setTrimEndPct(100);
+    setCurrentTime(0);
+    setIsPlaying(false);
     window.dispatchEvent(new CustomEvent('cmpvs:recenter-stage'));
   }, [shot.id]);
 
@@ -271,15 +277,21 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     const pct = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
 
     if (side === 'left' && isDraggingTrimLeft) {
-      setTrimStartPct(Math.min(trimEndPct - 2, Math.max(0, pct)));
+      const nextStart = Math.min(trimEndPct - 2, Math.max(0, pct));
+      setTrimStartPct(nextStart);
     } else if (side === 'right' && isDraggingTrimRight) {
-      setTrimEndPct(Math.max(trimStartPct + 2, Math.min(100, pct)));
+      const nextEnd = Math.max(trimStartPct + 2, Math.min(100, pct));
+      setTrimEndPct(nextEnd);
     }
   };
 
   const handleTrimPointerUp = (e: React.PointerEvent<HTMLDivElement>, side: 'left' | 'right') => {
     if (side === 'left') setIsDraggingTrimLeft(false);
     else setIsDraggingTrimRight(false);
+    updateVfxReference({
+      trimStartSeconds: Number(((trimStartPctRef.current / 100) * duration).toFixed(2)),
+      trimEndSeconds: Number(((trimEndPctRef.current / 100) * duration).toFixed(2)),
+    });
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {}
@@ -318,8 +330,16 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     setMarkers((prev) => [...prev, newMarker]);
 
     if (selectedActorId === '__camera__') {
-      const camPos = shot.camera.movement.startPosition;
-      updateCameraPositionAtTime(currentTime, camPos, duration);
+      const camPos = interpolateTrajectoryPosition(shot.camera.movement, currentTime, duration);
+      updateCameraPositionAtTime(
+        currentTime,
+        {
+          x: camPos.x,
+          y: camPos.y,
+          z: camPos.z ?? shot.camera.movement.startPosition.z ?? 45,
+        },
+        duration
+      );
     } else if (selectedActorId && targetActor) {
       const pos = interpolateTrajectoryPosition(targetActor.trajectory, currentTime, duration);
       updateActorPositionAtTime(selectedActorId, currentTime, pos, duration);

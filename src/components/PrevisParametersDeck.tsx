@@ -244,9 +244,52 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
       }
 
       setEnvironment(resultEnv);
-      setSceneDescription(promptText);
+      setSceneDescription(resultEnv.promptDescription || promptText);
       setLighting(decomposed.lighting.style, decomposed.lighting.direction, decomposed.lighting.contrast);
       setCameraMovement(decomposed.cameraSuggestion.movement.type, decomposed.cameraSuggestion.movement.speed);
+      if (decomposed.cameraSuggestion.shotType) {
+        const mappedShotType =
+          decomposed.cameraSuggestion.shotType === 'medium-full' || decomposed.cameraSuggestion.shotType === 'medium'
+            ? 'medium'
+            : decomposed.cameraSuggestion.shotType === 'medium-close' || decomposed.cameraSuggestion.shotType === 'close-up'
+            ? 'close-up'
+            : decomposed.cameraSuggestion.shotType === 'extreme-close'
+            ? 'extreme-close-up'
+            : decomposed.cameraSuggestion.shotType;
+        setShotType(mappedShotType as ShotType);
+      }
+      if (decomposed.cameraSuggestion.lensFocalLength) {
+        setFocalLength(decomposed.cameraSuggestion.lensFocalLength as FocalLength);
+      }
+      if (decomposed.cameraSuggestion.angle) {
+        const mappedAngle =
+          decomposed.cameraSuggestion.angle === 'birds-eye'
+            ? 'overhead-gods-eye'
+            : decomposed.cameraSuggestion.angle === 'worm-eye'
+            ? 'ground-level'
+            : decomposed.cameraSuggestion.angle;
+        setCameraAngle(mappedAngle as CameraAngle);
+      }
+      if (decomposed.cameraSuggestion.movement.pacing) {
+        updateCameraMovementOptions({ pacing: decomposed.cameraSuggestion.movement.pacing });
+      }
+
+      if (decomposed.practicalLights && decomposed.practicalLights.length > 0) {
+        for (const pl of decomposed.practicalLights.slice(0, 3)) {
+          const hexColor = `#${(pl.colorHex ?? 0xffaa44).toString(16).padStart(6, '0')}`;
+          addStageLight({
+            name: `${pl.type.charAt(0).toUpperCase() + pl.type.slice(1)} Light`,
+            color: hexColor,
+            intensity: pl.intensity,
+            position: {
+              x: Math.min(95, Math.max(5, Math.round(50 + (pl.relativePosition?.[0] ?? 0) * 5))),
+              y: Math.min(95, Math.max(5, Math.round(50 + (pl.relativePosition?.[2] ?? 0) * 5))),
+              z: Math.min(95, Math.max(5, Math.round(15 + (pl.relativePosition?.[1] ?? 1) * 15))),
+            },
+            enabled: true,
+          });
+        }
+      }
 
       for (const actor of decomposed.extractedActors) {
         const alreadyExists = shot.actors.some(
@@ -258,6 +301,11 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
           addActor(actor.name, actor.kind, actor.tokenPrompt, {
             scale: actor.scale,
             actionDescription: actor.actionDescription,
+            sculpt: actor.sculpt,
+            partGraph: actor.sculpt,
+            startPosition: actor.stagePosition
+              ? { x: actor.stagePosition.x, y: actor.stagePosition.y, z: 0 }
+              : undefined,
           });
         }
       }
@@ -288,6 +336,32 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
 
     setLighting(decomposed.lighting.style, decomposed.lighting.direction, decomposed.lighting.contrast);
     setCameraMovement(decomposed.cameraSuggestion.movement.type, decomposed.cameraSuggestion.movement.speed);
+    if (decomposed.cameraSuggestion.shotType) {
+      const mappedShotType =
+        decomposed.cameraSuggestion.shotType === 'medium-full' || decomposed.cameraSuggestion.shotType === 'medium'
+          ? 'medium'
+          : decomposed.cameraSuggestion.shotType === 'medium-close' || decomposed.cameraSuggestion.shotType === 'close-up'
+          ? 'close-up'
+          : decomposed.cameraSuggestion.shotType === 'extreme-close'
+          ? 'extreme-close-up'
+          : decomposed.cameraSuggestion.shotType;
+      setShotType(mappedShotType as ShotType);
+    }
+    if (decomposed.cameraSuggestion.lensFocalLength) {
+      setFocalLength(decomposed.cameraSuggestion.lensFocalLength as FocalLength);
+    }
+    if (decomposed.cameraSuggestion.angle) {
+      const mappedAngle =
+        decomposed.cameraSuggestion.angle === 'birds-eye'
+          ? 'overhead-gods-eye'
+          : decomposed.cameraSuggestion.angle === 'worm-eye'
+          ? 'ground-level'
+          : decomposed.cameraSuggestion.angle;
+      setCameraAngle(mappedAngle as CameraAngle);
+    }
+    if (decomposed.cameraSuggestion.movement.pacing) {
+      updateCameraMovementOptions({ pacing: decomposed.cameraSuggestion.movement.pacing });
+    }
 
     for (const actor of decomposed.extractedActors) {
       const alreadyExists = shot.actors.some(
@@ -299,6 +373,11 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
         addActor(actor.name, actor.kind, actor.tokenPrompt, {
           scale: actor.scale,
           actionDescription: actor.actionDescription,
+          sculpt: actor.sculpt,
+          partGraph: actor.sculpt,
+          startPosition: actor.stagePosition
+            ? { x: actor.stagePosition.x, y: actor.stagePosition.y, z: 0 }
+            : undefined,
         });
       }
     }
@@ -343,7 +422,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
           </div>
 
           {/* Shot Duration Stepper */}
-          <div className="flex items-center gap-1 rounded-lg bg-[#090D16] border border-[#273247] px-2 py-1.5 font-mono text-[10.5px] shrink-0 shadow-inner" title="Shot Duration (1s – 10s)">
+          <div className="flex items-center gap-1 rounded-lg bg-[#090D16] border border-[#273247] px-2 py-1.5 font-mono text-[10.5px] shrink-0 shadow-inner" title="Shot Duration (1s – 15s)">
             <Clock className="h-3 w-3 text-[#F0AE42]" />
             <button
               type="button"
@@ -355,7 +434,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
             <span className="text-white font-bold min-w-[26px] text-center">{shot.durationSeconds || 4}s</span>
             <button
               type="button"
-              onClick={() => updateDuration(Math.min(10, (shot.durationSeconds || 4) + 1))}
+              onClick={() => updateDuration(Math.min(15, (shot.durationSeconds || 4) + 1))}
               className="px-1 rounded hover:bg-white/10 text-slate-300 hover:text-white font-bold"
             >
               +
@@ -1477,16 +1556,17 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                           if (!promptToReason || refiningActorId === act.id) return;
                           try {
                             setRefiningActorId(act.id);
-                            if (!act.kind || act.kind === 'human') {
-                              updateActor(act.id, {
-                                token: promptToReason,
-                                sculpt: undefined,
-                                partGraph: undefined,
-                              });
-                            } else {
-                              const graph = await reasonObject(promptToReason);
-                              updateActor(act.id, { sculpt: graph, partGraph: graph });
-                            }
+                            const existingSculpt = act.sculpt || act.partGraph;
+                            const graph = await reasonObject(promptToReason, {
+                              reviseSpec: existingSculpt,
+                              revisionFeedback: existingSculpt ? promptToReason : undefined,
+                              imageBase64: act.conceptImageUrl?.startsWith('data:') ? act.conceptImageUrl : undefined,
+                            });
+                            updateActor(act.id, {
+                              token: promptToReason,
+                              sculpt: graph,
+                              partGraph: graph,
+                            });
                           } catch (err) {
                             console.error('Failed to edit object by prompt:', err);
                           } finally {

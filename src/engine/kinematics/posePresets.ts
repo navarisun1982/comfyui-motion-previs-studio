@@ -650,13 +650,42 @@ export function isSyntheticCompilerPose(pose?: ActorPose | null): boolean {
  * Restores a serialized ActorPose onto a rig.
  */
 export function applyBonePose(rig: HumanoidRig, pose: ActorPose): void {
-  // Guard Mixamo FBX rigs against synthetic [0,0,0,1] compiler poses (which would invert 180-deg Mixamo thigh bind rotations)
+  // Guard Mixamo FBX rigs against synthetic [0,0,0,1] compiler leg poses (which would invert 180-deg Mixamo thigh bind rotations),
+  // while preserving upper-body, head, spine, and arm delta rotations compiled from natural language.
   if (rig.root.userData?.isMannequinRig && isSyntheticCompilerPose(pose)) {
     if (pose.hipsOffset && pose.hipsOffset[1] < -0.2) {
       applyPosePreset(rig, 'sitting-chair');
     } else {
       applyPosePreset(rig, 'neutral-stand');
     }
+    const upperBodyBones: HumanoidBone[] = [
+      'Spine',
+      'Chest',
+      'Neck',
+      'Head',
+      'LeftArm',
+      'RightArm',
+      'LeftForeArm',
+      'RightForeArm',
+      'LeftHand',
+      'RightHand',
+    ];
+    for (const boneName of upperBodyBones) {
+      const quatTuple = pose.rotations[boneName];
+      const bone = rig.bones.get(boneName);
+      if (bone && quatTuple && quatTuple.length === 4) {
+        const isIdent =
+          Math.abs(quatTuple[0]) < 1e-4 &&
+          Math.abs(quatTuple[1]) < 1e-4 &&
+          Math.abs(quatTuple[2]) < 1e-4 &&
+          Math.abs(quatTuple[3] - 1) < 1e-4;
+        if (!isIdent) {
+          const deltaQ = new THREE.Quaternion(quatTuple[0], quatTuple[1], quatTuple[2], quatTuple[3]);
+          bone.quaternion.multiply(deltaQ);
+        }
+      }
+    }
+    rig.root.updateMatrixWorld(true);
     return;
   }
 

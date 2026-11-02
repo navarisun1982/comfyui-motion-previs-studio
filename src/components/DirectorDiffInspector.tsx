@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useHistoryStore, computeShotDiff } from '../stores/useHistoryStore';
 import { useShotStore } from '../stores/useShotStore';
-import { History, GitCompare, RotateCcw, CheckCircle2, ChevronRight, Video, ArrowLeft } from 'lucide-react';
+import { compilePromptForShot } from '../engine/promptCompiler';
+import { History, GitCompare, RotateCcw, CheckCircle2, ChevronRight, Video, ArrowLeft, Camera } from 'lucide-react';
 
 import { useShallow } from 'zustand/react/shallow';
 
@@ -10,23 +11,54 @@ interface DirectorDiffInspectorProps {
 }
 
 export const DirectorDiffInspector: React.FC<DirectorDiffInspectorProps> = ({ onClose }) => {
-  const { revisions, activeRevisionId, comparisonRevisionId, setActiveRevision, setComparisonRevision, getRevision } =
-    useHistoryStore(
-      useShallow((s) => ({
-        revisions: s.revisions,
-        activeRevisionId: s.activeRevisionId,
-        comparisonRevisionId: s.comparisonRevisionId,
-        setActiveRevision: s.setActiveRevision,
-        setComparisonRevision: s.setComparisonRevision,
-        getRevision: s.getRevision,
-      }))
-    );
+  const {
+    revisions,
+    activeRevisionId,
+    comparisonRevisionId,
+    setActiveRevision,
+    setComparisonRevision,
+    getRevision,
+    saveRevision,
+  } = useHistoryStore(
+    useShallow((s) => ({
+      revisions: s.revisions,
+      activeRevisionId: s.activeRevisionId,
+      comparisonRevisionId: s.comparisonRevisionId,
+      setActiveRevision: s.setActiveRevision,
+      setComparisonRevision: s.setComparisonRevision,
+      getRevision: s.getRevision,
+      saveRevision: s.saveRevision,
+    }))
+  );
+  const shot = useShotStore((s) => s.shot);
+  const previsVideoUrl = useShotStore((s) => s.previsVideoUrl);
   const loadShot = useShotStore((s) => s.loadShot);
+  const [showAllShots, setShowAllShots] = useState(false);
 
-  const revA = getRevision(activeRevisionId || '') || revisions[0];
-  const revB = getRevision(comparisonRevisionId || '') || (revisions.length > 1 ? revisions[1] : undefined);
+  const shotRevisions = revisions.filter((r) => (r.shotId || r.shotSpec?.id) === shot.id);
+  const visibleRevisions = showAllShots || shotRevisions.length === 0 ? revisions : shotRevisions;
+
+  const revA =
+    visibleRevisions.find((r) => r.id === activeRevisionId) ||
+    getRevision(activeRevisionId || '') ||
+    visibleRevisions[0];
+  const revB =
+    visibleRevisions.find((r) => r.id === comparisonRevisionId) ||
+    getRevision(comparisonRevisionId || '') ||
+    (visibleRevisions.length > 1 ? visibleRevisions[1] : undefined);
 
   const diffItems = revA && revB ? computeShotDiff(revA.shotSpec, revB.shotSpec) : [];
+
+  const handleSnapshotCurrentTake = () => {
+    const compiled = compilePromptForShot(shot);
+    const revId = saveRevision(
+      shot,
+      compiled.positivePrompt,
+      previsVideoUrl || undefined,
+      `Manual Snapshot (${shot.name})`
+    );
+    setActiveRevision(revId);
+  };
 
   return (
     <div className="flex h-full w-full flex-col bg-director-darkest p-6 text-xs text-slate-100 overflow-y-auto">
@@ -47,6 +79,20 @@ export const DirectorDiffInspector: React.FC<DirectorDiffInspectorProps> = ({ on
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleSnapshotCurrentTake}
+            className="flex items-center gap-1.5 rounded-lg bg-director-cyan/20 px-3 py-1.5 font-mono text-xs font-semibold text-director-cyan border border-director-cyan/40 transition-all hover:bg-director-cyan hover:text-director-darkest active:scale-95"
+            title="Record a snapshot of the current shot state into revision history"
+          >
+            <Camera className="h-3.5 w-3.5" />
+            Snapshot Take
+          </button>
+          <button
+            onClick={() => setShowAllShots((prev) => !prev)}
+            className="flex items-center gap-1 rounded-lg bg-white/5 hover:bg-white/10 px-2.5 py-1.5 font-mono text-[11px] text-slate-300 border border-white/10 transition-colors"
+          >
+            {showAllShots ? 'All Shots' : `Active Shot (${shotRevisions.length})`}
+          </button>
           {revA && (
             <button
               onClick={() => {
@@ -103,7 +149,7 @@ export const DirectorDiffInspector: React.FC<DirectorDiffInspectorProps> = ({ on
                 onChange={(e) => setActiveRevision(e.target.value)}
                 className="glass-control rounded p-2 text-xs text-white"
               >
-                {revisions.map((r) => (
+                {visibleRevisions.map((r) => (
                   <option key={r.id} value={r.id} className="bg-director-panel text-white">
                     v{r.version} — {r.note} ({new Date(r.timestamp ?? r.createdAt).toLocaleTimeString()})
                   </option>
@@ -122,7 +168,7 @@ export const DirectorDiffInspector: React.FC<DirectorDiffInspectorProps> = ({ on
                 onChange={(e) => setComparisonRevision(e.target.value)}
                 className="glass-control rounded p-2 text-xs text-white"
               >
-                {revisions.map((r) => (
+                {visibleRevisions.map((r) => (
                   <option key={r.id} value={r.id} className="bg-director-panel text-white">
                     v{r.version} — {r.note} ({new Date(r.timestamp ?? r.createdAt).toLocaleTimeString()})
                   </option>

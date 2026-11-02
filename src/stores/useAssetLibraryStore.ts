@@ -3,7 +3,7 @@ import { SubjectKind } from '../types/shotspec';
 import { reasonObject, ObjectReasonerError } from '../services/objectReasoner';
 import { SculptSpec, registerSculptSpec, removeSculptSpec } from '../engine/procedural3D/sculptSpec';
 import { safeGetItem, safeSetItem } from '../services/storage';
-import { registerModelFile, getModelBlobUrl } from '../services/modelStorage';
+import { registerModelFile, getModelBlobUrl, offloadLargeImageToIndexedDB, resolveOffloadedImage, resolveOffloadedImageSync } from '../services/modelStorage';
 
 export type AssetCategory =
   | 'all'
@@ -54,7 +54,7 @@ export interface SaveGeneratedGlbParams {
 }
 
 // 200+ Canonical Curated 3D Assets across 9 production domains
-export const CURATED_3D_ASSETS: Asset3DItem[] = [
+const RAW_CURATED_3D_ASSETS: Asset3DItem[] = [
   // ================= 1. ARCHITECTURE (25 assets) =================
   {
     id: 'arch-cottage',
@@ -2633,25 +2633,49 @@ export const CURATED_3D_ASSETS: Asset3DItem[] = [
   },
 ];
 
+const seenCuratedIds = new Set<string>();
+export const CURATED_3D_ASSETS: Asset3DItem[] = RAW_CURATED_3D_ASSETS.filter((item) => {
+  if (seenCuratedIds.has(item.id)) return false;
+  seenCuratedIds.add(item.id);
+  return true;
+});
+
 const STORAGE_KEY = 'comfy_director_custom_3d_assets_v1';
 
 const getSafeCustomAssets = (): Asset3DItem[] => {
-  const loaded = safeGetItem<Asset3DItem[]>(STORAGE_KEY, []);
-  // Asynchronously rehydrate blob URLs for persisted models
+  const rawLoaded = safeGetItem<Asset3DItem[]>(STORAGE_KEY, []);
+  const loaded = rawLoaded.map((a) => {
+    if (a.conceptImageUrl?.startsWith('refimg://')) {
+      const syncResolved = resolveOffloadedImageSync(a.conceptImageUrl);
+      if (syncResolved) {
+        return { ...a, conceptImageUrl: syncResolved };
+      }
+    }
+    return a;
+  });
+  // Asynchronously rehydrate blob URLs for persisted models and offloaded concept images
   if (typeof window !== 'undefined') {
     setTimeout(async () => {
       let changed = false;
       const rehydrated = await Promise.all(
         loaded.map(async (a) => {
+          let nextItem = a;
           if (!a.modelUrl?.startsWith('/api/comfy-glb-output') && (a.modelId || (a.modelUrl && a.modelUrl.startsWith('model://')))) {
             const key = a.modelId || a.modelUrl!;
             const activeUrl = await getModelBlobUrl(key);
             if (activeUrl && activeUrl !== a.modelUrl) {
               changed = true;
-              return { ...a, modelUrl: activeUrl };
+              nextItem = { ...nextItem, modelUrl: activeUrl };
             }
           }
-          return a;
+          if (nextItem.conceptImageUrl?.startsWith('refimg://')) {
+            const resolvedImg = await resolveOffloadedImage(nextItem.conceptImageUrl);
+            if (resolvedImg && resolvedImg !== nextItem.conceptImageUrl) {
+              changed = true;
+              nextItem = { ...nextItem, conceptImageUrl: resolvedImg };
+            }
+          }
+          return nextItem;
         })
       );
       if (changed) {
@@ -2663,12 +2687,16 @@ const getSafeCustomAssets = (): Asset3DItem[] => {
 };
 
 const persistCustomAssets = (assets: Asset3DItem[]) => {
-  // Sanitize assets so we don't store ephemeral blob: URLs in localStorage
+  // Sanitize assets so we don't store ephemeral blob: URLs or multi-MB base64 images in localStorage
   const sanitized = assets.map((a) => {
+    let next = a;
     if (a.modelUrl?.startsWith('blob:') && a.modelId) {
-      return { ...a, modelUrl: `model://${a.modelId}` };
+      next = { ...next, modelUrl: `model://${a.modelId}` };
     }
-    return a;
+    if (next.conceptImageUrl?.startsWith('data:') && next.conceptImageUrl.length > 80_000) {
+      next = { ...next, conceptImageUrl: offloadLargeImageToIndexedDB(next.conceptImageUrl) };
+    }
+    return next;
   });
   if (!safeSetItem(STORAGE_KEY, sanitized)) {
     // Fallback if a large base64 conceptImageUrl exceeds localStorage quota

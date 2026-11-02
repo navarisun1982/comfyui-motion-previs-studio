@@ -76,7 +76,9 @@ const FOV_MAP: Record<FocalLength, number> = {
 export function computeCameraIntrinsics(
   focalLength: FocalLength,
   aspectRatio: ShotSpec['aspectRatio'],
-  targetWidth: number = 1280
+  targetWidth: number = 1280,
+  customFocalLengthMm?: number,
+  sensorSize?: string
 ): CameraIntrinsics {
   let targetHeight = 720;
   if (aspectRatio === '9:16') {
@@ -90,8 +92,25 @@ export function computeCameraIntrinsics(
     targetHeight = targetWidth;
   }
 
-  const focalMm = FOCAL_MM_MAP[focalLength] || 35;
-  const fovDeg = FOV_MAP[focalLength] || 63;
+  const baseMm = FOCAL_MM_MAP[focalLength] || 35;
+  const focalMm =
+    typeof customFocalLengthMm === 'number' && Number.isFinite(customFocalLengthMm)
+      ? customFocalLengthMm
+      : baseMm;
+  const hasCustomLensOrSensor =
+    (typeof customFocalLengthMm === 'number' && customFocalLengthMm !== baseMm) ||
+    (sensorSize && sensorSize !== 'super-35');
+  const sensorHeightMm =
+    sensorSize === 'imax-65mm'
+      ? 38.5
+      : sensorSize === 'full-frame'
+      ? 24.0
+      : sensorSize === 'anamorphic-2x'
+      ? 21.0
+      : 18.66;
+  const fovDeg = hasCustomLensOrSensor
+    ? Math.max(8, Math.min(130, (2 * Math.atan(sensorHeightMm / (2 * Math.max(8, focalMm))) * 180) / Math.PI))
+    : FOV_MAP[focalLength] || 63;
   const fovRad = (fovDeg * Math.PI) / 180;
 
   // Focal length in pixel coordinates
@@ -141,11 +160,19 @@ export function lookAtToMatrix4(
   const zy = -fy;
   const zz = -fz;
 
-  // X_cam = Up x Z_cam
-  let xx = up.y * zz - up.z * zy;
-  let xy = up.z * zx - up.x * zz;
-  let xz = up.x * zy - up.y * zx;
-  const xLen = Math.sqrt(xx * xx + xy * xy + xz * xz) || 1.0;
+  // X_cam = Up x Z_cam (fallback to safeUp [0, 0, -1] on overhead gimbal lock)
+  let effUp = up;
+  let xx = effUp.y * zz - effUp.z * zy;
+  let xy = effUp.z * zx - effUp.x * zz;
+  let xz = effUp.x * zy - effUp.y * zx;
+  let xLen = Math.sqrt(xx * xx + xy * xy + xz * xz);
+  if (xLen < 1e-6) {
+    effUp = { x: 0, y: 0, z: -1 };
+    xx = effUp.y * zz - effUp.z * zy;
+    xy = effUp.z * zx - effUp.x * zz;
+    xz = effUp.x * zy - effUp.y * zx;
+    xLen = Math.sqrt(xx * xx + xy * xy + xz * xz) || 1.0;
+  }
   xx /= xLen;
   xy /= xLen;
   xz /= xLen;
@@ -186,24 +213,65 @@ export function exportCameraPoseBundle(shot: ShotSpec): CameraPoseBundle {
   const fps = shot.frameRate || 24;
   const duration = shot.durationSeconds || 4.0;
   const frameCount = Math.max(1, Math.round(duration * fps));
-  const intrinsics = computeCameraIntrinsics(shot.camera.lens.focalLength, shot.aspectRatio);
+  const intrinsics = computeCameraIntrinsics(
+    shot.camera.lens.focalLength,
+    shot.aspectRatio,
+    1280,
+    shot.camera.lens.customFocalLengthMm,
+    shot.camera.lens.sensorSize
+  );
 
   const w2cExtrinsics: Matrix4x4[] = [];
   const c2wPoses: Matrix4x4[] = [];
   const timestamps: number[] = [];
 
+  const angle = shot.camera.angle;
+  const baseLookHeight =
+    angle === 'low-angle'
+      ? 6.1
+      : angle === 'ground-level'
+      ? 6.4
+      : angle === 'high-angle'
+      ? 3.8
+      : angle === 'overhead-gods-eye'
+      ? 0.5
+      : 5.0;
+
   const lookAtTarget = {
     x: (shot.camera.movement.targetLookAt.x - 50) * 1.0,
-    y: 5.0, // Eye level height on stage
+    y: baseLookHeight + (shot.camera.lookAtHeightOffset ?? 0),
     z: (shot.camera.movement.targetLookAt.y - 50) * 1.0,
   };
+
+  const rollRad =
+    (((shot.camera.dutchRollDeg ?? 0) + (angle === 'dutch-angle' ? -15 : 0)) * Math.PI) / 180;
+  const cosR = Math.cos(rollRad);
+  const sinR = Math.sin(rollRad);
 
   for (let f = 0; f < frameCount; f++) {
     const t = (f / Math.max(1, frameCount - 1)) * duration;
     timestamps.push(Math.round(t * 1000) / 1000);
 
-    const eyePos = interpolateCameraPosition(shot.camera.movement, t, duration);
-    const { c2w, w2c } = lookAtToMatrix4(eyePos, lookAtTarget);
+    const rawEye = interpolateCameraPosition(shot.camera.movement, t, duration);
+    const eyePos = {
+      x: rawEye.x,
+      y:
+        angle === 'ground-level'
+          ? Math.min(rawEye.y, 0.4)
+          : angle === 'overhead-gods-eye'
+          ? Math.max(rawEye.y, 28)
+          : rawEye.y,
+      z: rawEye.z,
+    };
+
+    const isOverhead =
+      angle === 'overhead-gods-eye' ||
+      (Math.abs(eyePos.x - lookAtTarget.x) < 0.1 && Math.abs(eyePos.z - lookAtTarget.z) < 0.1);
+    const upVec = isOverhead
+      ? { x: 0, y: 0, z: -1 }
+      : { x: -sinR, y: cosR, z: 0 };
+
+    const { c2w, w2c } = lookAtToMatrix4(eyePos, lookAtTarget, upVec);
 
     w2cExtrinsics.push(w2c);
     c2wPoses.push(c2w);

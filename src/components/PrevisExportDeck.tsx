@@ -251,21 +251,29 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
   const handleRenderInComfyUI = async () => {
     setComfyErrorText(null);
+    if (activeEngineTab === 'seedance') {
+      setComfyErrorText(
+        'Seedance 2.0 is a prompt-export engine (no local ComfyUI weights). Switch to LTX-2.5 or MiniMax H3 to render locally in ComfyUI, or copy/export the Seedance prompt below.'
+      );
+      return;
+    }
+
+    const targetEngine: 'ltx-2.5' | 'minimax-h3' = activeEngineTab === 'ltx-2.5' ? 'ltx-2.5' : 'minimax-h3';
     const customConfig = loadStoredCustomWorkflowConfig();
-    // Validate that all 4 Reference Image slots are filled when using the built-in 4-ref MiniMax H3 Ref2VA workflow
     const trimmedRefs = refImageNames.map((n) => n.trim()) as [string, string, string, string];
-    if (customConfig.activeSource !== 'custom' && trimmedRefs.some((n) => n.length === 0)) {
+    // Validate that all 4 Reference Image slots are filled when using the built-in 4-ref MiniMax H3 Ref2VA workflow
+    if (targetEngine === 'minimax-h3' && customConfig.activeSource !== 'custom' && trimmedRefs.some((n) => n.length === 0)) {
       setComfyErrorText('All 4 Reference Image slots (<picture 1> to <picture 4>) must be filled before submitting to MiniMax H3 Ref2VA.');
       return;
     }
 
     setIsSubmittingComfy(true);
     try {
-      // 1. Ensure 3D RGB Previs MP4 exists (auto-render if needed)
+      // 1. Ensure 3D RGB Previs MP4 exists (auto-render at selectedResolution if needed)
       let rgbUrl = useShotStore.getState().previsVideoUrl;
       if (!rgbUrl) {
-        setComfyStatusText('Step 1/3: Rendering 24fps 3D RGB Previs MP4 for <Video 1> reference...');
-        await renderPrevisVideo('rgb');
+        setComfyStatusText(`Step 1/3: Rendering 24fps 3D RGB Previs MP4 (${selectedResolution}) for <Video 1> reference...`);
+        await renderPrevisVideo('rgb', selectedResolution);
         rgbUrl = useShotStore.getState().previsVideoUrl;
       }
       if (!rgbUrl) {
@@ -273,19 +281,25 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       }
 
       // Fetch blob from object URL + resolve any DataURL thumbnails uploaded in Directing Stage into Blobs!
-      setComfyStatusText('Step 2/3: Uploading 3D Previs MP4 & Reference Images to ComfyUI (127.0.0.1:8188)...');
+      setComfyStatusText(
+        targetEngine === 'ltx-2.5'
+          ? 'Step 2/3: Uploading 3D Previs MP4 to ComfyUI (127.0.0.1:8188)...'
+          : 'Step 2/3: Uploading 3D Previs MP4 & Reference Images to ComfyUI (127.0.0.1:8188)...'
+      );
       const previsBlob = await (await fetch(rgbUrl)).blob();
 
       const resolvedRefBlobs: [Blob | null, Blob | null, Blob | null, Blob | null] = [null, null, null, null];
-      for (let i = 0; i < 4; i++) {
-        if (refImageFiles[i]) {
-          resolvedRefBlobs[i] = refImageFiles[i];
-        } else if (refImageThumbs[i]) {
-          try {
-            const res = await fetch(refImageThumbs[i]!);
-            resolvedRefBlobs[i] = await res.blob();
-          } catch {
-            resolvedRefBlobs[i] = null;
+      if (targetEngine === 'minimax-h3') {
+        for (let i = 0; i < 4; i++) {
+          if (refImageFiles[i]) {
+            resolvedRefBlobs[i] = refImageFiles[i];
+          } else if (refImageThumbs[i]) {
+            try {
+              const res = await fetch(refImageThumbs[i]!);
+              resolvedRefBlobs[i] = await res.blob();
+            } catch {
+              resolvedRefBlobs[i] = null;
+            }
           }
         }
       }
@@ -296,44 +310,54 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       } catch {
         objInfo = null;
       }
-      syncActiveMinimaxTemplateToRegistry(customConfig, objInfo);
+      if (targetEngine === 'minimax-h3') {
+        syncActiveMinimaxTemplateToRegistry(customConfig, objInfo);
+      }
       if (templateRegistry.list().length === 0) {
         loadBundledTemplates();
       }
 
-      // 2. Queue job via JobRunner using active minimax_h3 template (built-in or custom URL/JSON)
-      const minimaxCompiled = getAdapter('minimax-h3').compilePrompt(shot);
-      const effectiveMinimaxPrompt =
-        activeEngineTab === 'minimax-h3' &&
-        displayPositivePrompt.includes('subject_definitions:') &&
-        !displayPositivePrompt.includes('from mark (')
+      // 2. Queue job via JobRunner using active engine template (LTX-2.5 or MiniMax H3)
+      const engineCompiled = getAdapter(targetEngine).compilePrompt(shot);
+      const effectivePrompt =
+        targetEngine === 'minimax-h3'
+          ? displayPositivePrompt.includes('subject_definitions:') && !displayPositivePrompt.includes('from mark (')
+            ? displayPositivePrompt
+            : engineCompiled.positivePrompt
+          : !displayPositivePrompt.includes('subject_definitions:') && !displayPositivePrompt.includes('from mark (') && displayPositivePrompt.trim().length > 0
           ? displayPositivePrompt
-          : minimaxCompiled.positivePrompt;
+          : engineCompiled.positivePrompt;
 
       setComfyStatusText(
-        customConfig.activeSource === 'custom'
+        targetEngine === 'ltx-2.5'
+          ? 'Step 3/3: Binding ltx25_stubelius (Distilled 22B INT8) & queuing in ComfyUI...'
+          : customConfig.activeSource === 'custom'
           ? `Step 3/3: Binding Custom Workflow (${customConfig.label || 'Custom JSON'}) & queuing in ComfyUI...`
           : 'Step 3/3: Binding minimax_h3_ref2va (SolAttn + 8-Step Turbo LoRA) & queuing in ComfyUI...'
       );
       await defaultJobRunner.run({
         shot,
-        engine: 'minimax-h3',
+        engine: targetEngine,
         mode: 'control',
         profile: selectedResolution === '1080p' ? 'final' : 'draft',
-        prompt: effectiveMinimaxPrompt,
+        prompt: effectivePrompt,
         negative: displayNegativePrompt,
         seed: Math.max(0, Math.floor(comfySeed)),
         promptSource: 'compiled',
         controlVideoBlob: previsBlob,
-        refImageBlobs: resolvedRefBlobs,
-        refImageFilenames: trimmedRefs,
+        refImageBlobs: targetEngine === 'minimax-h3' ? resolvedRefBlobs : undefined,
+        refImageFilenames: targetEngine === 'minimax-h3' ? trimmedRefs : undefined,
         onProgress: (pct, title) => {
           setComfyStatusText(`ComfyUI Executing (${pct}%): ${title}`);
         },
         onSuccess: (_revId, videoUrl, filename) => {
           setFinalComfyVideoUrl(videoUrl);
           setFinalComfyFilename(filename);
-          setFinalComfyMeta('1504×832 • 60fps RIFE + Audio');
+          setFinalComfyMeta(
+            targetEngine === 'ltx-2.5'
+              ? `${selectedResolution === '1080p' ? '1080p Upscaled' : 'Native Draft'} • LTX-2.5 INT8`
+              : '1504×832 • 60fps RIFE + Audio'
+          );
           setComfyStatusText(`Completed! Final video ready: ${filename}`);
           setIsSubmittingComfy(false);
           setActivePassTab('side-by-side');
@@ -411,7 +435,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
         positivePrompt: res.positivePrompt,
         negativePrompt: res.negativePrompt,
       });
-      if (res.negativePrompt) {
+      if (res.negativePrompt && !shot.negativePrompt?.trim()) {
         setNegativePrompt(res.negativePrompt);
       }
       setAiDirectorFeedback(res.directorNotes);
@@ -746,7 +770,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                       </div>
                     )}
                     <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-indigo-500/40 text-[9px] font-mono text-indigo-300 font-bold">
-                      2. MINIMAX H3 FINAL RENDER ({finalComfyFilename || 'ComfyUI'})
+                      2. {activeEngineTab === 'ltx-2.5' ? 'LTX-2.5' : 'MINIMAX H3'} FINAL RENDER ({finalComfyFilename || 'ComfyUI'})
                     </div>
                   </div>
                   {previsVideoUrl && finalComfyVideoUrl && (
@@ -858,7 +882,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
               {/* Action Buttons */}
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => renderPrevisVideo(renderPassMode)}
+                  onClick={() => renderPrevisVideo(renderPassMode, selectedResolution)}
                   disabled={isRenderingPrevis}
                   className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold text-xs shadow-lg shadow-amber-500/20 disabled:opacity-50 transition-all cursor-pointer"
                 >
@@ -941,7 +965,15 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                     </button>
                   </div>
                   <p className="text-[10px] font-mono text-slate-400">
-                    Template: <span className="text-indigo-300 font-semibold">minimax_h3_ref2va</span> (SolAttn + 8-Step Turbo LoRA @ 0.7 • Node 638 Previs Video + 4 Ref Images → Node 145 60fps MP4+Audio)
+                    {activeEngineTab === 'ltx-2.5' ? (
+                      <>
+                        Template: <span className="text-amber-300 font-semibold">ltx25_stubelius</span> (Distilled 22B INT8 • Node 7 LTXDirectorCS25 Previs Video → Node 15 MP4)
+                      </>
+                    ) : (
+                      <>
+                        Template: <span className="text-indigo-300 font-semibold">minimax_h3_ref2va</span> (SolAttn + 8-Step Turbo LoRA @ 0.7 • Node 638 Previs Video + 4 Ref Images → Node 145 60fps MP4+Audio)
+                      </>
+                    )}
                   </p>
                 </div>
               </div>

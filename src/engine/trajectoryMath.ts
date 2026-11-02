@@ -121,7 +121,16 @@ export function interpolateCameraPosition(
   let stagePos: { x: number; y: number; z: number };
 
   if (rawKeyframes.length === 0) {
-    const ratio = clampedTime / safeDuration;
+    const rawRatio = clampedTime / safeDuration;
+    const pacing = cameraMovement.pacing;
+    const ratio =
+      pacing === 'ease-in-out'
+        ? rawRatio * rawRatio * (3 - 2 * rawRatio)
+        : pacing === 'ease-in'
+        ? rawRatio * rawRatio
+        : pacing === 'ease-out'
+        ? 1 - (1 - rawRatio) * (1 - rawRatio)
+        : rawRatio;
     const start = cameraMovement.startPosition;
     const end = cameraMovement.endPosition;
     stagePos = {

@@ -1504,10 +1504,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     const env = shot.environment;
     const skyHex = env?.skyColor || '#08090c';
     const fogHex = env?.fogColor || '#08090c';
+    const fogDensity = Math.max(0, Math.min(1, env?.fogDensity ?? 0.01));
+    const fogNear = Math.max(15, Math.round(100 - fogDensity * 80));
+    const fogFar = Math.max(120, Math.round(600 - fogDensity * 440));
 
-    // 1. Sky & Atmospheric Fog (linear falloff ensures the stage orbit camera never gets blacked out)
+    // 1. Sky & Atmospheric Fog (linear falloff modulated by fogDensity so the stage orbit camera never gets blacked out)
     scene.background = new THREE.Color(skyHex);
-    scene.fog = new THREE.Fog(new THREE.Color(fogHex), 100, 600);
+    scene.fog = new THREE.Fog(new THREE.Color(fogHex), fogNear, fogFar);
 
     // 2. Ground Material & Surface Texturing
     applyGroundSurface(floorMesh, env?.groundSurface);
@@ -2001,6 +2004,14 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         const smoothPunch = punch * punch * (3 - 2 * punch);
         vfCameraRef.current.fov = Math.max(12, baseFov * (1 - smoothPunch * 0.55));
         vfCameraRef.current.updateProjectionMatrix();
+      } else if (liveShot.camera.movement.type === 'zoom-in') {
+        const smoothZoom = ratio * ratio * (3 - 2 * ratio);
+        vfCameraRef.current.fov = Math.max(12, baseFov * (1 - smoothZoom * 0.38));
+        vfCameraRef.current.updateProjectionMatrix();
+      } else if (liveShot.camera.movement.type === 'zoom-out') {
+        const smoothZoom = ratio * ratio * (3 - 2 * ratio);
+        vfCameraRef.current.fov = Math.min(120, baseFov * (1 + smoothZoom * 0.42));
+        vfCameraRef.current.updateProjectionMatrix();
       } else if (Math.abs(vfCameraRef.current.fov - baseFov) > 0.2) {
         vfCameraRef.current.fov = baseFov;
         vfCameraRef.current.updateProjectionMatrix();
@@ -2110,7 +2121,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
               applyPosePreset(mesh.userData.rig, actor.posePreset);
             } else if (actor.posePreset && !POSE_PRESETS[actor.posePreset] && !mesh.userData.isAutoRiggedGlb) {
               applyPosePreset(mesh.userData.rig, 'neutral-stand');
-            } else if (mesh.userData.isAutoRiggedGlb) {
+            } else if (mesh.userData.isAutoRiggedGlb && typeof mesh.userData.setAnimationTime !== 'function') {
               resetToRestPose(mesh.userData.rig);
             }
           }
@@ -2278,7 +2289,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
       // Deterministic render (8n+1 frame snapping if target model is LTX-2.5)
       const isLtx = shot.targetModel === 'ltx-2.5';
-      const hasHumanActor = shot.actors.some((a) => !a.kind || a.kind === 'human');
+      const hasHumanActor = shot.actors.some(
+        (a) =>
+          !a.kind ||
+          a.kind === 'human' ||
+          a.kind === 'character' ||
+          detectObjectPoseCategory(a) === 'humanoid'
+      );
       const renderPassMode = requestedPassMode || (hasHumanActor ? 'all' : 'rgb');
 
       // Calculate target resolution matching shot aspect ratio
@@ -2305,10 +2322,21 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       vfCameraRef.current.aspect = targetWidth / targetHeight;
       vfCameraRef.current.updateProjectionMatrix();
 
-      // Collect all active humanoid rigs for high-fidelity OpenPose pass
+      // Collect all active humanoid rigs for high-fidelity OpenPose pass (excluding quadruped/spine_flex/rigid_prop)
       const activeHumanoidRigs: HumanoidRig[] = [];
-      actorMeshesRef.current.forEach((actorMesh) => {
-        if (actorMesh.userData?.rig) {
+      actorMeshesRef.current.forEach((actorMesh, actorId) => {
+        const act = shot.actors.find((a) => a.id === actorId);
+        const isHumanoidRig =
+          actorMesh.userData?.rig &&
+          actorMesh.userData?.rigArchetype !== 'quadruped' &&
+          actorMesh.userData?.rigArchetype !== 'spine_flex' &&
+          actorMesh.userData?.rigArchetype !== 'rigid_prop' &&
+          (!act ||
+            !act.kind ||
+            act.kind === 'human' ||
+            act.kind === 'character' ||
+            detectObjectPoseCategory(act) === 'humanoid');
+        if (isHumanoidRig) {
           activeHumanoidRigs.push(actorMesh.userData.rig);
         }
       });
@@ -2323,6 +2351,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         height: targetHeight,
         renderPass: renderPassMode,
         snap8n1: isLtx,
+        trimStartSeconds: shot.vfxReference?.trimStartSeconds,
+        trimEndSeconds: shot.vfxReference?.trimEndSeconds,
         syncPositions,
         modelUrls: actorModelUrls,
         humanoidRigs: activeHumanoidRigs,

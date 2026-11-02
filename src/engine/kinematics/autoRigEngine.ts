@@ -58,6 +58,7 @@ export interface RigLandmarks {
   quadFrontLegZ?: number;
   quadBackLegX?: number;
   quadBackLegZ?: number;
+  isLengthAlongZ?: boolean;
 
   // Detected stance metadata
   detectedStance?: 't-pose' | 'a-pose' | 'relaxed' | 'quadruped' | 'flexible' | 'rigid';
@@ -307,13 +308,20 @@ export function detectMeshRigLandmarks(
       neckY: 0.70,
       headY: 0.80,
       quadSpineY: 0.58,
-      quadNeckPos: [0, 0.68, dirSign * THREE.MathUtils.clamp(halfLen * 0.56, 0.16, 0.45)],
-      quadHeadPos: [0, 0.78, dirSign * THREE.MathUtils.clamp(halfLen * 0.76, 0.24, 0.58)],
-      quadTailPos: [0, 0.56, -dirSign * THREE.MathUtils.clamp(halfLen * 0.82, 0.24, 0.60)],
+      quadNeckPos: isLengthAlongZ
+        ? [0, 0.68, dirSign * THREE.MathUtils.clamp(halfLen * 0.56, 0.16, 0.45)]
+        : [dirSign * THREE.MathUtils.clamp(halfLen * 0.56, 0.16, 0.45), 0.68, 0],
+      quadHeadPos: isLengthAlongZ
+        ? [0, 0.78, dirSign * THREE.MathUtils.clamp(halfLen * 0.76, 0.24, 0.58)]
+        : [dirSign * THREE.MathUtils.clamp(halfLen * 0.76, 0.24, 0.58), 0.78, 0],
+      quadTailPos: isLengthAlongZ
+        ? [0, 0.56, -dirSign * THREE.MathUtils.clamp(halfLen * 0.82, 0.24, 0.60)]
+        : [-dirSign * THREE.MathUtils.clamp(halfLen * 0.82, 0.24, 0.60), 0.56, 0],
       quadFrontLegX: legX,
       quadFrontLegZ: frontZ,
       quadBackLegX: legX,
       quadBackLegZ: backZ,
+      isLengthAlongZ,
       detectedStance: 'quadruped',
     };
     if (primaryGeom) {
@@ -527,48 +535,56 @@ function buildAdaptiveRigSkeleton(
 
   if (rigType === 'quadruped') {
     const sy = (landmarks.quadSpineY ?? 0.58) * H;
-    const neckP = landmarks.quadNeckPos ?? [0, 0.68, 0.28];
-    const headP = landmarks.quadHeadPos ?? [0, 0.78, 0.42];
-    const tailP = landmarks.quadTailPos ?? [0, 0.56, -0.45];
+    const alongZ = landmarks.isLengthAlongZ !== false;
+    const neckP = landmarks.quadNeckPos ?? (alongZ ? [0, 0.68, 0.28] : [0.28, 0.68, 0]);
+    const headP = landmarks.quadHeadPos ?? (alongZ ? [0, 0.78, 0.42] : [0.42, 0.78, 0]);
+    const tailP = landmarks.quadTailPos ?? (alongZ ? [0, 0.56, -0.45] : [-0.45, 0.56, 0]);
     const flX = (landmarks.quadFrontLegX ?? 0.11) * H;
     const flZ = (landmarks.quadFrontLegZ ?? 0.24) * H;
     const blX = (landmarks.quadBackLegX ?? 0.11) * H;
     const blZ = (landmarks.quadBackLegZ ?? -0.24) * H;
     const midZ = (flZ + blZ) * 0.5;
+    const pt = (lat: number, y: number, foreAft: number) =>
+      alongZ ? new THREE.Vector3(lat, y, foreAft) : new THREE.Vector3(foreAft, y, lat);
 
-    worldPos.set('Hips', new THREE.Vector3(0, sy, blZ * 0.65));
-    worldPos.set('Spine', new THREE.Vector3(0, sy, midZ));
-    worldPos.set('Chest', new THREE.Vector3(0, sy + 0.02 * H, flZ * 0.75));
+    worldPos.set('Hips', pt(0, sy, blZ * 0.65));
+    worldPos.set('Spine', pt(0, sy, midZ));
+    worldPos.set('Chest', pt(0, sy + 0.02 * H, flZ * 0.75));
     worldPos.set('Neck', new THREE.Vector3(neckP[0] * H, neckP[1] * H, neckP[2] * H));
     worldPos.set('Head', new THREE.Vector3(headP[0] * H, headP[1] * H, headP[2] * H));
 
     // Front Left Leg mapped to LeftShoulder -> LeftArm -> LeftForeArm -> LeftHand
-    worldPos.set('LeftShoulder', new THREE.Vector3(flX * 0.6, sy, flZ));
-    worldPos.set('LeftArm', new THREE.Vector3(flX, sy * 0.88, flZ));
-    worldPos.set('LeftForeArm', new THREE.Vector3(flX, sy * 0.46, flZ));
-    worldPos.set('LeftHand', new THREE.Vector3(flX, 0.05 * H, flZ + 0.02 * H));
+    worldPos.set('LeftShoulder', pt(flX * 0.6, sy, flZ));
+    worldPos.set('LeftArm', pt(flX, sy * 0.88, flZ));
+    worldPos.set('LeftForeArm', pt(flX, sy * 0.46, flZ));
+    worldPos.set('LeftHand', pt(flX, 0.05 * H, flZ + 0.02 * H));
 
     // Front Right Leg mapped to RightShoulder -> RightArm -> RightForeArm -> RightHand
-    worldPos.set('RightShoulder', new THREE.Vector3(-flX * 0.6, sy, flZ));
-    worldPos.set('RightArm', new THREE.Vector3(-flX, sy * 0.88, flZ));
-    worldPos.set('RightForeArm', new THREE.Vector3(-flX, sy * 0.46, flZ));
-    worldPos.set('RightHand', new THREE.Vector3(-flX, 0.05 * H, flZ + 0.02 * H));
+    worldPos.set('RightShoulder', pt(-flX * 0.6, sy, flZ));
+    worldPos.set('RightArm', pt(-flX, sy * 0.88, flZ));
+    worldPos.set('RightForeArm', pt(-flX, sy * 0.46, flZ));
+    worldPos.set('RightHand', pt(-flX, 0.05 * H, flZ + 0.02 * H));
 
     // Back Left Leg mapped to LeftUpLeg -> LeftLeg -> LeftFoot
-    worldPos.set('LeftUpLeg', new THREE.Vector3(blX, sy * 0.88, blZ));
-    worldPos.set('LeftLeg', new THREE.Vector3(blX, sy * 0.46, blZ - 0.02 * H));
-    worldPos.set('LeftFoot', new THREE.Vector3(blX, 0.05 * H, blZ));
+    worldPos.set('LeftUpLeg', pt(blX, sy * 0.88, blZ));
+    worldPos.set('LeftLeg', pt(blX, sy * 0.46, blZ - 0.02 * H));
+    worldPos.set('LeftFoot', pt(blX, 0.05 * H, blZ));
 
     // Back Right Leg mapped to RightUpLeg -> RightLeg -> RightFoot
-    worldPos.set('RightUpLeg', new THREE.Vector3(-blX, sy * 0.88, blZ));
-    worldPos.set('RightLeg', new THREE.Vector3(-blX, sy * 0.46, blZ - 0.02 * H));
-    worldPos.set('RightFoot', new THREE.Vector3(-blX, 0.05 * H, blZ));
+    worldPos.set('RightUpLeg', pt(-blX, sy * 0.88, blZ));
+    worldPos.set('RightLeg', pt(-blX, sy * 0.46, blZ - 0.02 * H));
+    worldPos.set('RightFoot', pt(-blX, 0.05 * H, blZ));
 
     // Add an explicit Tail bone under Hips for quadruped tail wagging
     const tailBone = new THREE.Bone();
     tailBone.name = 'tail_bone';
     tailBone.userData.role = 'tail';
-    tailBone.position.set(0, (tailP[1] * H) - sy, (tailP[2] * H) - blZ * 0.65);
+    const hipsPos = worldPos.get('Hips')!;
+    tailBone.position.set(
+      tailP[0] * H - hipsPos.x,
+      tailP[1] * H - hipsPos.y,
+      tailP[2] * H - hipsPos.z
+    );
     root.userData.tailBone = tailBone;
   } else if (rigType === 'spine_flex') {
     // 5-Bone Vertical Flexible Chain (with compact symmetric side anchors)
@@ -760,144 +776,147 @@ function buildAdaptiveRigSkeleton(
       side: 'center',
       region: 'head',
     },
+    ...(rigType === 'spine_flex'
+      ? []
+      : ([
+          // Left Arm
+          {
+            boneIndex: idxOf('LeftShoulder'),
+            boneName: 'LeftShoulder' as HumanoidBone,
+            start: pOf('LeftShoulder'),
+            end: pOf('LeftArm'),
+            radius: 0.075 * H,
+            side: 'left' as const,
+            region: 'arm' as const,
+          },
+          {
+            boneIndex: idxOf('LeftArm'),
+            boneName: 'LeftArm' as HumanoidBone,
+            start: pOf('LeftArm'),
+            end: pOf('LeftForeArm'),
+            radius: 0.07 * H,
+            side: 'left' as const,
+            region: 'arm' as const,
+          },
+          {
+            boneIndex: idxOf('LeftForeArm'),
+            boneName: 'LeftForeArm' as HumanoidBone,
+            start: pOf('LeftForeArm'),
+            end: pOf('LeftHand'),
+            radius: 0.065 * H,
+            side: 'left' as const,
+            region: 'arm' as const,
+          },
+          {
+            boneIndex: idxOf('LeftHand'),
+            boneName: 'LeftHand' as HumanoidBone,
+            start: pOf('LeftHand'),
+            end: pOf('LeftHand').add(
+              pOf('LeftHand').sub(pOf('LeftForeArm')).normalize().multiplyScalar(0.06 * H)
+            ),
+            radius: 0.065 * H,
+            side: 'left' as const,
+            region: 'arm' as const,
+          },
 
-    // Left Arm
-    {
-      boneIndex: idxOf('LeftShoulder'),
-      boneName: 'LeftShoulder',
-      start: pOf('LeftShoulder'),
-      end: pOf('LeftArm'),
-      radius: 0.075 * H,
-      side: 'left',
-      region: 'arm',
-    },
-    {
-      boneIndex: idxOf('LeftArm'),
-      boneName: 'LeftArm',
-      start: pOf('LeftArm'),
-      end: pOf('LeftForeArm'),
-      radius: 0.07 * H,
-      side: 'left',
-      region: 'arm',
-    },
-    {
-      boneIndex: idxOf('LeftForeArm'),
-      boneName: 'LeftForeArm',
-      start: pOf('LeftForeArm'),
-      end: pOf('LeftHand'),
-      radius: 0.065 * H,
-      side: 'left',
-      region: 'arm',
-    },
-    {
-      boneIndex: idxOf('LeftHand'),
-      boneName: 'LeftHand',
-      start: pOf('LeftHand'),
-      end: pOf('LeftHand').add(
-        pOf('LeftHand').sub(pOf('LeftForeArm')).normalize().multiplyScalar(0.06 * H)
-      ),
-      radius: 0.065 * H,
-      side: 'left',
-      region: 'arm',
-    },
+          // Right Arm
+          {
+            boneIndex: idxOf('RightShoulder'),
+            boneName: 'RightShoulder' as HumanoidBone,
+            start: pOf('RightShoulder'),
+            end: pOf('RightArm'),
+            radius: 0.075 * H,
+            side: 'right' as const,
+            region: 'arm' as const,
+          },
+          {
+            boneIndex: idxOf('RightArm'),
+            boneName: 'RightArm' as HumanoidBone,
+            start: pOf('RightArm'),
+            end: pOf('RightForeArm'),
+            radius: 0.07 * H,
+            side: 'right' as const,
+            region: 'arm' as const,
+          },
+          {
+            boneIndex: idxOf('RightForeArm'),
+            boneName: 'RightForeArm' as HumanoidBone,
+            start: pOf('RightForeArm'),
+            end: pOf('RightHand'),
+            radius: 0.065 * H,
+            side: 'right' as const,
+            region: 'arm' as const,
+          },
+          {
+            boneIndex: idxOf('RightHand'),
+            boneName: 'RightHand' as HumanoidBone,
+            start: pOf('RightHand'),
+            end: pOf('RightHand').add(
+              pOf('RightHand').sub(pOf('RightForeArm')).normalize().multiplyScalar(0.06 * H)
+            ),
+            radius: 0.065 * H,
+            side: 'right' as const,
+            region: 'arm' as const,
+          },
 
-    // Right Arm
-    {
-      boneIndex: idxOf('RightShoulder'),
-      boneName: 'RightShoulder',
-      start: pOf('RightShoulder'),
-      end: pOf('RightArm'),
-      radius: 0.075 * H,
-      side: 'right',
-      region: 'arm',
-    },
-    {
-      boneIndex: idxOf('RightArm'),
-      boneName: 'RightArm',
-      start: pOf('RightArm'),
-      end: pOf('RightForeArm'),
-      radius: 0.07 * H,
-      side: 'right',
-      region: 'arm',
-    },
-    {
-      boneIndex: idxOf('RightForeArm'),
-      boneName: 'RightForeArm',
-      start: pOf('RightForeArm'),
-      end: pOf('RightHand'),
-      radius: 0.065 * H,
-      side: 'right',
-      region: 'arm',
-    },
-    {
-      boneIndex: idxOf('RightHand'),
-      boneName: 'RightHand',
-      start: pOf('RightHand'),
-      end: pOf('RightHand').add(
-        pOf('RightHand').sub(pOf('RightForeArm')).normalize().multiplyScalar(0.06 * H)
-      ),
-      radius: 0.065 * H,
-      side: 'right',
-      region: 'arm',
-    },
+          // Left Leg
+          {
+            boneIndex: idxOf('LeftUpLeg'),
+            boneName: 'LeftUpLeg' as HumanoidBone,
+            start: pOf('LeftUpLeg'),
+            end: pOf('LeftLeg'),
+            radius: 0.085 * H,
+            side: 'left' as const,
+            region: 'leg' as const,
+          },
+          {
+            boneIndex: idxOf('LeftLeg'),
+            boneName: 'LeftLeg' as HumanoidBone,
+            start: pOf('LeftLeg'),
+            end: pOf('LeftFoot'),
+            radius: 0.075 * H,
+            side: 'left' as const,
+            region: 'leg' as const,
+          },
+          {
+            boneIndex: idxOf('LeftFoot'),
+            boneName: 'LeftFoot' as HumanoidBone,
+            start: pOf('LeftFoot'),
+            end: pOf('LeftFoot').add(new THREE.Vector3(0, -0.04 * H, 0.06 * H)),
+            radius: 0.08 * H,
+            side: 'left' as const,
+            region: 'leg' as const,
+          },
 
-    // Left Leg
-    {
-      boneIndex: idxOf('LeftUpLeg'),
-      boneName: 'LeftUpLeg',
-      start: pOf('LeftUpLeg'),
-      end: pOf('LeftLeg'),
-      radius: 0.085 * H,
-      side: 'left',
-      region: 'leg',
-    },
-    {
-      boneIndex: idxOf('LeftLeg'),
-      boneName: 'LeftLeg',
-      start: pOf('LeftLeg'),
-      end: pOf('LeftFoot'),
-      radius: 0.075 * H,
-      side: 'left',
-      region: 'leg',
-    },
-    {
-      boneIndex: idxOf('LeftFoot'),
-      boneName: 'LeftFoot',
-      start: pOf('LeftFoot'),
-      end: pOf('LeftFoot').add(new THREE.Vector3(0, -0.04 * H, 0.06 * H)),
-      radius: 0.08 * H,
-      side: 'left',
-      region: 'leg',
-    },
-
-    // Right Leg
-    {
-      boneIndex: idxOf('RightUpLeg'),
-      boneName: 'RightUpLeg',
-      start: pOf('RightUpLeg'),
-      end: pOf('RightLeg'),
-      radius: 0.085 * H,
-      side: 'right',
-      region: 'leg',
-    },
-    {
-      boneIndex: idxOf('RightLeg'),
-      boneName: 'RightLeg',
-      start: pOf('RightLeg'),
-      end: pOf('RightFoot'),
-      radius: 0.075 * H,
-      side: 'right',
-      region: 'leg',
-    },
-    {
-      boneIndex: idxOf('RightFoot'),
-      boneName: 'RightFoot',
-      start: pOf('RightFoot'),
-      end: pOf('RightFoot').add(new THREE.Vector3(0, -0.04 * H, 0.06 * H)),
-      radius: 0.08 * H,
-      side: 'right',
-      region: 'leg',
-    },
+          // Right Leg
+          {
+            boneIndex: idxOf('RightUpLeg'),
+            boneName: 'RightUpLeg' as HumanoidBone,
+            start: pOf('RightUpLeg'),
+            end: pOf('RightLeg'),
+            radius: 0.085 * H,
+            side: 'right' as const,
+            region: 'leg' as const,
+          },
+          {
+            boneIndex: idxOf('RightLeg'),
+            boneName: 'RightLeg' as HumanoidBone,
+            start: pOf('RightLeg'),
+            end: pOf('RightFoot'),
+            radius: 0.075 * H,
+            side: 'right' as const,
+            region: 'leg' as const,
+          },
+          {
+            boneIndex: idxOf('RightFoot'),
+            boneName: 'RightFoot' as HumanoidBone,
+            start: pOf('RightFoot'),
+            end: pOf('RightFoot').add(new THREE.Vector3(0, -0.04 * H, 0.06 * H)),
+            radius: 0.08 * H,
+            side: 'right' as const,
+            region: 'leg' as const,
+          },
+        ] as BoneSegmentDef[])),
   ];
 
   if (rigType === 'quadruped' && root.userData.tailBone) {

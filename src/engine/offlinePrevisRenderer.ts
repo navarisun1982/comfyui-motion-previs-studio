@@ -15,6 +15,8 @@ export interface PrevisRenderOptions {
   height?: number;
   renderPass?: 'rgb' | 'depth' | 'openpose' | 'both' | 'all';
   snap8n1?: boolean;
+  trimStartSeconds?: number;
+  trimEndSeconds?: number;
   syncPositions: (time: number) => void;
   onProgress?: (progressPercent: number) => void;
   onFrame?: (frameIndex: number, totalFrames: number) => void;
@@ -240,16 +242,22 @@ export async function renderOfflinePrevisPasses(
     height = 720,
     renderPass = 'rgb',
     snap8n1 = false,
+    trimStartSeconds,
+    trimEndSeconds,
     syncPositions,
     onProgress,
     onFrame,
     modelUrls,
   } = options;
 
+  const startSec = Math.max(0, Math.min(durationSeconds, trimStartSeconds ?? 0));
+  const endSec = Math.max(startSec + 0.05, Math.min(durationSeconds, trimEndSeconds ?? durationSeconds));
+  const activeDuration = endSec - startSec;
+
   // 1. Calculate deterministic frame count
   const totalFrames = snap8n1
-    ? snapFrames(durationSeconds, fps, '8n+1')
-    : Math.max(2, Math.round(durationSeconds * fps));
+    ? snapFrames(activeDuration, fps, '8n+1')
+    : Math.max(2, Math.round(activeDuration * fps));
 
   const shouldRenderRgb = renderPass === 'rgb' || renderPass === 'both' || renderPass === 'all';
   const shouldRenderDepth = renderPass === 'depth' || renderPass === 'both' || renderPass === 'all';
@@ -279,7 +287,7 @@ export async function renderOfflinePrevisPasses(
     renderer.setSize(width, height, false);
 
     for (let f = 0; f < totalFrames; f++) {
-      const t = totalFrames > 1 ? (f / (totalFrames - 1)) * durationSeconds : 0;
+      const t = totalFrames > 1 ? startSec + (f / (totalFrames - 1)) * activeDuration : startSec;
 
       // Update positions and matrices at exact timestep t
       syncPositions(t);

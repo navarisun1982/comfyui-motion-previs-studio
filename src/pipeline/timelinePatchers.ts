@@ -65,12 +65,22 @@ const ltxFirstFramePatcher: TimelinePatcher = {
     const data = isPlainObject(timeline) ? structuredClone(timeline) : {};
     const segments = Array.isArray(data.segments) ? [...data.segments] : [];
 
-    // Filter out previous first-frame image segments
-    const filteredSegments = segments.filter((s) => {
-      if (!isPlainObject(s)) return true;
-      if (s.type === 'image' && (s.start === 0 || s.start === '0')) return false;
-      return true;
-    });
+    const rawFrames = Math.max(1, Math.round((ctx.durationSeconds || 5) * (ctx.frameRate || 24)));
+    const snappedFrames = Math.max(1, Math.round((rawFrames - 1) / 8)) * 8 + 1;
+
+    // Filter out previous first-frame image segments and update primary text segment length
+    const filteredSegments = segments
+      .filter((s) => {
+        if (!isPlainObject(s)) return true;
+        if (s.type === 'image' && (s.start === 0 || s.start === '0')) return false;
+        return true;
+      })
+      .map((s) => {
+        if (isPlainObject(s) && s.type === 'text' && (s.start === 0 || s.start === '0')) {
+          return { ...s, length: snappedFrames };
+        }
+        return s;
+      });
 
     if (ctx.mode === 'i2v' && ctx.firstFrameFile) {
       filteredSegments.unshift({
@@ -83,6 +93,7 @@ const ltxFirstFramePatcher: TimelinePatcher = {
 
     const result: Record<string, unknown> = {
       ...data,
+      normalDurationFrames: snappedFrames,
       segments: filteredSegments,
       disable_prompt_relay: true, // Use global prompt exclusively (Q5)
     };

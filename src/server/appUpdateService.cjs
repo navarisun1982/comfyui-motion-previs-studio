@@ -165,18 +165,17 @@ async function applyAppUpdate(options = {}) {
         20000
       );
       stashedChanges = true;
-    } catch {
-      // Fallback if stash fails for any reason
-      await runCmd('git', ['reset', '--hard', 'HEAD'], 15000);
+    } catch (stashErr) {
+      stepsLog.push(`Warning: Could not auto-stash local changes (${stashErr?.message || 'stash error'}). Proceeding carefully without destructive reset.`);
     }
   }
 
-  // 3. Fast-forward / clean sync to origin/master
+  // 3. Fast-forward sync to origin/master
   stepsLog.push(`Updating repository from ${beforeShortSha} to ${targetShortSha} (${behindCount} new commit${behindCount === 1 ? '' : 's'})...`);
   try {
     await runCmd('git', ['pull', '--ff-only', 'origin', 'master'], 30000);
-  } catch {
-    await runCmd('git', ['reset', '--hard', 'origin/master'], 20000);
+  } catch (pullErr) {
+    throw new Error(`Fast-forward git pull failed (${pullErr?.message || 'diverged branch'}). Local files were preserved safely.`);
   }
 
   // 4. Check if package.json or package-lock.json changed between beforeFullSha and targetFullSha

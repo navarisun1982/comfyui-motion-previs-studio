@@ -7,9 +7,11 @@
 
 import {
   getReasonerConfig,
+  buildOllamaRequest,
   buildOpenAiRequest,
   buildGeminiRequest,
   extractResponseText,
+  resolveWireUrl,
 } from './objectReasoner';
 
 export interface ActingCueProposal {
@@ -45,7 +47,7 @@ export function decomposeActingPromptRules(
 ): ActingCueProposal[] {
   const safeDuration = duration > 0 ? duration : 4.0;
   const rawBeats = prompt
-    .split(/(?:;|\. |\n|,\s*(?=[0-9]+(?:\.[0-9]+)?s\b)|,|\band then\b|\bthen\b|\bafter that\b|\bfollowed by\b)/i)
+    .split(/(?:;|\. |\n|,\s*(?=[0-9]+(?:\.[0-9]+)?s\b)|\band then\b|\bthen\b|\bafter that\b|\bfollowed by\b)/i)
     .map((s) => s.trim())
     .filter((s) => s.length > 2);
 
@@ -152,6 +154,17 @@ export async function generateActingCuesFromPrompt(
     return decomposeActingPromptRules(prompt, safeDuration);
   }
 
+  // If the prompt already contains explicit timestamped cues (e.g. "0s combat ready, 2s defensive block"),
+  // use the instant deterministic parser directly without waiting for a cold LLM network call.
+  if (/(?:^|[,;\n])\s*\d+(?:\.\d+)?\s*(?:s|sec|seconds)?\s*[:\s-]/i.test(prompt)) {
+    return decomposeActingPromptRules(prompt, safeDuration);
+  }
+
+  // If provider requires an API key and none is configured, fall back immediately
+  if (cfg.info.needsKey && !cfg.apiKey) {
+    return decomposeActingPromptRules(prompt, safeDuration);
+  }
+
   const systemInstruction = `You are an expert Hollywood character animator and 3D choreography director.
 Your objective is to translate an acting sequence prompt for character "${actorName}" across a ${safeDuration}s shot into a JSON array of timed keyframe cues.
 ${sceneDescription ? `Scene Context: "${sceneDescription}".` : ''}
@@ -175,37 +188,58 @@ No preamble, markdown backticks, or explanation.`;
 
   try {
     let rawText = '';
+    const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(30_000) : undefined;
     if (cfg.provider === 'gemini') {
       const { url, headers, body } = buildGeminiRequest(cfg, prompt, 'object', systemInstruction);
-      const res = await fetch(url, {
+      const res = await fetch(resolveWireUrl(url, cfg.provider), {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
+        signal,
       });
       if (res.ok) {
         const data = await res.json();
         rawText = extractResponseText('gemini', data);
       }
-    } else {
-      const protocol = cfg.provider === 'ollama' ? 'ollama' : 'openai';
-      const { url, headers, body } = buildOpenAiRequest(cfg, prompt, 'object', systemInstruction);
-      const res = await fetch(url, {
+    } else if (cfg.provider === 'ollama') {
+      const { url, headers, body } = buildOllamaRequest(cfg, prompt, 'object', systemInstruction, undefined, 'Acting sequence prompt: ');
+      const res = await fetch(resolveWireUrl(url, cfg.provider), {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
+        signal,
       });
       if (res.ok) {
         const data = await res.json();
-        rawText = extractResponseText(protocol, data);
+        rawText = extractResponseText('ollama', data);
+      }
+    } else {
+      const { url, headers, body } = buildOpenAiRequest(cfg, prompt, 'object', systemInstruction);
+      const res = await fetch(resolveWireUrl(url, cfg.provider), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        rawText = extractResponseText('openai', data);
       }
     }
 
     if (rawText) {
       const cleaned = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleaned);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const validated: ActingCueProposal[] = parsed.map((item, idx) => {
-          const t = Math.max(0, Math.min(safeDuration, Number(item.time ?? (idx / parsed.length) * safeDuration)));
+      const parsedArray = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.cues)
+        ? parsed.cues
+        : Array.isArray(parsed?.beats)
+        ? parsed.beats
+        : null;
+      if (parsedArray && parsedArray.length > 0) {
+        const validated: ActingCueProposal[] = parsedArray.map((item: any, idx: number) => {
+          const t = Math.max(0, Math.min(safeDuration, Number(item.time ?? (idx / parsedArray.length) * safeDuration)));
           const posePreset = VALID_PRESETS.includes(item.posePreset) ? item.posePreset : 'neutral-stand';
           const gait = ['auto', 'walk', 'run', 'sneak', 'idle', 'none'].includes(item.gait) ? item.gait : 'none';
           return {
@@ -213,6 +247,10 @@ No preamble, markdown backticks, or explanation.`;
             cueLabel: item.cueLabel || item.posePreset || `Beat ${idx + 1}`,
             posePreset,
             gait,
+            position:
+              item.position && typeof item.position.x === 'number' && typeof item.position.y === 'number'
+                ? item.position
+                : undefined,
             description: item.description,
           };
         });

@@ -137,7 +137,7 @@ function attachLocalWorkflowMiddleware(middlewares: { use: (fn: (req: any, res: 
         }
 
         let targetFile = '';
-        if (explicitPath && fs.existsSync(explicitPath)) {
+        if (explicitPath && explicitPath.toLowerCase().endsWith('.glb') && fs.existsSync(explicitPath)) {
           targetFile = explicitPath;
         } else {
           // Find the most recently modified .glb file across ComfyUI output directories
@@ -205,9 +205,9 @@ function attachLocalWorkflowMiddleware(middlewares: { use: (fn: (req: any, res: 
       } else if (filePath.toLowerCase().startsWith('file://')) {
         filePath = decodeURIComponent(filePath.replace(/^file:\/\//i, ''));
       }
-      if (!filePath || !fs.existsSync(filePath)) {
+      if (!filePath || !filePath.toLowerCase().endsWith('.json') || !fs.existsSync(filePath)) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: `Local workflow file not found at: ${filePath}` }));
+        res.end(JSON.stringify({ error: `Local workflow JSON file not found at: ${filePath}` }));
         return;
       }
       const resolved = path.resolve(filePath);

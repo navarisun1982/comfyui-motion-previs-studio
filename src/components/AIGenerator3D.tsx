@@ -421,7 +421,9 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       const activeRigType = activeScene?.userData?.autoRigType;
       const motion = previewMotionRef.current;
 
-      if (activeScene && activeRig) {
+      if (activeScene && typeof activeScene.userData?.setAnimationTime === 'function' && motion !== 'bind') {
+        activeScene.userData.setAnimationTime(tSec, 1);
+      } else if (activeScene && activeRig) {
         if (motion === 'bind') {
           resetToRestPose(activeRig);
         } else if (activeRigType === 'humanoid') {
