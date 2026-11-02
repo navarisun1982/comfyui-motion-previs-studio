@@ -4,6 +4,7 @@ import { useComfyStore } from '../stores/useComfyStore';
 import { getAdapter } from '../adapters';
 import { getReasonerConfig } from '../services/objectReasoner';
 import { directPromptWithAI } from '../services/aiPromptDirector';
+import { analyzeShotPovVisibility } from '../engine/povVisibilityEngine';
 import { exportCameraPoseBundle, exportCameraExtrinsicsJson } from '../engine/cameraMatrixExport';
 import { defaultComfyClient } from '../services/comfyClient';
 import { defaultJobRunner } from '../pipeline/jobRunner';
@@ -92,24 +93,35 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   const [comfyGpuLabel, setComfyGpuLabel] = useState<string>(
     storeSystemStats ? `${storeSystemStats.gpuName} (${storeSystemStats.vramTotalGb}GB VRAM)` : 'Checking 127.0.0.1:8188...'
   );
-  const [refImageNames, setRefImageNames] = useState<[string, string, string, string]>([
-    shot.actors[0]?.conceptImageName || 'char1.png',
-    shot.actors[1]?.conceptImageName || 'char2.png',
-    shot.actors[2]?.conceptImageName || 'char3.png',
-    shot.environment?.conceptImageName || 'char4.png',
-  ]);
-  const [refSlotTargets, setRefSlotTargets] = useState<[string, string, string, string]>(() => [
-    shot.actors[0]?.id || 'custom',
-    shot.actors[1]?.id || 'custom',
-    shot.actors[2]?.id || 'custom',
-    'environment',
-  ]);
-  const [refImageThumbs, setRefImageThumbs] = useState<[string | null, string | null, string | null, string | null]>([
-    shot.actors[0]?.conceptImageUrl || null,
-    shot.actors[1]?.conceptImageUrl || null,
-    shot.actors[2]?.conceptImageUrl || null,
-    shot.environment?.conceptImageUrl || null,
-  ]);
+  const povReport = React.useMemo(() => analyzeShotPovVisibility(shot), [shot]);
+
+  const [refImageNames, setRefImageNames] = useState<[string, string, string, string]>(() => {
+    const vis = povReport.visibleActors;
+    return [
+      vis[0]?.conceptImageName || shot.actors[0]?.conceptImageName || 'char1.png',
+      vis[1]?.conceptImageName || shot.actors[1]?.conceptImageName || 'char2.png',
+      vis[2]?.conceptImageName || shot.actors[2]?.conceptImageName || 'char3.png',
+      shot.environment?.conceptImageName || 'char4.png',
+    ];
+  });
+  const [refSlotTargets, setRefSlotTargets] = useState<[string, string, string, string]>(() => {
+    const vis = povReport.visibleActors;
+    return [
+      vis[0]?.id || shot.actors[0]?.id || 'custom',
+      vis[1]?.id || shot.actors[1]?.id || 'custom',
+      vis[2]?.id || shot.actors[2]?.id || 'custom',
+      'environment',
+    ];
+  });
+  const [refImageThumbs, setRefImageThumbs] = useState<[string | null, string | null, string | null, string | null]>(() => {
+    const vis = povReport.visibleActors;
+    return [
+      vis[0]?.conceptImageUrl || shot.actors[0]?.conceptImageUrl || null,
+      vis[1]?.conceptImageUrl || shot.actors[1]?.conceptImageUrl || null,
+      vis[2]?.conceptImageUrl || shot.actors[2]?.conceptImageUrl || null,
+      shot.environment?.conceptImageUrl || null,
+    ];
+  });
   const [refImageFiles, setRefImageFiles] = useState<[File | null, File | null, File | null, File | null]>([
     null,
     null,
@@ -199,20 +211,25 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     }
   };
 
-  // Automatically sync reference image slots with Directing Stage object/set reference images
+  // Automatically sync reference image slots with POV-visible Directing Stage object/set reference images
   useEffect(() => {
+    const visibleActors = povReport.visibleActors;
     setRefSlotTargets((prevTargets) => {
       const nextTargets = [...prevTargets] as [string, string, string, string];
       for (let i = 0; i < 3; i++) {
         const cur = nextTargets[i];
-        const exists = shot.actors.some((a) => a.id === cur);
-        if (!exists && shot.actors[i]) {
-          nextTargets[i] = shot.actors[i].id;
+        const curIsVisible = visibleActors.some((a) => a.id === cur);
+        if (!curIsVisible) {
+          if (visibleActors[i]) {
+            nextTargets[i] = visibleActors[i].id;
+          } else if (!shot.actors.some((a) => a.id === cur) && shot.actors[i]) {
+            nextTargets[i] = shot.actors[i].id;
+          }
         }
       }
       return nextTargets;
     });
-  }, [shot.actors]);
+  }, [shot.actors, povReport]);
 
   useEffect(() => {
     const nextThumbs: [string | null, string | null, string | null, string | null] = [...refImageThumbs] as any;
@@ -303,7 +320,14 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
           refImageDescriptions[i] = shot.environment?.promptDescription || shot.environment?.name || 'Active studio environment';
         } else if (slotTarget && slotTarget !== 'custom') {
           const matchedActor = shot.actors.find((a) => a.id === slotTarget);
-          refImageDescriptions[i] = matchedActor?.token || matchedActor?.name || '';
+          const isActorInPov = povReport.byActorId[slotTarget]?.everVisible ?? true;
+          if (matchedActor && isActorInPov) {
+            refImageDescriptions[i] = matchedActor.token || matchedActor.name || '';
+          } else if (matchedActor && !isActorInPov) {
+            // Do not inject off-screen actor descriptions or reference images into the generation job
+            resolvedRefBlobs[i] = null;
+            refImageDescriptions[i] = '';
+          }
         }
       }
 
@@ -1154,13 +1178,17 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                       className="w-full bg-[#0d1220] border border-white/15 rounded px-1.5 py-1 text-[9.5px] font-mono text-indigo-200 focus:outline-none focus:border-indigo-400"
                       title={`Select which Stage Object or Set maps to <picture ${idx + 1}>`}
                     >
-                      {shot.actors.map((act) => (
-                        <option key={act.id} value={act.id}>
-                          {act.kind === 'human' || act.kind === 'character' ? '👤 ' : '📦 '}
-                          {act.name} ({act.kind || 'human'})
-                          {act.conceptImageUrl ? ' ✓ Ref' : ''}
-                        </option>
-                      ))}
+                      {shot.actors.map((act) => {
+                        const inPov = povReport.byActorId[act.id]?.everVisible ?? true;
+                        return (
+                          <option key={act.id} value={act.id}>
+                            {inPov ? '👁️ ' : '🚫 [Off-Screen] '}
+                            {act.kind === 'human' || act.kind === 'character' ? '👤 ' : '📦 '}
+                            {act.name} ({act.kind || 'human'})
+                            {act.conceptImageUrl ? ' ✓ Ref' : ''}
+                          </option>
+                        );
+                      })}
                       <option value="environment">
                         🌍 Set: {shot.environment?.name || 'Active Environment'}
                         {shot.environment?.conceptImageUrl ? ' ✓ Ref' : ''}

@@ -14,6 +14,7 @@ import {
   PROVIDERS,
 } from './objectReasoner';
 import { buildTemporalTimeline, formatEnvironment } from '../engine/promptCompiler';
+import { analyzeShotPovVisibility } from '../engine/povVisibilityEngine';
 
 export interface DirectedPromptResult {
   positivePrompt: string;
@@ -23,35 +24,36 @@ export interface DirectedPromptResult {
   modelUsed: string;
 }
 
-const LTX_SYSTEM_INSTRUCTION = `You are a world-class Hollywood cinematographer and AI Prompt Director specialized in Lightricks LTX-Video (LTX-2.5).
+const LTX_SYSTEM_INSTRUCTION = `You are a world-class Hollywood cinematographer and AI Prompt Director specialized in Lightricks LTX-Video (LTX-2.5 Gemma-4 22B Distilled Audio-Visual DiT).
 Your objective is to convert a 3D directorial ShotSpec into a single continuous, natural descriptive paragraph written strictly in the present tense.
 
-CORE LTX RULES:
-1. WRITE IN PRESENT TENSE ONLY ("walks, turns, looks, shifts, breathes" — NEVER "walking, turned, or walks into").
-2. PHYSICAL CUES OVER EMOTION: Instead of describing feelings, describe physical performance, jaw tension, gaze, and posture.
-3. VERBS DRIVE MOTION: Use active physical verbs to drive diffusion frame-to-frame mechanics.
-4. NARRATIVE FLOW ACROSS TIME: Structure the paragraph chronologically across the shot duration (opening camera/action -> mid-shot movement -> closing resolution).
-5. AVOID AI BUZZWORDS: Absolutely NO "8k, masterpiece, hyperrealistic, trending on artstation". Use real-world optical terms (depth of field, shutter angle, lens focal length, volumetric light).
-6. OUTPUT FORMAT: Return ONLY the final positive prompt text paragraph. Do not add conversational preamble.`;
+CORE LTX-2.5 OFFICIAL RULES:
+1. STRICT CAMERA-POV VISIBILITY ONLY: Describe ONLY the subjects listed under "POV-VISIBLE STAGE ACTORS". Never mention or allude to any off-screen stage objects. If zero actors are visible in the camera POV, write a pure environmental/architectural shot.
+2. WRITE IN PRESENT TENSE ONLY ("walks, turns, looks, shifts, breathes" — NEVER past tense or passive participles).
+3. PHYSICAL CUES & CAMERA-RELATIVE FRAMING: Describe each visible subject's camera-relative screen zone (screen-left, center-frame, screen-right; close foreground, midground, distant background), physical performance, gaze, and posture.
+4. NARRATIVE FLOW ACROSS TIME: Structure the paragraph chronologically across the shot duration (opening camera/action -> mid-shot movement -> closing resolution), noting if a subject enters or exits the camera frame during a pan or track.
+5. DIEGETIC SOUNDSCAPE CUES: Conclude with a concise present-tense sentence describing synchronized diegetic audio (footsteps, cloth rustle, environmental acoustics) for the LTX-2.5 audio VAE.
+6. AVOID AI BUZZWORDS: Absolutely NO "8k, masterpiece, hyperrealistic, trending on artstation". Use real-world optical terms (depth of field, shutter angle, lens focal length, volumetric light).
+7. OUTPUT FORMAT: Return ONLY the final positive prompt text paragraph. Do not add conversational preamble.`;
 
-const MINIMAX_SYSTEM_INSTRUCTION = `You are an elite Hollywood director and prompt engineer specialized in MiniMax H3 Reference-to-Video (MiniMaxH3ReferenceToVideo / Hailuo).
-Your objective is to convert a 3D directorial ShotSpec into the canonical MiniMax H3 Reference-to-Video multi-subject + video-reference schema.
+const MINIMAX_SYSTEM_INSTRUCTION = `You are an elite Hollywood director and prompt engineer specialized in MiniMax H3 Reference-to-Video (MiniMaxH3ReferenceToVideo / Hailuo Ref2VA).
+Your objective is to convert a 3D directorial ShotSpec into the canonical 6-section MiniMax H3 Reference-to-Video multi-subject + video-reference schema.
 
-CORE MINIMAX H3 REF2VA SCHEMA:
-Structure the output strictly with these sections:
+CORE MINIMAX H3 REF2VA OFFICIAL SCHEMA:
+Structure the output strictly with these 6 sections:
 subject_definitions:
-Define <Subject 1> (<picture 1>), <Subject 2> (<picture 2>), <Subject 3> (<picture 3>), and <Subject 4> (<picture 4> environment), explicitly noting which 3D previz hex color each subject replaces (e.g. #EF4444, #06B6D4, #F59E0B, #334155) as an identification cue rather than surface color. Define <Video 1> as the supplied 3D previz video for camera trajectory and spatial blocking.
+Define <Subject 1> (<picture 1>) through <Subject N> (<picture N>) ONLY for the POV-visible actors listed in "POV-VISIBLE STAGE ACTORS" (up to 3 visible actors), explicitly noting which 3D previz hex color each visible subject replaces (e.g. #EF4444, #06B6D4, #F59E0B) in its camera-relative screen zone (screen-left, center-frame, screen-right) as an identification cue rather than surface color. Never define <Subject> slots for off-screen actors. Always define <Subject 4> (<picture 4> environment) replacing #334155 previz architecture, and <Video 1> as the supplied 3D previz video for camera trajectory and spatial blocking.
 
 summary: [reference generation] One-sentence summary of the shot duration, aspect ratio, and reference guidance.
 
 retention_analysis:
-List <Subject 1> through <Subject 4> (fully_preserved or attribute_transfer) and <Video 1> (partially_preserved motion and blocking reference).
+List each defined <Subject N> with its exact presence tag — (present throughout) if visible across all beats, or (appears in [Shot 1]) if entering/exiting mid-shot — followed by fully_preserved (for humans) or attribute_transfer (for props/vehicles/environment), and <Video 1> ([Shot 1] motion and blocking reference): partially_preserved.
 
 detailed_description:
-Continuous photorealistic lens, aperture, and [Shot 1] time-coded choreography (From 0.0–Xs... From X–Ys... From Y–Zs...) describing exact camera movement, subject trajectories, micro-acting cues, and lighting.
+Continuous photorealistic lens, aperture, and [Shot 1] time-coded choreography (From 0.0–Xs... From X–Ys... From Y–Zs...) describing exact camera movement and ONLY the POV-visible subjects' trajectories, micro-acting cues, and lighting.
 
 overall_soundscape:
-Diegetic sound effects (footsteps, weather, cloth, ambient acoustics) synchronized with the action for MiniMax H3 audio generation.
+Diegetic sound effects (footsteps, weather, cloth, ambient acoustics) synchronized with the visible action for MiniMax H3 audio generation.
 
 non_diegetic_music:
 N/A (or subtle score if requested).
@@ -61,11 +63,12 @@ OUTPUT FORMAT: Return ONLY the final structured prompt text. Do not add conversa
 const SEEDANCE_SYSTEM_INSTRUCTION = `You are an elite Hollywood Director and AI Prompt Engineer specialized in Seedance 2.0 (ByteDance Seaweed Video Architecture).
 Your objective is to translate a 3D directorial ShotSpec into the canonical, high-fidelity Seedance motion-matrix prompt formula.
 
-CORE SEEDANCE FORMULA:
-Structure the prompt strictly with these labeled brackets:
+CORE SEEDANCE 2.0 OFFICIAL FORMULA:
+1. STRICT CAMERA-POV VISIBILITY ONLY: Include ONLY the POV-visible subjects listed under "POV-VISIBLE STAGE ACTORS". Never mention off-screen stage objects.
+2. Structure the prompt strictly with these labeled brackets:
 [Camera 6-Axis Motion & Matrix Trajectory]: Explicit 3D movement trajectory (dolly, truck, pedestal, pan, tilt), lens focal length, dynamic depth of field, and camera physics.
-[Subject Dynamics & Aerodynamic Physics]: Subject physical appearance, attire movement aerodynamics, locomotion velocity, and stage coordinate trajectory.
-[Temporal Cue Timetable]: Sequential time-coded action beats across the shot (e.g. [0.0s - Xs]: ... | [Xs - Ys]: ... | [Ys - Zs]: ...).
+[Subject Dynamics & Aerodynamic Physics]: POV-visible subject physical appearance, camera-relative screen framing, attire movement aerodynamics, and locomotion velocity (omit if 0 visible actors).
+[Temporal Cue Timetable]: Sequential time-coded action beats across the shot ([0.0s - Xs]: ... | [Xs - Ys]: ... | [Ys - Zs]: ...).
 [Atmospheric Space & Volumetric Lighting]: Light source geometry, volumetric falloff, atmospheric density, and environmental reflections.
 [Render & Motion Profile]: Optical photorealism, 24fps motion matrix coherence, 180-degree shutter angle.
 
@@ -91,18 +94,39 @@ export async function directPromptWithAI(
       ? 'Seedance 2.0 (ByteDance Seaweed)'
       : 'Lightricks LTX-2.5 (22B Distilled DiT)';
 
-  const timeline = buildTemporalTimeline(shot);
+  const pov = analyzeShotPovVisibility(shot);
+  const timeline = buildTemporalTimeline(shot, pov);
   const timelineSummary = timeline
     .map((b) => `Phase (${b.timeRange}): ${b.cameraAction} | ${b.actorAction}`)
     .join('\n');
 
   const defaultPalette = ['#EF4444', '#06B6D4', '#F59E0B', '#10B981'];
-  const actorDetails = shot.actors
-    .map(
-      (a, idx) =>
-        `- <Subject ${idx + 1}> Name: ${a.name}, Kind: ${a.kind || 'human'}, Previs Hex ID: ${(a.color || defaultPalette[idx % defaultPalette.length]).toUpperCase()}, Descriptors: "${a.token}", Scale: ${a.scale ?? 1.0}x, Cue Start: ${a.trajectory?.startTimeSeconds ?? 0}s, Trajectory: (${a.trajectory?.startPosition?.x}, ${a.trajectory?.startPosition?.y}) -> (${a.trajectory?.endPosition?.x}, ${a.trajectory?.endPosition?.y}), Action: "${a.actionDescription}"${a.motionClip ? `, Motion Clip: ${a.motionClip}` : ''}`
-    )
+  const actorDetails = pov.visibleAnalyses
+    .map((analysis, idx) => {
+      const a = analysis.actor;
+      const presence = analysis.visibleInAllBeats
+        ? 'present throughout all beats'
+        : `visible in beats: ${(['open', 'mid', 'close'] as const)
+            .filter((phase) => analysis.visibleInBeats[phase])
+            .join(', ')}`;
+      return `- <Subject ${idx + 1}> Name: ${a.name}, Kind: ${a.kind || 'human'}, Previs Hex ID: ${(
+        a.color || defaultPalette[idx % defaultPalette.length]
+      ).toUpperCase()}, Descriptors: "${a.token}", Scale: ${
+        a.scale ?? 1.0
+      }x, Camera-POV Screen Zone: ${analysis.primaryScreenZone}, Coverage: ${
+        analysis.beats[analysis.firstVisibleBeat || 'open'].coverage
+      }, Temporal Presence: (${presence}), Action: "${a.actionDescription}"${
+        a.motionClip ? `, Motion Clip: ${a.motionClip}` : ''
+      }`;
+    })
     .join('\n');
+
+  const excludedNote =
+    pov.offScreenActors.length > 0
+      ? `\nOFF-SCREEN STAGE OBJECTS (OUTSIDE CAMERA POV FRUSTUM — DO NOT MENTION OR INCLUDE IN PROMPT): ${pov.offScreenActors
+          .map((a) => a.name)
+          .join(', ')}`
+      : '';
 
   const effectiveLensStr =
     typeof shot.camera.lens.customFocalLengthMm === 'number' &&
@@ -129,8 +153,8 @@ CAMERA & OPTICS:
 - Movement Type: ${shot.camera.movement.type}
 - Speed & Pacing: ${shot.camera.movement.speed}, ${shot.camera.movement.pacing || 'ease-in-out'}
 
-STAGE ACTORS & CHOREOGRAPHY:
-${actorDetails || 'None (environmental shot)'}
+POV-VISIBLE STAGE ACTORS & CHOREOGRAPHY:
+${actorDetails || 'None in camera POV (pure environmental shot)'}${excludedNote}
 
 LIGHTING & ATMOSPHERE:
 - Style: ${shot.lighting.style}

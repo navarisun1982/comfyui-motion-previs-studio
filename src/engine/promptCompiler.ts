@@ -1,5 +1,10 @@
 import { ShotSpec, CameraMovementType, FocalLength, CameraAngle, LightingStyle, LightingDirection, EnvironmentSpec } from '../types/shotspec';
 import { CompiledPromptBundle, TemporalPromptBeat } from '../adapters/types';
+import {
+  analyzeShotPovVisibility,
+  BeatPhase,
+  ShotPovVisibilityReport,
+} from './povVisibilityEngine';
 
 export function formatEnvironment(env?: EnvironmentSpec): string {
   if (!env) return '';
@@ -281,12 +286,20 @@ export function formatLighting(
 
 /**
  * Builds chronological temporal stages for the shot based on stage duration,
- * camera motion speed/pacing, and actor trajectory timing.
+ * camera motion speed/pacing, and camera-POV frustum visibility (`povVisibilityEngine`).
+ * Only actors visible inside the camera POV during each beat (`open`, `mid`, `close`) are
+ * described in that beat, using true camera-relative screen positions (`screen-left / center-frame / screen-right`
+ * and `close foreground / midground / distant background`).
  */
-export function buildTemporalTimeline(shot: ShotSpec): TemporalPromptBeat[] {
+export function buildTemporalTimeline(
+  shot: ShotSpec,
+  precomputedPov?: ShotPovVisibilityReport
+): TemporalPromptBeat[] {
   const duration = Math.max(1.0, shot.durationSeconds);
   const t1 = Number((duration * 0.35).toFixed(1));
   const t2 = Number((duration * 0.75).toFixed(1));
+
+  const pov = precomputedPov || analyzeShotPovVisibility(shot);
 
   const camType = shot.camera.movement.type;
   const speed = shot.camera.movement.speed;
@@ -294,7 +307,7 @@ export function buildTemporalTimeline(shot: ShotSpec): TemporalPromptBeat[] {
   const speedTerm = speed === 'slow-cinematic' ? 'gentle' : speed === 'rapid-dynamic' ? 'brisk' : 'steady';
 
   // Helper for camera phase
-  const getCameraPhase = (phase: 'open' | 'mid' | 'close') => {
+  const getCameraPhase = (phase: BeatPhase) => {
     if (camType === 'static') return 'Camera holds a motionless locked-off frame';
     if (phase === 'open') {
       return `Camera establishes framing and initiates a ${speedTerm} ${camType.replace(/-/g, ' ')} with ${pacing} pacing`;
@@ -305,76 +318,117 @@ export function buildTemporalTimeline(shot: ShotSpec): TemporalPromptBeat[] {
     return `Camera smoothly decelerates, settling into the final composition and locking focus`;
   };
 
-  // Helper to convert 0-100 stage coordinates into natural screen-space descriptions (avoids raw % numbers that diffusion models render as text)
-  const describeStagePosition = (pos: { x: number; y: number }): string => {
-    const horiz = pos.x < 40 ? 'screen-left' : pos.x > 60 ? 'screen-right' : 'center-frame';
-    const depth = pos.y < 42 ? 'background' : pos.y > 62 ? 'foreground' : 'midground';
-    return `${horiz} ${depth}`;
-  };
-
   const cleanCueText = (raw?: string): string => {
     if (!raw) return '';
     return raw.replace(/^[^\w\s<>()-]+\s*/u, '').trim().toLowerCase();
   };
 
-  // Helper for actor phase
-  const getActorPhase = (phase: 'open' | 'mid' | 'close') => {
-    if (!shot.actors || shot.actors.length === 0) {
-      return 'Scene environment exhibits continuous natural ambient motion';
+  // Helper for actor phase filtered strictly to actors visible in the camera POV during that beat
+  const getActorPhase = (phase: BeatPhase) => {
+    const visibleInBeat = pov.visibleAnalyses.filter((a) => a.beats[phase].visible);
+    if (visibleInBeat.length === 0) {
+      return 'Scene environment fills the camera frame with continuous natural atmospheric motion';
     }
-    return shot.actors.map((actor) => {
-      const actStart = actor.trajectory?.startTimeSeconds ?? 0;
-      const startPos = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
-      const endPos = actor.trajectory?.endPosition ?? { x: 50, y: 50 };
-      const hasDisplacement = Math.abs(startPos.x - endPos.x) > 3 || Math.abs(startPos.y - endPos.y) > 3;
-      const startZone = describeStagePosition(startPos);
-      const endZone = describeStagePosition(endPos);
 
-      const kfs = (actor.trajectory?.keyframes || []).filter((k) => k.posePreset || k.cueLabel || k.gait);
-      const openCue = kfs.find((k) => k.time <= t1);
-      const midCue = kfs.find((k) => k.time > t1 && k.time <= t2);
-      const closeCue = kfs.find((k) => k.time > t2);
+    return visibleInBeat
+      .map((analysis) => {
+        const actor = analysis.actor;
+        const beatState = analysis.beats[phase];
+        const actStart = actor.trajectory?.startTimeSeconds ?? 0;
+        const startPos = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
+        const endPos = actor.trajectory?.endPosition ?? { x: 50, y: 50 };
+        const hasDisplacement =
+          Math.abs(startPos.x - endPos.x) > 3 || Math.abs(startPos.y - endPos.y) > 3;
 
-      const formatCueDetail = (k?: typeof openCue) => {
-        if (!k) return '';
-        const label = cleanCueText(k.cueLabel) || (k.posePreset ? `${k.posePreset.replace(/-/g, ' ')} pose` : '');
-        const gaitNote = k.gait && k.gait !== 'auto' && k.gait !== 'none' ? `${k.gait} gait` : '';
-        return [label, gaitNote].filter(Boolean).join(', ');
-      };
+        const currentZone = beatState.screenZone;
+        const openZone = analysis.beats.open.visible ? analysis.beats.open.screenZone : currentZone;
+        const closeZone = analysis.beats.close.visible ? analysis.beats.close.screenZone : currentZone;
+        const coverageNote =
+          beatState.coverage !== 'full-body' ? ` in ${beatState.coverage} framing` : '';
 
-      const openPoseStr = formatCueDetail(openCue) ? ` (${formatCueDetail(openCue)})` : '';
-      const midPoseStr = formatCueDetail(midCue) ? `, transitioning into ${formatCueDetail(midCue)}` : '';
-      const closePoseStr = formatCueDetail(closeCue) ? `, settling into ${formatCueDetail(closeCue)}` : '';
+        const kfs = (actor.trajectory?.keyframes || []).filter(
+          (k) => k.posePreset || k.cueLabel || k.gait
+        );
+        const openCue = kfs.find((k) => k.time <= t1);
+        const midCue = kfs.find((k) => k.time > t1 && k.time <= t2);
+        const closeCue = kfs.find((k) => k.time > t2);
 
-      const socketStr = actor.socketToBone ? ` (attached to bone ${actor.socketToBone.boneName})` : '';
-      const exprStr = '';
-      const clipStr = actor.motionClip
-        ? ` [motion clip: ${actor.motionClip.replace(/-/g, ' ')}${actor.motionCycles && actor.motionCycles > 1 ? ` ×${actor.motionCycles} cycles` : ''}]`
-        : actor.motionCycles && actor.motionCycles > 1
-        ? ` [×${actor.motionCycles} cycles]`
-        : '';
+        const formatCueDetail = (k?: typeof openCue) => {
+          if (!k) return '';
+          const label =
+            cleanCueText(k.cueLabel) ||
+            (k.posePreset ? `${k.posePreset.replace(/-/g, ' ')} pose` : '');
+          const gaitNote = k.gait && k.gait !== 'auto' && k.gait !== 'none' ? `${k.gait} gait` : '';
+          return [label, gaitNote].filter(Boolean).join(', ');
+        };
 
-      if (phase === 'open') {
-        if (actStart > t1) {
-          return `${actor.name}${socketStr}${exprStr} holds initial position in the ${startZone}${openPoseStr}`;
+        const openPoseStr = formatCueDetail(openCue) ? ` (${formatCueDetail(openCue)})` : '';
+        const midPoseStr = formatCueDetail(midCue)
+          ? `, transitioning into ${formatCueDetail(midCue)}`
+          : '';
+        const closePoseStr = formatCueDetail(closeCue)
+          ? `, settling into ${formatCueDetail(closeCue)}`
+          : '';
+
+        const socketStr = actor.socketToBone
+          ? ` (attached to bone ${actor.socketToBone.boneName})`
+          : '';
+        const clipStr = actor.motionClip
+          ? ` [motion clip: ${actor.motionClip.replace(/-/g, ' ')}${
+              actor.motionCycles && actor.motionCycles > 1 ? ` ×${actor.motionCycles} cycles` : ''
+            }]`
+          : actor.motionCycles && actor.motionCycles > 1
+          ? ` [×${actor.motionCycles} cycles]`
+          : '';
+
+        const exitsAfterOpen = phase === 'open' && !analysis.visibleInBeats.mid;
+        const entersInMid = phase === 'mid' && !analysis.visibleInBeats.open;
+        const exitsAfterMid = phase === 'mid' && !analysis.visibleInBeats.close;
+        const entersInClose =
+          phase === 'close' && !analysis.visibleInBeats.open && !analysis.visibleInBeats.mid;
+
+        if (phase === 'open') {
+          const exitSuffix = exitsAfterOpen
+            ? ' before moving out of the camera frame as the view shifts'
+            : '';
+          if (actStart > t1) {
+            return `${actor.name}${socketStr} holds initial position in the ${currentZone}${coverageNote}${openPoseStr}${exitSuffix}`;
+          }
+          if (hasDisplacement) {
+            return `${actor.name}${socketStr} begins in the ${currentZone}${coverageNote} and initiates movement${openPoseStr}${clipStr}: ${actor.actionDescription}${exitSuffix}`;
+          }
+          return `${actor.name}${socketStr} remains positioned in the ${currentZone}${coverageNote}${clipStr}: ${actor.actionDescription}${exitSuffix}`;
+        }
+
+        if (phase === 'mid') {
+          const entryPrefix = entersInMid
+            ? `${actor.name}${socketStr} enters the camera frame in the ${currentZone}${coverageNote}`
+            : `${actor.name}${socketStr}`;
+          const exitSuffix = exitsAfterMid ? ', passing toward the edge of the camera frame' : '';
+
+          if (hasDisplacement) {
+            const transitionPhrase = entersInMid
+              ? ` and advances toward the ${closeZone}`
+              : openZone !== currentZone
+              ? ` advances continuously from the ${openZone} into the ${currentZone}`
+              : ` advances steadily through the ${currentZone}`;
+            return `${entryPrefix}${transitionPhrase}${midPoseStr} with fluid, lifelike biomechanics—grounded heel-to-toe footsteps, natural hip weight transfer, relaxed shoulder counter-rotation, natural elbow flexion, and realistic garment drape${exitSuffix}`;
+          }
+          return entersInMid
+            ? `${entryPrefix}${midPoseStr} (${actor.actionDescription})${exitSuffix}`
+            : `${entryPrefix} stays anchored in the ${currentZone}${coverageNote} (${actor.actionDescription})${exitSuffix}`;
+        }
+
+        // close
+        if (entersInClose) {
+          return `${actor.name}${socketStr} enters the camera frame in the ${currentZone}${coverageNote}${closePoseStr} (${actor.actionDescription}), holding eyeline toward the camera`;
         }
         if (hasDisplacement) {
-          return `${actor.name}${socketStr}${exprStr} begins in the ${startZone} and initiates movement${openPoseStr}${clipStr}: ${actor.actionDescription}`;
+          return `${actor.name}${socketStr} arrives in the ${currentZone}${coverageNote}${closePoseStr}, settling posture and holding eyeline toward the camera`;
         }
-        return `${actor.name}${socketStr}${exprStr} remains positioned in the ${startZone}${clipStr}: ${actor.actionDescription}`;
-      }
-      if (phase === 'mid') {
-        if (hasDisplacement) {
-          return `${actor.name}${socketStr}${exprStr} advances continuously from the ${startZone} toward the ${endZone}${midPoseStr} with fluid, lifelike human biomechanics—grounded heel-to-toe footsteps, natural hip weight transfer, relaxed shoulder counter-rotation, natural elbow flexion, and realistic garment drape`;
-        }
-        return `${actor.name}${socketStr}${exprStr} stays anchored in the ${startZone} (${actor.actionDescription})`;
-      }
-      // close
-      if (hasDisplacement) {
-        return `${actor.name}${socketStr}${exprStr} arrives in the ${endZone}${closePoseStr}, settling posture and holding eyeline toward the camera`;
-      }
-      return `${actor.name}${socketStr}${exprStr} holds steady presence in the ${startZone} through the final frame`;
-    }).join('; ');
+        return `${actor.name}${socketStr} holds steady presence in the ${currentZone}${coverageNote} through the final frame`;
+      })
+      .join('; ');
   };
 
   return [
@@ -400,14 +454,15 @@ export function buildTemporalTimeline(shot: ShotSpec): TemporalPromptBeat[] {
 }
 
 /**
- * LTX-2.5 (Lightricks DiT) Prompt Compiler
- * Follows official Lightricks DiT prompting guidelines:
+ * LTX-2.5 (Lightricks Gemma-4 22B Distilled Audio-Visual DiT) Prompt Compiler
+ * Follows official Lightricks LTX-2.5 prompting guidelines:
  * - Single continuous narrative paragraph in present tense ("walks, turns, looks, shifts").
- * - Action verbs driving frame-to-frame motion mechanics instead of static adjectives.
- * - Camera framing & motion defined first, followed by subject appearance and chronological motion.
+ * - Strictly describes ONLY subjects that actually enter the camera POV frustum (`pov.visibleAnalyses`).
+ * - Camera framing & optical lens defined first, followed by POV-visible subject appearances, chronological motion, and diegetic audio cues.
  * - Zero comma-soup/buzzwords ("masterpiece, 8k").
  */
 export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
+  const pov = analyzeShotPovVisibility(shot);
   const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed, {
     arcCurve: shot.camera.movement.arcCurve,
     trackTargetActorId: shot.camera.trackTargetActorId,
@@ -431,46 +486,84 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
     shot.lighting.contrast,
     shot.lighting.lights
   );
-  const timeline = buildTemporalTimeline(shot);
+  const timeline = buildTemporalTimeline(shot, pov);
 
   const duration = shot.durationSeconds.toFixed(1);
 
-  // Subject descriptors with scale
-  const subjectText = shot.actors.length > 0
-    ? shot.actors.map((actor) => {
-        const scale = actor.scale ?? 1.0;
-        const scalePrefix = scale >= 2.0 ? 'towering, massive ' : scale >= 1.4 ? 'large, prominent ' : scale <= 0.4 ? 'miniature, tiny ' : scale <= 0.7 ? 'small ' : '';
-        return `${scalePrefix}${actor.token} (${actor.name})`;
-      }).join(' and ')
-    : 'the scene subjects';
+  // Subject descriptors filtered strictly to POV-visible subjects with true camera-relative zones
+  const subjectSentence =
+    pov.visibleAnalyses.length > 0
+      ? `In the camera frame, ${pov.visibleAnalyses
+          .map((analysis) => {
+            const actor = analysis.actor;
+            const scale = actor.scale ?? 1.0;
+            const scalePrefix =
+              scale >= 2.0
+                ? 'towering, massive '
+                : scale >= 1.4
+                ? 'large, prominent '
+                : scale <= 0.4
+                ? 'miniature, tiny '
+                : scale <= 0.7
+                ? 'small '
+                : '';
+            const entryTiming =
+              analysis.firstVisibleBeat === 'mid'
+                ? 'entering the frame mid-shot in the '
+                : analysis.firstVisibleBeat === 'close'
+                ? 'entering the frame in the closing beat in the '
+                : 'positioned in the ';
+            return `${scalePrefix}${actor.token} (${actor.name}, ${entryTiming}${analysis.primaryScreenZone})`;
+          })
+          .join(' and ')}.`
+      : '';
 
   // Construct fluid, present-tense chronological narrative
   const openingActorAction = timeline[0].actorAction;
   const midActorAction = timeline[1].actorAction;
   const closingActorAction = timeline[2].actorAction;
 
-  const narrativeProgression = `Throughout the continuous ${duration}-second take, the ${cameraMove}. At the opening of the shot (${timeline[0].timeRange}), ${openingActorAction}. Over the mid-shot progression (${timeline[1].timeRange}), ${timeline[1].cameraAction.toLowerCase()} as ${midActorAction}. Towards the final resolution (${timeline[2].timeRange}), ${closingActorAction}, while the camera smoothly holds focus.`;
+  const soundscapeSentence =
+    pov.visibleAnalyses.length > 0
+      ? `Natural environmental acoustics matching ${shot.environment?.name || 'the space'}, subtle footsteps, and physical cloth movement accompany the action.`
+      : `Natural ambient soundscape and spatial acoustics fill ${shot.environment?.name || 'the environment'}.`;
+
+  const narrativeProgression = `Throughout the continuous ${duration}-second take, the ${cameraMove}. At the opening of the shot (${timeline[0].timeRange}), ${openingActorAction}. Over the mid-shot progression (${timeline[1].timeRange}), ${timeline[1].cameraAction.toLowerCase()} as ${midActorAction}. Towards the final resolution (${timeline[2].timeRange}), ${closingActorAction}, while the camera smoothly holds focus. ${soundscapeSentence}`;
 
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
 
   const positivePrompt = [
     `Cinematic ${shot.aspectRatio} ${angleInfo}, filmed on a ${lensInfo}.`,
-    `In the scene, ${subjectText}.`,
+    subjectSentence,
     envText ? `Setting: ${envText}.` : '',
     `${shot.sceneDescription.trim()}.`,
     shot.claymationMode
       ? `Authentic stop-motion claymation aesthetic, handcrafted malleable clay surface textures, subtle fingerprint imperfections, animated on-twos at ${shot.claymationFps || 12}fps motion cadence.`
       : `Atmospheric environment under ${lightInfo}, with volumetric light bounce, natural motion cadence at 24fps, and physical depth.`,
     narrativeProgression,
-  ].filter(Boolean).join(' ');
+  ]
+    .filter(Boolean)
+    .join(' ');
 
-  const negativePrompt = shot.negativePrompt || 'jitter, warping, temporal flicker, distorted anatomy, morphing faces, plastic skin, jittery frame skips, overexposed, low quality, 3d render, watermark, blurry';
+  const negativePrompt =
+    shot.negativePrompt ||
+    'jitter, warping, temporal flicker, distorted anatomy, morphing faces, plastic skin, jittery frame skips, overexposed, low quality, 3d render, watermark, blurry';
 
   return {
     positivePrompt,
     negativePrompt,
     cameraDirectives: `${angleInfo}. ${cameraMove}. Shot on ${lensInfo}.`,
-    actorDirectives: shot.actors.map((a) => `${a.token} (${a.actionDescription}${a.socketToBone ? `; attached to bone ${a.socketToBone.boneName}` : ''})`).join('; '),
+    actorDirectives:
+      pov.visibleAnalyses.length > 0
+        ? pov.visibleAnalyses
+            .map(
+              (a) =>
+                `${a.actor.token} (${a.actor.actionDescription}; POV: ${a.primaryScreenZone}${
+                  a.actor.socketToBone ? `; attached to bone ${a.actor.socketToBone.boneName}` : ''
+                })`
+            )
+            .join('; ')
+        : 'None in camera POV (environmental shot)',
     lightingDirectives: `Lighting: ${lightInfo}.`,
     styleDirectives: shot.claymationMode
       ? `Stop-motion claymation aesthetic, handcrafted clay textures, ${shot.claymationFps || 12}fps on-twos motion cadence.`
@@ -480,9 +573,11 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
     technicalMetadata: {
       targetModel: 'ltx-2.5',
       duration: shot.durationSeconds,
-      fps: shot.claymationMode ? (shot.claymationFps || 12) : shot.frameRate,
+      fps: shot.claymationMode ? shot.claymationFps || 12 : shot.frameRate,
       focalLength: shot.camera.lens.focalLength,
       aspectRatio: shot.aspectRatio,
+      povVisibleActorIds: pov.visibleActors.map((a) => a.id),
+      povOffScreenActorIds: pov.offScreenActors.map((a) => a.id),
     },
   };
 }
@@ -490,13 +585,15 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
 /**
  * MiniMax H3 / Hailuo Reference-to-Video (Ref2VA) Prompt Compiler
  * Follows the official MiniMax H3 Reference-to-Video multi-subject & video-reference schema:
- * - subject_definitions: Maps <Subject 1..4> to <picture 1..4> and 3D previz hex color IDs, plus <Video 1> (3D previz plate).
+ * - subject_definitions: Maps <Subject 1..N> to <picture 1..N> ONLY for POV-visible actors (`pov.visibleAnalyses`),
+ *   plus <Subject 4> (<picture 4> environment) and <Video 1> (3D previz plate).
  * - summary: [reference generation] overview.
- * - retention_analysis: Identity & attribute transfer directives for <Subject 1..4> and <Video 1>.
- * - detailed_description: Continuous time-stamped [Shot 1] camera, optics, and micro-acting choreography.
+ * - retention_analysis: Identity & attribute transfer directives with official `(present throughout)` vs `(appears in [Shot 1])` tags.
+ * - detailed_description: Continuous time-stamped [Shot 1] camera, optics, and POV-visible micro-acting choreography.
  * - overall_soundscape & non_diegetic_music: Drives the MiniMax H3 audio VAE decoder.
  */
 export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
+  const pov = analyzeShotPovVisibility(shot);
   const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed, {
     arcCurve: shot.camera.movement.arcCurve,
     trackTargetActorId: shot.camera.trackTargetActorId,
@@ -520,79 +617,115 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     shot.lighting.contrast,
     shot.lighting.lights
   );
-  const timeline = buildTemporalTimeline(shot);
+  const timeline = buildTemporalTimeline(shot, pov);
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
   const defaultPalette = ['#EF4444', '#06B6D4', '#F59E0B', '#10B981'];
 
-  // Build actor subject definitions (<Subject 1..3>) + <Subject 4> environment
+  // Build actor subject definitions (<Subject 1..3>) strictly from POV-visible actors + <Subject 4> environment
   const subjectDefLines: string[] = [];
   const retentionLines: string[] = [];
   const proxySpatialAnchors: string[] = [];
 
-  for (let i = 0; i < Math.min(3, Math.max(1, shot.actors.length)); i++) {
-    const actor = shot.actors[i];
+  const visibleTop3 = pov.visibleAnalyses.slice(0, 3);
+  for (let i = 0; i < visibleTop3.length; i++) {
+    const analysis = visibleTop3[i];
+    const actor = analysis.actor;
     const subjIdx = i + 1;
-    if (actor) {
-      const hex = (actor.color || defaultPalette[i]).toUpperCase();
-      const startPos = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
-      const horizZone = startPos.x < 40 ? 'screen-left' : startPos.x > 60 ? 'screen-right' : 'center-frame';
-      const isHuman =
-        actor.kind === 'character' ||
-        actor.kind === 'human' ||
-        /agent|man|woman|person|operative|detective|guard|hero|runner|character/i.test(`${actor.name} ${actor.token}`);
+    const hex = (actor.color || defaultPalette[i]).toUpperCase();
+    const horizZone = analysis.primaryHorizontalZone;
+    const presenceTag = analysis.visibleInAllBeats
+      ? 'present throughout'
+      : analysis.firstVisibleBeat === 'mid'
+      ? 'appears in [Shot 1] mid-shot progression'
+      : analysis.firstVisibleBeat === 'close'
+      ? 'appears in [Shot 1] closing beat'
+      : 'appears in [Shot 1]';
 
-      const scale = actor.scale ?? 1.0;
-      const scalePrefix =
-        scale >= 2.0 ? 'towering, massive ' : scale >= 1.4 ? 'large, prominent ' : scale <= 0.4 ? 'miniature, tiny ' : scale <= 0.7 ? 'small ' : '';
-      const socketNote = actor.socketToBone ? ` (carrying prop attached to bone ${actor.socketToBone.boneName})` : '';
+    const isHuman =
+      actor.kind === 'character' ||
+      actor.kind === 'human' ||
+      /agent|man|woman|person|operative|detective|guard|hero|runner|character/i.test(
+        `${actor.name} ${actor.token}`
+      );
 
-      proxySpatialAnchors.push(`<Subject ${subjIdx}> (${actor.name}) replaces the ${hex} proxy in the ${horizZone}`);
+    const scale = actor.scale ?? 1.0;
+    const scalePrefix =
+      scale >= 2.0
+        ? 'towering, massive '
+        : scale >= 1.4
+        ? 'large, prominent '
+        : scale <= 0.4
+        ? 'miniature, tiny '
+        : scale <= 0.7
+        ? 'small '
+        : '';
+    const socketNote = actor.socketToBone
+      ? ` (carrying prop attached to bone ${actor.socketToBone.boneName})`
+      : '';
 
-      if (isHuman) {
-        subjectDefLines.push(
-          `<Subject ${subjIdx}> is ${actor.name}, defined by <picture ${subjIdx}>: ${scalePrefix}${actor.token}${socketNote}, ${actor.actionDescription}. Preserve the exact facial identity, hair, and wardrobe across all angles. Replaces the ${hex} 3D mannequin figure in the ${horizZone} of <Video 1>; the ${hex} color is an identification cue, not skin or clothing color.`
-        );
-        retentionLines.push(
-          `<Subject ${subjIdx}> (appears in [Shot 1]): fully_preserved - retain facial identity, hair, and wardrobe from <picture ${subjIdx}> while following the exact ${horizZone} trajectory of the ${hex} figure in <Video 1>.`
-        );
-      } else {
-        subjectDefLines.push(
-          `<Subject ${subjIdx}> is ${actor.name}, defined by <picture ${subjIdx}>: ${scalePrefix}${actor.token} positioned on the ${horizZone} (${actor.actionDescription}). Replaces the ${hex} 3D proxy object on the ${horizZone} of <Video 1>; keep it strictly on the ${horizZone} as shown in <Video 1>, and replace the ${hex} proxy tint with realistic materials from <picture ${subjIdx}>.`
-        );
-        retentionLines.push(
-          `<Subject ${subjIdx}> (appears in [Shot 1]): attribute_transfer - strictly retain the ${horizZone} position, scale, and orientation from <Video 1>, rendered with the realistic appearance of <picture ${subjIdx}>.`
-        );
-      }
+    proxySpatialAnchors.push(
+      `<Subject ${subjIdx}> (${actor.name}) replaces the ${hex} proxy in the ${horizZone}`
+    );
+
+    if (isHuman) {
+      subjectDefLines.push(
+        `<Subject ${subjIdx}> is ${actor.name}, defined by <picture ${subjIdx}>: ${scalePrefix}${actor.token}${socketNote}, ${actor.actionDescription}. Preserve the exact facial identity, hair, and wardrobe across all angles. Replaces the ${hex} 3D mannequin figure in the ${horizZone} of <Video 1>; the ${hex} color is an identification cue, not skin or clothing color.`
+      );
+      retentionLines.push(
+        `<Subject ${subjIdx}> (${presenceTag}): fully_preserved - retain facial identity, hair, and wardrobe from <picture ${subjIdx}> while following the exact ${horizZone} trajectory of the ${hex} figure in <Video 1>.`
+      );
+    } else {
+      subjectDefLines.push(
+        `<Subject ${subjIdx}> is ${actor.name}, defined by <picture ${subjIdx}>: ${scalePrefix}${actor.token} positioned on the ${horizZone} (${actor.actionDescription}). Replaces the ${hex} 3D proxy object on the ${horizZone} of <Video 1>; keep it strictly on the ${horizZone} as shown in <Video 1>, and replace the ${hex} proxy tint with realistic materials from <picture ${subjIdx}>.`
+      );
+      retentionLines.push(
+        `<Subject ${subjIdx}> (${presenceTag}): attribute_transfer - strictly retain the ${horizZone} position, scale, and orientation from <Video 1>, rendered with the realistic appearance of <picture ${subjIdx}>.`
+      );
     }
   }
-  if (shot.actors.length > 3) {
-    for (let i = 3; i < shot.actors.length; i++) {
-      const extraActor = shot.actors[i];
+
+  if (pov.visibleAnalyses.length > 3) {
+    for (let i = 3; i < pov.visibleAnalyses.length; i++) {
+      const extraAnalysis = pov.visibleAnalyses[i];
+      const extraActor = extraAnalysis.actor;
       const hex = (extraActor.color || defaultPalette[i % defaultPalette.length]).toUpperCase();
-      const startPos = extraActor.trajectory?.startPosition ?? { x: 50, y: 50 };
-      const horizZone = startPos.x < 40 ? 'screen-left' : startPos.x > 60 ? 'screen-right' : 'center-frame';
-      proxySpatialAnchors.push(`${extraActor.name} (${extraActor.token}) replaces the ${hex} proxy in the ${horizZone}`);
+      proxySpatialAnchors.push(
+        `${extraActor.name} (${extraActor.token}) replaces the ${hex} proxy in the ${extraAnalysis.primaryHorizontalZone}`
+      );
     }
   }
 
-  const envDesc = `${shot.environment?.promptDescription || shot.sceneDescription.trim()}${envText ? ` (${envText})` : ''}`;
+  const envDesc = `${shot.environment?.promptDescription || shot.sceneDescription.trim()}${
+    envText ? ` (${envText})` : ''
+  }`;
   subjectDefLines.push(
     `<Subject 4> is the [Scene Environment]: ${envDesc}, replacing the dark-slate #334155 previz architecture blocks presented by <picture 4>, while preserving the open spatial width and ground plane layout of <Video 1>.`
   );
   retentionLines.push(
-    `<Subject 4> (appears in [Shot 1]): attribute_transfer - preserve the wide spatial layout and ground-plane relationships of <Video 1> while applying the realistic surface textures and lighting atmosphere from <picture 4>.`
+    `<Subject 4> (present throughout): attribute_transfer - preserve the wide spatial layout and ground-plane relationships of <Video 1> while applying the realistic surface textures and lighting atmosphere from <picture 4>.`
   );
 
+  const blockingDetail =
+    proxySpatialAnchors.length > 0
+      ? ` and exact camera-POV spatial blocking (${proxySpatialAnchors.join('; ')})`
+      : ' across the environment';
   subjectDefLines.push(
-    `<Video 1> is the supplied 3D previz reference video. Reference the animated 3D camera movement, perspective, and exact left-to-right spatial blocking (${proxySpatialAnchors.join('; ')}). Replace any synthetic 3D mannequin limb stiffness with fluid, organic human biomechanics (natural heel-to-toe footfalls, relaxed shoulder counter-swing, bent elbows, and steady head stabilization). Exclude any flat proxy shading or helper artifacts.`
+    `<Video 1> is the supplied 3D previz reference video. Reference the animated 3D camera movement, perspective,${blockingDetail}. Replace any synthetic 3D mannequin limb stiffness with fluid, organic human biomechanics (natural heel-to-toe footfalls, relaxed shoulder counter-swing, bent elbows, and steady head stabilization). Exclude any flat proxy shading or helper artifacts.`
   );
   retentionLines.push(
-    `<Video 1> ([Shot 1] motion and blocking reference): partially_preserved - strictly retain the continuous 3D camera trajectory, left-to-right subject arrangement, and locomotion speed across the ${shot.durationSeconds.toFixed(1)}-second duration while rendering lifelike, natural human gait physics.`
+    `<Video 1> ([Shot 1] motion and blocking reference): partially_preserved - strictly retain the continuous 3D camera trajectory${
+      proxySpatialAnchors.length > 0 ? ', camera-POV subject arrangement, and locomotion speed' : ' and environmental perspective'
+    } across the ${shot.durationSeconds.toFixed(1)}-second duration${
+      proxySpatialAnchors.length > 0 ? ' while rendering lifelike, natural human gait physics' : ''
+    }.`
   );
 
-  // Subject micro-acting summary for metadata
-  const subjectBlocks = shot.actors
-    .map((actor) => `${actor.token} (${actor.name}): ${actor.actionDescription}`)
+  // Subject micro-acting summary for metadata (POV-visible only)
+  const subjectBlocks = pov.visibleAnalyses
+    .map(
+      (a) =>
+        `${a.actor.token} (${a.actor.name}, POV: ${a.primaryScreenZone}): ${a.actor.actionDescription}`
+    )
     .join('; ');
 
   const styleLine = shot.claymationMode
@@ -606,22 +739,35 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     })
     .join('\n\n');
 
+  const refRangePhrase =
+    visibleTop3.length > 0
+      ? `<picture 1>–<picture ${visibleTop3.length}> and <picture 4> for subject and environment identity`
+      : `<picture 4> for environment identity`;
+
   const positivePrompt = [
     `subject_definitions:\n${subjectDefLines.join('\n\n')}`,
-    `summary: [reference generation] Create a cinematic, photorealistic ${shot.aspectRatio}, ${shot.durationSeconds.toFixed(1)}-second continuous shot ("${shot.name}"), using <Video 1> for blocking and camera-path guidance and <picture 1>–<picture 4> for subject and environment identity.`,
+    `summary: [reference generation] Create a cinematic, photorealistic ${shot.aspectRatio}, ${shot.durationSeconds.toFixed(1)}-second continuous shot ("${shot.name}"), using <Video 1> for blocking and camera-path guidance and ${refRangePhrase}.`,
     `retention_analysis:\n${retentionLines.join('\n')}`,
     `detailed_description: ${styleLine}\n\n${beatParagraphs}\n\nThroughout, ${lightInfo}. Preserve natural skin tones, readable facial micro-expressions, and physical depth. No readable text, subtitles, or interface graphics.`,
-    `overall_soundscape: Natural environmental ambiance matching ${shot.environment?.name || 'the scene'}, realistic footsteps and cloth movement synchronized with subject locomotion, and subtle spatial acoustics. No unintended vocalizations.`,
+    `overall_soundscape: Natural environmental ambiance matching ${
+      shot.environment?.name || 'the scene'
+    }${
+      visibleTop3.length > 0
+        ? ', realistic footsteps and cloth movement synchronized with visible subject locomotion,'
+        : ','
+    } and subtle spatial acoustics. No unintended vocalizations.`,
     `non_diegetic_music: N/A.`,
   ].join('\n\n');
 
-  const negativePrompt = shot.negativePrompt || 'blurry, low quality, deformed limbs, floating artifacts, jerky camera, unnatural motion, digital noise, oversaturated, morphing';
+  const negativePrompt =
+    shot.negativePrompt ||
+    'blurry, low quality, deformed limbs, floating artifacts, jerky camera, unnatural motion, digital noise, oversaturated, morphing';
 
   return {
     positivePrompt,
     negativePrompt,
     cameraDirectives: `${angleInfo}. ${cameraMove}. Shot on ${lensInfo}.`,
-    actorDirectives: subjectBlocks || 'None',
+    actorDirectives: subjectBlocks || 'None in camera POV (environmental shot)',
     lightingDirectives: `Lighting: ${lightInfo}.`,
     styleDirectives: shot.claymationMode
       ? `Stop-motion claymation aesthetic, handcrafted clay textures, ${shot.claymationFps || 12}fps motion cadence.`
@@ -631,9 +777,11 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     technicalMetadata: {
       targetModel: 'MiniMax H3 / Hailuo',
       duration: shot.durationSeconds,
-      fps: shot.claymationMode ? (shot.claymationFps || 12) : shot.frameRate,
+      fps: shot.claymationMode ? shot.claymationFps || 12 : shot.frameRate,
       focalLength: shot.camera.lens.focalLength,
       aspectRatio: shot.aspectRatio,
+      povVisibleActorIds: pov.visibleActors.map((a) => a.id),
+      povOffScreenActorIds: pov.offScreenActors.map((a) => a.id),
     },
   };
 }
@@ -641,10 +789,11 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
 /**
  * Seedance 2.0 (ByteDance Seaweed / SeaDance) Prompt Compiler
  * Follows official Seedance prompting guidelines:
- * - Structured brackets emphasizing 6-axis camera motion matrix coordinates, subject locomotion physics,
+ * - Structured brackets emphasizing 6-axis camera motion matrix coordinates, POV-visible subject locomotion physics,
  *   sequential cue timetables, spatial volumetric lighting, and optical sensor profiles.
  */
 export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
+  const pov = analyzeShotPovVisibility(shot);
   const cameraMove = formatCameraMovement(shot.camera.movement.type, shot.camera.movement.speed, {
     arcCurve: shot.camera.movement.arcCurve,
     trackTargetActorId: shot.camera.trackTargetActorId,
@@ -668,43 +817,60 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
     shot.lighting.contrast,
     shot.lighting.lights
   );
-  const timeline = buildTemporalTimeline(shot);
+  const timeline = buildTemporalTimeline(shot, pov);
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
 
   const dx = ((shot.camera.movement.endPosition.x - shot.camera.movement.startPosition.x) / 10.0).toFixed(2);
   const dy = ((shot.camera.movement.endPosition.y - shot.camera.movement.startPosition.y) / 10.0).toFixed(2);
   const dz = (((shot.camera.movement.endPosition.z ?? 50) - (shot.camera.movement.startPosition.z ?? 50)) / 10.0).toFixed(2);
 
-  // Subject with aerodynamic & locomotion physics
-  const subjectBlocks = shot.actors.map((actor) => {
-    const scale = actor.scale ?? 1.0;
-    const scalePrefix = scale >= 2.0 ? 'towering scale ' : scale >= 1.4 ? 'large scale ' : scale <= 0.5 ? 'miniature scale ' : '';
-    const start = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
-    const end = actor.trajectory?.endPosition ?? { x: 50, y: 50 };
-    const socketPart = actor.socketToBone ? ` [Socketed: Bone ${actor.socketToBone.boneName}]` : '';
-    return `${scalePrefix}${actor.token}${socketPart} [Stage Vector: (${start.x}%, ${start.y}%) -> (${end.x}%, ${end.y}%)], performing: ${actor.actionDescription}, attire aerodynamic drape and physical mass responding to acceleration`;
-  }).join('; ');
+  // Subject with aerodynamic & locomotion physics (strictly filtered to POV-visible subjects)
+  const subjectBlocks = pov.visibleAnalyses
+    .map((analysis) => {
+      const actor = analysis.actor;
+      const scale = actor.scale ?? 1.0;
+      const scalePrefix =
+        scale >= 2.0 ? 'towering scale ' : scale >= 1.4 ? 'large scale ' : scale <= 0.5 ? 'miniature scale ' : '';
+      const start = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
+      const end = actor.trajectory?.endPosition ?? { x: 50, y: 50 };
+      const socketPart = actor.socketToBone ? ` [Socketed: Bone ${actor.socketToBone.boneName}]` : '';
+      const closeZone = analysis.beats.close.visible
+        ? analysis.beats.close.screenZone
+        : analysis.primaryScreenZone;
+      return `${scalePrefix}${actor.token} (${actor.name})${socketPart} [Camera POV Framing: ${analysis.primaryScreenZone} -> ${closeZone} | Stage Vector: (${start.x}%, ${start.y}%) -> (${end.x}%, ${end.y}%)], performing: ${actor.actionDescription}, attire aerodynamic drape and physical mass responding to acceleration`;
+    })
+    .join('; ');
 
   // Chronological cue beats
-  const timelineString = timeline.map((beat) => `[${beat.timeRange}]: ${beat.cameraAction}; ${beat.actorAction}`).join(' | ');
+  const timelineString = timeline
+    .map((beat) => `[${beat.timeRange}]: ${beat.cameraAction}; ${beat.actorAction}`)
+    .join(' | ');
 
   const positivePrompt = [
     `[Camera 6-Axis Motion & Matrix Trajectory]: ${angleInfo}, ${cameraMove}, 3D displacement vector (dx: ${dx}, dy: ${dy}, dz: ${dz}), filmed on ${lensInfo}.`,
     subjectBlocks ? `[Subject Dynamics & Aerodynamic Physics]: ${subjectBlocks}.` : '',
     `[Temporal Cue Timetable]: ${timelineString}.`,
-    `[Atmospheric Space & Volumetric Lighting]: ${lightInfo}, volumetric shadow falloff, spatial air density, scene environment: ${shot.environment?.promptDescription || shot.sceneDescription.trim()}${envText ? ` (${envText})` : ''}.`,
+    `[Atmospheric Space & Volumetric Lighting]: ${lightInfo}, volumetric shadow falloff, spatial air density, scene environment: ${
+      shot.environment?.promptDescription || shot.sceneDescription.trim()
+    }${envText ? ` (${envText})` : ''}.`,
     shot.claymationMode
-      ? `[Render & Motion Profile]: Stop-motion claymation aesthetic, handcrafted tactile clay micro-textures, ${shot.claymationFps || 12}fps on-twos motion cadence.`
+      ? `[Render & Motion Profile]: Stop-motion claymation aesthetic, handcrafted tactile clay micro-textures, ${
+          shot.claymationFps || 12
+        }fps on-twos motion cadence.`
       : `[Render & Motion Profile]: Optical photorealism, 24fps motion matrix coherence, natural 180-degree optical shutter angle, rich texture fidelity.`,
-  ].filter(Boolean).join(' ');
+  ]
+    .filter(Boolean)
+    .join(' ');
 
-  const negativePrompt = shot.negativePrompt || 'floating artifacts, frame tearing, flickering geometry, unnatural jerky acceleration, low resolution, warped proportions, morphing hands, plastic textures, watermark';
+  const negativePrompt =
+    shot.negativePrompt ||
+    'floating artifacts, frame tearing, flickering geometry, unnatural jerky acceleration, low resolution, warped proportions, morphing hands, plastic textures, watermark';
 
   return {
     positivePrompt,
     negativePrompt,
     cameraDirectives: `${angleInfo}. ${cameraMove}. 3D delta: (${dx}, ${dy}, dz: ${dz}). Shot on ${lensInfo}.`,
-    actorDirectives: subjectBlocks || 'None',
+    actorDirectives: subjectBlocks || 'None in camera POV (environmental shot)',
     lightingDirectives: `Lighting: ${lightInfo}.`,
     styleDirectives: shot.claymationMode
       ? `Stop-motion claymation aesthetic, handcrafted clay textures, ${shot.claymationFps || 12}fps on-twos motion cadence.`
@@ -714,10 +880,12 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
     technicalMetadata: {
       targetModel: 'Seedance 2.0',
       duration: shot.durationSeconds,
-      fps: shot.claymationMode ? (shot.claymationFps || 12) : shot.frameRate,
+      fps: shot.claymationMode ? shot.claymationFps || 12 : shot.frameRate,
       focalLength: shot.camera.lens.focalLength,
       aspectRatio: shot.aspectRatio,
       cameraDelta: { dx, dy, dz },
+      povVisibleActorIds: pov.visibleActors.map((a) => a.id),
+      povOffScreenActorIds: pov.offScreenActors.map((a) => a.id),
     },
   };
 }
