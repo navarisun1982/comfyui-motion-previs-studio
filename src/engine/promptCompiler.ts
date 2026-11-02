@@ -410,23 +410,23 @@ export function buildTemporalTimeline(
             const transitionPhrase = entersInMid
               ? ` and advances toward the ${closeZone}`
               : openZone !== currentZone
-              ? ` advances continuously from the ${openZone} into the ${currentZone}`
-              : ` advances steadily through the ${currentZone}`;
-            return `${entryPrefix}${transitionPhrase}${midPoseStr} with fluid, lifelike biomechanics—grounded heel-to-toe footsteps, natural hip weight transfer, relaxed shoulder counter-rotation, natural elbow flexion, and realistic garment drape${exitSuffix}`;
+              ? ` moves fluidly from the ${openZone} into the ${currentZone}`
+              : ` moves steadily through the ${currentZone}`;
+            return `${entryPrefix}${transitionPhrase}${midPoseStr} with authentic real-world physical dynamics, natural secondary motion, and organic weight and momentum${exitSuffix}`;
           }
           return entersInMid
             ? `${entryPrefix}${midPoseStr} (${actor.actionDescription})${exitSuffix}`
-            : `${entryPrefix} stays anchored in the ${currentZone}${coverageNote} (${actor.actionDescription})${exitSuffix}`;
+            : `${entryPrefix} remains in the ${currentZone}${coverageNote} with subtle, lifelike secondary motion (${actor.actionDescription})${exitSuffix}`;
         }
 
         // close
         if (entersInClose) {
-          return `${actor.name}${socketStr} enters the camera frame in the ${currentZone}${coverageNote}${closePoseStr} (${actor.actionDescription}), holding eyeline toward the camera`;
+          return `${actor.name}${socketStr} enters the camera frame in the ${currentZone}${coverageNote}${closePoseStr} (${actor.actionDescription}) with natural physical presence`;
         }
         if (hasDisplacement) {
-          return `${actor.name}${socketStr} arrives in the ${currentZone}${coverageNote}${closePoseStr}, settling posture and holding eyeline toward the camera`;
+          return `${actor.name}${socketStr} settles into the ${currentZone}${coverageNote}${closePoseStr} with natural physical follow-through`;
         }
-        return `${actor.name}${socketStr} holds steady presence in the ${currentZone}${coverageNote} through the final frame`;
+        return `${actor.name}${socketStr} maintains living presence in the ${currentZone}${coverageNote} through the final frame`;
       })
       .join('; ');
   };
@@ -455,11 +455,12 @@ export function buildTemporalTimeline(
 
 /**
  * LTX-2.5 (Lightricks Gemma-4 22B Distilled Audio-Visual DiT) Prompt Compiler
- * Follows official Lightricks LTX-2.5 prompting guidelines:
- * - Single continuous narrative paragraph in present tense ("walks, turns, looks, shifts").
- * - Strictly describes ONLY subjects that actually enter the camera POV frustum (`pov.visibleAnalyses`).
- * - Camera framing & optical lens defined first, followed by POV-visible subject appearances, chronological motion, and diegetic audio cues.
- * - Zero comma-soup/buzzwords ("masterpiece, 8k").
+ * Follows official Lightricks LTX-2.5 prompting guidelines + Universal Previs-to-Reality Instantiation:
+ * - Single continuous narrative paragraph in present tense ("walks, turns, sways, shifts").
+ * - Strictly describes ONLY entities that actually enter the camera POV frustum (`pov.visibleAnalyses`).
+ * - Treats 3D previz motion/layout purely as a spatial & camera blueprint, instantiating every entity
+ *   from its reference image and description as a living real-world object/subject with organic secondary physics
+ *   rather than texture-wrapping simplified 3D proxy geometry.
  */
 export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
   const pov = analyzeShotPovVisibility(shot);
@@ -523,12 +524,15 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
   const midActorAction = timeline[1].actorAction;
   const closingActorAction = timeline[2].actorAction;
 
+  const previsToRealityDirective =
+    'Every visible element in the frame is realized as an authentic, living real-world entity with natural three-dimensional silhouette, organic surface complexity, and unscripted secondary physics—using the 3D previz guide solely for spatial placement, scale volume, and camera perspective without preserving any synthetic proxy geometry or mechanical rigidity.';
+
   const soundscapeSentence =
     pov.visibleAnalyses.length > 0
-      ? `Natural environmental acoustics matching ${shot.environment?.name || 'the space'}, subtle footsteps, and physical cloth movement accompany the action.`
+      ? `Natural environmental acoustics matching ${shot.environment?.name || 'the space'} and synchronized physical foley accompany the motion.`
       : `Natural ambient soundscape and spatial acoustics fill ${shot.environment?.name || 'the environment'}.`;
 
-  const narrativeProgression = `Throughout the continuous ${duration}-second take, the ${cameraMove}. At the opening of the shot (${timeline[0].timeRange}), ${openingActorAction}. Over the mid-shot progression (${timeline[1].timeRange}), ${timeline[1].cameraAction.toLowerCase()} as ${midActorAction}. Towards the final resolution (${timeline[2].timeRange}), ${closingActorAction}, while the camera smoothly holds focus. ${soundscapeSentence}`;
+  const narrativeProgression = `Throughout the continuous ${duration}-second take, the ${cameraMove}. At the opening of the shot (${timeline[0].timeRange}), ${openingActorAction}. Over the mid-shot progression (${timeline[1].timeRange}), ${timeline[1].cameraAction.toLowerCase()} as ${midActorAction}. Towards the final resolution (${timeline[2].timeRange}), ${closingActorAction}, while the camera smoothly holds focus. ${previsToRealityDirective} ${soundscapeSentence}`;
 
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
 
@@ -547,7 +551,7 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
 
   const negativePrompt =
     shot.negativePrompt ||
-    'jitter, warping, temporal flicker, distorted anatomy, morphing faces, plastic skin, jittery frame skips, overexposed, low quality, 3d render, watermark, blurry';
+    'jitter, warping, temporal flicker, distorted anatomy, morphing faces, plastic skin, stiff 3d proxy geometry, texture-wrapped low-poly mesh, robotic mannequin motion, jittery frame skips, overexposed, low quality, 3d render, watermark, blurry';
 
   return {
     positivePrompt,
@@ -584,13 +588,13 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
 
 /**
  * MiniMax H3 / Hailuo Reference-to-Video (Ref2VA) Prompt Compiler
- * Follows the official MiniMax H3 Reference-to-Video multi-subject & video-reference schema:
- * - subject_definitions: Maps <Subject 1..N> to <picture 1..N> ONLY for POV-visible actors (`pov.visibleAnalyses`),
- *   plus <Subject 4> (<picture 4> environment) and <Video 1> (3D previz plate).
- * - summary: [reference generation] overview.
- * - retention_analysis: Identity & attribute transfer directives with official `(present throughout)` vs `(appears in [Shot 1])` tags.
- * - detailed_description: Continuous time-stamped [Shot 1] camera, optics, and POV-visible micro-acting choreography.
- * - overall_soundscape & non_diegetic_music: Drives the MiniMax H3 audio VAE decoder.
+ * Follows the official MiniMax H3 Reference-to-Video multi-subject & video-reference schema
+ * (`muse_minimax_director.py` canonical convention) + Universal Semantic Entity Instantiation Rule:
+ * - subject_definitions: Maps <Subject 1..N> to <picture 1..N> ONLY for POV-visible entities (`pov.visibleAnalyses`),
+ *   plus <Subject 4> (<picture 4> environment) and <Video 1> (3D previz spatial & camera blueprint).
+ * - Universal Instantiation Rule: Every <Subject N> (`1..4`) is `fully_preserved` from `<picture N>`, completely
+ *   supplanting its 3D placeholder volume in `<Video 1>` as a true, living real-world entity (never texture-wrapping
+ *   the simplified 3D proxy mesh), while `<Video 1>` uses the official `weak_reference` tier (`camera/motion reference`).
  */
 export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
   const pov = analyzeShotPovVisibility(shot);
@@ -621,7 +625,7 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
   const defaultPalette = ['#EF4444', '#06B6D4', '#F59E0B', '#10B981'];
 
-  // Build actor subject definitions (<Subject 1..3>) strictly from POV-visible actors + <Subject 4> environment
+  // Build subject definitions (<Subject 1..3>) strictly from POV-visible entities + <Subject 4> environment
   const subjectDefLines: string[] = [];
   const retentionLines: string[] = [];
   const proxySpatialAnchors: string[] = [];
@@ -633,6 +637,7 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     const subjIdx = i + 1;
     const hex = (actor.color || defaultPalette[i]).toUpperCase();
     const horizZone = analysis.primaryHorizontalZone;
+    const screenZone = analysis.primaryScreenZone;
     const presenceTag = analysis.visibleInAllBeats
       ? 'present throughout'
       : analysis.firstVisibleBeat === 'mid'
@@ -640,13 +645,6 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
       : analysis.firstVisibleBeat === 'close'
       ? 'appears in [Shot 1] closing beat'
       : 'appears in [Shot 1]';
-
-    const isHuman =
-      actor.kind === 'character' ||
-      actor.kind === 'human' ||
-      /agent|man|woman|person|operative|detective|guard|hero|runner|character/i.test(
-        `${actor.name} ${actor.token}`
-      );
 
     const scale = actor.scale ?? 1.0;
     const scalePrefix =
@@ -660,28 +658,19 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
         ? 'small '
         : '';
     const socketNote = actor.socketToBone
-      ? ` (carrying prop attached to bone ${actor.socketToBone.boneName})`
+      ? ` (attached to bone ${actor.socketToBone.boneName})`
       : '';
 
     proxySpatialAnchors.push(
-      `<Subject ${subjIdx}> (${actor.name}) replaces the ${hex} proxy in the ${horizZone}`
+      `<Subject ${subjIdx}> (${actor.name}) occupies the ${hex} placeholder volume in the ${screenZone}`
     );
 
-    if (isHuman) {
-      subjectDefLines.push(
-        `<Subject ${subjIdx}> is ${actor.name}, defined by <picture ${subjIdx}>: ${scalePrefix}${actor.token}${socketNote}, ${actor.actionDescription}. Preserve the exact facial identity, hair, and wardrobe across all angles. Replaces the ${hex} 3D mannequin figure in the ${horizZone} of <Video 1>; the ${hex} color is an identification cue, not skin or clothing color.`
-      );
-      retentionLines.push(
-        `<Subject ${subjIdx}> (${presenceTag}): fully_preserved - retain facial identity, hair, and wardrobe from <picture ${subjIdx}> while following the exact ${horizZone} trajectory of the ${hex} figure in <Video 1>.`
-      );
-    } else {
-      subjectDefLines.push(
-        `<Subject ${subjIdx}> is ${actor.name}, defined by <picture ${subjIdx}>: ${scalePrefix}${actor.token} positioned on the ${horizZone} (${actor.actionDescription}). Replaces the ${hex} 3D proxy object on the ${horizZone} of <Video 1>; keep it strictly on the ${horizZone} as shown in <Video 1>, and replace the ${hex} proxy tint with realistic materials from <picture ${subjIdx}>.`
-      );
-      retentionLines.push(
-        `<Subject ${subjIdx}> (${presenceTag}): attribute_transfer - strictly retain the ${horizZone} position, scale, and orientation from <Video 1>, rendered with the realistic appearance of <picture ${subjIdx}>.`
-      );
-    }
+    subjectDefLines.push(
+      `<Subject ${subjIdx}> is ${actor.name} (from <picture ${subjIdx}>): ${scalePrefix}${actor.token}${socketNote}, ${actor.actionDescription}. Completely supplants the ${hex} 3D placeholder proxy in the ${horizZone} of <Video 1> — use <Video 1> only for its 3D spatial placement, approximate scale volume, and camera perspective, and instantiate the true, living real-world entity from <picture ${subjIdx}> in its place with its own authentic silhouette, organic detail, and natural physical dynamics (do NOT merely texture-wrap or paint <picture ${subjIdx}> over the simplified 3D proxy mesh; the ${hex} tint is strictly a spatial placement cue).`
+    );
+    retentionLines.push(
+      `<Subject ${subjIdx}> (${presenceTag}): fully_preserved - matches <picture ${subjIdx}>; instantiate the authentic real-world entity from <picture ${subjIdx}> at the ${horizZone} spatial coordinates and scale volume indicated in <Video 1>, with lifelike secondary motion and natural real-world physics rather than rigid proxy geometry.`
+    );
   }
 
   if (pov.visibleAnalyses.length > 3) {
@@ -690,7 +679,7 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
       const extraActor = extraAnalysis.actor;
       const hex = (extraActor.color || defaultPalette[i % defaultPalette.length]).toUpperCase();
       proxySpatialAnchors.push(
-        `${extraActor.name} (${extraActor.token}) replaces the ${hex} proxy in the ${extraAnalysis.primaryHorizontalZone}`
+        `${extraActor.name} (${extraActor.token}) occupies the ${hex} placeholder volume in the ${extraAnalysis.primaryScreenZone}`
       );
     }
   }
@@ -699,25 +688,21 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     envText ? ` (${envText})` : ''
   }`;
   subjectDefLines.push(
-    `<Subject 4> is the [Scene Environment]: ${envDesc}, replacing the dark-slate #334155 previz architecture blocks presented by <picture 4>, while preserving the open spatial width and ground plane layout of <Video 1>.`
+    `<Subject 4> is the [Scene Environment] (from <picture 4>): ${envDesc}. Completely supplants the dark-slate #334155 3D previz stage blocks in <Video 1> — use <Video 1> only for camera perspective, horizon line, and ground-plane depth, while instantiating the full, living real-world environment from <picture 4> with authentic three-dimensional structure and atmospheric depth (never texture-wrap the simplified previz blocks).`
   );
   retentionLines.push(
-    `<Subject 4> (present throughout): attribute_transfer - preserve the wide spatial layout and ground-plane relationships of <Video 1> while applying the realistic surface textures and lighting atmosphere from <picture 4>.`
+    `<Subject 4> (present throughout): fully_preserved - matches <picture 4>; instantiate the authentic real-world environment from <picture 4> across the 3D spatial layout and ground plane of <Video 1>.`
   );
 
   const blockingDetail =
     proxySpatialAnchors.length > 0
-      ? ` and exact camera-POV spatial blocking (${proxySpatialAnchors.join('; ')})`
-      : ' across the environment';
+      ? ` and coarse spatial placement volumes (${proxySpatialAnchors.join('; ')})`
+      : ' and environmental spatial depth';
   subjectDefLines.push(
-    `<Video 1> is the supplied 3D previz reference video. Reference the animated 3D camera movement, perspective,${blockingDetail}. Replace any synthetic 3D mannequin limb stiffness with fluid, organic human biomechanics (natural heel-to-toe footfalls, relaxed shoulder counter-swing, bent elbows, and steady head stabilization). Exclude any flat proxy shading or helper artifacts.`
+    `<Video 1> is the 3D previz spatial and camera blueprint. Reference <Video 1> ONLY for 3D camera movement, lens perspective,${blockingDetail}. Do NOT treat <Video 1> as literal geometry to be colored or texture-wrapped: discard all synthetic 3D proxy shapes, polygon edges, and mechanical rigidity, and render every element as a fully realized, living real-world entity.`
   );
   retentionLines.push(
-    `<Video 1> ([Shot 1] motion and blocking reference): partially_preserved - strictly retain the continuous 3D camera trajectory${
-      proxySpatialAnchors.length > 0 ? ', camera-POV subject arrangement, and locomotion speed' : ' and environmental perspective'
-    } across the ${shot.durationSeconds.toFixed(1)}-second duration${
-      proxySpatialAnchors.length > 0 ? ' while rendering lifelike, natural human gait physics' : ''
-    }.`
+    `<Video 1> (camera/motion reference): weak_reference - only structural/camera characteristics, spatial coordinates, and coarse scale volumes are retained; no visible 3D proxy content, simplified geometry, or rigid mechanical motion is reused.`
   );
 
   // Subject micro-acting summary for metadata (POV-visible only)
@@ -741,19 +726,19 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
 
   const refRangePhrase =
     visibleTop3.length > 0
-      ? `<picture 1>–<picture ${visibleTop3.length}> and <picture 4> for subject and environment identity`
-      : `<picture 4> for environment identity`;
+      ? `<picture 1>–<picture ${visibleTop3.length}> and <picture 4> for full real-world entity and environment instantiation`
+      : `<picture 4> for full real-world environment instantiation`;
 
   const positivePrompt = [
     `subject_definitions:\n${subjectDefLines.join('\n\n')}`,
-    `summary: [reference generation] Create a cinematic, photorealistic ${shot.aspectRatio}, ${shot.durationSeconds.toFixed(1)}-second continuous shot ("${shot.name}"), using <Video 1> for blocking and camera-path guidance and ${refRangePhrase}.`,
+    `summary: [reference generation] Create a cinematic, photorealistic ${shot.aspectRatio}, ${shot.durationSeconds.toFixed(1)}-second continuous shot ("${shot.name}"), using <Video 1> strictly as a spatial and camera-path blueprint and ${refRangePhrase}.`,
     `retention_analysis:\n${retentionLines.join('\n')}`,
-    `detailed_description: ${styleLine}\n\n${beatParagraphs}\n\nThroughout, ${lightInfo}. Preserve natural skin tones, readable facial micro-expressions, and physical depth. No readable text, subtitles, or interface graphics.`,
+    `detailed_description: ${styleLine}\n\n${beatParagraphs}\n\nThroughout, ${lightInfo}. Every entity in the frame exhibits authentic three-dimensional structure, natural secondary motion, and physical depth without any synthetic 3D previz rigidity. No readable text, subtitles, or interface graphics.`,
     `overall_soundscape: Natural environmental ambiance matching ${
       shot.environment?.name || 'the scene'
     }${
       visibleTop3.length > 0
-        ? ', realistic footsteps and cloth movement synchronized with visible subject locomotion,'
+        ? ', realistic physical foley and surface interactions synchronized with visible scene motion,'
         : ','
     } and subtle spatial acoustics. No unintended vocalizations.`,
     `non_diegetic_music: N/A.`,
@@ -761,7 +746,7 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
 
   const negativePrompt =
     shot.negativePrompt ||
-    'blurry, low quality, deformed limbs, floating artifacts, jerky camera, unnatural motion, digital noise, oversaturated, morphing';
+    'blurry, low quality, deformed limbs, stiff 3d proxy geometry, texture-wrapped low-poly mesh, robotic mannequin motion, floating artifacts, jerky camera, unnatural motion, digital noise, oversaturated, morphing';
 
   return {
     positivePrompt,
@@ -837,7 +822,7 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
       const closeZone = analysis.beats.close.visible
         ? analysis.beats.close.screenZone
         : analysis.primaryScreenZone;
-      return `${scalePrefix}${actor.token} (${actor.name})${socketPart} [Camera POV Framing: ${analysis.primaryScreenZone} -> ${closeZone} | Stage Vector: (${start.x}%, ${start.y}%) -> (${end.x}%, ${end.y}%)], performing: ${actor.actionDescription}, attire aerodynamic drape and physical mass responding to acceleration`;
+      return `${scalePrefix}${actor.token} (${actor.name})${socketPart} [Camera POV Framing: ${analysis.primaryScreenZone} -> ${closeZone} | Stage Vector: (${start.x}%, ${start.y}%) -> (${end.x}%, ${end.y}%)], performing: ${actor.actionDescription}, instantiated as a full living real-world entity with natural secondary motion and physical mass (supplanting the 3D previz placeholder volume without texture-wrapping)`;
     })
     .join('; ');
 
@@ -849,6 +834,7 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
   const positivePrompt = [
     `[Camera 6-Axis Motion & Matrix Trajectory]: ${angleInfo}, ${cameraMove}, 3D displacement vector (dx: ${dx}, dy: ${dy}, dz: ${dz}), filmed on ${lensInfo}.`,
     subjectBlocks ? `[Subject Dynamics & Aerodynamic Physics]: ${subjectBlocks}.` : '',
+    `[Previs-to-Reality Spatial Instantiation]: Use 3D stage vectors solely for camera perspective, spatial placement, and scale volumes; replace every 3D placeholder proxy with its authentic, living real-world entity and organic secondary physics rather than texture-wrapped proxy geometry.`,
     `[Temporal Cue Timetable]: ${timelineString}.`,
     `[Atmospheric Space & Volumetric Lighting]: ${lightInfo}, volumetric shadow falloff, spatial air density, scene environment: ${
       shot.environment?.promptDescription || shot.sceneDescription.trim()
@@ -864,7 +850,7 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
 
   const negativePrompt =
     shot.negativePrompt ||
-    'floating artifacts, frame tearing, flickering geometry, unnatural jerky acceleration, low resolution, warped proportions, morphing hands, plastic textures, watermark';
+    'floating artifacts, frame tearing, flickering geometry, stiff 3d proxy geometry, texture-wrapped low-poly mesh, unnatural jerky acceleration, low resolution, warped proportions, morphing hands, plastic textures, watermark';
 
   return {
     positivePrompt,

@@ -295,4 +295,73 @@ describe('Camera-POV Frustum Visibility & Official Model Prompting (povVisibilit
       'Scene environment fills the camera frame with continuous natural atmospheric motion'
     );
   });
+
+  it('applies Universal Semantic Entity Instantiation (fully_preserved + weak_reference <Video 1>, never texture-wrapping) across all entity types (human, tree/prop, vehicle, environment)', () => {
+    const base = createDefaultShotSpec();
+    const shot: ShotSpec = {
+      ...base,
+      camera: {
+        ...base.camera,
+        lens: { ...base.camera.lens, focalLength: '35mm' },
+        movement: {
+          ...base.camera.movement,
+          type: 'dolly-in',
+          startPosition: { x: 50, y: 75, z: 5 },
+          endPosition: { x: 50, y: 60, z: 5 },
+          targetLookAt: { x: 50, y: 40, z: 50 },
+        },
+      },
+      actors: [
+        {
+          id: 'entity-tree',
+          name: 'Ancient Blossom Tree',
+          kind: 'prop',
+          color: '#06B6D4',
+          scale: 1.8,
+          token: 'a gnarled cherry blossom tree with wind-swept pink petals',
+          actionDescription: 'branches sway gently in the breeze',
+          trajectory: {
+            startTimeSeconds: 0,
+            startPosition: { x: 42, y: 40 },
+            endPosition: { x: 42, y: 40 },
+          },
+        },
+        {
+          id: 'entity-human',
+          name: 'Wanderer',
+          kind: 'human',
+          color: '#EF4444',
+          scale: 1.0,
+          token: 'a traveler in a weathered linen cloak',
+          actionDescription: 'walks past the tree',
+          trajectory: {
+            startTimeSeconds: 0,
+            startPosition: { x: 55, y: 42 },
+            endPosition: { x: 50, y: 38 },
+          },
+        },
+      ],
+    };
+
+    const minimax = compileMiniMaxPrompt(shot);
+    // Both the non-human tree (<Subject 1>) and human (<Subject 2>) + environment (<Subject 4>) use fully_preserved
+    expect(minimax.positivePrompt).toContain('<Subject 1> is Ancient Blossom Tree (from <picture 1>)');
+    expect(minimax.positivePrompt).toContain('<Subject 1> (present throughout): fully_preserved');
+    expect(minimax.positivePrompt).toContain('<Subject 2> is Wanderer (from <picture 2>)');
+    expect(minimax.positivePrompt).toContain('<Subject 2> (present throughout): fully_preserved');
+    expect(minimax.positivePrompt).toContain('<Subject 4> (present throughout): fully_preserved');
+    expect(minimax.positivePrompt).not.toContain('attribute_transfer');
+    // <Video 1> uses weak_reference and explicitly forbids texture-wrapping
+    expect(minimax.positivePrompt).toContain(
+      '<Video 1> (camera/motion reference): weak_reference - only structural/camera characteristics'
+    );
+    expect(minimax.positivePrompt).toContain('do NOT merely texture-wrap');
+
+    const ltx = compileLtxPrompt(shot);
+    expect(ltx.positivePrompt).toContain('living real-world entity');
+    expect(ltx.positivePrompt).toContain('without preserving any synthetic proxy geometry');
+
+    const seedance = compileSeedancePrompt(shot);
+    expect(seedance.positivePrompt).toContain('[Previs-to-Reality Spatial Instantiation]');
+  });
 });
