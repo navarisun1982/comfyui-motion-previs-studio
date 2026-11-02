@@ -11,7 +11,9 @@
 **ComfyUI Motion Previs Studio** is a real-time **3D Motion Previsualization & Camera Blocking Studio** designed for filmmakers, VFX supervisors, and AI video directors. Instead of guessing text prompts for camera movement, character blocking, and lens framing, you generate or import rigged 3D `.GLB` characters and objects via **ComfyUI**, direct actors, cameras, sets, and lights inside an interactive 3D soundstage — and export deterministic **24fps MP4 previs**, **OpenPose skeletal passes**, **Depth maps**, **4×4 camera matrices**, and **ComfyUI workflow bundles** for **LTX-2.5 (22B Distilled INT8)**, **MiniMax H3**, **Seedance**, and **any video model that accepts video reference**.
 
 - 🧊 **Real 3D `.GLB` Generation Powered by ComfyUI (Image-to-3D & Text-to-3D)**: Generate authentic textured 3D `.GLB` characters, creatures, and props directly on your local ComfyUI server (`http://127.0.0.1:8188`) using **Pixal3D INT8**, **TRELLIS.2 INT8**, **BiRefNet**, **MoGe FoV Depth**, and **Z-Image Turbo (Qwen-3-4B + Flux VAE)** — with automatic bone rigging, persistent IndexedDB & disk library storage (`D:\ComfyUI\output\3d\`), and `<picture 1>` reference sync.
-- 🧠 **Local & Cloud AI Directing Assistants**: Connect local **Ollama** / **LM Studio** models or **Google Gemini** / **OpenAI** from the in-app Settings panel for natural-language character choreography, camera blocking, and directorial video prompt polishing.
+- 🎥 **Camera-POV Frustum Visibility Engine (`povVisibilityEngine.ts`)**: Prompts automatically describe **only** the characters, props, and objects that actually appear inside the active 3D Camera Viewfinder (`[0, Duration]`), including exact entry/exit timestamps (`enters frame at 1.2s`, `exits frame at 2.8s`) while completely excluding off-camera stage elements.
+- 🧬 **Universal Previs-to-Reality Entity Instantiation**: Treats `<Video 1>` strictly as a 3D spatial and camera-path blueprint (`weak_reference`) while instantiating every visible character, prop, natural element, and environment from `<picture 1>`–`<picture 4>` as a living, three-dimensional real-world entity (`fully_preserved`) with organic secondary motion rather than texture-wrapped 3D proxy geometry.
+- 🧠 **Local & Cloud AI Directing Assistants**: Connect local **Ollama** / **LM Studio** models or **Google Gemini** / **OpenAI** from the in-app Settings panel for natural-language character choreography, camera blocking, and official model-specific prompt compilation (**LTX-2.5**, **MiniMax H3 Ref2VA**, **Seedance 2.0**).
 
 ---
 
@@ -102,12 +104,15 @@ All **5 official ComfyUI workflows** powering this studio are bundled directly i
 - **Offline Hardware-Accelerated 24fps Renderer**: Exports frame-accurate `.mp4` (via `mp4-muxer`) for **Composite Previs**, **Clean Beauty**, **OpenPose 18-Joint Skeletons**, **Normalized Depth Maps**, and **Subject Alpha Masks**.
 - **Deterministic ComfyUI & Video Reference Bundles**: Exports `.zip` or JSON bundles containing your rendered control passes, `4×4` camera extrinsic matrices, compiled engine prompts, and verified ComfyUI API graphs for **LTX-2.5**, **MiniMax H3**, **Seedance**, and **any video model that accepts video reference**.
 
-### 6. ⚡ Direct ComfyUI Live API Bridge & In-App Video Rendering (`minimax_h3_ref2va`)
-- **One-Click `Render in ComfyUI (MiniMax H3)`**: Directly executes the 15-node **MiniMax H3 Ref2VA (`SolAttn` + `8-Step Turbo LoRA @ 0.7`)** workflow on your local ComfyUI server (`http://127.0.0.1:8188`) without manually exporting or importing files.
+### 6. ⚡ Direct ComfyUI Live API Bridge, Camera-POV Prompt Engine & In-App Video Rendering
+- **One-Click `Render in ComfyUI` (`MiniMax H3 Ref2VA` & `LTX-2.5 22B`)**: Directly executes **MiniMax H3 Ref2VA (`SolAttn` + `8-Step Turbo LoRA @ 0.7`)** or **LTX-2.5 22B Distilled INT8** on your local ComfyUI server (`http://127.0.0.1:8188`) without manually exporting or importing files.
 - **Automatic Previs MP4 + 4 Reference Image Binding**:
-  - Renders and uploads your 24fps 3D RGB Previs MP4 directly into **Node `638` (`<Video 1>`)** as the motion & camera reference plate.
-  - Synchronizes up to **4 Object, Character & Set Reference Images (`<picture 1>`–`<picture 4>`, Nodes `137` / `139` / `144` / `151`)** uploaded in Directing Mode, generated in ComfyUI 3D Studio, or selected in Render Mode.
-  - Compiles spatially locked Ref2VA prompts (**Node `646`**) that map 3D viewport positions (`screen-left midground`, `center-frame background`, `screen-right midground`) and distinguish human character identity (`fully_preserved`) from prop/vehicle styling (`attribute_transfer`).
+  - Renders and uploads your 24fps 3D RGB Previs MP4 directly into **Node `638` (`<Video 1>`)** (or LTX-2.5 **Node `285`**) as the camera & spatial blocking blueprint.
+  - Synchronizes up to **4 Object, Character & Set Reference Images (`<picture 1>`–`<picture 4>`, Nodes `137` / `139` / `144` / `151`)** uploaded in Directing Mode, generated in ComfyUI 3D Studio, or selected in Render Mode — and automatically binds the primary reference image into **LTX-2.5 Node `269`** as well.
+- **Camera-POV Frustum Filtering & Official Model-Specific Prompt Architecture**:
+  - **Viewport-Accurate Frustum Culling (`povVisibilityEngine.ts`)**: Evaluates the exact 3D `PerspectiveCamera` frustum (`fov`, aspect ratio, camera roll, and bounding spheres) across 25 timeline samples so compiled prompts only include subjects actually visible in the Camera Viewfinder (`VISIBLE_THROUGHOUT`, `ENTERS_FRAME`, `EXITS_FRAME`, `PASSES_THROUGH`), omitting off-screen stage objects.
+  - **Previs-to-Reality Semantic Instantiation**: Explicitly instructs video models to use `<Video 1>` solely for 3D camera trajectory, perspective, and spatial placement (`weak_reference`), while instantiating `<picture 1>`–`<picture 4>` as authentic, living real-world entities (`fully_preserved`) with natural secondary motion instead of painting or texture-wrapping simplified 3D proxy meshes.
+  - **Model-Tailored Prompt Syntax**: Compiles dedicated prompt structures tailored to official documentation for **MiniMax H3 Ref2VA** (`subject_definitions` + `retention_analysis` + `[Shot 1]` temporal beats), **LTX-2.5** (single flowing present-tense cinematic paragraph for `T5-XXL`), and **Seedance 2.0** (`@Video1` + `@Image1`–`@Image4` multimodal tags).
 - **In-App `Final Render` & `Side-by-Side Sync` Player**:
   - Streams live node-by-node execution progress over WebSocket (with automatic HTTP `/history` fallback) and loads the finished **60fps MP4+Audio (`Node 145`)** directly inside the studio viewport.
   - Compare your **3D Previs MP4** side-by-side in frame-accurate sync with the **Final ComfyUI Render**, download the final `.mp4` in one click, or inspect the exact disk path (`D:\ComfyUI\output\...`).
@@ -207,6 +212,8 @@ npm run build
 │   ├── engine/
 │   │   ├── kinematics/       # Auto-rigging engine (humanoid/quadruped/spine/prop), gait engine, 2-bone IK
 │   │   ├── staging/          # 3D environment builder & subject mesh factory
+│   │   ├── povVisibilityEngine.ts    # 3D Camera-POV frustum visibility & entry/exit timestamp analyzer
+│   │   ├── promptCompiler.ts         # Official model-specific compilers (LTX-2.5, MiniMax H3, Seedance 2.0)
 │   │   └── offlinePrevisRenderer.ts  # Deterministic multi-pass MP4 muxer pipeline
 │   ├── services/
 │   │   ├── comfy3dGenerator.ts       # Live ComfyUI Image-to-3D & Text-to-3D .GLB pipeline
