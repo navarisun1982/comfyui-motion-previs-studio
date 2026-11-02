@@ -554,7 +554,7 @@ export default function App() {
             onClick={() => setShowSettingsModal(false)}
           >
             <div
-              className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-[#273247] bg-[#0D1320] p-6 shadow-2xl"
+              className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-[#273247] bg-[#0D1320] shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               <Suspense fallback={<div className="text-[#98A5BC] font-mono text-xs p-4">Loading settings...</div>}>

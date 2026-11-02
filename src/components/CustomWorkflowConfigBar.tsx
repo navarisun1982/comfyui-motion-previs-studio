@@ -387,9 +387,11 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
                 <button
                   type="button"
                   onClick={() => setShowGuide(false)}
-                  className="text-[10px] text-slate-400 hover:text-white cursor-pointer"
+                  aria-label="Close Workflow Guide"
+                  title="Close Guide"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/5 text-slate-300 hover:text-white hover:bg-rose-500/25 hover:border-rose-400/40 transition-colors cursor-pointer"
                 >
-                  Hide
+                  ✕
                 </button>
               </div>
               <ol className="list-decimal list-inside space-y-1 text-[10px] text-slate-300">

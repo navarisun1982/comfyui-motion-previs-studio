@@ -6,11 +6,11 @@ import {
   Trash2,
   Copy,
   Search,
-  ChevronDown,
   Maximize2,
   Minimize2,
   Layers,
   Check,
+  X,
 } from 'lucide-react';
 
 export const InAppDebugger: React.FC = () => {
@@ -142,7 +142,7 @@ export const InAppDebugger: React.FC = () => {
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {errorCount > 0 && (
             <span className="rounded bg-rose-500/20 px-2 py-0.5 text-[10px] text-rose-400 font-bold border border-rose-500/30">
               {errorCount} Error(s)
@@ -177,10 +177,11 @@ export const InAppDebugger: React.FC = () => {
 
           <button
             onClick={toggleOpen}
-            className="rounded glass-control p-1 text-slate-400 hover:text-white"
+            aria-label="Close debugger dock"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/15 bg-white/5 text-slate-300 hover:text-white hover:bg-rose-500/25 hover:border-rose-400/40 transition-colors cursor-pointer"
             title="Close debugger dock"
           >
-            <ChevronDown className="h-3.5 w-3.5" />
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
@@ -273,8 +274,13 @@ export const InAppDebugger: React.FC = () => {
               <div className="w-80 shrink-0 border-l border-director-border bg-director-panel p-3 overflow-y-auto font-mono text-[10px]">
                 <div className="flex items-center justify-between border-b border-director-border/60 pb-1.5 mb-2">
                   <span className="font-bold text-director-gold">LOG PAYLOAD DETAILS</span>
-                  <button onClick={() => setSelectedLog(null)} className="text-slate-400 hover:text-white">
-                    ✕
+                  <button
+                    onClick={() => setSelectedLog(null)}
+                    aria-label="Close payload details"
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-white/15 bg-white/5 text-slate-300 hover:text-white hover:bg-rose-500/25 hover:border-rose-400/40 transition-colors cursor-pointer"
+                    title="Close"
+                  >
+                    <X className="h-3 w-3" />
                   </button>
                 </div>
                 <pre className="text-slate-300 whitespace-pre-wrap break-all leading-tight">
@@ -299,4 +305,3 @@ export const InAppDebugger: React.FC = () => {
 };
 
 export { DebuggerTogglePill } from './DebuggerTogglePill';
-

@@ -776,8 +776,14 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       >
         {/* Studio Settings Modal Overlay */}
         {showSettingsModal && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6 overflow-y-auto">
-            <div className="w-full max-w-2xl">
+          <div
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-6 overflow-y-auto"
+            onClick={() => setShowSettingsModal(false)}
+          >
+            <div
+              className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-2xl border border-white/15 bg-[#0e111a] shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
               <ReasonerSettingsPanel onClose={() => setShowSettingsModal(false)} />
             </div>
           </div>
@@ -790,70 +796,73 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         />
 
         {/* Header Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 border-b border-white/10 bg-[#111624] shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-cyan-500 via-indigo-600 to-violet-600 flex items-center justify-center text-white shadow-lg shadow-cyan-500/20">
-              <Box className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-bold text-white tracking-wide">
-                  ComfyUI 3D Character &amp; Object Studio (.GLB)
-                </h2>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/35 font-semibold">
-                  {generationMode === 'text-to-3d'
-                    ? 'Z-Image Turbo • Pixal3D • TRELLIS.2 (#e7a9555b)'
-                    : 'Pixal3D • TRELLIS.2 • BiRefNet (#aa77013b)'}
-                </span>
+        <div className="flex items-start justify-between gap-3 px-5 py-3 border-b border-white/10 bg-[#111624] shrink-0">
+          <div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-9 w-9 shrink-0 rounded-xl bg-gradient-to-br from-cyan-500 via-indigo-600 to-violet-600 flex items-center justify-center text-white shadow-lg shadow-cyan-500/20">
+                <Box className="h-5 w-5" />
               </div>
-              <p className="text-[11px] text-slate-400">
-                {generationMode === 'text-to-3d'
-                  ? 'Generate a 3D .GLB character or object directly from a text prompt via ComfyUI workflow #e7a9555b'
-                  : 'Turn any character or object concept image into a real textured 3D .GLB mesh via ComfyUI workflow #aa77013b'}
-              </p>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-sm font-bold text-white tracking-wide">
+                    ComfyUI 3D Character &amp; Object Studio (.GLB)
+                  </h2>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/35 font-semibold">
+                    {generationMode === 'text-to-3d'
+                      ? 'Z-Image Turbo • Pixal3D • TRELLIS.2 (#e7a9555b)'
+                      : 'Pixal3D • TRELLIS.2 • BiRefNet (#aa77013b)'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  {generationMode === 'text-to-3d'
+                    ? 'Generate a 3D .GLB character or object directly from a text prompt via ComfyUI workflow #e7a9555b'
+                    : 'Turn any character or object concept image into a real textured 3D .GLB mesh via ComfyUI workflow #aa77013b'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 ml-auto">
+              {/* Download All Bundled ComfyUI Workflows Button */}
+              <button
+                type="button"
+                onClick={() => setShowWorkflowsPackModal(true)}
+                className="flex items-center gap-1.5 text-[11px] font-mono font-semibold text-cyan-200 hover:text-white bg-cyan-500/15 hover:bg-cyan-500/25 px-2.5 py-1.5 rounded-lg border border-cyan-400/40 transition-all cursor-pointer"
+                title="Download all ComfyUI workflows used in this app (Image-to-3D, Text-to-3D, MiniMax H3 & LTX-2.5)"
+              >
+                <FileCode className="h-3.5 w-3.5 text-cyan-300" />
+                <span>📥 Workflows Pack</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowSettingsModal(true)}
+                className="flex items-center gap-1.5 text-[11px] font-mono text-slate-200 hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-1.5 rounded-lg border border-white/10 hover:border-white/25 transition-all cursor-pointer"
+                title="Open ComfyUI & Workflow Settings"
+              >
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    comfyStatus === 'connected' ? 'bg-emerald-400' : 'bg-rose-400'
+                  }`}
+                />
+                <span>
+                  {comfyStatus === 'connected'
+                    ? `ComfyUI Online${comfyStats ? ` • ${comfyStats.vramTotalGb}GB` : ''}`
+                    : 'ComfyUI Offline'}
+                </span>
+                <Settings className="h-3.5 w-3.5 text-slate-400" />
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Download All Bundled ComfyUI Workflows Button */}
-            <button
-              type="button"
-              onClick={() => setShowWorkflowsPackModal(true)}
-              className="flex items-center gap-1.5 text-[11px] font-mono font-semibold text-cyan-200 hover:text-white bg-cyan-500/15 hover:bg-cyan-500/25 px-2.5 py-1.5 rounded-lg border border-cyan-400/40 transition-all cursor-pointer"
-              title="Download all ComfyUI workflows used in this app (Image-to-3D, Text-to-3D, MiniMax H3 & LTX-2.5)"
-            >
-              <FileCode className="h-3.5 w-3.5 text-cyan-300" />
-              <span>📥 Workflows Pack</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowSettingsModal(true)}
-              className="flex items-center gap-1.5 text-[11px] font-mono text-slate-200 hover:text-white bg-white/5 hover:bg-white/10 px-2.5 py-1.5 rounded-lg border border-white/10 hover:border-white/25 transition-all cursor-pointer"
-              title="Open ComfyUI & Workflow Settings"
-            >
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  comfyStatus === 'connected' ? 'bg-emerald-400' : 'bg-rose-400'
-                }`}
-              />
-              <span>
-                {comfyStatus === 'connected'
-                  ? `ComfyUI Online${comfyStats ? ` • ${comfyStats.vramTotalGb}GB` : ''}`
-                  : 'ComfyUI Offline'}
-              </span>
-              <Settings className="h-3.5 w-3.5 text-slate-400" />
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close 3D Generator"
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:text-white hover:bg-rose-500/25 hover:border-rose-400/40 transition-colors cursor-pointer"
-              title="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close 3D Generator"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:text-white hover:bg-rose-500/25 hover:border-rose-400/40 transition-colors cursor-pointer"
+            title="Close (Esc)"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         {/* Main Two-Column Body */}

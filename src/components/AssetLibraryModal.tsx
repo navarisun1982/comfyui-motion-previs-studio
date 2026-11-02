@@ -314,147 +314,150 @@ export const AssetLibraryModal: React.FC = () => {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-3.5 bg-[#10131d]">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-indigo-600 shadow-lg shadow-amber-500/20 text-white font-bold text-lg">
-              <Box className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="font-display text-base sm:text-lg font-bold tracking-wide text-white truncate">
-                  3D Library
-                </h2>
-                <span className="rounded-full bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-300 border border-amber-500/30">
-                  {allAssets.length} Assets
-                </span>
-                <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-300 border border-emerald-500/30 hidden sm:inline">
-                  GLB / GLTF Native
-                </span>
+        <div className="flex items-start justify-between gap-3 border-b border-white/10 px-5 py-3.5 bg-[#10131d]">
+          <div className="flex flex-wrap items-center gap-3 flex-1 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-indigo-600 shadow-lg shadow-amber-500/20 text-white font-bold text-lg">
+                <Box className="h-5 w-5" />
               </div>
-              <p className="text-xs text-slate-400 font-sans truncate">
-                Curated 3D Asset Catalog • Full support for GLB/GLTF imports &amp; procedural generation
-              </p>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="font-display text-base sm:text-lg font-bold tracking-wide text-white truncate">
+                    3D Library
+                  </h2>
+                  <span className="rounded-full bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-300 border border-amber-500/30">
+                    {allAssets.length} Assets
+                  </span>
+                  <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-emerald-300 border border-emerald-500/30 hidden sm:inline">
+                    GLB / GLTF Native
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 font-sans truncate">
+                  Curated 3D Asset Catalog • Full support for GLB/GLTF imports &amp; procedural generation
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons in Header */}
+            <div className="flex flex-wrap items-center gap-2 ml-auto">
+              {/* Hidden native file input */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept=".glb,.gltf"
+                className="hidden"
+              />
+
+              {/* Upload GLB Button */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-blue-600/30 transition-all disabled:opacity-50"
+                title="Upload any 3D model (.glb / .gltf) from your PC"
+              >
+                {isUploading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                <span>Upload GLB</span>
+              </button>
+
+              {/* Free Animated .GLB Resource Sites Toggle Button */}
+              <button
+                onClick={() => setShowResourcesDrawer((prev) => !prev)}
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold font-mono transition-all border cursor-pointer ${
+                  showResourcesDrawer
+                    ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg shadow-indigo-600/30'
+                    : 'bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-200 border-indigo-500/40'
+                }`}
+                title="Browse 14 curated Free CC0, Sketchfab, Mixamo & AI Animated .GLB websites"
+              >
+                <Globe className="h-3.5 w-3.5 text-indigo-300" />
+                <span>🌐 .GLB Sites</span>
+              </button>
+
+              {/* AI 3D Generator Studio Button (Image-to-3D #aa77013b) */}
+              <button
+                onClick={() => {
+                  open3DStudio({
+                    initialMode: 'image-to-3d',
+                    initialPrompt: genPrompt || searchQuery || '',
+                  });
+                }}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-amber-500 via-indigo-600 to-cyan-500 text-white hover:brightness-110 shadow-md shadow-indigo-600/30 transition-all font-mono cursor-pointer"
+                title="Open ComfyUI 3D Studio in Image-to-3D mode (#aa77013b)"
+              >
+                <Sparkles className="h-4 w-4 text-amber-300" />
+                <span>✨ Image-to-3D</span>
+              </button>
+
+              {/* ComfyUI Text-to-3D .GLB Button (#e7a9555b) */}
+              <button
+                onClick={() => {
+                  open3DStudio({
+                    initialMode: 'text-to-3d',
+                    initialPrompt: genPrompt || searchQuery || '',
+                  });
+                }}
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold font-mono transition-all bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/50 cursor-pointer"
+                title="Open ComfyUI Text-to-3D .GLB Studio (#e7a9555b)"
+              >
+                <Zap className="h-3.5 w-3.5 text-amber-300" />
+                <span>✍️ Text-to-3D</span>
+              </button>
+
+              {/* Multi-Select Toggle Button */}
+              <button
+                onClick={() => {
+                  if (isMultiSelectMode) {
+                    setIsMultiSelectMode(false);
+                    setSelectedAssetIds(new Set());
+                  } else {
+                    setIsMultiSelectMode(true);
+                  }
+                }}
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all border ${
+                  isMultiSelectMode
+                    ? 'bg-amber-500 text-black border-amber-400 shadow-md shadow-amber-500/30'
+                    : 'bg-white/5 hover:bg-white/10 text-slate-300 border-white/10'
+                }`}
+                title="Toggle multi-selection to place several 3D models at once"
+              >
+                <CheckSquare className="h-4 w-4" />
+                <span>Multi-Select {selectedAssetIds.size > 0 && `(${selectedAssetIds.size})`}</span>
+              </button>
             </div>
           </div>
 
-          {/* Action Buttons in Header */}
-          <div className="flex flex-wrap items-center gap-2 ml-auto">
-            {/* Hidden native file input */}
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              accept=".glb,.gltf"
-              className="hidden"
-            />
-
-            {/* Upload GLB Button */}
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isUploading}
-              className="flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-blue-600/30 transition-all disabled:opacity-50"
-              title="Upload any 3D model (.glb / .gltf) from your PC"
-            >
-              {isUploading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Upload className="h-4 w-4" />
-              )}
-              <span>Upload GLB</span>
-            </button>
-
-            {/* Free Animated .GLB Resource Sites Toggle Button */}
-            <button
-              onClick={() => setShowResourcesDrawer((prev) => !prev)}
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold font-mono transition-all border cursor-pointer ${
-                showResourcesDrawer
-                  ? 'bg-indigo-600 text-white border-indigo-400 shadow-lg shadow-indigo-600/30'
-                  : 'bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-200 border-indigo-500/40'
-              }`}
-              title="Browse 14 curated Free CC0, Sketchfab, Mixamo & AI Animated .GLB websites"
-            >
-              <Globe className="h-3.5 w-3.5 text-indigo-300" />
-              <span>🌐 .GLB Sites</span>
-            </button>
-
-            {/* AI 3D Generator Studio Button (Image-to-3D #aa77013b) */}
-            <button
-              onClick={() => {
-                open3DStudio({
-                  initialMode: 'image-to-3d',
-                  initialPrompt: genPrompt || searchQuery || '',
-                });
-              }}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold bg-gradient-to-r from-amber-500 via-indigo-600 to-cyan-500 text-white hover:brightness-110 shadow-md shadow-indigo-600/30 transition-all font-mono cursor-pointer"
-              title="Open ComfyUI 3D Studio in Image-to-3D mode (#aa77013b)"
-            >
-              <Sparkles className="h-4 w-4 text-amber-300" />
-              <span>✨ Image-to-3D</span>
-            </button>
-
-            {/* ComfyUI Text-to-3D .GLB Button (#e7a9555b) */}
-            <button
-              onClick={() => {
-                open3DStudio({
-                  initialMode: 'text-to-3d',
-                  initialPrompt: genPrompt || searchQuery || '',
-                });
-              }}
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold font-mono transition-all bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/50 cursor-pointer"
-              title="Open ComfyUI Text-to-3D .GLB Studio (#e7a9555b)"
-            >
-              <Zap className="h-3.5 w-3.5 text-amber-300" />
-              <span>✍️ Text-to-3D</span>
-            </button>
-
-            {/* Multi-Select Toggle Button */}
-            <button
-              onClick={() => {
-                if (isMultiSelectMode) {
-                  setIsMultiSelectMode(false);
-                  setSelectedAssetIds(new Set());
-                } else {
-                  setIsMultiSelectMode(true);
-                }
-              }}
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all border ${
-                isMultiSelectMode
-                  ? 'bg-amber-500 text-black border-amber-400 shadow-md shadow-amber-500/30'
-                  : 'bg-white/5 hover:bg-white/10 text-slate-300 border-white/10'
-              }`}
-              title="Toggle multi-selection to place several 3D models at once"
-            >
-              <CheckSquare className="h-4 w-4" />
-              <span>Multi-Select {selectedAssetIds.size > 0 && `(${selectedAssetIds.size})`}</span>
-            </button>
-
-            {/* Top-Right X Close Button */}
-            <button
-              type="button"
-              onClick={closeLibrary}
-              aria-label="Close 3D Asset Library"
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:bg-rose-500/25 hover:border-rose-400/50 hover:text-white transition-colors shrink-0 cursor-pointer"
-              title="Close (Esc)"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
+          {/* Top-Right X Close Button */}
+          <button
+            type="button"
+            onClick={closeLibrary}
+            aria-label="Close 3D Asset Library"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:bg-rose-500/25 hover:border-rose-400/50 hover:text-white transition-colors cursor-pointer"
+            title="Close (Esc)"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         {/* Free Animated .GLB Websites & Resources Directory Drawer */}
         {showResourcesDrawer && (
           <div className="border-b border-indigo-500/35 bg-[#0c101b] p-4 animate-in slide-in-from-top duration-200 max-h-[55vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-start justify-between gap-2 mb-2">
               <span className="text-[11px] font-mono text-indigo-300 font-semibold">
                 Download any animated .GLB from these libraries, then click &ldquo;Upload GLB&rdquo; above to place it on stage:
               </span>
               <button
                 type="button"
                 onClick={() => setShowResourcesDrawer(false)}
-                className="flex items-center gap-1 rounded-md border border-white/15 bg-white/5 px-2 py-0.5 text-[11px] font-mono text-slate-300 hover:bg-white/15 hover:text-white transition-colors cursor-pointer"
+                aria-label="Close Resources Drawer"
+                title="Close Resources Drawer"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:bg-rose-500/25 hover:border-rose-400/50 hover:text-white transition-colors cursor-pointer"
               >
-                <X className="h-3 w-3" />
-                <span>Hide Resources</span>
+                <X className="h-3.5 w-3.5" />
               </button>
             </div>
             <GlbResourcesDirectory compact defaultExpanded />
@@ -465,38 +468,49 @@ export const AssetLibraryModal: React.FC = () => {
         {showGenerator && (
           <div className="border-b border-amber-500/30 bg-gradient-to-r from-[#171424] via-[#121524] to-[#171424] p-5 animate-in slide-in-from-top duration-300">
             <form onSubmit={handleGenerateSubmit} className="max-w-4xl mx-auto space-y-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-amber-400 font-bold text-sm flex items-center gap-1.5 font-display">
-                    <Zap className="h-4 w-4 text-amber-400" />
-                    Quick Text-to-3D Generator
-                  </span>
-                  <span className="text-[11px] font-mono text-slate-400 hidden sm:inline">
-                    (For reference images &amp; multi-angle sculpting, open Concept-to-3D Studio)
-                  </span>
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-amber-400 font-bold text-sm flex items-center gap-1.5 font-display">
+                      <Zap className="h-4 w-4 text-amber-400" />
+                      Quick Text-to-3D Generator
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-400 hidden sm:inline">
+                      (For reference images &amp; multi-angle sculpting, open Concept-to-3D Studio)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 ml-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        open3DStudio({ initialPrompt: genPrompt });
+                      }}
+                      className="flex items-center gap-1 rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-2.5 py-1 text-[11px] font-mono text-indigo-200 hover:bg-indigo-500/25 hover:text-white transition-all cursor-pointer"
+                    >
+                      <Sparkles className="h-3 w-3 text-amber-300" />
+                      <span>Open Concept-to-3D Studio</span>
+                    </button>
+                    <button
+                      type="button"
+                      id="reasoner-settings-toggle"
+                      onClick={() => setShowSettingsModal(true)}
+                      title="Change the LLM provider (opens Studio Settings)"
+                      className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] font-mono text-slate-400 hover:text-white hover:border-white/25 transition-all"
+                    >
+                      <Settings2 className="h-3.5 w-3.5" />
+                      Reasoner: {reasonerLabel}
+                    </button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      open3DStudio({ initialPrompt: genPrompt });
-                    }}
-                    className="flex items-center gap-1 rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-2.5 py-1 text-[11px] font-mono text-indigo-200 hover:bg-indigo-500/25 hover:text-white transition-all cursor-pointer"
-                  >
-                    <Sparkles className="h-3 w-3 text-amber-300" />
-                    <span>Open Concept-to-3D Studio</span>
-                  </button>
-                  <button
-                    type="button"
-                    id="reasoner-settings-toggle"
-                    onClick={() => setShowSettingsModal(true)}
-                    title="Change the LLM provider (opens Studio Settings)"
-                    className="flex items-center gap-1.5 rounded-lg border border-white/10 px-2.5 py-1 text-[11px] font-mono text-slate-400 hover:text-white hover:border-white/25 transition-all"
-                  >
-                    <Settings2 className="h-3.5 w-3.5" />
-                    Reasoner: {reasonerLabel}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowGenerator(false)}
+                  aria-label="Close Quick Text-to-3D Generator"
+                  title="Close Quick Text-to-3D Generator"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:bg-rose-500/25 hover:border-rose-400/50 hover:text-white transition-colors cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2">
@@ -1011,7 +1025,7 @@ export const AssetLibraryModal: React.FC = () => {
           }}
         >
           <div
-            className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-white/10 bg-[#0e111a] p-6 shadow-2xl"
+            className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-white/15 bg-[#0e111a] shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <ReasonerSettingsPanel onClose={() => setShowSettingsModal(false)} />

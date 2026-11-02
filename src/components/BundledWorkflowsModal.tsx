@@ -59,31 +59,31 @@ export const BundledWorkflowsModal: React.FC<BundledWorkflowsModalProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-white/10 bg-[#111624]">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-cyan-500 via-indigo-600 to-amber-500 flex items-center justify-center text-white shadow-lg shadow-cyan-500/20">
-              <FileCode className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white tracking-wide">
-                  ComfyUI Workflows Pack (3D &amp; Video)
-                </h2>
-                <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-[10px] font-mono font-bold text-cyan-200">
-                  {BUNDLED_WORKFLOWS_CATALOG.length} Bundled Workflows
-                </span>
+        <div className="flex items-start justify-between gap-3 px-6 py-4 border-b border-white/10 bg-[#111624] shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-3 flex-1 min-w-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-10 w-10 shrink-0 rounded-xl bg-gradient-to-br from-cyan-500 via-indigo-600 to-amber-500 flex items-center justify-center text-white shadow-lg shadow-cyan-500/20">
+                <FileCode className="h-5 w-5" />
               </div>
-              <p className="text-xs text-slate-400">
-                Save &amp; import all official ComfyUI workflows used in this app (Image-to-3D, Text-to-3D, MiniMax H3 &amp; LTX-2.5) into your own ComfyUI installation
-              </p>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-base font-bold text-white tracking-wide">
+                    ComfyUI Workflows Pack (3D &amp; Video)
+                  </h2>
+                  <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-[10px] font-mono font-bold text-cyan-200">
+                    {BUNDLED_WORKFLOWS_CATALOG.length} Bundled Workflows
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Save &amp; import all official ComfyUI workflows used in this app (Image-to-3D, Text-to-3D, MiniMax H3 &amp; LTX-2.5) into your own ComfyUI installation
+                </p>
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={handleDownloadAllSequential}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/20 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/20 transition-all cursor-pointer shrink-0 ml-auto"
               title="Download all ComfyUI workflow .JSON files to your PC"
             >
               {downloadedId === 'all-pack' ? (
@@ -98,17 +98,17 @@ export const BundledWorkflowsModal: React.FC<BundledWorkflowsModalProps> = ({
                 </>
               )}
             </button>
-
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close Workflows Pack"
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-rose-500/25 hover:border-rose-400/40 text-slate-300 hover:text-white transition-colors cursor-pointer"
-              title="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
           </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close Workflows Pack"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-rose-500/25 hover:border-rose-400/40 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            title="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
 
         {/* Filter Bar */}

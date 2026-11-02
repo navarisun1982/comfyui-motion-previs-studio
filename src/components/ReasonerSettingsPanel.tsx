@@ -417,15 +417,15 @@ export const ReasonerSettingsPanel: React.FC<{
         if (e.key === 'Enter' && (e.target as HTMLElement).tagName === 'INPUT') e.preventDefault();
       }}
     >
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-slate-200 tracking-wide">Studio Settings</span>
+      <div className="flex items-start justify-between gap-3">
+        <span className="text-xs font-bold text-slate-200 tracking-wide pt-1">Studio Settings</span>
         {onClose && (
           <button
             type="button"
             onClick={onClose}
             aria-label="Close Studio Settings"
             title="Close"
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-rose-500/25 hover:border-rose-400/40 text-slate-300 hover:text-white transition-colors cursor-pointer"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-rose-500/25 hover:border-rose-400/40 text-slate-300 hover:text-white transition-colors cursor-pointer"
             id="reasoner-settings-close"
           >
             <X className="h-4 w-4" />

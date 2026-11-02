@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useHistoryStore, computeShotDiff } from '../stores/useHistoryStore';
 import { useShotStore } from '../stores/useShotStore';
 import { compilePromptForShot } from '../engine/promptCompiler';
-import { History, GitCompare, RotateCcw, CheckCircle2, ChevronRight, Video, ArrowLeft, Camera } from 'lucide-react';
+import { History, GitCompare, RotateCcw, CheckCircle2, ChevronRight, Video, ArrowLeft, Camera, X } from 'lucide-react';
 
 import { useShallow } from 'zustand/react/shallow';
 
@@ -63,9 +63,9 @@ export const DirectorDiffInspector: React.FC<DirectorDiffInspectorProps> = ({ on
   return (
     <div className="flex h-full w-full flex-col bg-director-darkest p-6 text-xs text-slate-100 overflow-y-auto">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-director-border pb-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-director-cyan/20 text-director-cyan">
+      <div className="flex items-start justify-between gap-3 border-b border-director-border pb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-director-cyan/20 text-director-cyan">
             <GitCompare className="h-4 w-4" />
           </div>
           <div>
@@ -78,40 +78,53 @@ export const DirectorDiffInspector: React.FC<DirectorDiffInspectorProps> = ({ on
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleSnapshotCurrentTake}
-            className="flex items-center gap-1.5 rounded-lg bg-director-cyan/20 px-3 py-1.5 font-mono text-xs font-semibold text-director-cyan border border-director-cyan/40 transition-all hover:bg-director-cyan hover:text-director-darkest active:scale-95"
-            title="Record a snapshot of the current shot state into revision history"
-          >
-            <Camera className="h-3.5 w-3.5" />
-            Snapshot Take
-          </button>
-          <button
-            onClick={() => setShowAllShots((prev) => !prev)}
-            className="flex items-center gap-1 rounded-lg bg-white/5 hover:bg-white/10 px-2.5 py-1.5 font-mono text-[11px] text-slate-300 border border-white/10 transition-colors"
-          >
-            {showAllShots ? 'All Shots' : `Active Shot (${shotRevisions.length})`}
-          </button>
-          {revA && (
+        <div className="flex items-start gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => {
-                loadShot(revA.shotSpec);
-                if (onClose) onClose();
-              }}
-              className="flex items-center gap-1.5 rounded-lg bg-director-gold/20 px-3 py-1.5 font-mono text-xs font-semibold text-director-gold border border-director-gold/40 transition-all hover:bg-director-gold hover:text-director-darkest active:scale-95"
+              onClick={handleSnapshotCurrentTake}
+              className="flex items-center gap-1.5 rounded-lg bg-director-cyan/20 px-3 py-1.5 font-mono text-xs font-semibold text-director-cyan border border-director-cyan/40 transition-all hover:bg-director-cyan hover:text-director-darkest active:scale-95"
+              title="Record a snapshot of the current shot state into revision history"
             >
-              <RotateCcw className="h-3.5 w-3.5" />
-              Restore Revision {revA.version} to Studio
+              <Camera className="h-3.5 w-3.5" />
+              Snapshot Take
             </button>
-          )}
+            <button
+              onClick={() => setShowAllShots((prev) => !prev)}
+              className="flex items-center gap-1 rounded-lg bg-white/5 hover:bg-white/10 px-2.5 py-1.5 font-mono text-[11px] text-slate-300 border border-white/10 transition-colors"
+            >
+              {showAllShots ? 'All Shots' : `Active Shot (${shotRevisions.length})`}
+            </button>
+            {revA && (
+              <button
+                onClick={() => {
+                  loadShot(revA.shotSpec);
+                  if (onClose) onClose();
+                }}
+                className="flex items-center gap-1.5 rounded-lg bg-director-gold/20 px-3 py-1.5 font-mono text-xs font-semibold text-director-gold border border-director-gold/40 transition-all hover:bg-director-gold hover:text-director-darkest active:scale-95"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Restore Revision {revA.version} to Studio
+              </button>
+            )}
+            {onClose && (
+              <button
+                onClick={onClose}
+                className="flex items-center gap-1.5 rounded-lg bg-white/5 hover:bg-white/10 px-3 py-1.5 font-mono text-xs text-slate-300 hover:text-white border border-white/10 transition-colors"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+                <span>Back to Studio</span>
+              </button>
+            )}
+          </div>
           {onClose && (
             <button
+              type="button"
               onClick={onClose}
-              className="flex items-center gap-1.5 rounded-lg bg-white/5 hover:bg-white/10 px-3 py-1.5 font-mono text-xs text-slate-300 hover:text-white border border-white/10 transition-colors"
+              aria-label="Close Director Diff Inspector"
+              title="Close (Esc)"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-slate-300 hover:text-white hover:bg-rose-500/25 hover:border-rose-400/40 transition-colors cursor-pointer"
             >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              <span>Back to Studio</span>
+              <X className="h-4 w-4" />
             </button>
           )}
         </div>
