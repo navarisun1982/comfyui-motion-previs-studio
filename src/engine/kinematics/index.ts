@@ -13,4 +13,5 @@ export * from './motionCompiler';
 export * from './directorialMotionDecomposer';
 export * from './objectPosePresets';
 export * from './readyMadeMotions';
+export * from './universalKinematicSynthesizer';
 export * from './autoRigEngine';

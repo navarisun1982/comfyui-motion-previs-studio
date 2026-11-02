@@ -17,6 +17,7 @@ import {
   MotionSkillInvocation,
   DEFAULT_SKILL_DURATIONS,
 } from './motionSkills';
+import { buildOfflineUniversalKinematicProgram } from './universalKinematicSynthesizer';
 
 export interface SceneContextEntity {
   id: string;
@@ -114,7 +115,7 @@ export function decomposeDirectorialMotion(
 
   // Split clauses by punctuation, transition words, and compound actions
   const rawClauses = protectedText.split(
-    /(?<!\d),(?!\d)|[.;،\n]+|\b(?:then|and then|after that)\b|\b(?:and)\s+(?=(?:sit|sits|reach|reaches|grab|grabs|pick|picks|walk|walks|run|runs|jump|jumps|wave|waves|fight|fights|punch|punches|shoot|shoots|dodge|dodges|cheer|cheers|stand|stands|talk|talks|wait|waits|exit|exits))\b|(?:ثم|وبعد ذلك|وبعدها)|\bو(?=(?:يجلس|يمشي|يركض|يقفز|يلوح|يقاتل|يقف|يتحدث|يمد|يمسك|ينظر))/i
+    /(?<!\d),(?!\d)|[.;،\n]+|\b(?:then|and then|after that)\b|\b(?:and)\s+(?=(?:sit|sits|reach|reaches|grab|grabs|pick|picks|walk|walks|run|runs|crawl|crawls|climb|climbs|push|pushes|jump|jumps|wave|waves|fight|fights|punch|punches|shoot|shoots|dodge|dodges|cheer|cheers|stand|stands|get\s+up|gets\s+up|rise|rises|fall|falls|collapse|collapses|kneel|kneels|talk|talks|wait|waits|exit|exits))\b|(?:ثم|وبعد ذلك|وبعدها|فـ?(?=(?:يقوم|ينهض|يسقط|يقع|يجلس|يقف)))|\bو(?=(?:يجلس|يمشي|يركض|يزحف|يحبو|يتسلق|يدفع|يقفز|يلوح|يقاتل|يقف|يقوم|ينهض|يسقط|يقع|ينهار|يركع|يسجد|يتحدث|يمد|يمسك|ينظر))/i
   );
 
   const clauses = rawClauses.map((c) => c.replace(/__COORD_COMMA__/g, ',').trim()).filter(Boolean);
@@ -124,7 +125,16 @@ export function decomposeDirectorialMotion(
     const clauseEn = clause.toLowerCase();
     const clauseAr = normalizeArabicText(clause);
 
-    // 1. Walk / Locomotion / Jump / Dodge / Retreat / Drive
+    // 1. Walk / Locomotion / Crawl / Climb / Push / Jump / Dodge / Retreat / Drive
+    const isCrawlClause =
+      /\b(crawl|crawls|crawling|prone|on\s+all\s+fours|hands\s+and\s+knees)\b/i.test(clauseEn) ||
+      /(يزحف|زحف|يحبو|حبو|علي بطنه)/.test(clauseAr);
+    const isClimbClause =
+      /\b(climb|climbs|climbing|scale|scales|scaling|ladder)\b/i.test(clauseEn) ||
+      /(يتسلق|يصعد السلم|تسلق)/.test(clauseAr);
+    const isPushClause =
+      /\b(push|pushes|pushing|shove|shoves|shoving)\b/i.test(clauseEn) ||
+      /(يدفع|يزيح|يدفش|دفع)/.test(clauseAr);
     const isJumpClause =
       /\b(jump|jumps|jumping|leap|leaps|leaping|hop|hops|vault)\b/i.test(clauseEn) ||
       /(يقفز|قفز|يثب)/.test(clauseAr);
@@ -135,6 +145,9 @@ export function decomposeDirectorialMotion(
       /\b(retreat|retreats|retreating|back\s+up|backs\s+up|step\s+back|steps\s+back|walk\s+back|walks\s+back)\b/i.test(clauseEn) ||
       /(يتراجع|يرجع للخلف|يعود للخلف)/.test(clauseAr);
     const isWalk =
+      isCrawlClause ||
+      isClimbClause ||
+      isPushClause ||
       isJumpClause ||
       isDodgeClause ||
       isRetreatClause ||
@@ -145,11 +158,23 @@ export function decomposeDirectorialMotion(
       // Find destination coordinates or entity
       const coords = extractCoordinates(clause);
       const isStageGrid = currentPos[0] > 5 || currentPos[1] > 5;
-      let defaultTarget: [number, number] = [currentPos[0] + 1.5, currentPos[1] + 1.0];
+      let defaultTarget: [number, number] = isClimbClause
+        ? [currentPos[0], currentPos[1]]
+        : [currentPos[0] + 1.5, currentPos[1] + 1.0];
 
-      if (isStageGrid && !coords) {
+      if (isStageGrid && !coords && !isClimbClause) {
         const isFast = /\b(run|runs|running|sprint|dash)\b/i.test(clauseEn) || /(يركض|يجري)/.test(clauseAr);
-        const stepDist = isJumpClause ? 18 : isDodgeClause ? 14 : isFast ? 32 : 26;
+        const stepDist = isCrawlClause
+          ? 16
+          : isPushClause
+          ? 14
+          : isJumpClause
+          ? 18
+          : isDodgeClause
+          ? 14
+          : isFast
+          ? 32
+          : 26;
         if (/\b(center|middle)\b/i.test(clauseEn) || /(المنتصف|الوسط)/.test(clauseAr)) {
           defaultTarget = [50, 55];
         } else if (/\b(left|stage left)\b/i.test(clauseEn) || /(يسار|شمال)/.test(clauseAr)) {
@@ -191,7 +216,13 @@ export function decomposeDirectorialMotion(
 
       const isRunClause = /\b(run|runs|running|sprint|jog|dash)\b/i.test(clauseEn) || /(يركض|يجري)/.test(clauseAr);
       const isSneakClause = /\b(sneak|sneaks|sneaking|stealth|creep|prowl)\b/i.test(clauseEn) || /(يتسلل)/.test(clauseAr);
-      const clipForWalk = isJumpClause
+      const clipForWalk = isCrawlClause
+        ? 'human-crawl-prone'
+        : isClimbClause
+        ? 'human-climb-ascend'
+        : isPushClause
+        ? 'human-push-heavy'
+        : isJumpClause
         ? 'human-jump-leap'
         : isDodgeClause
         ? 'human-dodge-weave'
@@ -209,7 +240,7 @@ export function decomposeDirectorialMotion(
         skill: 'walkTo',
         args: {
           to: targetPos,
-          gait: isRunClause ? 'run' : isSneakClause ? 'sneak' : 'walk',
+          gait: isRunClause ? 'run' : isSneakClause || isCrawlClause ? 'sneak' : 'walk',
           motionClip: clipForWalk,
         },
         startTimeSec: currentTime,
@@ -220,8 +251,12 @@ export function decomposeDirectorialMotion(
       continue;
     }
 
-    // 2. Sit / Sit Down
+    // 2. Sit / Sit Down / Kneel / Bow Down
+    const isKneelClause =
+      /\b(kneel|kneels|kneeling|bow\s+down|bows\s+down|prostrate|on\s+knees)\b/i.test(clauseEn) ||
+      /(يركع|يسجد|يجثو|ركوع|سجود)/.test(clauseAr);
     const isSit =
+      isKneelClause ||
       /\b(sit|sits|sitting|sit down|take a seat|resting|seated)\b/i.test(clauseEn) ||
       /(يجلس|جلس|الجلوس|يقعد|يستقر في مقعد)/i.test(clauseAr);
 
@@ -245,7 +280,7 @@ export function decomposeDirectorialMotion(
         args: {
           seatTarget: seatPos,
           seatActorId,
-          motionClip: 'human-sit-down',
+          motionClip: isKneelClause ? 'human-kneel-bow' : 'human-sit-down',
         },
         startTimeSec: currentTime,
         durationSec: dur,
@@ -321,23 +356,31 @@ export function decomposeDirectorialMotion(
       continue;
     }
 
-    // 5. Stand / Idle / Look Around / Scan / Waiting
+    // 5. Stand Up / Rise / Stand / Idle / Look Around / Scan / Waiting
+    const isStandUpClause =
+      /\b(stand\s+up|stands\s+up|standing\s+up|get\s+up|gets\s+up|getting\s+up|rise|rises|rising)\b/i.test(clauseEn) ||
+      /(يقوم|ينهض|نهوض|يستقيم|يقف من جديد)/.test(clauseAr);
     const isLookClause =
       /\b(look|looks|looking|turn\s+head|turns\s+head|scan|scans|search|searches|gaze|gazes|glance|watch)\b/i.test(clauseEn) ||
       /(ينظر|يلتفت|يتلفت|يبحث|يراقب)/.test(clauseAr);
     const isStand =
+      isStandUpClause ||
       isLookClause ||
       /\b(stand|stands|idle|wait|waits|pose|stay)\b/i.test(clauseEn) ||
       /(يقف|وقوف|ينتظر|مسترخيا|ثابت|يتطلع)/i.test(clauseAr);
 
     if (isStand) {
-      const dur = DEFAULT_SKILL_DURATIONS.standIdle;
+      const dur = isStandUpClause ? 2.2 : DEFAULT_SKILL_DURATIONS.standIdle;
       skills.push({
         id: `skill_${idx}_standIdle`,
         skill: 'standIdle',
         args: {
           stance: isLookClause ? 'alert' : 'relaxed',
-          motionClip: isLookClause ? 'human-look-search' : 'human-idle-breathe',
+          motionClip: isStandUpClause
+            ? 'human-stand-up'
+            : isLookClause
+            ? 'human-look-search'
+            : 'human-idle-breathe',
         },
         startTimeSec: currentTime,
         durationSec: dur,
@@ -346,7 +389,10 @@ export function decomposeDirectorialMotion(
       continue;
     }
 
-    // 6. Combat / Fight / Shoot / Hit Reaction / Impact
+    // 6. Combat / Fight / Shoot / Fall / Collapse / Hit Reaction / Impact
+    const isFallClause =
+      /\b(fall|falls|falling|collapse|collapses|collapsing|faint|faints|drop\s+down|drops\s+down|pass\s+out)\b/i.test(clauseEn) ||
+      /(يسقط|يقع|ينهار|يغمي عليه|سقوط|وقع)/.test(clauseAr);
     const isSwordClause =
       /\b(sword|blade|slash|slashes|slashing|cleave)\b/i.test(clauseEn) ||
       /(سيف|يلوح بالسيف)/.test(clauseAr);
@@ -357,6 +403,7 @@ export function decomposeDirectorialMotion(
       /\b(punch|punches|punching|fight|fights|fighting|jab|cross|box|boxing|strike|attack|kick)\b/i.test(clauseEn) ||
       /(يلكم|يقاتل|يتشاجر|ضربه|قتال)/.test(clauseAr);
     const isHit =
+      isFallClause ||
       isSwordClause ||
       isShootClause ||
       isPunchClause ||
@@ -364,14 +411,16 @@ export function decomposeDirectorialMotion(
       /(يتلقي ضربه|يرتد|يصطدم|يتعثر|صدمه)/i.test(clauseAr);
 
     if (isHit) {
-      const combatClip = isSwordClause
+      const combatClip = isFallClause
+        ? 'human-fall-collapse'
+        : isSwordClause
         ? 'human-sword-slash'
         : isShootClause
         ? 'human-aim-fire'
         : isPunchClause
         ? 'human-combo-punch'
         : 'human-hit-stagger';
-      const dur = isSwordClause || isShootClause || isPunchClause ? 1.8 : DEFAULT_SKILL_DURATIONS.hitReaction;
+      const dur = isFallClause || isSwordClause || isShootClause || isPunchClause ? 1.8 : DEFAULT_SKILL_DURATIONS.hitReaction;
       skills.push({
         id: `skill_${idx}_hitReaction`,
         skill: 'hitReaction',
@@ -386,14 +435,51 @@ export function decomposeDirectorialMotion(
       currentTime += dur;
       continue;
     }
+
+    // 7. Universal Open-Ended Clause Synthesis (Clapping, Swimming, Bending, Custom Actions)
+    const clauseProg = buildOfflineUniversalKinematicProgram(clause);
+    const firstPhase = clauseProg.phases[0];
+    const dur = 2.2;
+    if (firstPhase?.stageDelta && (Math.abs(firstPhase.stageDelta[0]) > 1 || Math.abs(firstPhase.stageDelta[1]) > 1)) {
+      const nextTarget: [number, number] = [
+        Math.max(8, Math.min(92, currentPos[0] + firstPhase.stageDelta[0])),
+        Math.max(8, Math.min(92, currentPos[1] + firstPhase.stageDelta[1])),
+      ];
+      skills.push({
+        id: `skill_${idx}_universal_move`,
+        skill: 'walkTo',
+        args: {
+          to: nextTarget,
+          gait: 'walk',
+          motionClip: clauseProg.id,
+        },
+        startTimeSec: currentTime,
+        durationSec: dur,
+      });
+      currentPos = [...nextTarget];
+    } else {
+      skills.push({
+        id: `skill_${idx}_universal_act`,
+        skill: 'talkGesture',
+        args: {
+          style: 'expressive',
+          intensity: 0.8,
+          motionClip: clauseProg.id,
+        },
+        startTimeSec: currentTime,
+        durationSec: dur,
+      });
+    }
+    currentTime += dur;
   }
 
-  // Fallback: If no discrete skills were matched, default to standIdle -> talkGesture
+  // Fallback: If no discrete skills were matched, synthesize an expressive universal kinematic program
   if (skills.length === 0) {
+    const fallbackProg = buildOfflineUniversalKinematicProgram(prompt || 'stand');
     skills.push({
       id: 'skill_fallback_stand',
       skill: 'standIdle',
-      args: { stance: 'neutral' },
+      args: { stance: 'neutral', motionClip: fallbackProg.id },
       startTimeSec: 0,
       durationSec: Math.min(3.0, totalShotDurationSec),
     });

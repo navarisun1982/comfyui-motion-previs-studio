@@ -311,6 +311,25 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     const afterMulti = useShotStore.getState().shot.actors.find((a) => a.id === actorId)!;
     expect(afterMulti.trajectory.keyframes?.some((kf) => kf.motionClip === 'human-walk-forward')).toBe(true);
     expect(afterMulti.trajectory.keyframes?.some((kf) => kf.motionClip === 'human-sit-down')).toBe(true);
+
+    // 5. Arabic multi-beat ground crawl + stand up ("رجلا يزحف علي الارض ثم يقوم")
+    store.applyDirectorialMotion(actorId, 'رجلا يزحف علي الارض ثم يقوم', {
+      startTimeSec: 0,
+      endTimeSec: 6,
+    });
+    const afterCrawlStand = useShotStore.getState().shot.actors.find((a) => a.id === actorId)!;
+    expect(afterCrawlStand.trajectory.keyframes?.some((kf) => kf.motionClip === 'human-crawl-prone')).toBe(true);
+    expect(afterCrawlStand.trajectory.keyframes?.some((kf) => kf.motionClip === 'human-stand-up')).toBe(true);
+
+    // 6. Open-ended Universal IK synthesizer for arbitrary actions ("يصفق بحماس ثم يسبح للامام")
+    store.applyDirectorialMotion(actorId, 'يصفق بحماس ثم يسبح للامام', {
+      startTimeSec: 0,
+      endTimeSec: 6,
+    });
+    const afterUniversal = useShotStore.getState().shot.actors.find((a) => a.id === actorId)!;
+    expect(
+      afterUniversal.trajectory.keyframes?.some((kf) => Boolean(kf.motionClip?.startsWith('universal-ik:')))
+    ).toBe(true);
   });
 
   it('toggles the 14-site Animated .GLB Resources Directory inside the Look/Ref sub-tab', () => {

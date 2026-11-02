@@ -39,7 +39,7 @@ import { registerModelFile } from '../services/modelStorage';
 import { preloadGltfModels } from '../engine/gltfModelLoader';
 import { decomposeDirectorialScene } from '../engine/directorialSceneDecomposer';
 import { HumanoidMotionGroup } from '../engine/kinematics';
-import { generateActingCuesFromPrompt } from '../services/aiActingDirector';
+import { generateActingCuesFromPrompt, generateUniversalKinematicProgramFromPrompt } from '../services/aiActingDirector';
 import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
 import { CharacterControlCard, OBJECT_TARGET_PALETTE } from './CharacterControlCard';
 
@@ -1501,12 +1501,63 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                           const latestAfterApply = useShotStore
                             .getState()
                             .shot.actors.find((a) => a.id === act.id);
-                          const hasCompiledMotionClips = Boolean(
-                            latestAfterApply?.motionClip ||
-                              latestAfterApply?.trajectory.keyframes?.some((kf) => Boolean(kf.motionClip))
+                          const hasUniversalFallbackClip = Boolean(
+                            latestAfterApply?.motionClip?.startsWith('universal-ik:') ||
+                              latestAfterApply?.trajectory.keyframes?.some((kf) =>
+                                Boolean(kf.motionClip?.startsWith('universal-ik:'))
+                              )
                           );
-                          // Only run LLM acting cue augmentation when it's a custom prompt without Ready-Made Motion clips
+                          const hasCompiledMotionClips = Boolean(
+                            !hasUniversalFallbackClip &&
+                              (latestAfterApply?.motionClip ||
+                                latestAfterApply?.trajectory.keyframes?.some((kf) => Boolean(kf.motionClip)))
+                          );
+                          // When an open-ended prompt synthesized a Universal IK program, upgrade it via the AI Reasoner if configured
                           if (
+                            hasUniversalFallbackClip &&
+                            (!act.kind || act.kind === 'human' || act.kind === 'character')
+                          ) {
+                            setGeneratingActingId(act.id);
+                            try {
+                              const singleCycleDur = Math.max(0.2, cueDuration / effectiveCycles);
+                              const llmProgram = await generateUniversalKinematicProgramFromPrompt(
+                                actionText,
+                                singleCycleDur,
+                                act.name,
+                                shot.sceneDescription
+                              );
+                              if (llmProgram && llmProgram.id.startsWith('universal-ik:llm_')) {
+                                const currentShot = useShotStore.getState().shot;
+                                const updatedActors = currentShot.actors.map((a) => {
+                                  if (a.id !== act.id) return a;
+                                  const updatedKfs = (a.trajectory.keyframes || []).map((kf) =>
+                                    kf.time >= safeStart - 0.08 &&
+                                    kf.time <= safeEnd + 0.08 &&
+                                    kf.motionClip?.startsWith('universal-ik:')
+                                      ? { ...kf, motionClip: llmProgram.id }
+                                      : kf
+                                  );
+                                  return {
+                                    ...a,
+                                    motionClip: a.motionClip?.startsWith('universal-ik:') ? llmProgram.id : a.motionClip,
+                                    trajectory: {
+                                      ...a.trajectory,
+                                      keyframes: updatedKfs,
+                                    },
+                                  };
+                                });
+                                useShotStore.setState({
+                                  shot: { ...currentShot, actors: updatedActors },
+                                  currentTime: safeStart,
+                                  isPlaying: true,
+                                });
+                              }
+                            } catch {
+                              // Offline universal kinematic program already active
+                            } finally {
+                              setGeneratingActingId(null);
+                            }
+                          } else if (
                             !hasCompiledMotionClips &&
                             (!act.kind || act.kind === 'human' || act.kind === 'character')
                           ) {

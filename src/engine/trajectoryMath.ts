@@ -476,7 +476,23 @@ export function interpolateActorPoseAtTime(
       activeMotionClip = clipKfs[0].motionClip;
     }
     if (activeMotionClip) {
-      const matching = clipKfs.filter((k) => k.motionClip === activeMotionClip);
+      // Isolate the contiguous run of keyframes for the current beat so multi-beat sequences
+      // (e.g. Crawl [0..2s] -> Stand Up [2..4s] -> Crawl [4..6s]) compute 0..1 progress per beat!
+      let activeIdx = 0;
+      for (let i = 0; i < clipKfs.length; i++) {
+        if (evalTime >= clipKfs[i].time - 0.05) {
+          activeIdx = i;
+        }
+      }
+      let startIdx = activeIdx;
+      while (startIdx > 0 && clipKfs[startIdx - 1].motionClip === activeMotionClip) {
+        startIdx--;
+      }
+      let endIdx = activeIdx;
+      while (endIdx < clipKfs.length - 1 && clipKfs[endIdx + 1].motionClip === activeMotionClip) {
+        endIdx++;
+      }
+      const matching = clipKfs.slice(startIdx, endIdx + 1);
       activeMotionCycles = matching.find((k) => k.motionCycles !== undefined)?.motionCycles;
       if (matching.length >= 2) {
         const segStart = matching[0].time;

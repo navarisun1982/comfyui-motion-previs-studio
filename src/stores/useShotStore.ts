@@ -70,7 +70,7 @@ interface ShotState {
   updateDuration: (seconds: number) => void;
   updateAspectRatio: (ratio: ShotSpec['aspectRatio']) => void;
   updateTargetModel: (model: ShotSpec['targetModel']) => void;
-  
+
   // Camera
   setFocalLength: (focalLength: FocalLength) => void;
   setShotType: (shotType: ShotType) => void;
@@ -86,7 +86,7 @@ interface ShotState {
   updateCameraLens: (updates: Partial<ShotSpec['camera']['lens']>) => void;
   updateCameraMovementOptions: (updates: Partial<ShotSpec['camera']['movement']>) => void;
   applyCameraFramingPreset: (preset: 'face-cu' | 'medium-bust' | 'cowboy' | 'ots-right' | 'ots-left' | 'hero-low' | 'birds-eye' | 'wide-establish', actorId?: string) => void;
-  
+
   // Actors & Scene Objects
   sceneCastPool: Actor[];
   addToCastPool: (actor: Actor) => void;
@@ -137,14 +137,14 @@ interface ShotState {
   addStageLight: (partial?: Partial<StageLight>) => void;
   updateStageLight: (lightId: string, updates: Partial<StageLight>) => void;
   removeStageLight: (lightId: string) => void;
-  
+
   // Context & Reference
   setSceneDescription: (desc: string) => void;
   setNegativePrompt: (neg: string) => void;
   setReferenceImage: (ref?: ShotSpec['referenceImage']) => void;
   updateVfxReference: (updates: Partial<NonNullable<ShotSpec['vfxReference']>>) => void;
   setTakeAsActivePlate: (videoUrl: string, fileName?: string) => void;
-  
+
   // UI Inspector Tab Coordination
   activeDeckTab: 'camera' | 'staging' | 'environment' | 'atmosphere';
   setActiveDeckTab: (tab: 'camera' | 'staging' | 'environment' | 'atmosphere') => void;
@@ -641,11 +641,11 @@ export const useShotStore = create<ShotState>((set, get) => {
       const shot = get().shot;
       const vfxRef = shot.vfxReference
         ? {
-            ...shot.vfxReference,
-            videoUrl: url || shot.vfxReference.videoUrl,
-            fileName: `${shot.name.replace(/\s+/g, '_')}_previs.${blob?.type.includes('mp4') ? 'mp4' : 'webm'}`,
-            enabled: true,
-          }
+          ...shot.vfxReference,
+          videoUrl: url || shot.vfxReference.videoUrl,
+          fileName: `${shot.name.replace(/\s+/g, '_')}_previs.${blob?.type.includes('mp4') ? 'mp4' : 'webm'}`,
+          enabled: true,
+        }
         : undefined;
 
       const newShot = vfxRef ? { ...shot, vfxReference: vfxRef } : shot;
@@ -1256,13 +1256,13 @@ export const useShotStore = create<ShotState>((set, get) => {
             keyframes: nextTrajectory.keyframes.map((kf) =>
               kf.rotation
                 ? {
-                    ...kf,
-                    rotation: {
-                      x: Number((kf.rotation.x + dX).toFixed(2)),
-                      y: Number((kf.rotation.y + dY).toFixed(2)),
-                      z: Number((kf.rotation.z + dZ).toFixed(2)),
-                    },
-                  }
+                  ...kf,
+                  rotation: {
+                    x: Number((kf.rotation.x + dX).toFixed(2)),
+                    y: Number((kf.rotation.y + dY).toFixed(2)),
+                    z: Number((kf.rotation.z + dZ).toFixed(2)),
+                  },
+                }
                 : kf
             ),
           };
@@ -1380,15 +1380,15 @@ export const useShotStore = create<ShotState>((set, get) => {
       const updatedActors = shot.actors.map((a) =>
         a.id === actorId
           ? {
-              ...a,
-              trajectory: {
-                ...updatedTrajectory,
-                startTimeSeconds: a.trajectory.startTimeSeconds ?? 0,
-              },
-              pose: isAtStart ? pose : a.pose,
-              posePreset: isAtStart ? (posePreset ?? a.posePreset) : a.posePreset,
-              gait: isAtStart ? (gait ?? a.gait) : a.gait,
-            }
+            ...a,
+            trajectory: {
+              ...updatedTrajectory,
+              startTimeSeconds: a.trajectory.startTimeSeconds ?? 0,
+            },
+            pose: isAtStart ? pose : a.pose,
+            posePreset: isAtStart ? (posePreset ?? a.posePreset) : a.posePreset,
+            gait: isAtStart ? (gait ?? a.gait) : a.gait,
+          }
           : a
       );
       logger.action(`Recorded pose cue for "${target.name}" at ${time.toFixed(1)}s`, { posePreset, gait });
@@ -1420,10 +1420,10 @@ export const useShotStore = create<ShotState>((set, get) => {
       const updatedActors = shot.actors.map((a) =>
         a.id === actorId
           ? {
-              ...a,
-              trajectory: updatedTrajectory,
-              rotation: isAtStart ? rotation : (a.rotation || rotation),
-            }
+            ...a,
+            trajectory: updatedTrajectory,
+            rotation: isAtStart ? rotation : (a.rotation || rotation),
+          }
           : a
       );
       logger.action(`Updated "${target.name}" rotation at ${time.toFixed(1)}s`, rotation);
@@ -1436,9 +1436,9 @@ export const useShotStore = create<ShotState>((set, get) => {
       const updatedActors = shot.actors.map((a) =>
         a.id === propActorId
           ? {
-              ...a,
-              socketToBone: { targetActorId, boneName, offset, rotationOffset },
-            }
+            ...a,
+            socketToBone: { targetActorId, boneName, offset, rotationOffset },
+          }
           : a
       );
       logger.action(`Socketed actor "${propActorId}" to "${targetActorId}" bone "${boneName}"`);
@@ -1542,16 +1542,16 @@ export const useShotStore = create<ShotState>((set, get) => {
         const updatedActors = shot.actors.map((a) =>
           a.id === actorId
             ? {
-                ...a,
-                actionDescription: prompt.trim() || compiled.clip.promptPhrase,
-                motionClip: compiled.clip.id,
-                motionCycles: safeCycles,
-                gait: compiled.clip.baseGait ?? 'none',
-                posePreset: compiled.clip.basePosePreset,
-                pose: undefined,
-                rotation: uprightRot,
-                trajectory: updatedTrajectory,
-              }
+              ...a,
+              actionDescription: prompt.trim() || compiled.clip.promptPhrase,
+              motionClip: compiled.clip.id,
+              motionCycles: safeCycles,
+              gait: compiled.clip.baseGait ?? 'none',
+              posePreset: compiled.clip.basePosePreset,
+              pose: undefined,
+              rotation: uprightRot,
+              trajectory: updatedTrajectory,
+            }
             : a
         );
 
@@ -1643,10 +1643,10 @@ export const useShotStore = create<ShotState>((set, get) => {
         endPosition:
           mergedKeyframes.length > 0
             ? {
-                x: mergedKeyframes[mergedKeyframes.length - 1].position.x,
-                y: mergedKeyframes[mergedKeyframes.length - 1].position.y,
-                z: target.trajectory.endPosition.z ?? 0,
-              }
+              x: mergedKeyframes[mergedKeyframes.length - 1].position.x,
+              y: mergedKeyframes[mergedKeyframes.length - 1].position.y,
+              z: target.trajectory.endPosition.z ?? 0,
+            }
             : target.trajectory.endPosition,
       };
 
@@ -1658,43 +1658,43 @@ export const useShotStore = create<ShotState>((set, get) => {
         /\b(run|runs|running|sprint|jog)\b/i.test(prompt) || /(يركض|يجري)/.test(prompt)
           ? 'run'
           : /\b(sneak|sneaking|creep)\b/i.test(prompt) || /(يتسلل)/.test(prompt)
-          ? 'sneak'
-          : isLocomotionPrompt
-          ? 'walk'
-          : target.gait || 'auto';
+            ? 'sneak'
+            : isLocomotionPrompt
+              ? 'walk'
+              : target.gait || 'auto';
 
       const detectedPosePreset =
         /\b(sit|sitting|seated)\b/i.test(prompt) || /(يجلس|جالس)/.test(prompt)
           ? 'sitting-chair'
           : /\b(crouch|duck|cover)\b/i.test(prompt)
-          ? 'crouch-cover'
-          : /\b(kneel)\b/i.test(prompt)
-          ? 'hero-kneel'
-          : /\b(bow|archer)\b/i.test(prompt)
-          ? 'aim-bow'
-          : /\b(pistol|gun|firearm|aim)\b/i.test(prompt)
-          ? 'aim-pistol'
-          : /\b(combat|fight|guard)\b/i.test(prompt)
-          ? 'combat-ready'
-          : /\b(talk|speak|dialogue|gesture)\b/i.test(prompt) || /(يتحدث|يتكلم)/.test(prompt)
-          ? 'dialogue-gesturing'
-          : isLocomotionPrompt
-          ? undefined
-          : target.posePreset;
+            ? 'crouch-cover'
+            : /\b(kneel)\b/i.test(prompt)
+              ? 'hero-kneel'
+              : /\b(bow|archer)\b/i.test(prompt)
+                ? 'aim-bow'
+                : /\b(pistol|gun|firearm|aim)\b/i.test(prompt)
+                  ? 'aim-pistol'
+                  : /\b(combat|fight|guard)\b/i.test(prompt)
+                    ? 'combat-ready'
+                    : /\b(talk|speak|dialogue|gesture)\b/i.test(prompt) || /(يتحدث|يتكلم)/.test(prompt)
+                      ? 'dialogue-gesturing'
+                      : isLocomotionPrompt
+                        ? undefined
+                        : target.posePreset;
 
       const updatedActors = shot.actors.map((a) =>
         a.id === actorId
           ? {
-              ...a,
-              actionDescription: prompt,
-              motionClip: undefined,
-              motionCycles: safeCycles,
-              gait: detectedGait,
-              posePreset: detectedPosePreset,
-              trajectory: updatedTrajectory,
-              pose: firstCycleFrames.length > 0 ? firstCycleFrames[0].pose : a.pose,
-              ikTargets: firstCycleFrames.length > 0 ? firstCycleFrames[0].ikTargets : a.ikTargets,
-            }
+            ...a,
+            actionDescription: prompt,
+            motionClip: undefined,
+            motionCycles: safeCycles,
+            gait: detectedGait,
+            posePreset: detectedPosePreset,
+            trajectory: updatedTrajectory,
+            pose: firstCycleFrames.length > 0 ? firstCycleFrames[0].pose : a.pose,
+            ikTargets: firstCycleFrames.length > 0 ? firstCycleFrames[0].ikTargets : a.ikTargets,
+          }
           : a
       );
 
@@ -1759,16 +1759,16 @@ export const useShotStore = create<ShotState>((set, get) => {
       const updatedActors = shot.actors.map((a) =>
         a.id === actorId
           ? {
-              ...a,
-              actionDescription: compiled.clip.promptPhrase,
-              motionClip: compiled.clip.id,
-              motionCycles: Math.max(1, Math.min(20, Math.round(options?.motionCycles ?? target.motionCycles ?? 1))),
-              gait: compiled.clip.baseGait ?? 'none',
-              posePreset: compiled.clip.basePosePreset,
-              pose: undefined,
-              rotation: uprightRot,
-              trajectory: updatedTrajectory,
-            }
+            ...a,
+            actionDescription: compiled.clip.promptPhrase,
+            motionClip: compiled.clip.id,
+            motionCycles: Math.max(1, Math.min(20, Math.round(options?.motionCycles ?? target.motionCycles ?? 1))),
+            gait: compiled.clip.baseGait ?? 'none',
+            posePreset: compiled.clip.basePosePreset,
+            pose: undefined,
+            rotation: uprightRot,
+            trajectory: updatedTrajectory,
+          }
           : a
       );
 
@@ -1797,53 +1797,53 @@ export const useShotStore = create<ShotState>((set, get) => {
       const defaultName = name && name.trim()
         ? name.trim().charAt(0).toUpperCase() + name.trim().slice(1)
         : resolvedKind !== 'human'
-        ? resolvedKind.charAt(0).toUpperCase() + resolvedKind.slice(1)
-        : `Character ${shot.actors.length + 1}`;
+          ? resolvedKind.charAt(0).toUpperCase() + resolvedKind.slice(1)
+          : `Character ${shot.actors.length + 1}`;
 
       const defaultToken = token
         ? token
         : name && name.trim()
-        ? `a detailed ${name.trim().toLowerCase()}`
-        : resolvedKind === 'spaceship' || resolvedKind === 'space ship' || resolvedKind === 'starship'
-        ? 'a sleek futuristic sci-fi starship with glowing cyan ion thrusters and cockpit canopy'
-        : resolvedKind === 'mountain'
-        ? 'a majestic rugged mountain peak with alpine stone crags'
-        : resolvedKind === 'car'
-        ? 'a vintage automobile'
-        : resolvedKind === 'table'
-        ? 'a rustic wooden table'
-        : resolvedKind === 'tree'
-        ? 'a tall lush tree'
-        : resolvedKind === 'chair'
-        ? 'an armchair'
-        : resolvedKind === 'prop'
-        ? 'a storage crate'
-        : resolvedKind === 'sofa' || resolvedKind === 'couch'
-        ? 'a comfortable leather sofa'
-        : resolvedKind === 'house' || resolvedKind === 'building'
-        ? 'a rustic stone building'
-        : resolvedKind === 'tv' || resolvedKind === 'screen'
-        ? 'a high-definition television monitor'
-        : resolvedKind === 'bicycle' || resolvedKind === 'bike'
-        ? 'a classic bicycle'
-        : resolvedKind === 'lamp' || resolvedKind === 'streetlamp'
-        ? 'a vintage cast-iron streetlamp'
-        : resolvedKind === 'robot'
-        ? 'an advanced robotic humanoid droid'
-        : resolvedKind !== 'human'
-        ? `a detailed ${resolvedKind}`
-        : 'a central dramatic protagonist';
+          ? `a detailed ${name.trim().toLowerCase()}`
+          : resolvedKind === 'spaceship' || resolvedKind === 'space ship' || resolvedKind === 'starship'
+            ? 'a sleek futuristic sci-fi starship with glowing cyan ion thrusters and cockpit canopy'
+            : resolvedKind === 'mountain'
+              ? 'a majestic rugged mountain peak with alpine stone crags'
+              : resolvedKind === 'car'
+                ? 'a vintage automobile'
+                : resolvedKind === 'table'
+                  ? 'a rustic wooden table'
+                  : resolvedKind === 'tree'
+                    ? 'a tall lush tree'
+                    : resolvedKind === 'chair'
+                      ? 'an armchair'
+                      : resolvedKind === 'prop'
+                        ? 'a storage crate'
+                        : resolvedKind === 'sofa' || resolvedKind === 'couch'
+                          ? 'a comfortable leather sofa'
+                          : resolvedKind === 'house' || resolvedKind === 'building'
+                            ? 'a rustic stone building'
+                            : resolvedKind === 'tv' || resolvedKind === 'screen'
+                              ? 'a high-definition television monitor'
+                              : resolvedKind === 'bicycle' || resolvedKind === 'bike'
+                                ? 'a classic bicycle'
+                                : resolvedKind === 'lamp' || resolvedKind === 'streetlamp'
+                                  ? 'a vintage cast-iron streetlamp'
+                                  : resolvedKind === 'robot'
+                                    ? 'an advanced robotic humanoid droid'
+                                    : resolvedKind !== 'human'
+                                      ? `a detailed ${resolvedKind}`
+                                      : 'a central dramatic protagonist';
 
       const defaultAction =
         resolvedKind === 'spaceship' || resolvedKind === 'space ship' || resolvedKind === 'starship'
           ? 'cruising smoothly through space with glowing ion thrusters'
           : resolvedKind === 'mountain' || resolvedKind === 'hill' || resolvedKind === 'rock'
-          ? 'towering majestically in the background landscape'
-          : resolvedKind === 'human'
-          ? 'stands and surveys the scene'
-          : resolvedKind === 'car'
-          ? 'parked along the road'
-          : 'positioned on set in the environment';
+            ? 'towering majestically in the background landscape'
+            : resolvedKind === 'human'
+              ? 'stands and surveys the scene'
+              : resolvedKind === 'car'
+                ? 'parked along the road'
+                : 'positioned on set in the environment';
 
       const spawnX = options?.startPosition?.x ?? (35 + Math.floor(Math.random() * 30));
       const spawnY = options?.startPosition?.y ?? (35 + Math.floor(Math.random() * 30));
@@ -2004,10 +2004,10 @@ export const useShotStore = create<ShotState>((set, get) => {
       const nextLights = existing.map((l) =>
         l.id === lightId
           ? {
-              ...l,
-              ...updates,
-              position: updates.position ? { ...l.position, ...updates.position } : l.position,
-            }
+            ...l,
+            ...updates,
+            position: updates.position ? { ...l.position, ...updates.position } : l.position,
+          }
           : l
       );
       const updated: ShotSpec = {

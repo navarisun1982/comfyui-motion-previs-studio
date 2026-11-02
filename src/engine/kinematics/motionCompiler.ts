@@ -347,6 +347,8 @@ export function compileMotionPlan(
         const jumpElevZ =
           skillMotionClip === 'human-jump-leap' && walkProgress > 0.18 && walkProgress < 0.82
             ? Math.sin(((walkProgress - 0.18) / 0.64) * Math.PI) * 14
+            : skillMotionClip === 'human-climb-ascend'
+            ? walkProgress * 18
             : 0;
 
         // Pelvic vertical bobbing & lateral weight sway

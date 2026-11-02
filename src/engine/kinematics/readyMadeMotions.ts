@@ -19,6 +19,7 @@ import { HumanoidRig } from './skeletonHierarchy';
 import { solveLimbIK, solveLookAt } from './twoBoneIKSolver';
 import { evaluateGait } from './gaitEngine';
 import { applyPosePreset } from './posePresets';
+import { evaluateUniversalKinematicProgram } from './universalKinematicSynthesizer';
 import {
   ObjectPoseCategory,
   detectObjectPoseCategory,
@@ -241,6 +242,80 @@ export const READY_MADE_MOTIONS: ReadyMadeMotionClip[] = [
     description: 'Both arms raised overhead pumping in celebration with energetic bounce.',
     promptPhrase: 'raises both arms overhead and cheers in triumph',
     defaultDurationSec: 2.4,
+    travelsByDefault: false,
+    baseGait: 'none',
+  },
+  {
+    id: 'human-crawl-prone',
+    name: 'Crawl on Ground',
+    icon: '🦎',
+    category: 'humanoid',
+    humanGroup: 'move',
+    description: 'Low prone crawling across the floor with alternating hand and knee progression.',
+    promptPhrase: 'crawls forward low across the ground on hands and knees',
+    defaultDurationSec: 3.0,
+    travelsByDefault: true,
+    baseGait: 'none',
+  },
+  {
+    id: 'human-stand-up',
+    name: 'Stand Up / Rise',
+    icon: '⬆️',
+    category: 'humanoid',
+    humanGroup: 'acting',
+    description: 'Pushes off the floor with hands and knees and rises smoothly to a full standing posture.',
+    promptPhrase: 'pushes off the ground and rises smoothly into an upright standing posture',
+    defaultDurationSec: 2.2,
+    travelsByDefault: false,
+    baseGait: 'none',
+    basePosePreset: 'neutral-stand',
+  },
+  {
+    id: 'human-fall-collapse',
+    name: 'Fall / Collapse',
+    icon: '⬇️',
+    category: 'humanoid',
+    humanGroup: 'combat',
+    description: 'Loses balance, drops to the knees, and collapses forward onto the floor.',
+    promptPhrase: 'loses balance and collapses down onto the ground',
+    defaultDurationSec: 2.0,
+    travelsByDefault: false,
+    baseGait: 'none',
+  },
+  {
+    id: 'human-kneel-bow',
+    name: 'Kneel / Bow Down',
+    icon: '🧎',
+    category: 'humanoid',
+    humanGroup: 'acting',
+    description: 'Drops onto one knee in a grounded dramatic kneel with lowered head.',
+    promptPhrase: 'drops onto one knee in a grounded kneeling posture',
+    defaultDurationSec: 2.2,
+    travelsByDefault: false,
+    baseGait: 'none',
+    basePosePreset: 'hero-kneel',
+  },
+  {
+    id: 'human-push-heavy',
+    name: 'Push Forward',
+    icon: '🫸',
+    category: 'humanoid',
+    humanGroup: 'acting',
+    description: 'Leans torso forward with both hands braced ahead, driving forward with effort.',
+    promptPhrase: 'leans forward and pushes heavily with both hands',
+    defaultDurationSec: 2.5,
+    travelsByDefault: true,
+    baseGait: 'none',
+  },
+  {
+    id: 'human-climb-ascend',
+    name: 'Climb / Scale Up',
+    icon: '🧗',
+    category: 'humanoid',
+    humanGroup: 'move',
+    description: 'Alternating overhead hand reaches and high knee lifts while ascending vertically.',
+    promptPhrase: 'reaches overhead with alternating hands and climbs upward',
+    defaultDurationSec: 2.8,
     travelsByDefault: false,
     baseGait: 'none',
   },
@@ -798,6 +873,46 @@ export function matchReadyMadeMotionFromPrompt(
   }
 
   // Humanoid semantic action matching
+  if (
+    /\b(crawl|crawls|crawling|prone|on\s+all\s+fours|hands\s+and\s+knees)\b/i.test(normalizedPrompt) ||
+    /(يزحف|زحف|يحبو|حبو|علي بطنه|على بطنه)/.test(promptAr)
+  ) {
+    return pickClip('human-crawl-prone');
+  }
+  if (
+    /\b(stand\s+up|stands\s+up|standing\s+up|get\s+up|gets\s+up|getting\s+up|rise|rises|rising|pick\s+himself\s+up|pick\s+herself\s+up)\b/i.test(
+      normalizedPrompt
+    ) ||
+    /(يقوم|ينهض|نهوض|يقف من جديد|يستقيم)/.test(promptAr)
+  ) {
+    return pickClip('human-stand-up');
+  }
+  if (
+    /\b(fall|falls|falling|collapse|collapses|collapsing|faint|faints|drop\s+down|drops\s+down|pass\s+out)\b/i.test(
+      normalizedPrompt
+    ) ||
+    /(يسقط|يقع|ينهار|يغمي عليه|سقوط|وقع)/.test(promptAr)
+  ) {
+    return pickClip('human-fall-collapse');
+  }
+  if (
+    /\b(kneel|kneels|kneeling|bow\s+down|bows\s+down|prostrate|on\s+knees)\b/i.test(normalizedPrompt) ||
+    /(يركع|يسجد|يجثو|ركوع|سجود)/.test(promptAr)
+  ) {
+    return pickClip('human-kneel-bow');
+  }
+  if (
+    /\b(push|pushes|pushing|shove|shoves|shoving|press\s+forward)\b/i.test(normalizedPrompt) ||
+    /(يدفع|يزيح|يدفش|دفع)/.test(promptAr)
+  ) {
+    return pickClip('human-push-heavy');
+  }
+  if (
+    /\b(climb|climbs|climbing|scale|scales|scaling|ladder)\b/i.test(normalizedPrompt) ||
+    /(يتسلق|يصعد السلم|تسلق)/.test(promptAr)
+  ) {
+    return pickClip('human-climb-ascend');
+  }
   if (/\b(jump|jumps|jumping|leap|leaps|leaping|hop|hops|vault)\b/i.test(normalizedPrompt) || /(يقفز|قفز|يثب)/.test(promptAr)) {
     return pickClip('human-jump-leap');
   }
@@ -1062,6 +1177,11 @@ export function compileReadyMadeMotionKeyframes(
 
     // Special elevation (Z) & orientation curves by clip ID (repeated per cycle `cycleU`)
     switch (clip.id) {
+      case 'human-climb-ascend': {
+        curZ = startZ + (cycleIdx + smoothCycleU) * (18 / safeCycles);
+        break;
+      }
+
       case 'human-jump-leap': {
         // Crouch [0..0.22], Airborne parabola [0.22..0.82], Landing [0.82..1.0] per cycle
         if (cycleU > 0.2 && cycleU < 0.82) {
@@ -1305,6 +1425,9 @@ export function evaluateReadyMadeHumanoidClip(
   isTravelingOnFloor?: boolean,
   motionCycles?: number
 ): boolean {
+  if (clipId && clipId.startsWith('universal-ik:')) {
+    return evaluateUniversalKinematicProgram(rig, clipId, timeSeconds, clipProgress01, motionCycles);
+  }
   const h = rig.height;
   const root = rig.root;
   if (root.parent) {
@@ -1754,6 +1877,154 @@ export function evaluateReadyMadeHumanoidClip(
         rigPoint(-0.34, 0.65 + 0.07 * lift, -0.15)
       );
       solveLookAt(rig, rigPoint(0, 0.90 + 0.15 * lift, 0.85));
+      return true;
+    }
+
+    case 'human-crawl-prone': {
+      resetToRest();
+      // Low quadrupedal/prone crawl: hips dropped near floor (-0.34*h), spine pitched horizontally forward (~1.15 rad),
+      // diagonal alternating hand & knee/foot progression along floor
+      const crawlPhase = u * Math.PI * 2 * 2; // 2 full crawl strides per cycle
+      const lArmWave = Math.sin(crawlPhase);
+      const rArmWave = Math.sin(crawlPhase + Math.PI);
+      const lLegWave = Math.sin(crawlPhase + Math.PI);
+      const rLegWave = Math.sin(crawlPhase);
+
+      const swayX = Math.cos(crawlPhase) * 0.03;
+      const bobY = Math.abs(Math.sin(crawlPhase)) * 0.018;
+
+      setHipsOffsetAndTilt(swayX, -0.34 + bobY, -0.08, 0.65, swayX * 1.4, -swayX * 0.8);
+      setChestTilt(0.62, -swayX * 1.8, 0);
+
+      // Legs bent low behind/under hips, alternating knee/ankle pull forward
+      const lFootZ = -0.26 + lLegWave * 0.12;
+      const rFootZ = -0.26 + rLegWave * 0.12;
+      const lFootY = 0.05 + Math.max(0, Math.cos(crawlPhase + Math.PI)) * 0.04;
+      const rFootY = 0.05 + Math.max(0, Math.cos(crawlPhase)) * 0.04;
+
+      solveLimbIK(rig, 'leftLeg', rigPoint(0.14, lFootY, lFootZ), rigPoint(0.18, 0.08, lFootZ + 0.32));
+      solveLimbIK(rig, 'rightLeg', rigPoint(-0.14, rFootY, rFootZ), rigPoint(-0.18, 0.08, rFootZ + 0.32));
+
+      // Hands reaching forward on the ground ahead of shoulders and pulling back
+      const lHandZ = 0.36 + lArmWave * 0.15;
+      const rHandZ = 0.36 + rArmWave * 0.15;
+      const lHandY = 0.05 + Math.max(0, Math.cos(crawlPhase)) * 0.06;
+      const rHandY = 0.05 + Math.max(0, Math.cos(crawlPhase + Math.PI)) * 0.06;
+
+      solveLimbIK(rig, 'leftArm', rigPoint(0.18, lHandY, lHandZ), rigPoint(0.28, 0.28, lHandZ - 0.18));
+      solveLimbIK(rig, 'rightArm', rigPoint(-0.18, rHandY, rHandZ), rigPoint(-0.28, 0.28, rHandZ - 0.18));
+      solveLookAt(rig, rigPoint(swayX * 0.8, 0.28, 0.95));
+      return true;
+    }
+
+    case 'human-stand-up': {
+      resetToRest();
+      // Smooth 3-stage rise from prone/ground (u=0) -> hands & knees / half-kneel (u=0.45) -> upright standing (u=1.0)
+      const ease = u * u * (3 - 2 * u);
+      const downFactor = 1.0 - ease;
+
+      const hipsDrop = -0.34 * downFactor;
+      const hipsBack = -0.06 * Math.sin(u * Math.PI);
+      const spinePitch = 0.65 * Math.pow(downFactor, 1.2);
+      const chestPitch = 0.55 * Math.pow(downFactor, 1.3);
+
+      setHipsOffsetAndTilt(0, hipsDrop, hipsBack, spinePitch * 0.5, 0, 0);
+      setChestTilt(chestPitch, 0, 0);
+
+      // Asymmetric support leg steps forward at mid-rise (u ~ 0.35..0.75) to push body up
+      const stepSupport = Math.sin(u * Math.PI);
+      const lFootZ = -0.18 * downFactor + 0.16 * stepSupport;
+      const rFootZ = -0.22 * downFactor;
+      solveLimbIK(rig, 'leftLeg', rigPoint(0.12, 0.04, lFootZ), rigPoint(0.14, 0.28, lFootZ + 0.45));
+      solveLimbIK(rig, 'rightLeg', rigPoint(-0.12, 0.04, rFootZ), rigPoint(-0.14, 0.24, rFootZ + 0.45));
+
+      // Hands push off the floor/knee early (u < 0.6), then settle to natural sides (u -> 1.0)
+      const lHandY = 0.06 * downFactor + 0.50 * ease + 0.06 * stepSupport;
+      const rHandY = 0.06 * downFactor + 0.50 * ease;
+      const handZ = 0.32 * downFactor + 0.04 * ease;
+
+      solveLimbIK(rig, 'leftArm', rigPoint(0.19, lHandY, handZ), rigPoint(0.28, lHandY + 0.12, handZ - 0.24));
+      solveLimbIK(rig, 'rightArm', rigPoint(-0.19, rHandY, handZ), rigPoint(-0.28, rHandY + 0.12, handZ - 0.24));
+      solveLookAt(rig, rigPoint(0, 0.32 * downFactor + 0.90 * ease, 0.90));
+      return true;
+    }
+
+    case 'human-fall-collapse': {
+      resetToRest();
+      // Smooth collapse from standing (u=0) -> buckling knees (u=0.45) -> prone on ground (u=1.0)
+      const fallU = Math.min(1, u / 0.82);
+      const ease = fallU * fallU * (3 - 2 * fallU);
+
+      const hipsDrop = -0.35 * ease;
+      const spinePitch = 0.68 * ease;
+      const chestPitch = 0.58 * ease;
+
+      setHipsOffsetAndTilt(0, hipsDrop, -0.05 * ease, spinePitch * 0.5, 0, 0.08 * ease);
+      setChestTilt(chestPitch, 0.06 * ease, 0);
+
+      solveLimbIK(rig, 'leftLeg', rigPoint(0.13, 0.04, -0.22 * ease), rigPoint(0.15, 0.22 * (1 - 0.5 * ease), 0.38));
+      solveLimbIK(rig, 'rightLeg', rigPoint(-0.13, 0.04, -0.25 * ease), rigPoint(-0.15, 0.22 * (1 - 0.5 * ease), 0.38));
+
+      // Hands brace toward ground as character falls
+      const handY = 0.50 * (1 - ease) + 0.06 * ease;
+      const handZ = 0.06 * (1 - ease) + 0.34 * ease;
+      solveLimbIK(rig, 'leftArm', rigPoint(0.20, handY, handZ), rigPoint(0.30, handY + 0.12, handZ - 0.22));
+      solveLimbIK(rig, 'rightArm', rigPoint(-0.20, handY, handZ), rigPoint(-0.30, handY + 0.12, handZ - 0.22));
+      solveLookAt(rig, rigPoint(0, 0.88 * (1 - ease) + 0.24 * ease, 0.85));
+      return true;
+    }
+
+    case 'human-kneel-bow': {
+      resetToRest();
+      const ease = u < 0.35 ? (u / 0.35) : 1.0;
+      const smooth = ease * ease * (3 - 2 * ease);
+
+      setHipsOffsetAndTilt(0, -0.22 * smooth, 0, 0.12 * smooth, 0, 0);
+      setChestTilt(0.22 * smooth, 0, 0);
+
+      // Left foot planted ahead, right knee dropped back toward floor
+      solveLimbIK(rig, 'leftLeg', rigPoint(0.12, 0.04, 0.18 * smooth), rigPoint(0.14, 0.34, 0.55));
+      solveLimbIK(rig, 'rightLeg', rigPoint(-0.12, 0.04, -0.22 * smooth), rigPoint(-0.14, 0.12, 0.20));
+
+      solveLimbIK(rig, 'leftArm', rigPoint(0.14, 0.50 - 0.12 * smooth, 0.18 * smooth), rigPoint(0.26, 0.52, -0.20));
+      solveLimbIK(rig, 'rightArm', rigPoint(-0.18, 0.50 - 0.18 * smooth, 0.08 * smooth), rigPoint(-0.28, 0.50, -0.20));
+      solveLookAt(rig, rigPoint(0, 0.90 - 0.28 * smooth, 0.85));
+      return true;
+    }
+
+    case 'human-push-heavy': {
+      resetToRest();
+      const strain = Math.sin(u * Math.PI * 2) * 0.03;
+      setHipsOffsetAndTilt(0, -0.10, 0.06, 0.22, 0, 0);
+      setChestTilt(0.32 + strain, 0, 0);
+
+      if (!applyWalkingLegsIfTraveling()) {
+        solveLimbIK(rig, 'leftLeg', rigPoint(0.13, 0.04, 0.16), rigPoint(0.15, 0.32, 0.55));
+        solveLimbIK(rig, 'rightLeg', rigPoint(-0.13, 0.04, -0.20), rigPoint(-0.15, 0.32, 0.55));
+      }
+
+      const pushExt = 0.38 + Math.sin(u * Math.PI) * 0.08;
+      solveLimbIK(rig, 'leftArm', rigPoint(0.16, 0.68, pushExt), rigPoint(0.28, 0.58, -0.15));
+      solveLimbIK(rig, 'rightArm', rigPoint(-0.16, 0.68, pushExt), rigPoint(-0.28, 0.58, -0.15));
+      solveLookAt(rig, rigPoint(0, 0.78, 1.0));
+      return true;
+    }
+
+    case 'human-climb-ascend': {
+      resetToRest();
+      const climbPhase = u * Math.PI * 2 * 2;
+      const lWave = Math.sin(climbPhase);
+      const rWave = Math.sin(climbPhase + Math.PI);
+
+      setHipsOffsetAndTilt(lWave * 0.02, -0.04, 0, 0.08, lWave * 0.08, 0);
+      setChestTilt(0.10, -lWave * 0.10, 0);
+
+      solveLimbIK(rig, 'leftLeg', rigPoint(0.12, 0.08 + Math.max(0, rWave) * 0.18, 0.12), rigPoint(0.16, 0.38, 0.55));
+      solveLimbIK(rig, 'rightLeg', rigPoint(-0.12, 0.08 + Math.max(0, lWave) * 0.18, 0.12), rigPoint(-0.16, 0.38, 0.55));
+
+      solveLimbIK(rig, 'leftArm', rigPoint(0.16, 0.82 + lWave * 0.18, 0.22), rigPoint(0.28, 0.65, -0.18));
+      solveLimbIK(rig, 'rightArm', rigPoint(-0.16, 0.82 + rWave * 0.18, 0.22), rigPoint(-0.28, 0.65, -0.18));
+      solveLookAt(rig, rigPoint(0, 1.15, 0.65));
       return true;
     }
 
