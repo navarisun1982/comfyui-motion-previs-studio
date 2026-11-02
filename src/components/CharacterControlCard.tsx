@@ -1137,115 +1137,134 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                     })}
                   </div>
                 </div>
-
-                {/* Row 2: Natural-Language Direction Prompt + Direct Button */}
-                <div className="flex items-center gap-1.5">
-                  <div className="relative flex-1 min-w-0">
-                    <input
-                      ref={promptInputRef}
-                      type="text"
-                      value={actor.actionDescription}
-                      onChange={(e) => onUpdateActor(actor.id, { actionDescription: e.target.value })}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && generatingActingId !== actor.id) {
-                          e.preventDefault();
-                          const actionText = (actor.actionDescription || 'walk forward').trim();
-                          onDirectCustomAction(actor, actionText, safeStart, safeEnd, cueDuration, actor.motionCycles ?? 1);
-                        }
-                      }}
-                      placeholder="Direct action (e.g. walk to right, sit down)..."
-                      className="w-full rounded-lg bg-[#121723] border border-white/[0.1] pl-2.5 pr-7 py-1.5 text-slate-100 text-[11px] font-mono placeholder-slate-500 focus:outline-none focus:border-emerald-500/70"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => promptInputRef.current?.focus()}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                      title="Edit action prompt"
-                    >
-                      <Pencil className="h-3 w-3" />
-                    </button>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={generatingActingId === actor.id}
-                    onClick={() => {
-                      const actionText = (actor.actionDescription || 'walk forward').trim();
-                      onDirectCustomAction(actor, actionText, safeStart, safeEnd, cueDuration, actor.motionCycles ?? 1);
-                    }}
-                    className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[11px] font-semibold shadow-sm border border-emerald-400/40 shrink-0 cursor-pointer"
-                    title={`Compile action into stage trajectory & pose keyframes (${safeStart.toFixed(1)}s → ${safeEnd.toFixed(1)}s)`}
-                  >
-                    {generatingActingId === actor.id ? (
-                      <>
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        <span>Directing...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Activity className="h-3.5 w-3.5" />
-                        <span>Direct</span>
-                        <Play className="h-2.5 w-2.5 fill-white" />
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Row 3: Active Cue Status, Chaining & Clear */}
-                <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-white/[0.06] font-mono text-[10px]">
-                  <span
-                    className="flex items-center gap-1.5 text-slate-400 truncate"
-                    style={actor.color ? { color: actor.color } : undefined}
-                  >
-                    <MapPin
-                      className="h-3 w-3 text-rose-400 shrink-0"
-                      style={actor.color ? { color: actor.color } : undefined}
-                    />
-                    <span className="truncate">
-                      {kfs.length} {kfs.length === 1 ? 'cue' : 'cues'} ({Math.round(actor.trajectory.startPosition.x)},{Math.round(actor.trajectory.startPosition.y)} → {Math.round(actor.trajectory.endPosition.x)},{Math.round(actor.trajectory.endPosition.y)})
-                    </span>
-                  </span>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {kfs.length > 0 && lastKfTime < shotDur - 0.5 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onUpdateMotionWindow(actor.id, {
-                            start: Number(lastKfTime.toFixed(1)),
-                            end: shotDur,
-                          })
-                        }
-                        className="px-2 py-0.5 rounded-md bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 font-semibold"
-                        title="Chain next action starting where the previous cue finished"
-                      >
-                        + Next ({lastKfTime.toFixed(1)}s→{shotDur}s)
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onUpdateActor(actor.id, {
-                          gait: 'idle',
-                          motionClip: undefined,
-                          trajectory: {
-                            ...actor.trajectory,
-                            endPosition: { ...actor.trajectory.startPosition },
-                            keyframes: [],
-                          },
-                        })
-                      }
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-500/35 font-medium transition-colors"
-                      title="Clear all motion keyframes and hold starting position"
-                    >
-                      <Trash2 className="h-2.5 w-2.5" />
-                      <span>Clear</span>
-                    </button>
-                  </div>
-                </div>
               </>
             )}
+          </div>
+
+          {/* ================= AI MOTION DIRECTOR (VISIBLE IN MOTION, TIMING & ALL TABS) ================= */}
+          <div
+            className={
+              activeSubTab === 'motion' || activeSubTab === 'timing' || activeSubTab === 'all'
+                ? 'inspector-section space-y-2'
+                : 'hidden'
+            }
+          >
+            <div className="flex items-center justify-between gap-1.5">
+              <span className="flex items-center gap-1.5 text-[10.5px] font-semibold text-emerald-300">
+                <Sparkles className="h-3 w-3 text-emerald-400 shrink-0" />
+                <span>AI Motion Direction (Describe Movement)</span>
+              </span>
+              <span className="text-[9.5px] font-mono text-slate-400">
+                {safeStart.toFixed(1)}s → {safeEnd.toFixed(1)}s
+              </span>
+            </div>
+
+            {/* Natural-Language Direction Prompt + Direct Button */}
+            <div className="flex items-center gap-1.5">
+              <div className="relative flex-1 min-w-0">
+                <input
+                  ref={promptInputRef}
+                  type="text"
+                  value={actor.actionDescription}
+                  onChange={(e) => onUpdateActor(actor.id, { actionDescription: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && generatingActingId !== actor.id) {
+                      e.preventDefault();
+                      const actionText = (actor.actionDescription || 'walk forward').trim();
+                      onDirectCustomAction(actor, actionText, safeStart, safeEnd, cueDuration, actor.motionCycles ?? 1);
+                    }
+                  }}
+                  placeholder="Direct action (e.g. walk to right, sit down)..."
+                  className="w-full rounded-lg bg-[#121723] border border-white/[0.1] pl-2.5 pr-7 py-1.5 text-slate-100 text-[11px] font-mono placeholder-slate-500 focus:outline-none focus:border-emerald-500/70"
+                />
+                <button
+                  type="button"
+                  onClick={() => promptInputRef.current?.focus()}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  title="Edit action prompt"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              </div>
+
+              <button
+                type="button"
+                disabled={generatingActingId === actor.id}
+                onClick={() => {
+                  const actionText = (actor.actionDescription || 'walk forward').trim();
+                  onDirectCustomAction(actor, actionText, safeStart, safeEnd, cueDuration, actor.motionCycles ?? 1);
+                }}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[11px] font-semibold shadow-sm border border-emerald-400/40 shrink-0 cursor-pointer"
+                title={`Compile action into stage trajectory & pose keyframes (${safeStart.toFixed(1)}s → ${safeEnd.toFixed(1)}s)`}
+              >
+                {generatingActingId === actor.id ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Directing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Activity className="h-3.5 w-3.5" />
+                    <span>Direct</span>
+                    <Play className="h-2.5 w-2.5 fill-white" />
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Active Cue Status, Chaining & Clear */}
+            <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-white/[0.06] font-mono text-[10px]">
+              <span
+                className="flex items-center gap-1.5 text-slate-400 truncate"
+                style={actor.color ? { color: actor.color } : undefined}
+              >
+                <MapPin
+                  className="h-3 w-3 text-rose-400 shrink-0"
+                  style={actor.color ? { color: actor.color } : undefined}
+                />
+                <span className="truncate">
+                  {kfs.length} {kfs.length === 1 ? 'cue' : 'cues'} ({Math.round(actor.trajectory.startPosition.x)},{Math.round(actor.trajectory.startPosition.y)} → {Math.round(actor.trajectory.endPosition.x)},{Math.round(actor.trajectory.endPosition.y)})
+                </span>
+              </span>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                {kfs.length > 0 && lastKfTime < shotDur - 0.5 && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onUpdateMotionWindow(actor.id, {
+                        start: Number(lastKfTime.toFixed(1)),
+                        end: shotDur,
+                      })
+                    }
+                    className="px-2 py-0.5 rounded-md bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 font-semibold"
+                    title="Chain next action starting where the previous cue finished"
+                  >
+                    + Next ({lastKfTime.toFixed(1)}s→{shotDur}s)
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    onUpdateActor(actor.id, {
+                      gait: 'idle',
+                      motionClip: undefined,
+                      trajectory: {
+                        ...actor.trajectory,
+                        endPosition: { ...actor.trajectory.startPosition },
+                        keyframes: [],
+                      },
+                    })
+                  }
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-500/35 font-medium transition-colors"
+                  title="Clear all motion keyframes and hold starting position"
+                >
+                  <Trash2 className="h-2.5 w-2.5" />
+                  <span>Clear</span>
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* ================= E. APPEARANCE, COLOR & RIG SLIDERS ================= */}
