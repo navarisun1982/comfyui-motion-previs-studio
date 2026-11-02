@@ -486,6 +486,415 @@ export const READY_MADE_MOTIONS: ReadyMadeMotionClip[] = [
   },
 ];
 
+export interface ReadyMadePromptMatch {
+  clip: ReadyMadeMotionClip;
+  startPositionOverride?: Point2D;
+  targetPosition?: Point2D;
+  travelMode?: 'auto' | 'travel' | 'in-place';
+}
+
+function normalizePromptArabic(text: string): string {
+  return text
+    .replace(/[\u064B-\u065F\u0670]/g, '')
+    .replace(/[إأآا]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .toLowerCase()
+    .trim();
+}
+
+/**
+ * Extracts optional start/end stage coordinates or directional destinations from natural-language prompts
+ * (e.g. "walk to right", "running fast from 25 to 8", "jump forward", "walk to center", "walk to table").
+ */
+export function parsePromptSpatialDirective(
+  prompt: string,
+  baseStartPosition?: Point2D,
+  sceneEntities?: Array<{ id: string; name: string; position: [number, number] | Point2D; kind?: string }>
+): {
+  startPositionOverride?: Point2D;
+  targetPosition?: Point2D;
+  travelMode?: 'auto' | 'travel' | 'in-place';
+} {
+  const textEn = prompt.trim().toLowerCase();
+  const textAr = normalizePromptArabic(prompt);
+  const startX = baseStartPosition?.x ?? 50;
+  const startY = baseStartPosition?.y ?? 50;
+  const startZ = baseStartPosition?.z ?? 0;
+
+  let startPositionOverride: Point2D | undefined;
+  let targetPosition: Point2D | undefined;
+  let travelMode: 'auto' | 'travel' | 'in-place' | undefined;
+
+  if (
+    /\b(in[\s-]*place|on\s+(?:the\s+)?spot|stationary|without\s+moving)\b/i.test(textEn) ||
+    /(في مكانه|ثابت في مكانه|دون تحرك)/.test(textAr)
+  ) {
+    travelMode = 'in-place';
+  }
+
+  // 1. 2D range: "from (x1, y1) to (x2, y2)" or "from x1, y1 to x2, y2"
+  const range2D = textEn.match(
+    /(?:from|من)\s*[([]?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*[)\]]?\s*(?:to|into|toward|towards|إلى|الي|نحو)\s*[([]?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*[)\]]?/i
+  );
+  if (range2D) {
+    startPositionOverride = {
+      x: THREE.MathUtils.clamp(parseFloat(range2D[1]), 4, 96),
+      y: THREE.MathUtils.clamp(parseFloat(range2D[2]), 4, 96),
+      z: startZ,
+    };
+    targetPosition = {
+      x: THREE.MathUtils.clamp(parseFloat(range2D[3]), 4, 96),
+      y: THREE.MathUtils.clamp(parseFloat(range2D[4]), 4, 96),
+      z: startZ,
+    };
+    travelMode = 'travel';
+    return { startPositionOverride, targetPosition, travelMode };
+  }
+
+  // 2. 1D range: "from 25 to 8" or "from 20 to 80" (if values are in 0..100 stage range)
+  const range1D = textEn.match(
+    /(?:from|من)\s+(-?\d+(?:\.\d+)?)(?!\s*(?:s|sec|seconds|ms|x\b|%))\s+(?:to|into|toward|towards|إلى|الي)\s+(-?\d+(?:\.\d+)?)(?!\s*(?:s|sec|seconds|ms|x\b|%))/i
+  );
+  if (range1D) {
+    const v1 = parseFloat(range1D[1]);
+    const v2 = parseFloat(range1D[2]);
+    if (Math.abs(v1 - v2) >= 2 && v1 >= 0 && v1 <= 100 && v2 >= 0 && v2 <= 100) {
+      const isHorizontal = /\b(left|right|across|side|x)\b/i.test(textEn) || /(يمين|يسار|عرض)/.test(textAr);
+      const scaleIfSmall = v1 <= 30 && v2 <= 30 && (v1 < 12 || v2 < 12) ? 2.5 : 1.0;
+      const c1 = THREE.MathUtils.clamp(v1 * scaleIfSmall, 6, 94);
+      const c2 = THREE.MathUtils.clamp(v2 * scaleIfSmall, 6, 94);
+      if (isHorizontal) {
+        startPositionOverride = { x: c1, y: startY, z: startZ };
+        targetPosition = { x: c2, y: startY, z: startZ };
+      } else {
+        startPositionOverride = { x: startX, y: c1, z: startZ };
+        targetPosition = { x: startX, y: c2, z: startZ };
+      }
+      travelMode = 'travel';
+      return { startPositionOverride, targetPosition, travelMode };
+    }
+  }
+
+  // 3. Explicit 2D target: "[x, y]", "(x, y)", or "to x, y"
+  const coord2D =
+    textEn.match(/\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]|\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/) ||
+    textEn.match(/(?:to|at|toward|towards|إلى|الي|عند|نحو)\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/i);
+  if (coord2D) {
+    const rawX = parseFloat(coord2D[1] || coord2D[3]);
+    const rawY = parseFloat(coord2D[2] || coord2D[4]);
+    // Convert small metric world coords (-5..5) to stage grid (0..100) if needed
+    const isSmallWorld = Math.abs(rawX) <= 10 && Math.abs(rawY) <= 10 && (startX > 10 || startY > 10);
+    const tx = isSmallWorld ? 50 + rawX * 8 : rawX;
+    const ty = isSmallWorld ? 50 + rawY * 8 : rawY;
+    targetPosition = {
+      x: THREE.MathUtils.clamp(tx, 6, 94),
+      y: THREE.MathUtils.clamp(ty, 6, 94),
+      z: startZ,
+    };
+    travelMode = 'travel';
+    return { startPositionOverride, targetPosition, travelMode };
+  }
+
+  // 4. Scene entity target ("walk to the table", "run to Character 2")
+  if (sceneEntities && sceneEntities.length > 0) {
+    for (const ent of sceneEntities) {
+      const entName = (ent.name || '').trim().toLowerCase();
+      const entKind = (ent.kind || '').trim().toLowerCase();
+      const entAr = normalizePromptArabic(ent.name || '');
+      if (
+        (entName && textEn.includes(entName)) ||
+        (entKind && entKind !== 'human' && entKind !== 'character' && textEn.includes(entKind)) ||
+        (entAr && textAr.includes(entAr))
+      ) {
+        const ex = Array.isArray(ent.position) ? ent.position[0] : ent.position.x;
+        const ey = Array.isArray(ent.position) ? ent.position[1] : ent.position.y;
+        targetPosition = {
+          x: THREE.MathUtils.clamp(Number(ex) || 50, 6, 94),
+          y: THREE.MathUtils.clamp(Number(ey) || 50, 6, 94),
+          z: startZ,
+        };
+        travelMode = 'travel';
+        return { startPositionOverride, targetPosition, travelMode };
+      }
+    }
+  }
+
+  // 5. Directional relative targets ("to right", "to left", "to center", "forward", "toward camera", "backward")
+  if (travelMode !== 'in-place') {
+    const stepDist = /\b(run|runs|running|sprint|dash|charge|gallop|fast|quickly)\b/i.test(textEn) || /(يركض|يجري|بسرعه)/.test(textAr) ? 34 : 26;
+    if (/\b(center|middle|stage\s+center)\b/i.test(textEn) || /(المنتصف|الوسط|منتصف المسرح)/.test(textAr)) {
+      targetPosition = { x: 50, y: 55, z: startZ };
+      travelMode = 'travel';
+    } else if (/\b(left|stage\s+left|west)\b/i.test(textEn) || /(يسار|شمال|لليسار)/.test(textAr)) {
+      targetPosition = { x: THREE.MathUtils.clamp(startX - stepDist, 8, 92), y: startY, z: startZ };
+      travelMode = 'travel';
+    } else if (/\b(right|stage\s+right|east)\b/i.test(textEn) || /(يمين|لليمين)/.test(textAr)) {
+      targetPosition = { x: THREE.MathUtils.clamp(startX + stepDist, 8, 92), y: startY, z: startZ };
+      travelMode = 'travel';
+    } else if (
+      /\b(back|backward|backwards|retreat|away\s+from\s+camera|upstage|north)\b/i.test(textEn) ||
+      /(خلف|للخلف|وراء|يتراجع|بعيدا عن الكاميرا)/.test(textAr)
+    ) {
+      targetPosition = { x: startX, y: THREE.MathUtils.clamp(startY - stepDist, 8, 92), z: startZ };
+      travelMode = 'travel';
+    } else if (
+      /\b(forward|forwards|ahead|toward\s+(?:the\s+)?camera|towards\s+(?:the\s+)?camera|closer|downstage|south)\b/i.test(textEn) ||
+      /(امام|للامام|قدام|نحو الكاميرا|باتجاه الكاميرا|يقترب)/.test(textAr)
+    ) {
+      const nextY = startY <= 72 ? THREE.MathUtils.clamp(startY + stepDist, 10, 92) : THREE.MathUtils.clamp(startY - stepDist, 10, 92);
+      targetPosition = { x: startX, y: nextY, z: startZ };
+      travelMode = 'travel';
+    }
+  }
+
+  return { startPositionOverride, targetPosition, travelMode };
+}
+
+/**
+ * Matches a single-action natural-language prompt (in English or Arabic) to the best Ready-Made Motion clip
+ * for the actor's category, while extracting any custom spatial destination or start-to-end range.
+ * Returns `undefined` when the prompt is a multi-step sequence (e.g. "walk to table, then sit down")
+ * so the multi-skill decomposer can handle sequential beats.
+ */
+export function matchReadyMadeMotionFromPrompt(
+  prompt: string,
+  actor?: Partial<Actor> | null,
+  sceneEntities?: Array<{ id: string; name: string; position: [number, number] | Point2D; kind?: string }>
+): ReadyMadePromptMatch | undefined {
+  const raw = prompt.trim();
+  if (!raw) return undefined;
+
+  const normalizedPrompt = raw.toLowerCase();
+  const promptAr = normalizePromptArabic(raw);
+
+  // 1. Exact phrase or clip name match always wins
+  const activeReadyClip = actor?.motionClip ? findReadyMadeMotionById(actor.motionClip) : undefined;
+  if (
+    activeReadyClip &&
+    (activeReadyClip.promptPhrase.trim().toLowerCase() === normalizedPrompt ||
+      activeReadyClip.name.trim().toLowerCase() === normalizedPrompt)
+  ) {
+    return { clip: activeReadyClip };
+  }
+  const exactCatalogClip = READY_MADE_MOTIONS.find(
+    (m) =>
+      m.promptPhrase.trim().toLowerCase() === normalizedPrompt ||
+      m.name.trim().toLowerCase() === normalizedPrompt
+  );
+  if (exactCatalogClip) {
+    return { clip: exactCatalogClip };
+  }
+
+  // 2. If the prompt contains multi-clause sequential transitions ("then", ";", "walk ... and sit"),
+  // let the multi-skill decomposer handle it.
+  const protectedCoords = normalizedPrompt.replace(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/g, '$1__C__$2');
+  const hasMultiClause =
+    /[.;،\n]|(?<!\d),(?!\d)|\b(?:then|and\s+then|after\s+that|followed\s+by)\b|(?:ثم|وبعد ذلك|وبعدها)/i.test(
+      protectedCoords
+    ) ||
+    /\b(?:and)\s+(?:sit|sits|reach|reaches|grab|grabs|pick|picks|walk|walks|run|runs|jump|jumps|wave|waves|fight|fights|shoot|shoots|stand|stands|talk|talks|wait|waits|exit|exits)\b/i.test(
+      normalizedPrompt
+    );
+  if (hasMultiClause) {
+    return undefined;
+  }
+
+  // Also let reach/grab/pick up or explicit dialogue-explaining use the specialized IK / gesture skills
+  if (
+    /\b(pick\s*up|reach|reaches|reaching|grab|grabs|grabbing|grasp|hold|holding|take\s+the)\b/i.test(normalizedPrompt) ||
+    /(يلتقط|يمد يده|يتناول)/.test(promptAr)
+  ) {
+    return undefined;
+  }
+
+  const baseStart = actor?.trajectory?.startPosition || { x: 50, y: 50, z: 0 };
+  const spatial = parsePromptSpatialDirective(raw, baseStart, sceneEntities);
+  const category = detectObjectPoseCategory(actor);
+
+  const pickClip = (id: string): ReadyMadePromptMatch | undefined => {
+    const clip = findReadyMadeMotionById(id);
+    if (!clip) return undefined;
+    return {
+      clip,
+      startPositionOverride: spatial.startPositionOverride,
+      targetPosition: spatial.targetPosition,
+      travelMode: spatial.travelMode,
+    };
+  };
+
+  // Non-humanoid specialized categories
+  if (category === 'quadruped') {
+    if (/\b(pounce|leap|jump|attack|lunge)\b/i.test(normalizedPrompt) || /(يقفز|ينقض|يهجم)/.test(promptAr)) {
+      return pickClip('quad-pounce-leap');
+    }
+    if (/\b(gallop|run|sprint|charge|fast|dash)\b/i.test(normalizedPrompt) || /(يركض|يجري|يعدو)/.test(promptAr)) {
+      return pickClip('quad-gallop-charge');
+    }
+    if (/\b(stalk|prowl|sneak|creep)\b/i.test(normalizedPrompt) || /(يتسلل|يتربص)/.test(promptAr)) {
+      return pickClip('quad-stalk-prowl');
+    }
+    if (/\b(walk|trot|move|step|forward|go|advance)\b/i.test(normalizedPrompt) || /(يمشي|يتحرك|يتقدم)/.test(promptAr)) {
+      return pickClip('quad-trot-forward');
+    }
+    if (/\b(idle|stand|wait|look|scan|alert)\b/i.test(normalizedPrompt) || /(يقف|ينتظر|ينظر)/.test(promptAr)) {
+      return pickClip('quad-alert-idle');
+    }
+  } else if (category === 'vehicle') {
+    if (/\b(drift|slide|turn|skid|corner)\b/i.test(normalizedPrompt) || /(ينجرف|ينعطف|تفحيط)/.test(promptAr)) {
+      return pickClip('veh-drift-turn');
+    }
+    if (/\b(brake|stop|halt|slam)\b/i.test(normalizedPrompt) || /(يتوقف|فرمله|يكبح)/.test(promptAr)) {
+      return pickClip('veh-hard-brake');
+    }
+    if (/\b(launch|accelerate|sprint|fast|speed|race|boost|throttle)\b/i.test(normalizedPrompt) || /(ينطلق|يتسارع|يسرع)/.test(promptAr)) {
+      return pickClip('veh-accel-launch');
+    }
+    if (/\b(drive|cruise|move|go|forward|roll|advance)\b/i.test(normalizedPrompt) || /(يسير|يتحرك|يقود|يتقدم)/.test(promptAr)) {
+      return pickClip('veh-drive-cruise');
+    }
+    if (/\b(idle|park|wait|rumble|stationary)\b/i.test(normalizedPrompt) || /(متوقف|ينتظر)/.test(promptAr)) {
+      return pickClip('veh-idle-rumble');
+    }
+  } else if (category === 'aerial') {
+    if (/\b(takeoff|take\s*off|climb|ascend|launch|lift\s*off|rise)\b/i.test(normalizedPrompt) || /(يقلع|يصعد|يرتفع)/.test(promptAr)) {
+      return pickClip('air-takeoff-climb');
+    }
+    if (/\b(dive|attack|descend|plunge|drop)\b/i.test(normalizedPrompt) || /(يغوص|يهبط|ينقض)/.test(promptAr)) {
+      return pickClip('air-dive-attack');
+    }
+    if (/\b(fly|swoop|soar|glide|pass|move|forward)\b/i.test(normalizedPrompt) || /(يطير|يحلق|يندفع)/.test(promptAr)) {
+      return pickClip('air-swoop-flyby');
+    }
+    if (/\b(hover|float|idle|wait|stabilize)\b/i.test(normalizedPrompt) || /(يحوم|يثبت)/.test(promptAr)) {
+      return pickClip('air-hover-bob');
+    }
+  } else if (category === 'weapon_prop') {
+    if (/\b(slash|swing|cleave|strike|cut)\b/i.test(normalizedPrompt) || /(يلوح|يضرب|يقطع)/.test(promptAr)) {
+      return pickClip('prop-slash-swing');
+    }
+    if (/\b(fire|shoot|recoil|kick|blast)\b/i.test(normalizedPrompt) || /(يطلق|يرتد)/.test(promptAr)) {
+      return pickClip('prop-recoil-kick');
+    }
+    if (/\b(drop|fall|bounce)\b/i.test(normalizedPrompt) || /(يسقط|يقع)/.test(promptAr)) {
+      return pickClip('prop-drop-bounce');
+    }
+    if (/\b(spin|float|levitate|rotate)\b/i.test(normalizedPrompt) || /(يدور|يطفو)/.test(promptAr)) {
+      return pickClip('prop-float-spin');
+    }
+  } else if (category === 'furniture_set' || category === 'environment_prop') {
+    if (/\b(open|swing|door|gate)\b/i.test(normalizedPrompt) || /(يفتح|باب)/.test(promptAr)) {
+      return pickClip('env-swing-open');
+    }
+    if (/\b(shake|quake|tremor|rattle|vibrate)\b/i.test(normalizedPrompt) || /(يهتز|يرتجف|زلزال)/.test(promptAr)) {
+      return pickClip('env-quake-shake');
+    }
+    if (/\b(fall|topple|tip|crash|collapse|knock)\b/i.test(normalizedPrompt) || /(يسقط|ينهار|ينقلب)/.test(promptAr)) {
+      return pickClip('env-fall-topple');
+    }
+    if (/\b(spin|rotate|turn|turntable)\b/i.test(normalizedPrompt) || /(يدور|يلف)/.test(promptAr)) {
+      return pickClip('env-turntable-spin');
+    }
+  }
+
+  // Humanoid semantic action matching
+  if (/\b(jump|jumps|jumping|leap|leaps|leaping|hop|hops|vault)\b/i.test(normalizedPrompt) || /(يقفز|قفز|يثب)/.test(promptAr)) {
+    return pickClip('human-jump-leap');
+  }
+  if (
+    /\b(sword|blade|slash|slashes|slashing|cleave|swing\s+weapon|katana)\b/i.test(normalizedPrompt) ||
+    /(سيف|يلوح بالسيف|ضربه سيف)/.test(promptAr)
+  ) {
+    return pickClip('human-sword-slash');
+  }
+  if (
+    /\b(aim|aims|aiming|shoot|shoots|shooting|fire|fires|firing|gun|pistol|rifle)\b/i.test(normalizedPrompt) ||
+    /(يصوب|يطلق النار|مسدس|بندقيه)/.test(promptAr)
+  ) {
+    return pickClip('human-aim-fire');
+  }
+  if (
+    /\b(punch|punches|punching|fight|fights|fighting|jab|cross|box|boxing|brawl|martial|strike|attack|kick)\b/i.test(normalizedPrompt) ||
+    /(يلكم|يقاتل|يتشاجر|ضربه|قتال|ملاكمه)/.test(promptAr)
+  ) {
+    return pickClip('human-combo-punch');
+  }
+  if (
+    /\b(dodge|dodges|dodging|evade|evades|evading|weave|weaves|duck|ducks|sidestep)\b/i.test(normalizedPrompt) ||
+    /(يراوغ|يتفادي|ينحني)/.test(promptAr)
+  ) {
+    return pickClip('human-dodge-weave');
+  }
+  if (
+    /\b(hit|struck|impact|recoil|knockback|knocked|stagger|staggers|stumble|hurt)\b/i.test(normalizedPrompt) ||
+    /(يتلقي ضربه|يرتد|يتعثر|صدمه)/.test(promptAr)
+  ) {
+    return pickClip('human-hit-stagger');
+  }
+  if (
+    /\b(wave|waves|waving|greet|greets|greeting|signal|signals|hello|hi\b)\b/i.test(normalizedPrompt) ||
+    /(يلوح|يحيي|تلويح|يسلم)/.test(promptAr)
+  ) {
+    return pickClip('human-wave-greet');
+  }
+  if (
+    /\b(cheer|cheers|cheering|celebrate|celebrates|celebrating|victory|triumph|dance|dancing|hurrah|raise\s+(?:both\s+)?arms)\b/i.test(normalizedPrompt) ||
+    /(يحتفل|يهتف|يرفع يديه|يرقص|انتصار)/.test(promptAr)
+  ) {
+    return pickClip('human-victory-cheer');
+  }
+  if (
+    /\b(sit|sits|sitting|sit\s+down|seated|take\s+a\s+seat|chair)\b/i.test(normalizedPrompt) ||
+    /(يجلس|جلس|الجلوس|يقعد)/.test(promptAr)
+  ) {
+    return pickClip('human-sit-down');
+  }
+  if (
+    /\b(look|looks|looking|turn\s+head|turns\s+head|turning\s+head|scan|scans|scanning|search|searches|gaze|gazes|glance|glances|watch|watches|inspect|observe)\b/i.test(
+      normalizedPrompt
+    ) ||
+    /(ينظر|يلتفت|يتلفت|يبحث|يراقب|يتفحص|يدير راسه)/.test(promptAr)
+  ) {
+    return pickClip('human-look-search');
+  }
+  if (
+    /\b(retreat|retreats|retreating|back\s+up|backs\s+up|step\s+back|steps\s+back|walk\s+back|walks\s+back|walk\s+backward|backward|backwards)\b/i.test(
+      normalizedPrompt
+    ) ||
+    /(يتراجع|يرجع للخلف|يعود للخلف|خطوه للخلف)/.test(promptAr)
+  ) {
+    return pickClip('human-back-retreat');
+  }
+  if (
+    /\b(run|runs|running|sprint|sprints|sprinting|jog|jogs|jogging|dash|dashes|rush|rushes|hurry)\b/i.test(normalizedPrompt) ||
+    /(يركض|يجري|يهرول|يسرع|ركض|جري)/.test(promptAr)
+  ) {
+    return pickClip('human-run-sprint');
+  }
+  if (
+    /\b(sneak|sneaks|sneaking|stealth|creep|creeps|creeping|prowl|prowls|tiptoe)\b/i.test(normalizedPrompt) ||
+    /(يتسلل|يتخفي|يمشي بحذر)/.test(promptAr)
+  ) {
+    return pickClip('human-sneak-prowl');
+  }
+  if (
+    /\b(walk|walks|walking|step|steps|stepping|stride|strides|move|moves|moving|go|goes|going|advance|advances|approach|approaches|head|heads|stroll|pace)\b/i.test(
+      normalizedPrompt
+    ) ||
+    /(يمشي|يمش|يتحرك|يتجه|يتقدم|يخطو|يسير|الذهاب|المشي|يقترب)/.test(promptAr)
+  ) {
+    return pickClip('human-walk-forward');
+  }
+  if (
+    /\b(idle|breathe|breathing|stand|stands|standing|wait|waits|waiting|stay|pose|still|relax)\b/i.test(normalizedPrompt) ||
+    /(يقف|وقوف|ينتظر|يتنفس|ثابت|مسترخي)/.test(promptAr)
+  ) {
+    return pickClip('human-idle-breathe');
+  }
+
+  return undefined;
+}
+
 export function findReadyMadeMotionById(id?: string | null): ReadyMadeMotionClip | undefined {
   if (!id) return undefined;
   return READY_MADE_MOTIONS.find((m) => m.id === id);

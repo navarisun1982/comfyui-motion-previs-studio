@@ -20,10 +20,12 @@ import { MotionSkillInvocation, MotionPlan, DEFAULT_SKILL_DURATIONS } from './mo
 export interface CompiledMotionFrame {
   timeSec: number;
   position: [number, number];
+  elevationZ?: number;
   headingDeg: number;
   pose: ActorPose;
   ikTargets?: ActorIKTargets;
   gait: 'walk' | 'run' | 'sneak' | 'idle' | 'none';
+  motionClip?: string;
   cueLabel?: string;
   isFootPlanted: { left: boolean; right: boolean };
 }
@@ -313,6 +315,7 @@ export function compileMotionPlan(
     const skillStart = activeSkill.startTimeSec;
     const skillDur = activeSkill.durationSec || DEFAULT_SKILL_DURATIONS[activeSkill.skill];
     const skillProgress = Math.max(0, Math.min(1, (timeSec - skillStart) / Math.max(0.01, skillDur)));
+    const skillMotionClip = (activeSkill.args as { motionClip?: string })?.motionClip;
 
     switch (activeSkill.skill) {
       case 'walkTo': {
@@ -341,6 +344,10 @@ export function compileMotionPlan(
         const walkProgress = skillProgress;
         const interpX = path.start[0] + dx * walkProgress;
         const interpZ = path.start[1] + dz * walkProgress;
+        const jumpElevZ =
+          skillMotionClip === 'human-jump-leap' && walkProgress > 0.18 && walkProgress < 0.82
+            ? Math.sin(((walkProgress - 0.18) / 0.64) * Math.PI) * 14
+            : 0;
 
         // Pelvic vertical bobbing & lateral weight sway
         const pelvicBob = Math.sin(stepPhase * 2) * 0.025;
@@ -363,13 +370,15 @@ export function compileMotionPlan(
         framePose.rotations['LeftLeg'] = eulerToQuat(Math.max(0, -legSwingDeg * 0.8), 0, 0);
         framePose.rotations['RightLeg'] = eulerToQuat(Math.max(0, legSwingDeg * 0.8), 0, 0);
 
-        frameGait = 'walk';
+        frameGait = activeSkill.args.gait || 'walk';
         frames.push({
           timeSec,
           position: [interpX, interpZ],
+          elevationZ: jumpElevZ,
           headingDeg: currentHeading,
           pose: framePose,
           gait: frameGait,
+          motionClip: skillMotionClip,
           cueLabel: `walkTo (${Math.round(walkProgress * 100)}%)`,
           isFootPlanted: { left: isLeftPlanted, right: isRightPlanted },
         });
@@ -500,6 +509,7 @@ export function compileMotionPlan(
       pose: framePose,
       ikTargets,
       gait: frameGait,
+      motionClip: skillMotionClip,
       cueLabel,
       isFootPlanted: { left: isLeftPlanted, right: isRightPlanted },
     });
@@ -514,10 +524,15 @@ export function compileMotionPlan(
     keyframes.push({
       id: `mkey_${Math.round(f.timeSec * 1000)}`,
       time: Number(f.timeSec.toFixed(2)),
-      position: { x: Number(f.position[0].toFixed(3)), y: Number(f.position[1].toFixed(3)) },
+      position: {
+        x: Number(f.position[0].toFixed(3)),
+        y: Number(f.position[1].toFixed(3)),
+        z: f.elevationZ !== undefined ? Number(f.elevationZ.toFixed(2)) : undefined,
+      },
       rotation: { x: 0, y: Number(f.headingDeg.toFixed(1)), z: 0 },
       pose: f.pose,
       gait: f.gait,
+      motionClip: f.motionClip,
       cueLabel: f.cueLabel,
     });
   }
@@ -528,10 +543,15 @@ export function compileMotionPlan(
     keyframes.push({
       id: `mkey_${Math.round(lastF.timeSec * 1000)}`,
       time: Number(lastF.timeSec.toFixed(2)),
-      position: { x: Number(lastF.position[0].toFixed(3)), y: Number(lastF.position[1].toFixed(3)) },
+      position: {
+        x: Number(lastF.position[0].toFixed(3)),
+        y: Number(lastF.position[1].toFixed(3)),
+        z: lastF.elevationZ !== undefined ? Number(lastF.elevationZ.toFixed(2)) : undefined,
+      },
       rotation: { x: 0, y: Number(lastF.headingDeg.toFixed(1)), z: 0 },
       pose: lastF.pose,
       gait: lastF.gait,
+      motionClip: lastF.motionClip,
       cueLabel: lastF.cueLabel,
     });
   }

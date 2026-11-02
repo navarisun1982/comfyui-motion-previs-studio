@@ -648,7 +648,7 @@ export function recordTrajectoryPoseAtTime(
     currentKeyframes[existingIdx] = {
       ...currentKeyframes[existingIdx],
       time: clampedTime,
-      pose: pose ?? currentKeyframes[existingIdx].pose,
+      pose: pose !== undefined ? pose : posePreset ? undefined : currentKeyframes[existingIdx].pose,
       posePreset: posePreset ?? currentKeyframes[existingIdx].posePreset,
       gait: gait ?? currentKeyframes[existingIdx].gait,
     };

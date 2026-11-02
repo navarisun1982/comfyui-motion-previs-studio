@@ -32,6 +32,8 @@ export interface WalkToArgs {
   heading?: number; // target yaw in degrees
   vary?: number; // 0..2 rhythm variance
   firstStep?: number; // stride of initial step
+  gait?: 'walk' | 'run' | 'sneak';
+  motionClip?: string;
 }
 
 export interface SitInSeatArgs {
@@ -39,6 +41,7 @@ export interface SitInSeatArgs {
   seatActorId?: string; // target chair / bench actor ID
   heading?: number;
   durationSec?: number;
+  motionClip?: string;
 }
 
 export interface ReachGripArgs {
@@ -56,18 +59,21 @@ export interface StandIdleArgs {
   heading?: number;
   stance?: 'neutral' | 'relaxed' | 'alert' | 'crossed_arms' | 'hands_on_hips';
   durationSec?: number;
+  motionClip?: string;
 }
 
 export interface TalkGestureArgs {
   intensity?: number; // 0.1 .. 1.0
   style?: 'expressive' | 'subtle' | 'explaining' | 'emphatic';
   durationSec?: number;
+  motionClip?: string;
 }
 
 export interface HitReactionArgs {
   direction?: 'front' | 'back' | 'left' | 'right';
   intensity?: number; // 0.1 .. 1.0
   durationSec?: number;
+  motionClip?: string;
 }
 
 export interface ExitCarArgs {

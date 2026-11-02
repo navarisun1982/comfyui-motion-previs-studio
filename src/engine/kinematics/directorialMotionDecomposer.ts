@@ -114,7 +114,7 @@ export function decomposeDirectorialMotion(
 
   // Split clauses by punctuation, transition words, and compound actions
   const rawClauses = protectedText.split(
-    /(?<!\d),(?!\d)|[.;،\n]+|\b(?:then|and then|after that)\b|\b(?:and)\s+(?=(?:sit|reach|grab|pick|walk|stand|talk|wait|exit))\b|(?:ثم|وبعد ذلك|وبعدها)|\bو(?=(?:يجلس|يمشي|يقف|يتحدث|يمد|يمسك|ينظر))/i
+    /(?<!\d),(?!\d)|[.;،\n]+|\b(?:then|and then|after that)\b|\b(?:and)\s+(?=(?:sit|sits|reach|reaches|grab|grabs|pick|picks|walk|walks|run|runs|jump|jumps|wave|waves|fight|fights|punch|punches|shoot|shoots|dodge|dodges|cheer|cheers|stand|stands|talk|talks|wait|waits|exit|exits))\b|(?:ثم|وبعد ذلك|وبعدها)|\bو(?=(?:يجلس|يمشي|يركض|يقفز|يلوح|يقاتل|يقف|يتحدث|يمد|يمسك|ينظر))/i
   );
 
   const clauses = rawClauses.map((c) => c.replace(/__COORD_COMMA__/g, ',').trim()).filter(Boolean);
@@ -124,8 +124,20 @@ export function decomposeDirectorialMotion(
     const clauseEn = clause.toLowerCase();
     const clauseAr = normalizeArabicText(clause);
 
-    // 1. Walk / Locomotion / Drive
+    // 1. Walk / Locomotion / Jump / Dodge / Retreat / Drive
+    const isJumpClause =
+      /\b(jump|jumps|jumping|leap|leaps|leaping|hop|hops|vault)\b/i.test(clauseEn) ||
+      /(يقفز|قفز|يثب)/.test(clauseAr);
+    const isDodgeClause =
+      /\b(dodge|dodges|dodging|evade|evades|evading|weave|weaves|sidestep)\b/i.test(clauseEn) ||
+      /(يراوغ|يتفادي)/.test(clauseAr);
+    const isRetreatClause =
+      /\b(retreat|retreats|retreating|back\s+up|backs\s+up|step\s+back|steps\s+back|walk\s+back|walks\s+back)\b/i.test(clauseEn) ||
+      /(يتراجع|يرجع للخلف|يعود للخلف)/.test(clauseAr);
     const isWalk =
+      isJumpClause ||
+      isDodgeClause ||
+      isRetreatClause ||
       /\b(walk|walks|walking|run|runs|running|sprint|jog|sneak|move|moves|moving|step|steps|head|go|advance|approach|stride|drive|drives|driving)\b/i.test(clauseEn) ||
       /(يمشي|يمش|يركض|يجري|يتحرك|يتجه|يتقدم|يخطو|يسير|الذهاب|المشي)/i.test(clauseAr);
 
@@ -136,13 +148,23 @@ export function decomposeDirectorialMotion(
       let defaultTarget: [number, number] = [currentPos[0] + 1.5, currentPos[1] + 1.0];
 
       if (isStageGrid && !coords) {
-        const stepDist = 26;
-        if (/\b(left|stage left)\b/i.test(clauseEn) || /(يسار|شمال)/.test(clauseAr)) {
+        const isFast = /\b(run|runs|running|sprint|dash)\b/i.test(clauseEn) || /(يركض|يجري)/.test(clauseAr);
+        const stepDist = isJumpClause ? 18 : isDodgeClause ? 14 : isFast ? 32 : 26;
+        if (/\b(center|middle)\b/i.test(clauseEn) || /(المنتصف|الوسط)/.test(clauseAr)) {
+          defaultTarget = [50, 55];
+        } else if (/\b(left|stage left)\b/i.test(clauseEn) || /(يسار|شمال)/.test(clauseAr)) {
           defaultTarget = [Math.max(10, currentPos[0] - stepDist), currentPos[1]];
         } else if (/\b(right|stage right)\b/i.test(clauseEn) || /(يمين)/.test(clauseAr)) {
           defaultTarget = [Math.min(90, currentPos[0] + stepDist), currentPos[1]];
-        } else if (/\b(back|backward|backwards|away|upstage|north)\b/i.test(clauseEn) || /(خلف|وراء|للخلف)/.test(clauseAr)) {
+        } else if (
+          isRetreatClause ||
+          /\b(back|backward|backwards|away|upstage|north)\b/i.test(clauseEn) ||
+          /(خلف|وراء|للخلف)/.test(clauseAr)
+        ) {
           defaultTarget = [currentPos[0], Math.max(12, currentPos[1] - stepDist)];
+        } else if (isDodgeClause) {
+          const sideSign = currentPos[0] > 55 ? -1 : 1;
+          defaultTarget = [Math.max(10, Math.min(90, currentPos[0] + sideSign * stepDist)), currentPos[1]];
         } else {
           // Default "forward / toward camera / ahead" movement on 0..100 stage
           const nextY = currentPos[1] <= 68 ? Math.min(88, currentPos[1] + stepDist) : Math.max(16, currentPos[1] - stepDist);
@@ -167,12 +189,28 @@ export function decomposeDirectorialMotion(
         }
       }
 
+      const isRunClause = /\b(run|runs|running|sprint|jog|dash)\b/i.test(clauseEn) || /(يركض|يجري)/.test(clauseAr);
+      const isSneakClause = /\b(sneak|sneaks|sneaking|stealth|creep|prowl)\b/i.test(clauseEn) || /(يتسلل)/.test(clauseAr);
+      const clipForWalk = isJumpClause
+        ? 'human-jump-leap'
+        : isDodgeClause
+        ? 'human-dodge-weave'
+        : isRetreatClause
+        ? 'human-back-retreat'
+        : isRunClause
+        ? 'human-run-sprint'
+        : isSneakClause
+        ? 'human-sneak-prowl'
+        : 'human-walk-forward';
+
       const dur = DEFAULT_SKILL_DURATIONS.walkTo;
       skills.push({
         id: `skill_${idx}_walkTo`,
         skill: 'walkTo',
         args: {
           to: targetPos,
+          gait: isRunClause ? 'run' : isSneakClause ? 'sneak' : 'walk',
+          motionClip: clipForWalk,
         },
         startTimeSec: currentTime,
         durationSec: dur,
@@ -184,7 +222,7 @@ export function decomposeDirectorialMotion(
 
     // 2. Sit / Sit Down
     const isSit =
-      /\b(sit|sit down|take a seat|resting|seated)\b/i.test(clauseEn) ||
+      /\b(sit|sits|sitting|sit down|take a seat|resting|seated)\b/i.test(clauseEn) ||
       /(يجلس|جلس|الجلوس|يقعد|يستقر في مقعد)/i.test(clauseAr);
 
     if (isSit) {
@@ -207,6 +245,7 @@ export function decomposeDirectorialMotion(
         args: {
           seatTarget: seatPos,
           seatActorId,
+          motionClip: 'human-sit-down',
         },
         startTimeSec: currentTime,
         durationSec: dur,
@@ -217,7 +256,7 @@ export function decomposeDirectorialMotion(
 
     // 3. Reach / Pick up / Grab / Hold
     const isReach =
-      /\b(pick\s*up|reach|grab|take|touch|grip|hold|grasp)\b/i.test(clauseEn) ||
+      /\b(pick\s*up|reach|reaches|grab|grabs|take|touch|grip|hold|grasp)\b/i.test(clauseEn) ||
       /(يمسك|يلتقط|ياخذ|يمد يده|يلمس|يتناول|مسك|التقاط)/i.test(clauseAr);
 
     if (isReach) {
@@ -251,9 +290,17 @@ export function decomposeDirectorialMotion(
       continue;
     }
 
-    // 4. Talk / Dialogue / Expressive Gestures
+    // 4. Talk / Dialogue / Wave / Cheer / Expressive Gestures
+    const isWaveClause =
+      /\b(wave|waves|waving|greet|greets|greeting|signal|signals|hello)\b/i.test(clauseEn) ||
+      /(يلوح|يحيي|تلويح)/.test(clauseAr);
+    const isCheerClause =
+      /\b(cheer|cheers|cheering|celebrate|celebrates|celebrating|victory|triumph|dance)\b/i.test(clauseEn) ||
+      /(يحتفل|يهتف|انتصار)/.test(clauseAr);
     const isTalk =
-      /\b(talk|speak|dialogue|gesture|explain|conversing)\b/i.test(clauseEn) ||
+      isWaveClause ||
+      isCheerClause ||
+      /\b(talk|talks|speak|speaks|dialogue|gesture|gestures|explain|conversing)\b/i.test(clauseEn) ||
       /(يتحدث|يتكلم|يشرح|يتحاور|حوار|ايماءات|يتحدث بطلاقه)/i.test(clauseAr);
 
     if (isTalk) {
@@ -265,6 +312,7 @@ export function decomposeDirectorialMotion(
         args: {
           style: isSubtle ? 'subtle' : 'expressive',
           intensity: isSubtle ? 0.4 : 0.8,
+          motionClip: isWaveClause ? 'human-wave-greet' : isCheerClause ? 'human-victory-cheer' : undefined,
         },
         startTimeSec: currentTime,
         durationSec: dur,
@@ -273,9 +321,13 @@ export function decomposeDirectorialMotion(
       continue;
     }
 
-    // 5. Stand / Idle / Waiting
+    // 5. Stand / Idle / Look Around / Scan / Waiting
+    const isLookClause =
+      /\b(look|looks|looking|turn\s+head|turns\s+head|scan|scans|search|searches|gaze|gazes|glance|watch)\b/i.test(clauseEn) ||
+      /(ينظر|يلتفت|يتلفت|يبحث|يراقب)/.test(clauseAr);
     const isStand =
-      /\b(stand|idle|wait|look around|pose|stay)\b/i.test(clauseEn) ||
+      isLookClause ||
+      /\b(stand|stands|idle|wait|waits|pose|stay)\b/i.test(clauseEn) ||
       /(يقف|وقوف|ينتظر|مسترخيا|ثابت|يتطلع)/i.test(clauseAr);
 
     if (isStand) {
@@ -284,7 +336,8 @@ export function decomposeDirectorialMotion(
         id: `skill_${idx}_standIdle`,
         skill: 'standIdle',
         args: {
-          stance: 'relaxed',
+          stance: isLookClause ? 'alert' : 'relaxed',
+          motionClip: isLookClause ? 'human-look-search' : 'human-idle-breathe',
         },
         startTimeSec: currentTime,
         durationSec: dur,
@@ -293,19 +346,39 @@ export function decomposeDirectorialMotion(
       continue;
     }
 
-    // 6. Hit Reaction / Impact
+    // 6. Combat / Fight / Shoot / Hit Reaction / Impact
+    const isSwordClause =
+      /\b(sword|blade|slash|slashes|slashing|cleave)\b/i.test(clauseEn) ||
+      /(سيف|يلوح بالسيف)/.test(clauseAr);
+    const isShootClause =
+      /\b(aim|aims|aiming|shoot|shoots|shooting|fire|fires|firing|gun|pistol|rifle)\b/i.test(clauseEn) ||
+      /(يصوب|يطلق النار|مسدس)/.test(clauseAr);
+    const isPunchClause =
+      /\b(punch|punches|punching|fight|fights|fighting|jab|cross|box|boxing|strike|attack|kick)\b/i.test(clauseEn) ||
+      /(يلكم|يقاتل|يتشاجر|ضربه|قتال)/.test(clauseAr);
     const isHit =
-      /\b(hit|struck|impact|recoil|knocked|stumble)\b/i.test(clauseEn) ||
+      isSwordClause ||
+      isShootClause ||
+      isPunchClause ||
+      /\b(hit|struck|impact|recoil|knocked|stumble|stagger)\b/i.test(clauseEn) ||
       /(يتلقي ضربه|يرتد|يصطدم|يتعثر|صدمه)/i.test(clauseAr);
 
     if (isHit) {
-      const dur = DEFAULT_SKILL_DURATIONS.hitReaction;
+      const combatClip = isSwordClause
+        ? 'human-sword-slash'
+        : isShootClause
+        ? 'human-aim-fire'
+        : isPunchClause
+        ? 'human-combo-punch'
+        : 'human-hit-stagger';
+      const dur = isSwordClause || isShootClause || isPunchClause ? 1.8 : DEFAULT_SKILL_DURATIONS.hitReaction;
       skills.push({
         id: `skill_${idx}_hitReaction`,
         skill: 'hitReaction',
         args: {
           direction: 'front',
           intensity: 0.85,
+          motionClip: combatClip,
         },
         startTimeSec: currentTime,
         durationSec: dur,

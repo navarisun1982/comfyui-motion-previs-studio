@@ -268,6 +268,51 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     expect(afterDirect.trajectory.keyframes?.length).toBe(37);
   });
 
+  it('compiles natural-language Direct prompts (walk to right, jump, wave, look around, running fast from 25 to 8, and multi-step sequences) into live trajectory keyframes and motion clips', () => {
+    const store = useShotStore.getState();
+    const actorId = store.shot.actors[0].id;
+
+    // 1. Default Lead Subject prompt ("turns head slowly toward the camera with focused gaze")
+    store.applyDirectorialMotion(actorId, 'turns head slowly toward the camera with focused gaze', {
+      startTimeSec: 0,
+      endTimeSec: 4,
+    });
+    const afterLook = useShotStore.getState().shot.actors.find((a) => a.id === actorId)!;
+    expect(afterLook.motionClip).toBe('human-look-search');
+    expect(afterLook.actionDescription).toBe('turns head slowly toward the camera with focused gaze');
+    expect((afterLook.trajectory.keyframes?.length || 0)).toBeGreaterThan(5);
+
+    // 2. Directional walk ("walk to right")
+    const beforeWalkX = afterLook.trajectory.startPosition.x;
+    store.applyDirectorialMotion(actorId, 'walk to right', {
+      startTimeSec: 0,
+      endTimeSec: 4,
+    });
+    const afterWalkRight = useShotStore.getState().shot.actors.find((a) => a.id === actorId)!;
+    expect(afterWalkRight.motionClip).toBe('human-walk-forward');
+    expect(afterWalkRight.gait).toBe('walk');
+    expect(afterWalkRight.trajectory.endPosition.x).toBeGreaterThan(beforeWalkX + 10);
+
+    // 3. Coordinate range ("running fast from 25 to 8")
+    store.applyDirectorialMotion(actorId, 'running fast from 25 to 8', {
+      startTimeSec: 0,
+      endTimeSec: 4,
+    });
+    const afterRunRange = useShotStore.getState().shot.actors.find((a) => a.id === actorId)!;
+    expect(afterRunRange.motionClip).toBe('human-run-sprint');
+    expect(afterRunRange.gait).toBe('run');
+    expect(afterRunRange.trajectory.startPosition.y).not.toBe(afterRunRange.trajectory.endPosition.y);
+
+    // 4. Multi-step compound prompt ("walk to right, then sit down")
+    store.applyDirectorialMotion(actorId, 'walk to right, then sit down', {
+      startTimeSec: 0,
+      endTimeSec: 6,
+    });
+    const afterMulti = useShotStore.getState().shot.actors.find((a) => a.id === actorId)!;
+    expect(afterMulti.trajectory.keyframes?.some((kf) => kf.motionClip === 'human-walk-forward')).toBe(true);
+    expect(afterMulti.trajectory.keyframes?.some((kf) => kf.motionClip === 'human-sit-down')).toBe(true);
+  });
+
   it('toggles the 14-site Animated .GLB Resources Directory inside the Look/Ref sub-tab', () => {
     const props = createProps();
     const { getByRole, getByText } = render(<CharacterControlCard {...props} />);

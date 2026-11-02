@@ -655,7 +655,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     } catch (err: any) {
       setGenerationError(
         err?.message ||
-          'Failed to generate 3D .GLB in ComfyUI. Please verify ComfyUI is running at http://127.0.0.1:8188.'
+        'Failed to generate 3D .GLB in ComfyUI. Please verify ComfyUI is running at http://127.0.0.1:8188.'
       );
     } finally {
       setIsGenerating(false);
@@ -840,9 +840,8 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                 title="Open ComfyUI & Workflow Settings"
               >
                 <span
-                  className={`h-2 w-2 rounded-full ${
-                    comfyStatus === 'connected' ? 'bg-emerald-400' : 'bg-rose-400'
-                  }`}
+                  className={`h-2 w-2 rounded-full ${comfyStatus === 'connected' ? 'bg-emerald-400' : 'bg-rose-400'
+                    }`}
                 />
                 <span>
                   {comfyStatus === 'connected'
@@ -908,13 +907,11 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     setGenerationMode('image-to-3d');
                     setGenerationError(null);
                   }}
-                  className={`py-2 px-2.5 rounded-lg font-bold transition-all flex flex-col items-start gap-0.5 text-left ${
-                    isCreationLocked || isGenerating ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
-                  } ${
-                    generationMode === 'image-to-3d'
+                  className={`py-2 px-2.5 rounded-lg font-bold transition-all flex flex-col items-start gap-0.5 text-left ${isCreationLocked || isGenerating ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                    } ${generationMode === 'image-to-3d'
                       ? 'bg-gradient-to-r from-cyan-600/40 to-indigo-600/40 border border-cyan-400 text-white shadow'
                       : 'bg-transparent border border-transparent text-slate-400 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <span className="text-[11px] flex items-center gap-1.5">
                     <span>🖼️ Image-to-3D</span>
@@ -931,13 +928,11 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     setGenerationMode('text-to-3d');
                     setGenerationError(null);
                   }}
-                  className={`py-2 px-2.5 rounded-lg font-bold transition-all flex flex-col items-start gap-0.5 text-left ${
-                    isCreationLocked || isGenerating ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
-                  } ${
-                    generationMode === 'text-to-3d'
+                  className={`py-2 px-2.5 rounded-lg font-bold transition-all flex flex-col items-start gap-0.5 text-left ${isCreationLocked || isGenerating ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                    } ${generationMode === 'text-to-3d'
                       ? 'bg-gradient-to-r from-amber-500/35 to-indigo-600/40 border border-amber-400 text-white shadow'
                       : 'bg-transparent border border-transparent text-slate-400 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <span className="text-[11px] flex items-center gap-1.5">
                     <span>✍️ Text-to-3D</span>
@@ -1102,11 +1097,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     type="button"
                     disabled={isCreationLocked || isGenerating}
                     onClick={() => setActorCategory(cat.id)}
-                    className={`py-1.5 px-2 rounded-lg font-semibold border transition-all cursor-pointer truncate ${
-                      actorCategory === cat.id
+                    className={`py-1.5 px-2 rounded-lg font-semibold border transition-all cursor-pointer truncate ${actorCategory === cat.id
                         ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200 shadow-sm'
                         : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
-                    }`}
+                      }`}
                   >
                     {cat.label}
                   </button>
@@ -1125,11 +1119,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     type="button"
                     disabled={isCreationLocked || isGenerating}
                     onClick={() => setWorkflowSource('builtin')}
-                    className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${
-                      workflowSource === 'builtin'
+                    className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${workflowSource === 'builtin'
                         ? 'bg-indigo-600 text-white'
                         : 'text-slate-400 hover:text-white'
-                    }`}
+                      }`}
                   >
                     {generationMode === 'text-to-3d' ? 'Built-in (#e7a9555b)' : 'Built-in (#aa77013b)'}
                   </button>
@@ -1137,11 +1130,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     type="button"
                     disabled={isCreationLocked || isGenerating}
                     onClick={() => setWorkflowSource('custom')}
-                    className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${
-                      workflowSource === 'custom'
+                    className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${workflowSource === 'custom'
                         ? 'bg-cyan-500 text-black font-bold'
                         : 'text-slate-400 hover:text-white'
-                    }`}
+                      }`}
                   >
                     Custom 3D .JSON
                   </button>
@@ -1232,11 +1224,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                       <button
                         type="button"
                         onClick={() => setEngineMode('pixal3d')}
-                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
-                          engineMode === 'pixal3d'
+                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${engineMode === 'pixal3d'
                             ? 'bg-indigo-600/30 border-indigo-400 text-white shadow'
                             : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
-                        }`}
+                          }`}
                       >
                         <div className="font-bold text-[11px] text-indigo-200">⚡ Pixal3D INT8</div>
                         <div className="text-[9.5px] text-slate-400 truncate">
@@ -1246,11 +1237,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                       <button
                         type="button"
                         onClick={() => setEngineMode('trellis2')}
-                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
-                          engineMode === 'trellis2'
+                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${engineMode === 'trellis2'
                             ? 'bg-cyan-600/30 border-cyan-400 text-white shadow'
                             : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
-                        }`}
+                          }`}
                       >
                         <div className="font-bold text-[11px] text-cyan-200">🧊 TRELLIS.2 INT8</div>
                         <div className="text-[9.5px] text-slate-400 truncate">
@@ -1267,11 +1257,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                       <button
                         type="button"
                         onClick={() => setQualityMode('fast_vertex')}
-                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
-                          qualityMode === 'fast_vertex'
+                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${qualityMode === 'fast_vertex'
                             ? 'bg-emerald-600/25 border-emerald-400 text-white'
                             : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
-                        }`}
+                          }`}
                       >
                         <div className="font-bold text-[11px] text-emerald-300">
                           🚀 Fast Vertex-Color
@@ -1283,11 +1272,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                       <button
                         type="button"
                         onClick={() => setQualityMode('full_pbr')}
-                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${
-                          qualityMode === 'full_pbr'
+                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${qualityMode === 'full_pbr'
                             ? 'bg-amber-600/25 border-amber-400 text-white'
                             : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
-                        }`}
+                          }`}
                       >
                         <div className="font-bold text-[11px] text-amber-300">
                           🎨 Full PBR UV-Baked
@@ -1308,11 +1296,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                   <button
                     type="button"
                     onClick={() => setRemoveBackground((v) => !v)}
-                    className={`py-1.5 px-2 rounded-lg border text-[10.5px] font-bold transition-all cursor-pointer truncate ${
-                      removeBackground
+                    className={`py-1.5 px-2 rounded-lg border text-[10.5px] font-bold transition-all cursor-pointer truncate ${removeBackground
                         ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
                         : 'bg-white/5 border-white/15 text-slate-400'
-                    }`}
+                      }`}
                     title="Run BiRefNet AI background removal inside ComfyUI before 3D generation"
                   >
                     {removeBackground ? '✓ BiRefNet ON' : 'BiRefNet OFF'}
@@ -1458,10 +1445,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                         {rigInfo.rigType === 'humanoid'
                           ? `Humanoid Rig (${rigInfo.boneCount} Bones • ${rigInfo.landmarks.detectedStance?.toUpperCase() || 'AUTO'})`
                           : rigInfo.rigType === 'quadruped'
-                          ? `Quadruped Rig (${rigInfo.boneCount} Bones)`
-                          : rigInfo.rigType === 'spine_flex'
-                          ? `Flex Spine Rig (${rigInfo.boneCount} Bones)`
-                          : 'Rigid Prop Pivot'}
+                            ? `Quadruped Rig (${rigInfo.boneCount} Bones)`
+                            : rigInfo.rigType === 'spine_flex'
+                              ? `Flex Spine Rig (${rigInfo.boneCount} Bones)`
+                              : 'Rigid Prop Pivot'}
                       </span>
                     )}
                   </>
@@ -1477,11 +1464,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowBones((v) => !v)}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10.5px] font-mono font-semibold cursor-pointer ${
-                      showBones
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10.5px] font-mono font-semibold cursor-pointer ${showBones
                         ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
                         : 'bg-black/70 border-white/15 text-slate-400 hover:text-white'
-                    }`}
+                      }`}
                     title="Show or hide 3D skeleton bones & joint markers inside the mesh"
                   >
                     <span>🦴 {showBones ? 'Bones ON' : 'Bones OFF'}</span>
@@ -1490,11 +1476,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                 <button
                   type="button"
                   onClick={() => setAutoSpin((v) => !v)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10.5px] font-mono font-semibold cursor-pointer ${
-                    autoSpin
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10.5px] font-mono font-semibold cursor-pointer ${autoSpin
                       ? 'bg-cyan-500/20 border-cyan-400/40 text-cyan-200'
                       : 'bg-black/70 border-white/15 text-slate-400 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <RotateCw className="h-3 w-3" />
                   <span>Turntable</span>
@@ -1502,11 +1487,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsWireframe((v) => !v)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10.5px] font-mono font-semibold cursor-pointer ${
-                    isWireframe
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10.5px] font-mono font-semibold cursor-pointer ${isWireframe
                       ? 'bg-amber-500/20 border-amber-400/40 text-amber-200'
                       : 'bg-black/70 border-white/15 text-slate-400 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <Box className="h-3 w-3" />
                   <span>Wireframe</span>
@@ -1605,11 +1589,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                         key={opt.id}
                         type="button"
                         onClick={() => setRigType(opt.id)}
-                        className={`px-2 py-1 rounded-md text-[10px] font-semibold border transition-all cursor-pointer ${
-                          rigType === opt.id
+                        className={`px-2 py-1 rounded-md text-[10px] font-semibold border transition-all cursor-pointer ${rigType === opt.id
                             ? 'bg-cyan-500/25 border-cyan-400 text-cyan-100'
                             : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
-                        }`}
+                          }`}
                       >
                         {opt.label}
                       </button>
@@ -1621,11 +1604,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     <button
                       type="button"
                       onClick={() => setShowLandmarkEditor((v) => !v)}
-                      className={`px-2.5 py-1 rounded-md text-[10px] font-mono font-semibold border transition-all cursor-pointer ${
-                        showLandmarkEditor
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-mono font-semibold border transition-all cursor-pointer ${showLandmarkEditor
                           ? 'bg-amber-500/25 border-amber-400 text-amber-200'
                           : 'bg-white/5 border-white/15 text-slate-300 hover:text-white'
-                      }`}
+                        }`}
                     >
                       🎯 {showLandmarkEditor ? 'Hide Joint Tuner' : 'Adjust Joint Landmarks'}
                     </button>
@@ -1664,11 +1646,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                         key={m.id}
                         type="button"
                         onClick={() => setPreviewMotion(m.id)}
-                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all cursor-pointer ${
-                          previewMotion === m.id
+                        className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-all cursor-pointer ${previewMotion === m.id
                             ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
                             : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
-                        }`}
+                          }`}
                       >
                         {m.label}
                       </button>
@@ -1699,7 +1680,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                             Shoulder Height:{' '}
                             {Math.round(
                               ((customLandmarks?.shoulderY ?? rigInfo.landmarks.shoulderY) || 0.78) *
-                                100
+                              100
                             )}
                             %
                           </span>

@@ -1501,9 +1501,13 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                           const latestAfterApply = useShotStore
                             .getState()
                             .shot.actors.find((a) => a.id === act.id);
-                          // Only run LLM acting cue augmentation when it's a custom prompt (not a Ready-Made Motion clip)
+                          const hasCompiledMotionClips = Boolean(
+                            latestAfterApply?.motionClip ||
+                              latestAfterApply?.trajectory.keyframes?.some((kf) => Boolean(kf.motionClip))
+                          );
+                          // Only run LLM acting cue augmentation when it's a custom prompt without Ready-Made Motion clips
                           if (
-                            !latestAfterApply?.motionClip &&
+                            !hasCompiledMotionClips &&
                             (!act.kind || act.kind === 'human' || act.kind === 'character')
                           ) {
                             setGeneratingActingId(act.id);
@@ -1527,12 +1531,14 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                                       ? cue.gait
                                       : baseGait === 'walk' || baseGait === 'run' || baseGait === 'sneak'
                                       ? baseGait
-                                      : cue.gait;
+                                      : undefined;
                                   const effectivePosePreset =
                                     effectiveGait === 'walk' || effectiveGait === 'run' || effectiveGait === 'sneak'
                                       ? undefined
-                                      : cue.posePreset;
-                                  if (effectivePosePreset || (effectiveGait && effectiveGait !== 'none')) {
+                                      : cue.posePreset && cue.posePreset !== 'neutral-stand'
+                                      ? cue.posePreset
+                                      : undefined;
+                                  if (effectivePosePreset || effectiveGait) {
                                     recordActorPoseAtTime(
                                       act.id,
                                       Math.min(shotDur, safeStart + cycleOffset + cue.time),

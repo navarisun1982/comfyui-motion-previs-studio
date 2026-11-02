@@ -41,7 +41,7 @@ import { getAdapter } from '../adapters';
 import { ValidationReport, CompiledPromptBundle } from '../adapters/types';
 import { logger } from './useLogStore';
 import { recordTrajectoryPositionAtTime, interpolateTrajectoryPosition, recordTrajectoryPoseAtTime } from '../engine/trajectoryMath';
-import { decomposeDirectorialMotion, compileMotionPlan, compileReadyMadeMotionKeyframes, findReadyMadeMotionById, READY_MADE_MOTIONS } from '../engine/kinematics';
+import { decomposeDirectorialMotion, compileMotionPlan, compileReadyMadeMotionKeyframes, matchReadyMadeMotionFromPrompt } from '../engine/kinematics';
 import { STORAGE_KEYS, safeGetItem, safeSetItem, sanitizeShotForStorage } from '../services/storage';
 import { toPersistentModelUri, offloadLargeImageToIndexedDB, resolveOffloadedImage, resolveOffloadedImageSync } from '../services/modelStorage';
 
@@ -1467,30 +1467,6 @@ export const useShotStore = create<ShotState>((set, get) => {
       const winDuration = winEnd - winStart;
       const safeCycles = Math.max(1, Math.min(20, Math.round(options?.motionCycles ?? target.motionCycles ?? 1)));
 
-      // If the prompt matches the actor's active Ready-Made Motion or a catalog Ready-Made Motion phrase,
-      // delegate directly to applyReadyMadeMotion so the Ready-Made clip and its cycle repetitions are preserved!
-      const normalizedPrompt = prompt.trim().toLowerCase();
-      const activeReadyClip = target.motionClip ? findReadyMadeMotionById(target.motionClip) : undefined;
-      const matchedReadyClip =
-        activeReadyClip &&
-        (activeReadyClip.promptPhrase.trim().toLowerCase() === normalizedPrompt ||
-          activeReadyClip.name.trim().toLowerCase() === normalizedPrompt)
-          ? activeReadyClip
-          : READY_MADE_MOTIONS.find(
-              (m) =>
-                m.promptPhrase.trim().toLowerCase() === normalizedPrompt ||
-                m.name.trim().toLowerCase() === normalizedPrompt
-            );
-
-      if (matchedReadyClip) {
-        get().applyReadyMadeMotion(actorId, matchedReadyClip.id, {
-          startTimeSec: winStart,
-          endTimeSec: winEnd,
-          motionCycles: safeCycles,
-        });
-        return;
-      }
-
       // Sample actor's position at winStart so chained cues (e.g. 0-3s then 3-6s) continue seamlessly from where the previous cue ended
       const startCoord =
         winStart > 0.05
@@ -1509,6 +1485,86 @@ export const useShotStore = create<ShotState>((set, get) => {
           position: [a.trajectory.startPosition.x ?? 0, a.trajectory.startPosition.y ?? 0] as [number, number],
           kind: a.kind,
         }));
+
+      // Match single-intent prompts (including custom spatial destinations like "walk to right", "running fast from 25 to 8", "jump", "wave", "turns head slowly toward the camera")
+      // directly to the procedural Ready-Made Motion Clip engine while preserving the user's custom actionDescription!
+      const actorForMatch: Actor = {
+        ...target,
+        trajectory: {
+          ...target.trajectory,
+          startPosition: {
+            x: startPos[0],
+            y: startPos[1],
+            z: startCoord.z ?? target.trajectory.startPosition.z ?? 0,
+          },
+        },
+      };
+      const matchedReady = matchReadyMadeMotionFromPrompt(prompt, actorForMatch, otherActors);
+      if (matchedReady) {
+        const effectiveStartPos = matchedReady.startPositionOverride || {
+          x: startPos[0],
+          y: startPos[1],
+          z: startCoord.z ?? target.trajectory.startPosition.z ?? 0,
+        };
+        const compiled = compileReadyMadeMotionKeyframes(target, matchedReady.clip.id, {
+          startTimeSec: winStart,
+          endTimeSec: winEnd,
+          startPosition: effectiveStartPos,
+          startRotation: target.rotation,
+          travelMode: matchedReady.travelMode ?? 'auto',
+          targetPosition: matchedReady.targetPosition,
+          motionCycles: safeCycles,
+        });
+
+        const preservedKeyframes = (target.trajectory.keyframes || []).filter(
+          (kf) => kf.time < winStart - 0.08 || kf.time > winEnd + 0.08
+        );
+        const mergedKeyframes = [...preservedKeyframes, ...compiled.keyframes].sort((a, b) => a.time - b.time);
+
+        const updatedTrajectory = {
+          ...target.trajectory,
+          startPosition:
+            winStart <= 0.08 && compiled.keyframes.length > 0
+              ? compiled.keyframes[0].position
+              : target.trajectory.startPosition,
+          endPosition:
+            mergedKeyframes.length > 0
+              ? mergedKeyframes[mergedKeyframes.length - 1].position
+              : compiled.endPosition,
+          keyframes: mergedKeyframes,
+        };
+
+        const isHumanoid = compiled.clip.category === 'humanoid';
+        const uprightRot = isHumanoid
+          ? { x: 0, y: compiled.endRotation.y || target.rotation?.y || 0, z: 0 }
+          : compiled.endRotation;
+
+        const updatedActors = shot.actors.map((a) =>
+          a.id === actorId
+            ? {
+                ...a,
+                actionDescription: prompt.trim() || compiled.clip.promptPhrase,
+                motionClip: compiled.clip.id,
+                motionCycles: safeCycles,
+                gait: compiled.clip.baseGait ?? 'none',
+                posePreset: compiled.clip.basePosePreset,
+                pose: undefined,
+                rotation: uprightRot,
+                trajectory: updatedTrajectory,
+              }
+            : a
+        );
+
+        logger.action(
+          `Directed "${target.name}" with "${prompt}" -> Ready-Made Motion "${compiled.clip.name}" (${winStart.toFixed(1)}s -> ${winEnd.toFixed(1)}s, ${safeCycles}x)`
+        );
+        const updated: ShotSpec = { ...shot, actors: updatedActors };
+        commitShot(updated, { currentTime: winStart, isPlaying: true });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('cmpvs:transport-play', { detail: { time: winStart, play: true } }));
+        }
+        return;
+      }
 
       const cycleDur = Math.max(0.2, winDuration / safeCycles);
       const shiftedKeyframes: NonNullable<Actor['trajectory']['keyframes']> = [];
@@ -1549,15 +1605,16 @@ export const useShotStore = create<ShotState>((set, get) => {
           // Avoid duplicate boundary keyframes between consecutive cycles
           if (c > 0 && idx === 0) return;
           const shiftedTime = Number((kf.time + cycleWinStart).toFixed(2));
+          const baseZ = startCoord.z ?? target.trajectory.startPosition.z ?? 0;
           shiftedKeyframes.push({
             ...kf,
             id: `${kf.id}-cyc${c}`,
             time: shiftedTime,
-            motionClip: undefined,
+            motionClip: kf.motionClip,
             motionCycles: safeCycles,
             position: {
               ...kf.position,
-              z: startCoord.z ?? target.trajectory.startPosition.z ?? 0,
+              z: kf.position.z !== undefined ? baseZ + kf.position.z : baseZ,
             },
           });
         });
