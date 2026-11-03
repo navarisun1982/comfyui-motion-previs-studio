@@ -94,7 +94,8 @@ function withMotion(
 }
 
 function getEnvPreset(id: string) {
-  return CINEMATIC_ENVIRONMENT_PRESETS.find((p) => p.id === id)?.spec || CINEMATIC_ENVIRONMENT_PRESETS[0].spec;
+  const spec = CINEMATIC_ENVIRONMENT_PRESETS.find((p) => p.id === id)?.spec || CINEMATIC_ENVIRONMENT_PRESETS[0].spec;
+  return { ...spec };
 }
 
 export const buildDefaultShotSpec = (shotItem: ShotBibleItem): ShotSpec => {

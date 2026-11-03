@@ -95,6 +95,13 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   );
   const povReport = React.useMemo(() => analyzeShotPovVisibility(shot), [shot]);
 
+  // Per-shot custom reference slot cache so switching scenes/shots never leaks custom slots or actor references
+  const slotTargetsByShotRef = useRef<Record<string, [string, string, string, string]>>({});
+  const customSlotsByShotRef = useRef<
+    Record<string, Record<number, { thumb: string | null; name: string; file: File | null }>>
+  >({});
+  const prevShotIdRef = useRef<string>(shot.id);
+
   const [refImageNames, setRefImageNames] = useState<[string, string, string, string]>(() => {
     const vis = povReport.visibleActors;
     return [
@@ -211,60 +218,97 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     }
   };
 
-  // Automatically sync reference image slots with POV-visible Directing Stage object/set reference images
+  // Automatically sync reference image slots with active shot's POV-visible Directing Stage object/set reference images
+  // Strictly isolated per shot (`shot.id`) and per actor (`actor.id`) so switching shots NEVER leaks reference images.
   useEffect(() => {
     const visibleActors = povReport.visibleActors;
+    const isShotSwitch = prevShotIdRef.current !== shot.id;
+    prevShotIdRef.current = shot.id;
+
     setRefSlotTargets((prevTargets) => {
-      const nextTargets = [...prevTargets] as [string, string, string, string];
+      const savedForShot = slotTargetsByShotRef.current[shot.id];
+      const baseTargets: [string, string, string, string] = isShotSwitch
+        ? savedForShot
+          ? [...savedForShot]
+          : [
+              visibleActors[0]?.id || shot.actors[0]?.id || 'custom',
+              visibleActors[1]?.id || shot.actors[1]?.id || 'custom',
+              visibleActors[2]?.id || shot.actors[2]?.id || 'custom',
+              'environment',
+            ]
+        : ([...prevTargets] as [string, string, string, string]);
+
       for (let i = 0; i < 3; i++) {
-        const cur = nextTargets[i];
-        const curIsVisible = visibleActors.some((a) => a.id === cur);
-        if (!curIsVisible) {
-          if (visibleActors[i]) {
-            nextTargets[i] = visibleActors[i].id;
-          } else if (!shot.actors.some((a) => a.id === cur) && shot.actors[i]) {
-            nextTargets[i] = shot.actors[i].id;
-          }
+        const cur = baseTargets[i];
+        const existsInShot = cur === 'custom' || cur === 'environment' || shot.actors.some((a) => a.id === cur);
+        if (!existsInShot) {
+          baseTargets[i] = visibleActors[i]?.id || shot.actors[i]?.id || 'custom';
         }
       }
-      return nextTargets;
+      if (
+        baseTargets[3] !== 'environment' &&
+        baseTargets[3] !== 'custom' &&
+        !shot.actors.some((a) => a.id === baseTargets[3])
+      ) {
+        baseTargets[3] = 'environment';
+      }
+
+      slotTargetsByShotRef.current[shot.id] = baseTargets;
+      return baseTargets;
     });
-  }, [shot.actors, povReport]);
+  }, [shot.id, shot.actors, povReport]);
 
   useEffect(() => {
-    const nextThumbs: [string | null, string | null, string | null, string | null] = [...refImageThumbs] as any;
-    const nextNames: [string, string, string, string] = [...refImageNames] as any;
-    let changed = false;
+    const nextThumbs: [string | null, string | null, string | null, string | null] = [null, null, null, null];
+    const nextNames: [string, string, string, string] = ['char1.png', 'char2.png', 'char3.png', 'char4.png'];
+    const nextFiles: [File | null, File | null, File | null, File | null] = [null, null, null, null];
+    const shotCustomSlots = customSlotsByShotRef.current[shot.id] || {};
 
     for (let idx = 0; idx < 4; idx++) {
       const targetId = refSlotTargets[idx];
+      const defaultPlaceholder = `char${idx + 1}.png`;
       if (targetId === 'environment') {
-        if (shot.environment?.conceptImageUrl && nextThumbs[idx] !== shot.environment.conceptImageUrl) {
-          nextThumbs[idx] = shot.environment.conceptImageUrl;
-          changed = true;
-        }
-        if (shot.environment?.conceptImageName && nextNames[idx] !== shot.environment.conceptImageName) {
-          nextNames[idx] = shot.environment.conceptImageName;
-          changed = true;
-        }
+        nextThumbs[idx] = shot.environment?.conceptImageUrl || null;
+        nextNames[idx] = shot.environment?.conceptImageName || defaultPlaceholder;
+        nextFiles[idx] = null;
       } else if (targetId && targetId !== 'custom') {
         const actor = shot.actors.find((a) => a.id === targetId);
-        if (actor?.conceptImageUrl && nextThumbs[idx] !== actor.conceptImageUrl) {
-          nextThumbs[idx] = actor.conceptImageUrl;
-          changed = true;
-        }
-        if (actor?.conceptImageName && nextNames[idx] !== actor.conceptImageName) {
-          nextNames[idx] = actor.conceptImageName;
-          changed = true;
-        }
+        nextThumbs[idx] = actor?.conceptImageUrl || null;
+        nextNames[idx] = actor?.conceptImageName || defaultPlaceholder;
+        nextFiles[idx] = null;
+      } else {
+        const customEntry = shotCustomSlots[idx];
+        nextThumbs[idx] = customEntry?.thumb || null;
+        nextNames[idx] = customEntry?.name || defaultPlaceholder;
+        nextFiles[idx] = customEntry?.file || null;
       }
     }
 
-    if (changed) {
-      setRefImageThumbs(nextThumbs);
-      setRefImageNames(nextNames);
-    }
-  }, [refSlotTargets, shot.actors, shot.environment]);
+    setRefImageThumbs((prev) =>
+      prev[0] === nextThumbs[0] &&
+      prev[1] === nextThumbs[1] &&
+      prev[2] === nextThumbs[2] &&
+      prev[3] === nextThumbs[3]
+        ? prev
+        : nextThumbs
+    );
+    setRefImageNames((prev) =>
+      prev[0] === nextNames[0] &&
+      prev[1] === nextNames[1] &&
+      prev[2] === nextNames[2] &&
+      prev[3] === nextNames[3]
+        ? prev
+        : nextNames
+    );
+    setRefImageFiles((prev) =>
+      prev[0] === nextFiles[0] &&
+      prev[1] === nextFiles[1] &&
+      prev[2] === nextFiles[2] &&
+      prev[3] === nextFiles[3]
+        ? prev
+        : nextFiles
+    );
+  }, [shot.id, refSlotTargets, shot.actors, shot.environment]);
 
   const handleRenderInComfyUI = async () => {
     setComfyErrorText(null);
@@ -304,22 +348,32 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       const resolvedRefBlobs: [Blob | null, Blob | null, Blob | null, Blob | null] = [null, null, null, null];
       const refImageDescriptions: [string, string, string, string] = ['', '', '', ''];
       for (let i = 0; i < 4; i++) {
-        if (refImageFiles[i]) {
+        const slotTarget = refSlotTargets[i];
+        const matchedActor =
+          slotTarget && slotTarget !== 'environment' && slotTarget !== 'custom'
+            ? shot.actors.find((a) => a.id === slotTarget)
+            : undefined;
+        const slotImageUrl =
+          slotTarget === 'environment'
+            ? shot.environment?.conceptImageUrl || null
+            : matchedActor
+            ? matchedActor.conceptImageUrl || null
+            : refImageThumbs[i] || null;
+
+        if (slotTarget === 'custom' && refImageFiles[i]) {
           resolvedRefBlobs[i] = refImageFiles[i];
-        } else if (refImageThumbs[i]) {
+        } else if (slotImageUrl) {
           try {
-            const res = await fetch(refImageThumbs[i]!);
+            const res = await fetch(slotImageUrl);
             resolvedRefBlobs[i] = await res.blob();
           } catch {
             resolvedRefBlobs[i] = null;
           }
         }
 
-        const slotTarget = refSlotTargets[i];
         if (slotTarget === 'environment') {
           refImageDescriptions[i] = shot.environment?.promptDescription || shot.environment?.name || 'Active studio environment';
         } else if (slotTarget && slotTarget !== 'custom') {
-          const matchedActor = shot.actors.find((a) => a.id === slotTarget);
           const isActorInPov = povReport.byActorId[slotTarget]?.everVisible ?? true;
           if (matchedActor && isActorInPov) {
             refImageDescriptions[i] = matchedActor.token || matchedActor.name || '';
@@ -1118,14 +1172,15 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                     ? `${mappedActor.kind === 'human' || mappedActor.kind === 'character' ? '👤 Character' : `📦 ${mappedActor.kind || 'Object'}`}: ${mappedActor.name}`
                     : `🖼️ Custom Reference ${idx + 1}`;
                 const thumbUrl =
-                  refImageThumbs[idx] ||
-                  (comfyOnline && refImageNames[idx]?.trim()
-                    ? defaultComfyClient.getViewUrl(refImageNames[idx].trim(), '', 'input')
-                    : null);
+                  targetVal === 'environment'
+                    ? shot.environment?.conceptImageUrl || null
+                    : mappedActor
+                    ? mappedActor.conceptImageUrl || null
+                    : refImageThumbs[idx] || null;
 
                 return (
                   <div
-                    key={idx}
+                    key={`${shot.id}-refslot-${idx}`}
                     className="rounded-xl bg-black/60 border border-white/15 p-2.5 flex flex-col gap-1.5"
                   >
                     {/* Prominent Object / Character Title + Slot Badge */}
@@ -1148,32 +1203,32 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                         const newTarget = e.target.value;
                         const nextTargets = [...refSlotTargets] as [string, string, string, string];
                         nextTargets[idx] = newTarget;
+                        slotTargetsByShotRef.current[shot.id] = nextTargets;
                         setRefSlotTargets(nextTargets);
 
+                        const defaultPlaceholder = `char${idx + 1}.png`;
+                        const nextThumbs = [...refImageThumbs] as [string | null, string | null, string | null, string | null];
+                        const nextNames = [...refImageNames] as [string, string, string, string];
+                        const nextFiles = [...refImageFiles] as [File | null, File | null, File | null, File | null];
+
                         if (newTarget === 'environment') {
-                          if (shot.environment?.conceptImageUrl) {
-                            const nextThumbs = [...refImageThumbs] as [string | null, string | null, string | null, string | null];
-                            nextThumbs[idx] = shot.environment.conceptImageUrl;
-                            setRefImageThumbs(nextThumbs);
-                          }
-                          if (shot.environment?.conceptImageName) {
-                            const nextNames = [...refImageNames] as [string, string, string, string];
-                            nextNames[idx] = shot.environment.conceptImageName;
-                            setRefImageNames(nextNames);
-                          }
+                          nextThumbs[idx] = shot.environment?.conceptImageUrl || null;
+                          nextNames[idx] = shot.environment?.conceptImageName || defaultPlaceholder;
+                          nextFiles[idx] = null;
                         } else if (newTarget !== 'custom') {
                           const found = shot.actors.find((a) => a.id === newTarget);
-                          if (found?.conceptImageUrl) {
-                            const nextThumbs = [...refImageThumbs] as [string | null, string | null, string | null, string | null];
-                            nextThumbs[idx] = found.conceptImageUrl;
-                            setRefImageThumbs(nextThumbs);
-                          }
-                          if (found?.conceptImageName) {
-                            const nextNames = [...refImageNames] as [string, string, string, string];
-                            nextNames[idx] = found.conceptImageName;
-                            setRefImageNames(nextNames);
-                          }
+                          nextThumbs[idx] = found?.conceptImageUrl || null;
+                          nextNames[idx] = found?.conceptImageName || defaultPlaceholder;
+                          nextFiles[idx] = null;
+                        } else {
+                          const customEntry = customSlotsByShotRef.current[shot.id]?.[idx];
+                          nextThumbs[idx] = customEntry?.thumb || null;
+                          nextNames[idx] = customEntry?.name || defaultPlaceholder;
+                          nextFiles[idx] = customEntry?.file || null;
                         }
+                        setRefImageThumbs(nextThumbs);
+                        setRefImageNames(nextNames);
+                        setRefImageFiles(nextFiles);
                       }}
                       className="w-full bg-[#0d1220] border border-white/15 rounded px-1.5 py-1 text-[9.5px] font-mono text-indigo-200 focus:outline-none focus:border-indigo-400"
                       title={`Select which Stage Object or Set maps to <picture ${idx + 1}>`}
@@ -1216,16 +1271,28 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                             type="text"
                             value={refImageNames[idx]}
                             onChange={(e) => {
+                              const newName = e.target.value;
                               const next = [...refImageNames] as [string, string, string, string];
-                              next[idx] = e.target.value;
+                              next[idx] = newName;
                               setRefImageNames(next);
+                              if (targetVal === 'custom') {
+                                const shotCustom = customSlotsByShotRef.current[shot.id] || {};
+                                customSlotsByShotRef.current[shot.id] = {
+                                  ...shotCustom,
+                                  [idx]: {
+                                    thumb: shotCustom[idx]?.thumb || null,
+                                    name: newName,
+                                    file: shotCustom[idx]?.file || null,
+                                  },
+                                };
+                              }
                             }}
                             placeholder={`char${idx + 1}.png`}
                             className="w-full bg-black/70 border border-white/15 rounded px-1.5 py-1 text-[10px] font-mono text-slate-200 focus:outline-none focus:border-indigo-400"
                           />
                           <label
                             className="px-2 py-1 rounded bg-indigo-500/25 hover:bg-indigo-500/40 border border-indigo-400/40 text-indigo-200 cursor-pointer shrink-0 flex items-center gap-1 text-[9.5px] font-mono"
-                            title={`Upload reference image for ${displayObjectTitle} (syncs back to Directing Stage)`}
+                            title={`Upload reference image for ${displayObjectTitle} (saved independently for this element & shot)`}
                           >
                             <Upload className="h-3 w-3" />
                             <input
@@ -1235,8 +1302,11 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                               onChange={(e) => {
                                 const f = e.target.files?.[0] || null;
                                 if (!f) return;
+                                const activeShotIdAtUpload = shot.id;
+                                const activeTargetAtUpload = targetVal;
+
                                 const nextFiles = [...refImageFiles] as [File | null, File | null, File | null, File | null];
-                                nextFiles[idx] = f;
+                                nextFiles[idx] = activeTargetAtUpload === 'custom' ? f : null;
                                 setRefImageFiles(nextFiles);
 
                                 const nextNames = [...refImageNames] as [string, string, string, string];
@@ -1251,22 +1321,33 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                                     nextThumbs[idx] = dataUrl;
                                     setRefImageThumbs(nextThumbs);
 
-                                    // Sync back to the mapped Stage Object or Environment so Directing Stage also has it!
-                                    if (targetVal === 'environment' && shot.environment) {
-                                      setEnvironment({
-                                        ...shot.environment,
-                                        conceptImageUrl: dataUrl,
-                                        conceptImageName: f.name,
-                                      });
-                                    } else if (targetVal && targetVal !== 'custom') {
-                                      updateActor(targetVal, {
-                                        conceptImageUrl: dataUrl,
-                                        conceptImageName: f.name,
-                                      });
+                                    if (activeTargetAtUpload === 'custom') {
+                                      const shotCustom = customSlotsByShotRef.current[activeShotIdAtUpload] || {};
+                                      customSlotsByShotRef.current[activeShotIdAtUpload] = {
+                                        ...shotCustom,
+                                        [idx]: { thumb: dataUrl, name: f.name, file: f },
+                                      };
+                                    } else if (
+                                      useShotStore.getState().shot.id === activeShotIdAtUpload
+                                    ) {
+                                      // Sync back to the mapped Stage Object or Environment in this specific shot!
+                                      if (activeTargetAtUpload === 'environment' && shot.environment) {
+                                        setEnvironment({
+                                          ...shot.environment,
+                                          conceptImageUrl: dataUrl,
+                                          conceptImageName: f.name,
+                                        });
+                                      } else if (activeTargetAtUpload && activeTargetAtUpload !== 'custom') {
+                                        updateActor(activeTargetAtUpload, {
+                                          conceptImageUrl: dataUrl,
+                                          conceptImageName: f.name,
+                                        });
+                                      }
                                     }
                                   }
                                 };
                                 reader.readAsDataURL(f);
+                                e.target.value = '';
                               }}
                             />
                           </label>

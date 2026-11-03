@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, act } from '@testing-library/react';
 import { CharacterControlCard } from '../src/components/CharacterControlCard';
+import { PrevisExportDeck } from '../src/components/PrevisExportDeck';
+import { buildDefaultShotSpec, DEFAULT_SCENES } from '../src/components/ShotBible';
 import { Actor } from '../src/types/shotspec';
 import { compileReadyMadeMotionKeyframes, findReadyMadeMotionById } from '../src/engine/kinematics';
 import { useShotStore } from '../src/stores/useShotStore';
@@ -482,6 +484,70 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     store.applyActorMotionCurve(actorId, 'fast-start', 0, 4);
     const burstMidTime = useShotStore.getState().shot.actors[0].trajectory.keyframes![6].time;
     expect(burstMidTime).not.toBe(linearMidTime);
+  });
+
+  it('strictly isolates reference images per actor and per shot when switching between scenes/shots', () => {
+    const shot01aItem = DEFAULT_SCENES[0].shots[0]; // Shot 01A (Agent Kael, Interceptor Coupe, Street Planter Tree)
+    const shot02aItem = DEFAULT_SCENES[1].shots[0]; // Shot 02A (Explorer Aria, Dune Buggy, Sandstone Arch)
+    const shot03aItem = DEFAULT_SCENES[2].shots[0]; // Shot 03A (Julian, Elena)
+
+    const store = useShotStore.getState();
+    store.loadShot(buildDefaultShotSpec(shot01aItem));
+
+    // Attach a reference image ONLY to Agent Kael in Shot 01A
+    const kaelImg = 'data:image/png;base64,KAEL_UNIQUE_REF_01A';
+    store.updateActor('actor-kael', {
+      conceptImageUrl: kaelImg,
+      conceptImageName: 'agent_kael_ref.png',
+    });
+
+    // Verify other elements in Shot 01A do NOT share Kael's reference image
+    const s01a = useShotStore.getState().shot;
+    expect(s01a.actors.find((a) => a.id === 'actor-kael')?.conceptImageUrl).toBe(kaelImg);
+    expect(s01a.actors.find((a) => a.id === 'veh-interceptor')?.conceptImageUrl).toBeUndefined();
+    expect(s01a.environment?.conceptImageUrl).toBeUndefined();
+
+    // Mount PrevisExportDeck while on Shot 01A
+    const { container, queryByDisplayValue } = render(<PrevisExportDeck />);
+    expect(queryByDisplayValue('agent_kael_ref.png')).toBeTruthy();
+    expect(container.querySelector(`img[src="${kaelImg}"]`)).toBeTruthy();
+
+    // Switch to Scene 02 (Shot 02A - Explorer Aria) which does NOT have Agent Kael
+    act(() => {
+      useShotStore.getState().switchShot(shot02aItem.id, () => buildDefaultShotSpec(shot02aItem));
+    });
+
+    const s02a = useShotStore.getState().shot;
+    expect(s02a.id).toBe('shot-02a');
+    expect(s02a.actors.every((a) => a.conceptImageUrl === undefined)).toBe(true);
+    expect(s02a.environment?.conceptImageUrl).toBeUndefined();
+
+    // Verify PrevisExportDeck NEVER leaks Agent Kael's image or filename onto Explorer Aria or any slot in Shot 02A
+    expect(queryByDisplayValue('agent_kael_ref.png')).toBeNull();
+    expect(container.querySelector(`img[src="${kaelImg}"]`)).toBeNull();
+
+    // Switch to Scene 03 (Shot 03A - Julian & Elena) and assign a separate reference image to Julian
+    act(() => {
+      useShotStore.getState().switchShot(shot03aItem.id, () => buildDefaultShotSpec(shot03aItem));
+    });
+    const julianImg = 'data:image/png;base64,JULIAN_UNIQUE_REF_03A';
+    act(() => {
+      useShotStore.getState().updateActor('actor-julian', {
+        conceptImageUrl: julianImg,
+        conceptImageName: 'julian_portrait.png',
+      });
+    });
+    expect(queryByDisplayValue('julian_portrait.png')).toBeTruthy();
+    expect(container.querySelector(`img[src="${julianImg}"]`)).toBeTruthy();
+    expect(useShotStore.getState().shot.actors.find((a) => a.id === 'actor-elena')?.conceptImageUrl).toBeUndefined();
+
+    // Switch back to Shot 01A -> Agent Kael's reference image is preserved independently, and Julian's image is not shown
+    act(() => {
+      useShotStore.getState().switchShot(shot01aItem.id, () => buildDefaultShotSpec(shot01aItem));
+    });
+    expect(queryByDisplayValue('agent_kael_ref.png')).toBeTruthy();
+    expect(container.querySelector(`img[src="${kaelImg}"]`)).toBeTruthy();
+    expect(container.querySelector(`img[src="${julianImg}"]`)).toBeNull();
   });
 });
 

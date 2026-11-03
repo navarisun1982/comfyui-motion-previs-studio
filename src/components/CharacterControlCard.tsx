@@ -554,22 +554,25 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                 <Upload className="h-3 w-3 text-indigo-300" />
                 <span>{actor.conceptImageUrl ? 'Change' : 'Upload Ref'}</span>
                 <input
+                  key={`ref-upload-${actor.id}`}
                   type="file"
                   accept="image/*"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
+                    const targetActorId = actor.id;
                     const reader = new FileReader();
                     reader.onload = () => {
                       if (typeof reader.result === 'string') {
-                        onUpdateActor(actor.id, {
+                        onUpdateActor(targetActorId, {
                           conceptImageUrl: reader.result,
                           conceptImageName: file.name,
                         });
                       }
                     };
                     reader.readAsDataURL(file);
+                    e.target.value = '';
                   }}
                 />
               </label>

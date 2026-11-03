@@ -283,11 +283,13 @@ const loadCachedShots = (): Record<string, ShotSpec> => {
       const s = parsed[key];
       if (!s) continue;
       if (!s.environment) {
-        s.environment = CINEMATIC_ENVIRONMENT_PRESETS[0].spec;
+        s.environment = { ...CINEMATIC_ENVIRONMENT_PRESETS[0].spec };
+      } else {
+        s.environment = { ...s.environment };
       }
       if (s.environment?.conceptImageUrl?.startsWith('refimg://')) {
         const syncEnvImg = resolveOffloadedImageSync(s.environment.conceptImageUrl);
-        if (syncEnvImg) s.environment.conceptImageUrl = syncEnvImg;
+        if (syncEnvImg) s.environment = { ...s.environment, conceptImageUrl: syncEnvImg };
       }
       if (Array.isArray(s.actors)) {
         s.actors = s.actors.map((a) => {

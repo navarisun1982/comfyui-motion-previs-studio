@@ -162,10 +162,8 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       setTextPrompt(initialPrompt);
       if (!actorName || actorName === 'Hero Character') setActorName(initialPrompt);
     }
-    if (initialImageUrl && !referenceImageUrl) {
-      setReferenceImageUrl(initialImageUrl);
-    }
-  }, [initialPrompt, initialImageUrl, initialMode]);
+    setReferenceImageUrl(initialImageUrl || null);
+  }, [initialPrompt, initialImageUrl, initialMode, targetActorId]);
 
   // Elapsed timer during generation
   useEffect(() => {
