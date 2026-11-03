@@ -824,6 +824,117 @@ export const useShotStore = create<ShotState>((set, get) => {
     setCameraMovement: (type, speed) => {
       const { shot } = get();
       const normalizedSpeed: MovementSpeed = speed ?? shot.camera.movement.speed;
+      const prevMov = shot.camera.movement;
+      const start = {
+        x: prevMov.startPosition.x,
+        y: prevMov.startPosition.y,
+        z: prevMov.startPosition.z ?? 20,
+      };
+      let end = {
+        x: prevMov.endPosition.x,
+        y: prevMov.endPosition.y,
+        z: prevMov.endPosition.z ?? start.z,
+      };
+      const lookAt = prevMov.targetLookAt ?? { x: 50, y: 50 };
+      const speedMul =
+        normalizedSpeed === 'rapid-dynamic' ? 1.35 : normalizedSpeed === 'moderate' ? 1.1 : 1.0;
+
+      // Forward & Right vectors in 2D stage space from startPosition toward targetLookAt
+      let fX = lookAt.x - start.x;
+      let fY = lookAt.y - start.y;
+      const fLen = Math.hypot(fX, fY);
+      if (fLen > 0.5) {
+        fX /= fLen;
+        fY /= fLen;
+      } else {
+        fX = 0;
+        fY = -1; // Default forward along -Y (toward stage center)
+      }
+      // Right vector (90° CW from forward in top-down stage space where +Y is down/+Z)
+      const rX = -fY;
+      const rY = fX;
+
+      const clampStage = (v: number) => Number(Math.max(4, Math.min(96, v)).toFixed(2));
+      const clampElev = (v: number) => Number(Math.max(2, Math.min(98, v)).toFixed(2));
+
+      if (type === 'static' || type === 'pan-left' || type === 'pan-right' || type === 'tilt-up' || type === 'tilt-down' || type === 'whip-pan' || type === 'rack-focus' || type === 'handheld-subtle' || type === 'zoom-in' || type === 'zoom-out' || type === 'crash-zoom') {
+        end = { ...start };
+      } else if (type === 'dolly-in' || type === 'dolly-zoom-vertigo') {
+        const pushDist = Math.min(Math.max(12, (fLen || 30) * 0.48), 32) * speedMul;
+        end = {
+          x: clampStage(start.x + fX * pushDist),
+          y: clampStage(start.y + fY * pushDist),
+          z: start.z,
+        };
+      } else if (type === 'dolly-out') {
+        const pullDist = 20 * speedMul;
+        end = {
+          x: clampStage(start.x - fX * pullDist),
+          y: clampStage(start.y - fY * pullDist),
+          z: start.z,
+        };
+      } else if (type === 'truck-left') {
+        const truckDist = 22 * speedMul;
+        end = {
+          x: clampStage(start.x - rX * truckDist),
+          y: clampStage(start.y - rY * truckDist),
+          z: start.z,
+        };
+      } else if (type === 'truck-right') {
+        const truckDist = 22 * speedMul;
+        end = {
+          x: clampStage(start.x + rX * truckDist),
+          y: clampStage(start.y + rY * truckDist),
+          z: start.z,
+        };
+      } else if (type === 'pedestal-up') {
+        end = {
+          x: start.x,
+          y: start.y,
+          z: clampElev(start.z + 28 * speedMul),
+        };
+      } else if (type === 'pedestal-down') {
+        end = {
+          x: start.x,
+          y: start.y,
+          z: clampElev(start.z - 22 * speedMul),
+        };
+      } else if (type === 'crane-arc') {
+        const pushDist = 14 * speedMul;
+        end = {
+          x: clampStage(start.x + fX * pushDist + rX * 10),
+          y: clampStage(start.y + fY * pushDist + rY * 10),
+          z: clampElev(start.z + 22 * speedMul),
+        };
+      } else if (type === 'fpv-dive') {
+        const diveDist = Math.min(Math.max(18, (fLen || 35) * 0.65), 40) * speedMul;
+        end = {
+          x: clampStage(start.x + fX * diveDist),
+          y: clampStage(start.y + fY * diveDist),
+          z: clampElev(Math.min(start.z, 12)),
+        };
+      } else if (type === 'steadicam-follow') {
+        const followDist = 16 * speedMul;
+        end = {
+          x: clampStage(start.x + fX * followDist),
+          y: clampStage(start.y + fY * followDist),
+          z: start.z,
+        };
+      } else if (type === 'orbit-clockwise' || type === 'orbit-counter-clockwise' || type === 'spiral-orbit-in') {
+        const dir = type === 'orbit-counter-clockwise' ? -1 : 1;
+        const angleOffset = dir * Math.PI * (type === 'spiral-orbit-in' ? 1.5 : 1.2);
+        const relX = start.x - lookAt.x;
+        const relY = start.y - lookAt.y;
+        const baseRadius = Math.hypot(relX, relY) || 30;
+        const radius = type === 'spiral-orbit-in' ? baseRadius * 0.45 : baseRadius;
+        const baseAngle = Math.atan2(relY, relX);
+        end = {
+          x: clampStage(lookAt.x + Math.cos(baseAngle + angleOffset) * radius),
+          y: clampStage(lookAt.y + Math.sin(baseAngle + angleOffset) * radius),
+          z: start.z,
+        };
+      }
+
       const updated: ShotSpec = {
         ...shot,
         camera: {
@@ -832,6 +943,8 @@ export const useShotStore = create<ShotState>((set, get) => {
             ...shot.camera.movement,
             type,
             speed: normalizedSpeed,
+            startPosition: start,
+            endPosition: end,
           },
         },
       };

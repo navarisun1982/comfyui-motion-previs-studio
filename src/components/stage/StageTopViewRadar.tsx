@@ -4,6 +4,7 @@ import { FocalLength } from '../../types/shotspec';
 import {
   interpolateTrajectoryPosition,
   interpolateObjectRotationAtTime,
+  evaluateLiveCameraStageState,
 } from '../../engine/trajectoryMath';
 import { ChevronDown, ChevronRight, Sun, Moon, RotateCcw, Plus, Trash2 } from 'lucide-react';
 
@@ -197,7 +198,8 @@ export const StageTopViewRadar: React.FC<StageTopViewRadarProps> = ({
         if (
           t > 0.05 &&
           (liveShot.camera.movement.type === 'orbit-clockwise' ||
-            liveShot.camera.movement.type === 'orbit-counter-clockwise')
+            liveShot.camera.movement.type === 'orbit-counter-clockwise' ||
+            liveShot.camera.movement.type === 'spiral-orbit-in')
         ) {
           liveState.setCameraMovement('dolly-in', liveShot.camera.movement.speed);
         }
@@ -211,6 +213,13 @@ export const StageTopViewRadar: React.FC<StageTopViewRadarProps> = ({
         const nextX = Number(Math.min(98, Math.max(2, rawPt.x + drag.offsetX)).toFixed(2));
         const nextY = Number(Math.min(98, Math.max(2, rawPt.y + drag.offsetY)).toFixed(2));
         const curEndZ = liveShot.camera.movement.endPosition.z ?? liveShot.camera.movement.startPosition.z ?? 20;
+        if (
+          liveShot.camera.movement.type === 'orbit-clockwise' ||
+          liveShot.camera.movement.type === 'orbit-counter-clockwise' ||
+          liveShot.camera.movement.type === 'spiral-orbit-in'
+        ) {
+          liveState.setCameraMovement('dolly-in', liveShot.camera.movement.speed);
+        }
         liveState.setCameraPositions(liveShot.camera.movement.startPosition, {
           x: nextX,
           y: nextY,
@@ -249,32 +258,60 @@ export const StageTopViewRadar: React.FC<StageTopViewRadarProps> = ({
     };
   }, [endGesture]);
 
-  // Live Camera & Look-At Positions in 0..100 Stage Space
-  const camStagePos = useMemo(
-    () => interpolateTrajectoryPosition(shot.camera.movement, currentTime, safeDur),
-    [shot.camera.movement, currentTime, safeDur]
+  // Live Camera & Look-At Positions in 0..100 Stage Space (full orbital, arc, pacing, pan, and tracking math)
+  const liveCameraState = useMemo(
+    () =>
+      evaluateLiveCameraStageState(
+        shot.camera,
+        shot.actors,
+        currentTime,
+        safeDur
+      ),
+    [shot.camera, shot.actors, currentTime, safeDur]
   );
 
+  const camStagePos = liveCameraState.position;
   const camColor = shot.camera.color || '#0284c7';
   const lookAtStagePos = shot.camera.movement.targetLookAt ?? { x: 50, y: 50 };
+  const effectiveLookAtStagePos = liveCameraState.lookAt;
   const camView = stageToView(camStagePos);
   const lookAtView = stageToView(lookAtStagePos);
-  const camStartView = stageToView(shot.camera.movement.startPosition);
-  const camEndView = stageToView(shot.camera.movement.endPosition);
-  const hasCameraPath =
-    Math.hypot(
-      shot.camera.movement.startPosition.x - shot.camera.movement.endPosition.x,
-      shot.camera.movement.startPosition.y - shot.camera.movement.endPosition.y
-    ) > 1.5;
+  const effectiveLookAtView = stageToView(effectiveLookAtStagePos);
+  const camStartStagePos = liveCameraState.pathPoints[0] || shot.camera.movement.startPosition;
+  const camEndStagePos =
+    liveCameraState.pathPoints[liveCameraState.pathPoints.length - 1] ||
+    shot.camera.movement.endPosition;
+  const camStartView = stageToView(camStartStagePos);
+  const camEndView = stageToView(camEndStagePos);
 
-  // Compute Camera FOV Cone Polygon in View Coordinates
+  const camPathPolylinePoints = useMemo(() => {
+    return liveCameraState.pathPoints
+      .map((pt) => {
+        const v = stageToView(pt);
+        return `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
+      })
+      .join(' ');
+  }, [liveCameraState.pathPoints, zoom]);
+
+  const hasCameraPath = useMemo(() => {
+    const pts = liveCameraState.pathPoints;
+    if (pts.length < 2) return false;
+    let totalLen = 0;
+    for (let i = 1; i < pts.length; i++) {
+      totalLen += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    }
+    return totalLen > 1.2;
+  }, [liveCameraState.pathPoints]);
+
+  // Compute Camera FOV Cone Polygon in View Coordinates (using effective live look-at + yaw offset)
   const fovConePoints = useMemo(() => {
     const fovDeg = FOV_MAP[shot.camera.lens.focalLength] || 63;
     const halfRad = ((fovDeg * 0.5) * Math.PI) / 180;
-    const dx = lookAtView.x - camView.x;
-    const dy = lookAtView.y - camView.y;
+    const dx = effectiveLookAtView.x - camView.x;
+    const dy = effectiveLookAtView.y - camView.y;
     const dist = Math.hypot(dx, dy);
-    const baseAngle = dist > 0.5 ? Math.atan2(dy, dx) : -Math.PI / 2;
+    const yawRad = ((liveCameraState.yawOffsetDeg || 0) * Math.PI) / 180;
+    const baseAngle = (dist > 0.5 ? Math.atan2(dy, dx) : -Math.PI / 2) - yawRad;
     const coneLength = Math.max(24 * zoom, Math.min(48 * zoom, dist > 2 ? dist * 1.05 : 32 * zoom));
 
     const leftX = camView.x + Math.cos(baseAngle - halfRad) * coneLength;
@@ -286,7 +323,15 @@ export const StageTopViewRadar: React.FC<StageTopViewRadarProps> = ({
       polygon: `${camView.x.toFixed(2)},${camView.y.toFixed(2)} ${leftX.toFixed(2)},${leftY.toFixed(2)} ${rightX.toFixed(2)},${rightY.toFixed(2)}`,
       baseAngleDeg: (baseAngle * 180) / Math.PI,
     };
-  }, [camView.x, camView.y, lookAtView.x, lookAtView.y, shot.camera.lens.focalLength, zoom]);
+  }, [
+    camView.x,
+    camView.y,
+    effectiveLookAtView.x,
+    effectiveLookAtView.y,
+    liveCameraState.yawOffsetDeg,
+    shot.camera.lens.focalLength,
+    zoom,
+  ]);
 
   // Effective Stage Lights (1 or more freely-positioned lights)
   const stageLights = useMemo(() => getEffectiveStageLights(shot.lighting), [shot.lighting]);
@@ -649,25 +694,32 @@ export const StageTopViewRadar: React.FC<StageTopViewRadarProps> = ({
           );
         })}
 
-        {/* Camera Trajectory Path (Start -> End) + Draggable End Waypoint if moving */}
+        {/* Camera Trajectory Path (Start -> Curved/Orbital/Tracked Polyline -> End) + Draggable End Waypoint if moving */}
         {hasCameraPath && (
           <g>
-            <line
-              x1={camStartView.x}
-              y1={camStartView.y}
-              x2={camEndView.x}
-              y2={camEndView.y}
+            <polyline
+              points={camPathPolylinePoints}
+              fill="none"
               stroke={camColor}
               strokeWidth="0.6"
               strokeDasharray="1.5 1.2"
               opacity="0.7"
+            />
+            <circle
+              cx={camStartView.x}
+              cy={camStartView.y}
+              r="0.9"
+              fill={hexToRgba(camColor, 0.55)}
+              stroke={camColor}
+              strokeWidth="0.35"
+              className="pointer-events-none"
             />
             <g
               transform={`translate(${camEndView.x}, ${camEndView.y})`}
               onPointerDown={(e) =>
                 startEntityDrag(e, {
                   kind: 'camera-end',
-                  currentStagePos: shot.camera.movement.endPosition,
+                  currentStagePos: camEndStagePos,
                 })
               }
               className="cursor-grab active:cursor-grabbing"

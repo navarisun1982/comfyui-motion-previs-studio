@@ -1771,28 +1771,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
   // 8. Update Trajectory Curve Line in Stage View
   useEffect(() => {
     if (!trajectoryLineRef.current) return;
-
-    const start = shot.camera.movement.startPosition;
-    const end = shot.camera.movement.endPosition;
-
-    const startX = (start.x - 50) * 1.0;
-    const startZ = (start.y - 50) * 1.0;
-    const startY = (start.z ?? 50) * 0.3 + 1.5;
-
-    const endX = (end.x - 50) * 1.0;
-    const endZ = (end.y - 50) * 1.0;
-    const endY = (end.z ?? 50) * 0.3 + 1.5;
-
-    const points = [
-      new THREE.Vector3(startX, startY, startZ),
-      new THREE.Vector3(endX, endY, endZ),
-    ];
-
-    trajectoryLineRef.current.geometry.dispose();
-    trajectoryLineRef.current.geometry = new THREE.BufferGeometry().setFromPoints(points);
-    trajectoryLineRef.current.computeLineDistances();
-    setLayerRecursively(trajectoryLineRef.current, 1);
-  }, [shot.camera.movement]);
+    syncPositions(currentTimeRef.current);
+  }, [shot.camera.movement, shot.camera.trackTargetActorId, shot.camera.followActorMovement]);
 
   // 9. Sync Positions for Camera & Actors at arbitrary time t (reads live Zustand state for 0-latency drag)
   const syncPositions = (t: number) => {
@@ -1957,19 +1937,35 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
     if (trajectoryLineRef.current) {
       const hasCamKfs = Boolean(liveShot.camera.movement.keyframes && liveShot.camera.movement.keyframes.length > 0);
+      const hasFollow = Boolean(
+        liveShot.camera.trackTargetActorId &&
+          (liveShot.camera.followActorMovement || liveShot.camera.movement.type === 'steadicam-follow')
+      );
       const hasArcOrOrbit =
         Math.abs(liveShot.camera.movement.arcCurve ?? 0) > 0.5 ||
         liveShot.camera.movement.type === 'orbit-clockwise' ||
         liveShot.camera.movement.type === 'orbit-counter-clockwise' ||
         liveShot.camera.movement.type === 'spiral-orbit-in' ||
-        liveShot.camera.movement.type === 'crane-arc';
+        liveShot.camera.movement.type === 'crane-arc' ||
+        hasFollow;
       const pts: THREE.Vector3[] = [];
       if (hasCamKfs || hasArcOrOrbit) {
         const steps = 24;
+        const trackedAct = hasFollow
+          ? liveShot.actors.find((a) => a.id === liveShot.camera.trackTargetActorId)
+          : undefined;
+        const trackedStart = trackedAct ? getActorPositionAtTime(trackedAct, 0) : undefined;
         for (let i = 0; i <= steps; i++) {
           const tau = (i / steps) * liveDur;
           const p = getCameraPositionAtTime(tau);
-          pts.push(new THREE.Vector3(p.x, p.y + 1.5, p.z));
+          let px = p.x;
+          let pz = p.z;
+          if (trackedAct && trackedStart) {
+            const trackedAtTau = getActorPositionAtTime(trackedAct, tau);
+            px += trackedAtTau.x - trackedStart.x;
+            pz += trackedAtTau.z - trackedStart.z;
+          }
+          pts.push(new THREE.Vector3(px, p.y + 1.5, pz));
         }
       } else {
         const start = liveShot.camera.movement.startPosition;

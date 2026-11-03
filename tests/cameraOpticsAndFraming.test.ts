@@ -109,4 +109,43 @@ describe('Camera Deck Optics & Framing Mechanics', () => {
     expect(useShotStore.getState().shot.camera.movement.type).toBe('pan-right');
     expect(useShotStore.getState().shot.camera.movement.speed).toBe('moderate');
   });
+
+  it('automatically updates start/end positions when switching camera movement presets and evaluates live Top-View stage state', async () => {
+    const { evaluateLiveCameraStageState } = await import('../src/engine/trajectoryMath');
+    const store = useShotStore.getState();
+
+    // 1. Switch to static -> start and end should match
+    store.setCameraMovement('static');
+    let shot = useShotStore.getState().shot;
+    expect(shot.camera.movement.endPosition.x).toBe(shot.camera.movement.startPosition.x);
+    expect(shot.camera.movement.endPosition.y).toBe(shot.camera.movement.startPosition.y);
+
+    // 2. Switch from static to truck-right -> endPosition.x should shift right (> startPosition.x)
+    store.setCameraMovement('truck-right', 'moderate');
+    shot = useShotStore.getState().shot;
+    expect(shot.camera.movement.endPosition.x).toBeGreaterThan(shot.camera.movement.startPosition.x);
+
+    const midTruck = evaluateLiveCameraStageState(shot.camera, shot.actors, 2.0, 4.0);
+    expect(midTruck.position.x).toBeGreaterThan(shot.camera.movement.startPosition.x);
+
+    // 3. Switch to dolly-out -> endPosition.y should move further back (> startPosition.y)
+    store.setCameraMovement('dolly-out', 'moderate');
+    shot = useShotStore.getState().shot;
+    expect(shot.camera.movement.endPosition.y).toBeGreaterThan(shot.camera.movement.startPosition.y);
+
+    // 4. Switch to orbit-clockwise -> live Top-View state should trace a curved orbital path around targetLookAt
+    store.setCameraMovement('orbit-clockwise', 'moderate');
+    shot = useShotStore.getState().shot;
+    const orbitStart = evaluateLiveCameraStageState(shot.camera, shot.actors, 0, 4.0);
+    const orbitMid = evaluateLiveCameraStageState(shot.camera, shot.actors, 2.0, 4.0);
+    expect(Math.hypot(orbitMid.position.x - orbitStart.position.x, orbitMid.position.y - orbitStart.position.y)).toBeGreaterThan(10);
+    expect(orbitMid.pathPoints.length).toBeGreaterThan(10);
+
+    // 5. Switch to pan-right -> live Top-View lookAt target shifts horizontally over time
+    store.setCameraMovement('pan-right', 'moderate');
+    shot = useShotStore.getState().shot;
+    const panStart = evaluateLiveCameraStageState(shot.camera, shot.actors, 0, 4.0);
+    const panEnd = evaluateLiveCameraStageState(shot.camera, shot.actors, 4.0, 4.0);
+    expect(panEnd.lookAt.x).toBeGreaterThan(panStart.lookAt.x);
+  });
 });

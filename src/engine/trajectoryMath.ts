@@ -11,6 +11,7 @@ export interface TrajectoryData {
 export interface CameraTrajectoryData {
   startPosition: Point3D;
   endPosition: Point3D;
+  targetLookAt?: Point2D;
   keyframes?: CameraKeyframe[];
   type?: string;
   pacing?: 'linear' | 'ease-in-out' | 'ease-in' | 'ease-out';
@@ -195,22 +196,25 @@ export function interpolateCameraPosition(
     }
   }
 
-  // Orbit adjustments if orbital trajectory
+  // Orbit adjustments if orbital trajectory (pivoting around targetLookAt)
   if (
     cameraMovement.type === 'orbit-clockwise' ||
     cameraMovement.type === 'orbit-counter-clockwise' ||
     cameraMovement.type === 'spiral-orbit-in'
   ) {
     const ratio = clampedTime / safeDuration;
-    const startX = (cameraMovement.startPosition.x - 50) * 1.0;
-    const startZ = (cameraMovement.startPosition.y - 50) * 1.0;
+    const pivotStage = cameraMovement.targetLookAt ?? { x: 50, y: 50 };
+    const pivotX = (pivotStage.x - 50) * 1.0;
+    const pivotZ = (pivotStage.y - 50) * 1.0;
+    const startX = (cameraMovement.startPosition.x - 50) * 1.0 - pivotX;
+    const startZ = (cameraMovement.startPosition.y - 50) * 1.0 - pivotZ;
     const dir = cameraMovement.type === 'orbit-counter-clockwise' ? -1 : 1;
     const angleOffset = dir * ratio * Math.PI * (cameraMovement.type === 'spiral-orbit-in' ? 1.5 : 1.2);
     const baseRadius = Math.sqrt(startX * startX + startZ * startZ) || 30;
     const radius = cameraMovement.type === 'spiral-orbit-in' ? baseRadius * (1 - ratio * 0.55) : baseRadius;
     const baseAngle = Math.atan2(startZ, startX);
-    threeX = Math.cos(baseAngle + angleOffset) * radius;
-    threeZ = Math.sin(baseAngle + angleOffset) * radius;
+    threeX = pivotX + Math.cos(baseAngle + angleOffset) * radius;
+    threeZ = pivotZ + Math.sin(baseAngle + angleOffset) * radius;
   } else if (cameraMovement.type === 'crane-arc') {
     const ratio = clampedTime / safeDuration;
     const parabola = 4 * ratio * (1 - ratio);
@@ -219,6 +223,151 @@ export function interpolateCameraPosition(
   }
 
   return { x: threeX, y: threeY, z: threeZ };
+}
+
+export interface LiveCameraStageState {
+  /** Camera position in 0..100 stage coordinate space at time t */
+  position: { x: number; y: number; z: number };
+  /** Effective camera look-at aim point in 0..100 stage coordinate space at time t */
+  lookAt: { x: number; y: number; z: number };
+  /** Total horizontal yaw offset in degrees (from camera.yawOffsetDeg) */
+  yawOffsetDeg: number;
+  /** Sampled 2D/3D trajectory curve in 0..100 stage coordinate space across [0..duration] */
+  pathPoints: Array<{ x: number; y: number; z: number }>;
+}
+
+/**
+ * Evaluates the exact live camera stage position, look-at target, and full trajectory curve
+ * in 0..100 stage coordinate space at time `t`, accounting for:
+ * - Pacing (`linear`, `ease-in-out`, `ease-in`, `ease-out`)
+ * - Curved dolly arcs (`arcCurve`)
+ * - Orbital & crane paths (`orbit-clockwise`, `orbit-counter-clockwise`, `spiral-orbit-in`, `crane-arc`)
+ * - Rotational pan / whip-pan aim shifts (`pan-left`, `pan-right`, `whip-pan`, `tilt-up`, `tilt-down`)
+ * - Subject Tracking & Steadicam Follow lock (`trackTargetActorId`, `followActorMovement`, `steadicam-follow`)
+ * - Multi-waypoint camera keyframes (`keyframes`)
+ */
+export function evaluateLiveCameraStageState(
+  camera: {
+    movement: CameraTrajectoryData;
+    trackTargetActorId?: string;
+    followActorMovement?: boolean;
+    yawOffsetDeg?: number;
+  },
+  actors: Array<{ id: string; trajectory: TrajectoryData }>,
+  time: number,
+  duration: number
+): LiveCameraStageState {
+  const safeDuration = duration > 0 ? duration : 4.0;
+  const clampedTime = Math.max(0, Math.min(safeDuration, time));
+  const ratio = safeDuration > 0 ? clampedTime / safeDuration : 0;
+
+  const computePosAt = (tau: number): { x: number; y: number; z: number } => {
+    const pos3D = interpolateCameraPosition(camera.movement, tau, safeDuration);
+    let stageX = pos3D.x + 50;
+    let stageY = pos3D.z + 50;
+    const stageZ = pos3D.y / 0.3;
+
+    if (
+      camera.trackTargetActorId &&
+      (camera.followActorMovement || camera.movement.type === 'steadicam-follow')
+    ) {
+      const trackedActor = actors.find((a) => a.id === camera.trackTargetActorId);
+      if (trackedActor) {
+        const trackedStart = interpolateTrajectoryPosition(trackedActor.trajectory, 0, safeDuration);
+        const trackedNow = interpolateTrajectoryPosition(trackedActor.trajectory, tau, safeDuration);
+        stageX += trackedNow.x - trackedStart.x;
+        stageY += trackedNow.y - trackedStart.y;
+      }
+    }
+
+    return {
+      x: Math.max(-20, Math.min(120, stageX)),
+      y: Math.max(-20, Math.min(120, stageY)),
+      z: Math.max(0, Math.min(100, stageZ)),
+    };
+  };
+
+  const position = computePosAt(clampedTime);
+
+  // Evaluate Look-At target in 0..100 stage space
+  const baseLookAt = camera.movement.targetLookAt ?? { x: 50, y: 50 };
+  const camLookKfs = (camera.movement.keyframes || [])
+    .filter((k) => k.lookAt !== undefined && k.time >= 0 && k.time <= safeDuration)
+    .sort((a, b) => a.time - b.time);
+
+  let lookAtCoord: { x: number; y: number; z?: number } = baseLookAt;
+  if (camLookKfs.length > 0) {
+    const lookWaypoints: Array<{ time: number; lookAt: { x: number; y: number; z?: number } }> = [];
+    if (camLookKfs[0].time > 0.01) {
+      lookWaypoints.push({ time: 0, lookAt: camLookKfs[0].lookAt! });
+    }
+    for (const kf of camLookKfs) {
+      lookWaypoints.push({ time: kf.time, lookAt: kf.lookAt! });
+    }
+    if (lookWaypoints[lookWaypoints.length - 1].time < safeDuration - 0.01) {
+      lookWaypoints.push({ time: safeDuration, lookAt: baseLookAt });
+    }
+    if (clampedTime <= lookWaypoints[0].time) {
+      lookAtCoord = lookWaypoints[0].lookAt;
+    } else if (clampedTime >= lookWaypoints[lookWaypoints.length - 1].time) {
+      lookAtCoord = lookWaypoints[lookWaypoints.length - 1].lookAt;
+    } else {
+      for (let i = 0; i < lookWaypoints.length - 1; i++) {
+        const wA = lookWaypoints[i];
+        const wB = lookWaypoints[i + 1];
+        if (clampedTime >= wA.time && clampedTime <= wB.time) {
+          const seg = wB.time - wA.time;
+          const u = seg > 0 ? (clampedTime - wA.time) / seg : 0;
+          const smoothU = u * u * (3 - 2 * u);
+          const zA = wA.lookAt.z ?? 50;
+          const zB = wB.lookAt.z ?? 50;
+          lookAtCoord = {
+            x: wA.lookAt.x + (wB.lookAt.x - wA.lookAt.x) * smoothU,
+            y: wA.lookAt.y + (wB.lookAt.y - wA.lookAt.y) * smoothU,
+            z: zA + (zB - zA) * smoothU,
+          };
+          break;
+        }
+      }
+    }
+  }
+
+  let lookX = lookAtCoord.x;
+  let lookY = lookAtCoord.y;
+  let lookZ = lookAtCoord.z ?? 50;
+
+  if (camera.movement.type === 'pan-left') {
+    lookX += (0.5 - ratio) * 15;
+  } else if (camera.movement.type === 'pan-right') {
+    lookX += (ratio - 0.5) * 15;
+  } else if (camera.movement.type === 'whip-pan') {
+    lookX += Math.sin(ratio * Math.PI) * 20;
+  }
+
+  if (camera.trackTargetActorId) {
+    const trackedActor = actors.find((a) => a.id === camera.trackTargetActorId);
+    if (trackedActor) {
+      const trackedNow = interpolateTrajectoryPosition(trackedActor.trajectory, clampedTime, safeDuration);
+      lookX = trackedNow.x;
+      lookY = trackedNow.y;
+      lookZ = trackedNow.z ?? 50;
+    }
+  }
+
+  // Sample trajectory path points across [0..duration]
+  const steps = 24;
+  const pathPoints: Array<{ x: number; y: number; z: number }> = [];
+  for (let i = 0; i <= steps; i++) {
+    const tau = (i / steps) * safeDuration;
+    pathPoints.push(computePosAt(tau));
+  }
+
+  return {
+    position,
+    lookAt: { x: lookX, y: lookY, z: lookZ },
+    yawOffsetDeg: camera.yawOffsetDeg ?? 0,
+    pathPoints,
+  };
 }
 
 /**
