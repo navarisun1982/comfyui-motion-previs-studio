@@ -500,38 +500,42 @@ export default function App() {
             )}
           </main>
 
-          {/* Right Column: Previs Parameters Deck */}
-          <aside
-            className={`flex flex-col border-l border-[#273247] bg-[#0D1320] shrink-0 transition-all duration-200 ease-in-out ${
-              isRightSidebarOpen
-                ? 'w-[380px] min-w-[380px] max-w-[380px] overflow-y-auto overflow-x-hidden'
-                : 'w-0 min-w-0 max-w-0 border-l-0 overflow-hidden'
-            }`}
-          >
-            <div className="w-[380px] h-full flex flex-col min-w-[380px] overflow-y-auto">
-              <PrevisParametersDeck
-                onOpenPromptInspector={() => setWorkspaceMode('export')}
-                onExportProductionPack={() => setWorkspaceMode('export')}
-              />
-            </div>
-          </aside>
+          {/* Right Column: Previs Parameters Deck (Only shown in 3D Stage & Directing mode) */}
+          {workspaceMode === 'previs' && (
+            <>
+              <aside
+                className={`flex flex-col border-l border-[#273247] bg-[#0D1320] shrink-0 transition-all duration-200 ease-in-out ${
+                  isRightSidebarOpen
+                    ? 'w-[380px] min-w-[380px] max-w-[380px] overflow-y-auto overflow-x-hidden'
+                    : 'w-0 min-w-0 max-w-0 border-l-0 overflow-hidden'
+                }`}
+              >
+                <div className="w-[380px] h-full flex flex-col min-w-[380px] overflow-y-auto">
+                  <PrevisParametersDeck
+                    onOpenPromptInspector={() => setWorkspaceMode('export')}
+                    onExportProductionPack={() => setWorkspaceMode('export')}
+                  />
+                </div>
+              </aside>
 
-          {/* Floating Collapsible Drawer Toggle Tab on the Sidebar Seam */}
-          <button
-            type="button"
-            onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
-            className={`absolute top-1/2 -translate-y-1/2 z-30 flex items-center justify-center w-4 h-12 rounded-l-md border border-[#273247] bg-[#121A2A]/95 hover:bg-[#6658F5] text-[#98A5BC] hover:text-white shadow-2xl backdrop-blur-md transition-all duration-200 group cursor-pointer ${
-              isRightSidebarOpen ? 'right-[380px]' : 'right-0'
-            }`}
-            title={isRightSidebarOpen ? 'Collapse Parameters Deck' : 'Expand Parameters Deck'}
-            aria-label={isRightSidebarOpen ? 'Collapse Parameters Deck' : 'Expand Parameters Deck'}
-          >
-            {isRightSidebarOpen ? (
-              <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-            ) : (
-              <ChevronLeft className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" />
-            )}
-          </button>
+              {/* Floating Collapsible Drawer Toggle Tab on the Sidebar Seam */}
+              <button
+                type="button"
+                onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
+                className={`absolute top-1/2 -translate-y-1/2 z-30 flex items-center justify-center w-4 h-12 rounded-l-md border border-[#273247] bg-[#121A2A]/95 hover:bg-[#6658F5] text-[#98A5BC] hover:text-white shadow-2xl backdrop-blur-md transition-all duration-200 group cursor-pointer ${
+                  isRightSidebarOpen ? 'right-[380px]' : 'right-0'
+                }`}
+                title={isRightSidebarOpen ? 'Collapse Parameters Deck' : 'Expand Parameters Deck'}
+                aria-label={isRightSidebarOpen ? 'Collapse Parameters Deck' : 'Expand Parameters Deck'}
+              >
+                {isRightSidebarOpen ? (
+                  <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                ) : (
+                  <ChevronLeft className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" />
+                )}
+              </button>
+            </>
+          )}
         </div>
       )}
 
