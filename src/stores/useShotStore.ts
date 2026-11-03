@@ -121,6 +121,7 @@ interface ShotState {
   unsocketActor: (propActorId: string) => void;
   applyDirectorialMotion: (actorId: string, prompt: string, options?: { startTimeSec?: number; endTimeSec?: number; motionCycles?: number }) => void;
   applyReadyMadeMotion: (actorId: string, clipId: string, options?: { startTimeSec?: number; endTimeSec?: number; travelMode?: 'auto' | 'travel' | 'in-place'; motionCycles?: number }) => void;
+  resetActorMotion: (actorId: string) => void;
   setClaymationMode: (enabled: boolean, fps?: number) => void;
   stagingMoveMode: 'base' | 'keyframe';
   setStagingMoveMode: (mode: 'base' | 'keyframe') => void;
@@ -1890,6 +1891,48 @@ export const useShotStore = create<ShotState>((set, get) => {
       commitShot(updated, { currentTime: winStart, isPlaying: true });
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('cmpvs:transport-play', { detail: { time: winStart, play: true } }));
+      }
+    },
+
+    resetActorMotion: (actorId) => {
+      const { shot } = get();
+      const target = shot.actors.find((a) => a.id === actorId);
+      if (!target) return;
+
+      const cleanStart: Point3D = {
+        x: target.trajectory.startPosition.x ?? 50,
+        y: target.trajectory.startPosition.y ?? 50,
+        z: 0,
+      };
+
+      const updatedActors = shot.actors.map((a) =>
+        a.id === actorId
+          ? {
+              ...a,
+              gait: 'idle' as ActorGait,
+              motionClip: undefined,
+              motionCycles: 1,
+              posePreset: 'neutral-stand',
+              pose: undefined,
+              ikTargets: undefined,
+              rotation: { x: 0, y: 0, z: 0 },
+              trajectory: {
+                ...a.trajectory,
+                startTimeSeconds: 0,
+                startPosition: { ...cleanStart },
+                endPosition: { ...cleanStart },
+                keyframes: [],
+              },
+            }
+          : a
+      );
+
+      logger.action(`Reset all motion for "${target.name}" and restored starting position`);
+      const updated: ShotSpec = { ...shot, actors: updatedActors };
+      commitShot(updated, { currentTime: 0, isPlaying: false });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cmpvs:transport-play', { detail: { time: 0, play: false } }));
+        window.dispatchEvent(new CustomEvent('cmpvs:reset-actor-pose'));
       }
     },
 

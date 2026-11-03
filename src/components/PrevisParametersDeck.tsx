@@ -177,6 +177,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
     setActiveDeckTab,
     applyDirectorialMotion,
     applyReadyMadeMotion,
+    resetActorMotion,
     selectedActorId,
     setSelectedActorId,
     previsVideoUrl,
@@ -1485,6 +1486,8 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                         onApplyReadyMadeMotion={(id, clipId, opts) =>
                           applyReadyMadeMotion(id, clipId, opts)
                         }
+                        onResetActorMotion={(id) => resetActorMotion(id)}
+                        onExtendShotDuration={(nextDur) => updateDuration(nextDur)}
                         onDirectCustomAction={async (act, actionText, safeStart, safeEnd, cueDuration, overrideCycles) => {
                           const effectiveCycles = Math.max(1, Math.min(20, Math.round(overrideCycles ?? act.motionCycles ?? 1)));
                           applyDirectorialMotion(act.id, actionText, {

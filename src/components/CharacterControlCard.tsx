@@ -117,6 +117,8 @@ export interface CharacterControlCardProps {
     cueDuration: number,
     motionCycles?: number
   ) => Promise<void>;
+  onResetActorMotion?: (actorId: string) => void;
+  onExtendShotDuration?: (nextDurationSec: number) => void;
   onRefineObjectByPrompt: (actor: Actor) => Promise<void>;
   onAttachGlbFile: (actorId: string, file: File) => Promise<void>;
   onSocketActorToBone: (actorId: string, targetActorId: string, bone: HumanoidBone) => void;
@@ -157,6 +159,8 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   onUpdateActorPositionAtTime,
   onApplyReadyMadeMotion,
   onDirectCustomAction,
+  onResetActorMotion,
+  onExtendShotDuration,
   onRefineObjectByPrompt,
   onAttachGlbFile,
   onSocketActorToBone,
@@ -170,6 +174,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const [activeSubTab, setActiveSubTab] = useState<CharacterCardSubTab>('motion');
   const [showGlbResources, setShowGlbResources] = useState<boolean>(false);
   const [showRigLandmarksDrawer, setShowRigLandmarksDrawer] = useState<boolean>(false);
+  const [lastDirectedSignature, setLastDirectedSignature] = useState<string | null>(null);
 
   const kind = actor.kind || 'human';
   const shotDur = shotDurationSeconds || 4;
@@ -185,6 +190,11 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const cueDuration = Number((safeEnd - safeStart).toFixed(1));
   const kfs = actor.trajectory.keyframes || [];
   const lastKfTime = kfs.length > 0 ? kfs[kfs.length - 1].time : 0;
+  const currentActionText = (actor.actionDescription || 'walk forward').trim();
+  const currentCycles = actor.motionCycles ?? 1;
+  const currentSignature = `${currentActionText}|${safeStart.toFixed(1)}|${safeEnd.toFixed(1)}|${currentCycles}`;
+  const isAlreadyDirected = kfs.length > 0 && lastDirectedSignature === currentSignature;
+  const hasExistingMotionWithNewPrompt = kfs.length > 0 && !isAlreadyDirected;
 
   const rawCategory = detectObjectPoseCategory(actor);
   const objCategory =
@@ -1142,13 +1152,23 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                 <span className="flex items-center gap-1.5 text-[10.5px] font-semibold text-emerald-300">
                   <Sparkles className="h-3 w-3 text-emerald-400 shrink-0" />
                   <span>AI Motion Direction (Describe Movement)</span>
+                  {isAlreadyDirected && (
+                    <span
+                      data-testid="directed-active-badge"
+                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-200 border border-cyan-400/40 text-[9px] font-mono"
+                      title="Current prompt & timing window are already compiled into live motion keyframes. Edit prompt or click + Chain to add next movement."
+                    >
+                      <Check className="h-2.5 w-2.5 text-cyan-300" />
+                      <span>Directed</span>
+                    </span>
+                  )}
                 </span>
                 <span className="text-[9.5px] font-mono text-slate-400">
                   {safeStart.toFixed(1)}s → {safeEnd.toFixed(1)}s
                 </span>
               </div>
 
-              {/* Natural-Language Direction Prompt + Direct Button */}
+              {/* Natural-Language Direction Prompt + Direct & Chain Buttons */}
               <div className="flex items-center gap-1.5">
                 <div className="relative flex-1 min-w-0">
                   <input
@@ -1160,6 +1180,9 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                       if (e.key === 'Enter' && generatingActingId !== actor.id) {
                         e.preventDefault();
                         const actionText = (actor.actionDescription || 'walk forward').trim();
+                        setLastDirectedSignature(
+                          `${actionText}|${safeStart.toFixed(1)}|${safeEnd.toFixed(1)}|${actor.motionCycles ?? 1}`
+                        );
                         onDirectCustomAction(actor, actionText, safeStart, safeEnd, cueDuration, actor.motionCycles ?? 1);
                       }
                     }}
@@ -1181,15 +1204,32 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                   disabled={generatingActingId === actor.id}
                   onClick={() => {
                     const actionText = (actor.actionDescription || 'walk forward').trim();
+                    setLastDirectedSignature(
+                      `${actionText}|${safeStart.toFixed(1)}|${safeEnd.toFixed(1)}|${actor.motionCycles ?? 1}`
+                    );
                     onDirectCustomAction(actor, actionText, safeStart, safeEnd, cueDuration, actor.motionCycles ?? 1);
                   }}
-                  className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-[11px] font-semibold shadow-sm border border-emerald-400/40 shrink-0 cursor-pointer"
-                  title={`Compile action into stage trajectory & pose keyframes (${safeStart.toFixed(1)}s → ${safeEnd.toFixed(1)}s)`}
+                  className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg disabled:opacity-50 text-white text-[11px] font-semibold shadow-sm border shrink-0 cursor-pointer transition-colors ${
+                    isAlreadyDirected
+                      ? 'bg-cyan-700/80 hover:bg-cyan-600 border-cyan-400/50'
+                      : 'bg-emerald-600 hover:bg-emerald-500 border-emerald-400/40'
+                  }`}
+                  title={
+                    isAlreadyDirected
+                      ? `Current prompt already compiled (${safeStart.toFixed(1)}s → ${safeEnd.toFixed(1)}s) — Click to replay or edit prompt to direct a new action`
+                      : `Compile action into stage trajectory & pose keyframes (${safeStart.toFixed(1)}s → ${safeEnd.toFixed(1)}s)`
+                  }
                 >
                   {generatingActingId === actor.id ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       <span>Directing...</span>
+                    </>
+                  ) : isAlreadyDirected ? (
+                    <>
+                      <RotateCcw className="h-3 w-3 text-cyan-200" />
+                      <span>Direct</span>
+                      <span className="text-[9.5px] font-mono text-cyan-200">(Replay)</span>
                     </>
                   ) : (
                     <>
@@ -1199,9 +1239,42 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                     </>
                   )}
                 </button>
+
+                {hasExistingMotionWithNewPrompt && (
+                  <button
+                    type="button"
+                    disabled={generatingActingId === actor.id}
+                    onClick={() => {
+                      const actionText = (actor.actionDescription || 'walk forward').trim();
+                      const chainStart = Number(lastKfTime.toFixed(1));
+                      const neededEnd =
+                        chainStart >= shotDur - 0.5 ? Math.min(15, Number((chainStart + 3.0).toFixed(1))) : shotDur;
+                      if (neededEnd > shotDur && onExtendShotDuration) {
+                        onExtendShotDuration(neededEnd);
+                      }
+                      const chainDur = Math.max(0.5, Number((neededEnd - chainStart).toFixed(1)));
+                      onUpdateMotionWindow(actor.id, { start: chainStart, end: neededEnd });
+                      setLastDirectedSignature(
+                        `${actionText}|${chainStart.toFixed(1)}|${neededEnd.toFixed(1)}|${actor.motionCycles ?? 1}`
+                      );
+                      onDirectCustomAction(
+                        actor,
+                        actionText,
+                        chainStart,
+                        neededEnd,
+                        chainDur,
+                        actor.motionCycles ?? 1
+                      );
+                    }}
+                    className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-600/80 hover:bg-indigo-500 disabled:opacity-50 text-white text-[10.5px] font-semibold shadow-sm border border-indigo-400/50 shrink-0 cursor-pointer transition-colors"
+                    title={`Append "${currentActionText}" starting from ${lastKfTime.toFixed(1)}s where the previous movement ended`}
+                  >
+                    <span>+ Chain</span>
+                  </button>
+                )}
               </div>
 
-              {/* Active Cue Status, Chaining & Clear */}
+              {/* Active Cue Status, Chaining & Start Fresh / Clear */}
               <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-white/[0.06] font-mono text-[10px]">
                 <span
                   className="flex items-center gap-1.5 text-slate-400 truncate"
@@ -1217,37 +1290,55 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                 </span>
 
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {kfs.length > 0 && lastKfTime < shotDur - 0.5 && (
+                  {kfs.length > 0 && (
                     <button
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        const nextStart = Number(lastKfTime.toFixed(1));
+                        const nextEnd =
+                          nextStart >= shotDur - 0.5 ? Math.min(15, Number((nextStart + 3.0).toFixed(1))) : shotDur;
+                        if (nextEnd > shotDur && onExtendShotDuration) {
+                          onExtendShotDuration(nextEnd);
+                        }
                         onUpdateMotionWindow(actor.id, {
-                          start: Number(lastKfTime.toFixed(1)),
-                          end: shotDur,
-                        })
-                      }
+                          start: nextStart,
+                          end: nextEnd,
+                        });
+                        promptInputRef.current?.focus();
+                        promptInputRef.current?.select();
+                      }}
                       className="px-2 py-0.5 rounded-md bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 font-semibold"
-                      title="Chain next action starting where the previous cue finished"
+                      title="Set timing window to continue where the previous cue finished (auto-extends shot duration if at end)"
                     >
-                      + Next ({lastKfTime.toFixed(1)}s→{shotDur}s)
+                      + Next ({lastKfTime.toFixed(1)}s→
+                      {lastKfTime >= shotDur - 0.5 ? Math.min(15, Number((lastKfTime + 3.0).toFixed(1))) : shotDur}s)
                     </button>
                   )}
 
                   <button
                     type="button"
-                    onClick={() =>
+                    onClick={() => {
+                      setLastDirectedSignature(null);
+                      onUpdateMotionWindow(actor.id, { start: 0, end: shotDur });
+                      if (onResetActorMotion) {
+                        onResetActorMotion(actor.id);
+                      }
                       onUpdateActor(actor.id, {
                         gait: 'idle',
                         motionClip: undefined,
+                        motionCycles: 1,
+                        posePreset: 'neutral-stand',
+                        pose: undefined,
+                        ikTargets: undefined,
                         trajectory: {
                           ...actor.trajectory,
                           endPosition: { ...actor.trajectory.startPosition },
                           keyframes: [],
                         },
-                      })
-                    }
+                      });
+                    }}
                     className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-500/35 font-medium transition-colors"
-                    title="Clear all motion keyframes and hold starting position"
+                    title="Cancel all motion completely, rewind to 0.0s, and start fresh from initial position"
                   >
                     <Trash2 className="h-2.5 w-2.5" />
                     <span>Clear</span>

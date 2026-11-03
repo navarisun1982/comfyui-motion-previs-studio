@@ -348,5 +348,84 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     expect(getByText('Meshy AI')).toBeTruthy();
     expect(getByText('gltf.report (by Don McCurdy)')).toBeTruthy();
   });
+
+  it('supports Option 1 (Smart Directed/Replay state), Option 2 (+ Chain cumulative motion & auto duration extension), and Full Reset/Clear to start fresh', () => {
+    const onResetActorMotion = vi.fn();
+    const onExtendShotDuration = vi.fn();
+    const props = createProps({
+      shotDurationSeconds: 2.0,
+      motionWindow: { start: 0, end: 2.0 },
+      onResetActorMotion,
+      onExtendShotDuration,
+    });
+
+    const { getByText, queryByTestId, rerender } = render(<CharacterControlCard {...props} />);
+
+    // Initially, before clicking Direct in this session, + Chain is visible because kfs.length > 0
+    expect(queryByTestId('directed-active-badge')).toBeNull();
+    expect(getByText('+ Chain')).toBeTruthy();
+
+    // 1. Click Direct -> marks current prompt & window as "Directed" (Option 1)
+    fireEvent.click(getByText('Direct'));
+    expect(props.onDirectCustomAction).toHaveBeenCalledWith(
+      mockActor,
+      'running fast from 25 to 8',
+      0,
+      2.0,
+      2.0,
+      1
+    );
+    expect(queryByTestId('directed-active-badge')).toBeTruthy();
+    expect(getByText('(Replay)')).toBeTruthy();
+
+    // 2. User edits prompt -> "Directed" badge clears and "+ Chain" appears for cumulative chaining (Option 2)
+    const updatedActor: Actor = {
+      ...mockActor,
+      actionDescription: 'sit down',
+    };
+    rerender(
+      <CharacterControlCard
+        {...props}
+        actor={updatedActor}
+      />
+    );
+    expect(queryByTestId('directed-active-badge')).toBeNull();
+    const chainBtn = getByText('+ Chain');
+    expect(chainBtn).toBeTruthy();
+
+    // Since lastKfTime is 2.0s and shotDurationSeconds is 2.0s, clicking + Chain auto-extends shot duration to 5.0s and chains from 2.0s -> 5.0s!
+    fireEvent.click(chainBtn);
+    expect(onExtendShotDuration).toHaveBeenCalledWith(5.0);
+    expect(props.onUpdateMotionWindow).toHaveBeenCalledWith('actor-test-1', { start: 2.0, end: 5.0 });
+    expect(props.onDirectCustomAction).toHaveBeenCalledWith(
+      updatedActor,
+      'sit down',
+      2.0,
+      5.0,
+      3.0,
+      1
+    );
+
+    // 3. Full Reset / Clear option cancels all motion, resets window to 0 -> shotDur, and invokes resetActorMotion in useShotStore
+    fireEvent.click(getByText('Clear'));
+    expect(onResetActorMotion).toHaveBeenCalledWith('actor-test-1');
+    expect(props.onUpdateMotionWindow).toHaveBeenCalledWith('actor-test-1', { start: 0, end: 2.0 });
+
+    // Also verify useShotStore.getState().resetActorMotion directly clears keyframes, resets pose/gait, and rewinds currentTime to 0
+    const store = useShotStore.getState();
+    const firstActorId = store.shot.actors[0].id;
+    store.applyDirectorialMotion(firstActorId, 'walk to right', { startTimeSec: 0, endTimeSec: 4 });
+    expect((useShotStore.getState().shot.actors[0].trajectory.keyframes?.length || 0)).toBeGreaterThan(0);
+
+    store.resetActorMotion(firstActorId);
+    const resetActor = useShotStore.getState().shot.actors[0];
+    expect(resetActor.trajectory.keyframes).toEqual([]);
+    expect(resetActor.motionClip).toBeUndefined();
+    expect(resetActor.gait).toBe('idle');
+    expect(resetActor.posePreset).toBe('neutral-stand');
+    expect(resetActor.trajectory.endPosition).toEqual(resetActor.trajectory.startPosition);
+    expect(useShotStore.getState().currentTime).toBe(0);
+    expect(useShotStore.getState().isPlaying).toBe(false);
+  });
 });
 
