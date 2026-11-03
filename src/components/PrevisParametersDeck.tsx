@@ -178,6 +178,9 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
     applyDirectorialMotion,
     applyReadyMadeMotion,
     resetActorMotion,
+    moveActorKeyframeTime,
+    scaleActorCuesInRange,
+    applyActorMotionCurve,
     selectedActorId,
     setSelectedActorId,
     previsVideoUrl,
@@ -1488,6 +1491,21 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                         }
                         onResetActorMotion={(id) => resetActorMotion(id)}
                         onExtendShotDuration={(nextDur) => updateDuration(nextDur)}
+                        onMoveActorCueTime={(id, cueId, nextTime) => moveActorKeyframeTime(id, cueId, nextTime)}
+                        onScaleActorCuesInRange={(id, oldStart, oldEnd, newStart, newEnd) =>
+                          scaleActorCuesInRange(id, oldStart, oldEnd, newStart, newEnd)
+                        }
+                        onApplyActorMotionCurve={(id, curve, startSec, endSec) =>
+                          applyActorMotionCurve(id, curve, startSec, endSec)
+                        }
+                        onSeekTime={(t) => {
+                          useShotStore.setState({ currentTime: t, isPlaying: false });
+                          window.dispatchEvent(
+                            new CustomEvent('cmpvs:transport-play', {
+                              detail: { time: t, play: false },
+                            })
+                          );
+                        }}
                         onDirectCustomAction={async (act, actionText, safeStart, safeEnd, cueDuration, overrideCycles) => {
                           const effectiveCycles = Math.max(1, Math.min(20, Math.round(overrideCycles ?? act.motionCycles ?? 1)));
                           applyDirectorialMotion(act.id, actionText, {

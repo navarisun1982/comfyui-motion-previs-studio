@@ -119,6 +119,15 @@ export interface CharacterControlCardProps {
   ) => Promise<void>;
   onResetActorMotion?: (actorId: string) => void;
   onExtendShotDuration?: (nextDurationSec: number) => void;
+  onMoveActorCueTime?: (actorId: string, cueId: string, newTime: number) => void;
+  onScaleActorCuesInRange?: (actorId: string, oldStart: number, oldEnd: number, newStart: number, newEnd: number) => void;
+  onApplyActorMotionCurve?: (
+    actorId: string,
+    curve: 'linear' | 'ease-in-out' | 'fast-start' | 'slow-start',
+    startTimeSec?: number,
+    endTimeSec?: number
+  ) => void;
+  onSeekTime?: (time: number) => void;
   onRefineObjectByPrompt: (actor: Actor) => Promise<void>;
   onAttachGlbFile: (actorId: string, file: File) => Promise<void>;
   onSocketActorToBone: (actorId: string, targetActorId: string, bone: HumanoidBone) => void;
@@ -161,6 +170,10 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   onDirectCustomAction,
   onResetActorMotion,
   onExtendShotDuration,
+  onMoveActorCueTime,
+  onScaleActorCuesInRange,
+  onApplyActorMotionCurve,
+  onSeekTime,
   onRefineObjectByPrompt,
   onAttachGlbFile,
   onSocketActorToBone,
@@ -171,10 +184,19 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const promptInputRef = useRef<HTMLInputElement | null>(null);
   const lookPromptInputRef = useRef<HTMLInputElement | null>(null);
+  const cueRibbonRef = useRef<HTMLDivElement | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<CharacterCardSubTab>('motion');
   const [showGlbResources, setShowGlbResources] = useState<boolean>(false);
   const [showRigLandmarksDrawer, setShowRigLandmarksDrawer] = useState<boolean>(false);
   const [lastDirectedSignature, setLastDirectedSignature] = useState<string | null>(null);
+  const [draggingCueId, setDraggingCueId] = useState<string | null>(null);
+  const [draggingSpanEdge, setDraggingSpanEdge] = useState<{
+    side: 'start' | 'end' | 'move';
+    initialStart: number;
+    initialEnd: number;
+    startClientX: number;
+  } | null>(null);
+  const [activePacingCurve, setActivePacingCurve] = useState<'linear' | 'ease-in-out' | 'fast-start' | 'slow-start'>('linear');
 
   const kind = actor.kind || 'human';
   const shotDur = shotDurationSeconds || 4;
@@ -1345,6 +1367,250 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                   </button>
                 </div>
               </div>
+
+              {/* ================= INTERACTIVE DRAG & DROP CUE RIBBON & PACING SHAPER ================= */}
+              {kfs.length > 0 && (() => {
+                const actorHex = actor.color || '#10b981';
+                const cueSpanStart = kfs[0].time;
+                const cueSpanEnd = kfs[kfs.length - 1].time;
+                const cueSpanDur = Math.max(0.1, cueSpanEnd - cueSpanStart);
+                const startPct = Math.max(0, Math.min(100, (cueSpanStart / shotDur) * 100));
+                const endPct = Math.max(startPct + 2, Math.min(100, (cueSpanEnd / shotDur) * 100));
+
+                return (
+                  <div
+                    data-testid={`actor-cue-ribbon-${actor.id}`}
+                    className="rounded-lg bg-[#090d16] border border-white/[0.08] p-2 space-y-1.5 select-none"
+                  >
+                    {/* Header: Subject Identity Badge + Speed Span + Motion Pacing Curve Buttons */}
+                    <div className="flex items-center justify-between gap-1.5 flex-wrap text-[9.5px] font-mono">
+                      <span className="inline-flex items-center gap-1.5 font-semibold" style={{ color: actorHex }}>
+                        <span
+                          className="h-2 w-2 rounded-full border border-white/40"
+                          style={{ backgroundColor: actorHex }}
+                        />
+                        <span>
+                          {actor.name.slice(0, 12)} Cues ({cueSpanStart.toFixed(1)}s–{cueSpanEnd.toFixed(1)}s • {cueSpanDur.toFixed(1)}s)
+                        </span>
+                      </span>
+
+                      <div className="flex items-center gap-1">
+                        {(
+                          [
+                            { id: 'linear' as const, label: 'Linear', tip: 'Constant steady speed across cues' },
+                            { id: 'ease-in-out' as const, label: 'Smooth', tip: 'Smooth cinematic Ease-In-Out acceleration' },
+                            { id: 'fast-start' as const, label: 'Burst ⚡', tip: 'Explosive fast start, gradual slow finish' },
+                            { id: 'slow-start' as const, label: 'Ramp ↗', tip: 'Slow stealth start, rapid finish' },
+                          ]
+                        ).map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => {
+                              setActivePacingCurve(c.id);
+                              if (onApplyActorMotionCurve) {
+                                onApplyActorMotionCurve(actor.id, c.id, cueSpanStart, cueSpanEnd);
+                              }
+                            }}
+                            className={`px-1.5 py-0.5 rounded text-[8.5px] font-semibold border transition-colors ${
+                              activePacingCurve === c.id
+                                ? 'bg-emerald-500/25 text-emerald-200 border-emerald-400/50'
+                                : 'bg-[#121723] text-slate-400 hover:text-white border-white/[0.08]'
+                            }`}
+                            title={c.tip}
+                          >
+                            {c.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Interactive Drag-and-Drop Cue Track */}
+                    <div
+                      ref={cueRibbonRef}
+                      onPointerMove={(e) => {
+                        if (!cueRibbonRef.current) return;
+                        const rect = cueRibbonRef.current.getBoundingClientRect();
+                        if (rect.width <= 0) return;
+                        if (draggingCueId) {
+                          const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                          const nextTime = Number((pct * shotDur).toFixed(2));
+                          onMoveActorCueTime?.(actor.id, draggingCueId, nextTime);
+                          onSeekTime?.(nextTime);
+                        } else if (draggingSpanEdge) {
+                          const deltaSec = ((e.clientX - draggingSpanEdge.startClientX) / rect.width) * shotDur;
+                          if (draggingSpanEdge.side === 'start') {
+                            const nextStart = Math.max(
+                              0,
+                              Math.min(draggingSpanEdge.initialEnd - 0.3, draggingSpanEdge.initialStart + deltaSec)
+                            );
+                            onScaleActorCuesInRange?.(
+                              actor.id,
+                              cueSpanStart,
+                              cueSpanEnd,
+                              Number(nextStart.toFixed(2)),
+                              cueSpanEnd
+                            );
+                            onUpdateMotionWindow(actor.id, {
+                              start: Number(nextStart.toFixed(1)),
+                              end: Number(cueSpanEnd.toFixed(1)),
+                            });
+                          } else if (draggingSpanEdge.side === 'end') {
+                            const nextEnd = Math.max(
+                              draggingSpanEdge.initialStart + 0.3,
+                              Math.min(shotDur, draggingSpanEdge.initialEnd + deltaSec)
+                            );
+                            onScaleActorCuesInRange?.(
+                              actor.id,
+                              cueSpanStart,
+                              cueSpanEnd,
+                              cueSpanStart,
+                              Number(nextEnd.toFixed(2))
+                            );
+                            onUpdateMotionWindow(actor.id, {
+                              start: Number(cueSpanStart.toFixed(1)),
+                              end: Number(nextEnd.toFixed(1)),
+                            });
+                          } else if (draggingSpanEdge.side === 'move') {
+                            const spanLen = draggingSpanEdge.initialEnd - draggingSpanEdge.initialStart;
+                            const nextStart = Math.max(
+                              0,
+                              Math.min(shotDur - spanLen, draggingSpanEdge.initialStart + deltaSec)
+                            );
+                            const nextEnd = Math.min(shotDur, nextStart + spanLen);
+                            onScaleActorCuesInRange?.(
+                              actor.id,
+                              cueSpanStart,
+                              cueSpanEnd,
+                              Number(nextStart.toFixed(2)),
+                              Number(nextEnd.toFixed(2))
+                            );
+                            onUpdateMotionWindow(actor.id, {
+                              start: Number(nextStart.toFixed(1)),
+                              end: Number(nextEnd.toFixed(1)),
+                            });
+                          }
+                        }
+                      }}
+                      onPointerUp={(e) => {
+                        if (draggingCueId || draggingSpanEdge) {
+                          setDraggingCueId(null);
+                          setDraggingSpanEdge(null);
+                          try {
+                            cueRibbonRef.current?.releasePointerCapture(e.pointerId);
+                          } catch {}
+                        }
+                      }}
+                      onPointerCancel={() => {
+                        setDraggingCueId(null);
+                        setDraggingSpanEdge(null);
+                      }}
+                      className="relative h-7 w-full rounded-md bg-[#111726] border border-white/[0.1] overflow-hidden touch-none"
+                      title="Drag cue nodes to retime individual moments, or drag the colored bar edges to speed up / slow down the entire movement"
+                    >
+                      {/* Span Bar (Drag body to shift window, drag left/right handles to stretch/compress speed) */}
+                      <div
+                        data-testid={`actor-cue-span-bar-${actor.id}`}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          cueRibbonRef.current?.setPointerCapture(e.pointerId);
+                          setDraggingSpanEdge({
+                            side: 'move',
+                            initialStart: cueSpanStart,
+                            initialEnd: cueSpanEnd,
+                            startClientX: e.clientX,
+                          });
+                        }}
+                        className="absolute top-1 bottom-1 rounded flex items-center justify-between cursor-grab active:cursor-grabbing"
+                        style={{
+                          left: `${startPct}%`,
+                          width: `${Math.max(3, endPct - startPct)}%`,
+                          backgroundColor: `${actorHex}28`,
+                          border: `1px solid ${actorHex}90`,
+                        }}
+                      >
+                        {/* Left Speed Stretch Handle */}
+                        <div
+                          data-testid={`actor-cue-stretch-start-${actor.id}`}
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            cueRibbonRef.current?.setPointerCapture(e.pointerId);
+                            setDraggingSpanEdge({
+                              side: 'start',
+                              initialStart: cueSpanStart,
+                              initialEnd: cueSpanEnd,
+                              startClientX: e.clientX,
+                            });
+                          }}
+                          className="h-full w-2 cursor-ew-resize flex items-center justify-center hover:bg-white/30 rounded-l"
+                          title="Drag left/right to change movement start time & speed"
+                        >
+                          <span className="h-2.5 w-0.5 rounded bg-white/80" />
+                        </div>
+
+                        <span className="text-[8.5px] font-mono text-white/90 truncate px-1 pointer-events-none">
+                          ⇄ Drag to shift / edges for speed
+                        </span>
+
+                        {/* Right Speed Stretch Handle */}
+                        <div
+                          data-testid={`actor-cue-stretch-end-${actor.id}`}
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            cueRibbonRef.current?.setPointerCapture(e.pointerId);
+                            setDraggingSpanEdge({
+                              side: 'end',
+                              initialStart: cueSpanStart,
+                              initialEnd: cueSpanEnd,
+                              startClientX: e.clientX,
+                            });
+                          }}
+                          className="h-full w-2 cursor-ew-resize flex items-center justify-center hover:bg-white/30 rounded-r"
+                          title="Drag left/right to compress (faster) or stretch (slower) movement"
+                        >
+                          <span className="h-2.5 w-0.5 rounded bg-white/80" />
+                        </div>
+                      </div>
+
+                      {/* Draggable Individual Cue Nodes */}
+                      {kfs.map((kf, idx) => {
+                        const kfPct = Math.max(1, Math.min(99, (kf.time / shotDur) * 100));
+                        const isAirborne = (kf.position.z ?? 0) > 2;
+                        const isLocomotion = kf.gait === 'walk' || kf.gait === 'run' || kf.gait === 'sneak';
+                        const isEndpoint = idx === 0 || idx === kfs.length - 1 || kfs.length <= 8 || idx % 3 === 0;
+                        if (!isEndpoint && draggingCueId !== kf.id) return null;
+
+                        return (
+                          <div
+                            key={kf.id}
+                            data-testid={`draggable-cue-node-${kf.id}`}
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              cueRibbonRef.current?.setPointerCapture(e.pointerId);
+                              setDraggingCueId(kf.id);
+                              onSeekTime?.(kf.time);
+                            }}
+                            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-20 cursor-ew-resize group"
+                            style={{ left: `${kfPct}%` }}
+                            title={`Drag Cue @ ${kf.time.toFixed(2)}s (${kf.motionClip || kf.posePreset || kf.gait || 'pose'})`}
+                          >
+                            <div
+                              className={`h-3 w-3 border border-white shadow transition-transform group-hover:scale-125 ${
+                                isAirborne
+                                  ? 'rounded-sm rotate-12'
+                                  : isLocomotion
+                                  ? 'rotate-45'
+                                  : 'rounded-full'
+                              }`}
+                              style={{ backgroundColor: actorHex }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* ================= E. APPEARANCE, COLOR & RIG SLIDERS ================= */}

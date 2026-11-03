@@ -80,6 +80,7 @@ interface ShotState {
   setCameraTargetLookAt: (targetLookAt: Point2D) => void;
   focusCameraOnSubject: (actorId?: string) => void;
   updateCameraPositionAtTime: (time: number, position: Point3D, duration: number, forceMode?: 'base' | 'keyframe') => void;
+  moveCameraKeyframeTime: (keyframeId: string, newTime: number) => void;
   removeCameraKeyframe: (keyframeId: string) => void;
   setCameraColor: (color: string) => void;
   updateCameraOptions: (updates: Partial<ShotSpec['camera']>) => void;
@@ -114,6 +115,9 @@ interface ShotState {
   clearAllActors: () => void;
   setActors: (actors: Actor[]) => void;
   updateActorPositionAtTime: (actorId: string, time: number, position: Point2D, duration: number, forceMode?: 'base' | 'keyframe') => void;
+  moveActorKeyframeTime: (actorId: string, keyframeId: string, newTime: number) => void;
+  scaleActorCuesInRange: (actorId: string, oldStart: number, oldEnd: number, newStart: number, newEnd: number) => void;
+  applyActorMotionCurve: (actorId: string, curve: 'linear' | 'ease-in-out' | 'fast-start' | 'slow-start', startTimeSec?: number, endTimeSec?: number) => void;
   removeActorKeyframe: (actorId: string, keyframeId: string) => void;
   recordActorPoseAtTime: (actorId: string, time: number, pose?: ActorPose, posePreset?: string, gait?: ActorGait, duration?: number) => void;
   updateActorRotationAtTime: (actorId: string, time: number, rotation: Point3D, duration?: number) => void;
@@ -1102,6 +1106,26 @@ export const useShotStore = create<ShotState>((set, get) => {
       commitShot(updated);
     },
 
+    moveCameraKeyframeTime: (keyframeId, newTime) => {
+      const { shot } = get();
+      const safeDur = shot.durationSeconds || 4.0;
+      const clampedTime = Number(Math.max(0, Math.min(safeDur, newTime)).toFixed(2));
+      const updatedKfs = (shot.camera.movement.keyframes || [])
+        .map((k) => (k.id === keyframeId ? { ...k, time: clampedTime } : k))
+        .sort((a, b) => a.time - b.time);
+      const updated: ShotSpec = {
+        ...shot,
+        camera: {
+          ...shot.camera,
+          movement: {
+            ...shot.camera.movement,
+            keyframes: updatedKfs,
+          },
+        },
+      };
+      commitShot(updated, { currentTime: clampedTime });
+    },
+
     removeCameraKeyframe: (keyframeId) => {
       const { shot } = get();
       const updated: ShotSpec = {
@@ -1456,6 +1480,119 @@ export const useShotStore = create<ShotState>((set, get) => {
       if (!isGestureActive) {
         logger.action(`Updated "${target.name}" position at ${time.toFixed(1)}s`, position);
       }
+      const updated: ShotSpec = { ...shot, actors: updatedActors };
+      commitShot(updated);
+    },
+
+    moveActorKeyframeTime: (actorId, keyframeId, newTime) => {
+      const { shot } = get();
+      const target = shot.actors.find((a) => a.id === actorId);
+      if (!target) return;
+      const safeDur = shot.durationSeconds || 4.0;
+      const clampedTime = Number(Math.max(0, Math.min(safeDur, newTime)).toFixed(2));
+      const updatedKfs = (target.trajectory.keyframes || [])
+        .map((k) => (k.id === keyframeId ? { ...k, time: clampedTime } : k))
+        .sort((a, b) => a.time - b.time);
+
+      const updatedActors = shot.actors.map((a) =>
+        a.id === actorId
+          ? {
+              ...a,
+              trajectory: {
+                ...a.trajectory,
+                keyframes: updatedKfs,
+              },
+            }
+          : a
+      );
+      const updated: ShotSpec = { ...shot, actors: updatedActors };
+      commitShot(updated, { currentTime: clampedTime });
+    },
+
+    scaleActorCuesInRange: (actorId, oldStart, oldEnd, newStart, newEnd) => {
+      const { shot } = get();
+      const target = shot.actors.find((a) => a.id === actorId);
+      if (!target) return;
+      const safeDur = shot.durationSeconds || 4.0;
+      const clampedStart = Math.max(0, Math.min(safeDur - 0.2, newStart));
+      const clampedEnd = Math.max(clampedStart + 0.2, Math.min(safeDur, newEnd));
+      const oldSpan = Math.max(0.05, oldEnd - oldStart);
+      const newSpan = clampedEnd - clampedStart;
+
+      const updatedKfs = (target.trajectory.keyframes || [])
+        .map((k) => {
+          if (k.time >= oldStart - 0.08 && k.time <= oldEnd + 0.08) {
+            const norm = Math.max(0, Math.min(1, (k.time - oldStart) / oldSpan));
+            const mappedTime = Number(Math.max(0, Math.min(safeDur, clampedStart + norm * newSpan)).toFixed(2));
+            return { ...k, time: mappedTime };
+          }
+          return k;
+        })
+        .sort((a, b) => a.time - b.time);
+
+      const updatedActors = shot.actors.map((a) =>
+        a.id === actorId
+          ? {
+              ...a,
+              trajectory: {
+                ...a.trajectory,
+                startTimeSeconds: clampedStart <= 0.08 ? 0 : clampedStart,
+                keyframes: updatedKfs,
+              },
+            }
+          : a
+      );
+      const updated: ShotSpec = { ...shot, actors: updatedActors };
+      commitShot(updated);
+    },
+
+    applyActorMotionCurve: (actorId, curve, startTimeSec, endTimeSec) => {
+      const { shot } = get();
+      const target = shot.actors.find((a) => a.id === actorId);
+      if (!target) return;
+      const kfs = target.trajectory.keyframes || [];
+      if (kfs.length < 2) return;
+
+      const winStart = startTimeSec ?? kfs[0].time;
+      const winEnd = endTimeSec ?? kfs[kfs.length - 1].time;
+      const span = Math.max(0.1, winEnd - winStart);
+
+      const inWindow = kfs.filter((k) => k.time >= winStart - 0.05 && k.time <= winEnd + 0.05);
+      if (inWindow.length < 2) return;
+
+      const count = inWindow.length;
+      const remappedIds = new Map<string, number>();
+      inWindow.forEach((kf, idx) => {
+        const u = idx / (count - 1); // uniform index progression 0..1
+        let easedU = u;
+        if (curve === 'ease-in-out') {
+          easedU = u * u * (3 - 2 * u);
+        } else if (curve === 'fast-start') {
+          // Fast start (cues bunched early, eases out at end)
+          easedU = Math.pow(u, 1.65);
+        } else if (curve === 'slow-start') {
+          // Slow start (gradual acceleration, fast finish)
+          easedU = 1 - Math.pow(1 - u, 1.65);
+        }
+        remappedIds.set(kf.id, Number((winStart + easedU * span).toFixed(2)));
+      });
+
+      const updatedKfs = kfs
+        .map((k) => (remappedIds.has(k.id) ? { ...k, time: remappedIds.get(k.id)! } : k))
+        .sort((a, b) => a.time - b.time);
+
+      const updatedActors = shot.actors.map((a) =>
+        a.id === actorId
+          ? {
+              ...a,
+              trajectory: {
+                ...a.trajectory,
+                keyframes: updatedKfs,
+              },
+            }
+          : a
+      );
+      logger.action(`Applied "${curve}" motion pacing curve to "${target.name}" cues`);
       const updated: ShotSpec = { ...shot, actors: updatedActors };
       commitShot(updated);
     },

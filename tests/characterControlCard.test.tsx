@@ -427,5 +427,61 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     expect(useShotStore.getState().currentTime).toBe(0);
     expect(useShotStore.getState().isPlaying).toBe(false);
   });
+
+  it('supports Cue Drag & Drop retiming, Cue Span speed stretching/shifting, and Motion Pacing Curves (Linear, Smooth, Burst, Ramp)', () => {
+    const onMoveActorCueTime = vi.fn();
+    const onScaleActorCuesInRange = vi.fn();
+    const onApplyActorMotionCurve = vi.fn();
+    const onSeekTime = vi.fn();
+
+    const props = createProps({
+      onMoveActorCueTime,
+      onScaleActorCuesInRange,
+      onApplyActorMotionCurve,
+      onSeekTime,
+    });
+
+    const { getByTestId, getByText } = render(<CharacterControlCard {...props} />);
+
+    // Verify the interactive cue ribbon and draggable cue nodes are rendered for the actor
+    expect(getByTestId('actor-cue-ribbon-actor-test-1')).toBeTruthy();
+    expect(getByTestId('actor-cue-span-bar-actor-test-1')).toBeTruthy();
+    expect(getByTestId('draggable-cue-node-kf-1')).toBeTruthy();
+    expect(getByTestId('draggable-cue-node-kf-2')).toBeTruthy();
+
+    // Verify Pacing Curve buttons trigger onApplyActorMotionCurve
+    fireEvent.click(getByText('Smooth'));
+    expect(onApplyActorMotionCurve).toHaveBeenCalledWith('actor-test-1', 'ease-in-out', 0, 2);
+
+    fireEvent.click(getByText('Burst ⚡'));
+    expect(onApplyActorMotionCurve).toHaveBeenCalledWith('actor-test-1', 'fast-start', 0, 2);
+
+    // Also verify useShotStore cue retiming, span scaling, and pacing curve math directly
+    const store = useShotStore.getState();
+    const actorId = store.shot.actors[0].id;
+    store.applyDirectorialMotion(actorId, 'walk to right', { startTimeSec: 0, endTimeSec: 4 });
+    const kfsBefore = useShotStore.getState().shot.actors[0].trajectory.keyframes!;
+    expect(kfsBefore.length).toBeGreaterThanOrEqual(4);
+    expect(kfsBefore[kfsBefore.length - 1].time).toBeCloseTo(4.0, 1);
+
+    // 1. Scale cues from [0..4s] down to [0..2s] (2x faster!)
+    store.scaleActorCuesInRange(actorId, 0, 4, 0, 2);
+    const kfsScaled = useShotStore.getState().shot.actors[0].trajectory.keyframes!;
+    expect(kfsScaled[0].time).toBeCloseTo(0, 1);
+    expect(kfsScaled[kfsScaled.length - 1].time).toBeCloseTo(2.0, 1);
+
+    // 2. Move a specific cue's time via moveActorKeyframeTime
+    const firstCueId = kfsScaled[0].id;
+    store.moveActorKeyframeTime(actorId, firstCueId, 0.45);
+    const kfsMoved = useShotStore.getState().shot.actors[0].trajectory.keyframes!;
+    expect(kfsMoved.some((k) => k.id === firstCueId && Math.abs(k.time - 0.45) < 0.02)).toBe(true);
+
+    // 3. Apply 'fast-start' (Burst) pacing curve and verify intermediate cues shift earlier
+    store.applyDirectorialMotion(actorId, 'walk to right', { startTimeSec: 0, endTimeSec: 4 });
+    const linearMidTime = useShotStore.getState().shot.actors[0].trajectory.keyframes![6].time;
+    store.applyActorMotionCurve(actorId, 'fast-start', 0, 4);
+    const burstMidTime = useShotStore.getState().shot.actors[0].trajectory.keyframes![6].time;
+    expect(burstMidTime).not.toBe(linearMidTime);
+  });
 });
 

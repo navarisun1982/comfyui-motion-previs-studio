@@ -48,6 +48,10 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     removeActor,
     updateActorPositionAtTime,
     updateCameraPositionAtTime,
+    moveActorKeyframeTime,
+    moveCameraKeyframeTime,
+    scaleActorCuesInRange,
+    applyActorMotionCurve,
     updateVfxReference,
     selectedActorId,
     setSelectedActorId,
@@ -122,6 +126,20 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const [isDraggingTrimLeft, setIsDraggingTrimLeft] = useState(false);
   const [isDraggingTrimRight, setIsDraggingTrimRight] = useState(false);
+  const [draggingTimelineCue, setDraggingTimelineCue] = useState<
+    | { kind: 'actor-cue'; actorId: string; cueId: string; origTime: number }
+    | { kind: 'camera-cue'; cueId: string; origTime: number }
+    | { kind: 'marker'; markerId: string; origTime: number }
+    | {
+        kind: 'actor-span';
+        actorId: string;
+        side: 'start' | 'end' | 'move';
+        initialStart: number;
+        initialEnd: number;
+        startClientX: number;
+      }
+    | null
+  >(null);
 
   const duration = shot.durationSeconds || 4;
   const timelineRef = useRef<HTMLDivElement | null>(null);
@@ -238,7 +256,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   );
 
   const handleTimelinePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).closest('[data-trim-handle]')) return;
+    if ((e.target as HTMLElement).closest('[data-trim-handle]') || (e.target as HTMLElement).closest('[data-cue-handle]')) return;
     e.preventDefault();
     timelineRef.current?.setPointerCapture(e.pointerId);
     setIsDraggingPlayhead(true);
@@ -246,6 +264,84 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   };
 
   const handleTimelinePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (draggingTimelineCue && timelineRef.current) {
+      e.preventDefault();
+      const rect = timelineRef.current.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const newTime = Number(Math.min(duration, Math.max(0, pct * duration)).toFixed(2));
+
+      if (draggingTimelineCue.kind === 'actor-cue') {
+        moveActorKeyframeTime(draggingTimelineCue.actorId, draggingTimelineCue.cueId, newTime);
+        setCurrentTime(newTime);
+      } else if (draggingTimelineCue.kind === 'camera-cue') {
+        moveCameraKeyframeTime(draggingTimelineCue.cueId, newTime);
+        setCurrentTime(newTime);
+      } else if (draggingTimelineCue.kind === 'marker') {
+        setMarkers((prev) =>
+          prev.map((m) =>
+            m.id === draggingTimelineCue.markerId
+              ? {
+                  ...m,
+                  time: newTime,
+                  label: m.label.replace(/@\s*[\d.]+s/, `@ ${newTime.toFixed(1)}s`),
+                }
+              : m
+          )
+        );
+        setCurrentTime(newTime);
+      } else if (draggingTimelineCue.kind === 'actor-span') {
+        const targetAct = shot.actors.find((a) => a.id === draggingTimelineCue.actorId);
+        const kfs = targetAct?.trajectory.keyframes || [];
+        if (kfs.length >= 2) {
+          const curStart = kfs[0].time;
+          const curEnd = kfs[kfs.length - 1].time;
+          const deltaSec = ((e.clientX - draggingTimelineCue.startClientX) / rect.width) * duration;
+          if (draggingTimelineCue.side === 'start') {
+            const nextStart = Math.max(
+              0,
+              Math.min(draggingTimelineCue.initialEnd - 0.3, draggingTimelineCue.initialStart + deltaSec)
+            );
+            scaleActorCuesInRange(
+              draggingTimelineCue.actorId,
+              curStart,
+              curEnd,
+              Number(nextStart.toFixed(2)),
+              curEnd
+            );
+            setCurrentTime(Number(nextStart.toFixed(2)));
+          } else if (draggingTimelineCue.side === 'end') {
+            const nextEnd = Math.max(
+              draggingTimelineCue.initialStart + 0.3,
+              Math.min(duration, draggingTimelineCue.initialEnd + deltaSec)
+            );
+            scaleActorCuesInRange(
+              draggingTimelineCue.actorId,
+              curStart,
+              curEnd,
+              curStart,
+              Number(nextEnd.toFixed(2))
+            );
+            setCurrentTime(Number(nextEnd.toFixed(2)));
+          } else if (draggingTimelineCue.side === 'move') {
+            const spanLen = draggingTimelineCue.initialEnd - draggingTimelineCue.initialStart;
+            const nextStart = Math.max(
+              0,
+              Math.min(duration - spanLen, draggingTimelineCue.initialStart + deltaSec)
+            );
+            const nextEnd = Math.min(duration, nextStart + spanLen);
+            scaleActorCuesInRange(
+              draggingTimelineCue.actorId,
+              curStart,
+              curEnd,
+              Number(nextStart.toFixed(2)),
+              Number(nextEnd.toFixed(2))
+            );
+          }
+        }
+      }
+      return;
+    }
     if (isDraggingPlayhead) {
       e.preventDefault();
       scrubToClientX(e.clientX);
@@ -253,6 +349,12 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   };
 
   const handleTimelinePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (draggingTimelineCue) {
+      setDraggingTimelineCue(null);
+      try {
+        timelineRef.current?.releasePointerCapture(e.pointerId);
+      } catch {}
+    }
     if (isDraggingPlayhead) {
       setIsDraggingPlayhead(false);
       try {
@@ -854,7 +956,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
             </div>
           </div>
 
-          {/* Timeline User Cue Markers */}
+          {/* Timeline User Cue Markers (Draggable) */}
           {markers.map((m) => {
             const mPct = (m.time / duration) * 100;
             const liveActorColor =
@@ -867,14 +969,22 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
             return (
               <div
                 key={m.id}
+                data-cue-handle="true"
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  e.preventDefault();
+                  timelineRef.current?.setPointerCapture(e.pointerId);
                   if (m.actorId) setSelectedActorId(m.actorId);
                   setCurrentTime(m.time);
+                  setDraggingTimelineCue({
+                    kind: 'marker',
+                    markerId: m.id,
+                    origTime: m.time,
+                  });
                 }}
-                className="absolute top-1 z-30 flex flex-col items-center cursor-pointer group pointer-events-auto"
+                className="absolute top-1 z-30 flex flex-col items-center cursor-ew-resize group pointer-events-auto"
                 style={{ left: `${mPct}%`, transform: 'translateX(-50%)' }}
-                title={`${m.label} (${m.time.toFixed(1)}s)`}
+                title={`${m.label} (${m.time.toFixed(1)}s) — Drag left/right to retime`}
               >
                 <div
                   className="h-3 w-3 rotate-45 border border-white shadow-sm transition-transform group-hover:scale-125"
@@ -890,47 +1000,228 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
             );
           })}
 
-          {/* Trajectory Keyframes on Timeline Track */}
-          {shot.actors
-            .flatMap((a) =>
-              (a.trajectory.keyframes || []).map((kf) => ({
-                ...kf,
-                actorName: a.name,
-                actorId: a.id,
-                actorColor: a.color,
-              }))
-            )
-            .map((kf) => {
-              const kfPct = (kf.time / duration) * 100;
-              const isSelected = kf.actorId === selectedActorId;
-              const cueColor = kf.actorColor || (isSelected ? '#F0AE42' : '#18B8D8');
+          {/* Multi-Subject Distinct Cue Swimlanes (Color + Initials Badge + Shape-Coded Draggable Cues + Speed Stretch Bar) */}
+          {(() => {
+            const fallbackPalette = ['#eab308', '#06b6d4', '#ec4899', '#10b981', '#a855f7', '#f97316', '#3b82f6'];
+            const totalLanes = Math.max(1, shot.actors.length);
+
+            return shot.actors.map((act, laneIdx) => {
+              const kfs = act.trajectory.keyframes || [];
+              if (kfs.length === 0) return null;
+
+              const isSelected = act.id === selectedActorId;
+              const laneColor = act.color || fallbackPalette[laneIdx % fallbackPalette.length];
+              // Stagger vertical position per actor so 3+ characters never overlap on the same horizontal line!
+              const bottomOffsetPx =
+                totalLanes === 1
+                  ? 5
+                  : Math.round(3 + (laneIdx / Math.max(1, totalLanes - 1)) * 22);
+
+              const spanStart = kfs[0].time;
+              const spanEnd = kfs[kfs.length - 1].time;
+              const startPct = Math.max(0, Math.min(100, (spanStart / duration) * 100));
+              const endPct = Math.max(startPct + 1.5, Math.min(100, (spanEnd / duration) * 100));
+              const shortTag =
+                act.name
+                  .replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '')
+                  .slice(0, 2)
+                  .toUpperCase() || `C${laneIdx + 1}`;
+
               return (
-                <div
-                  key={kf.id}
-                  onPointerDown={(e) => {
-                    e.stopPropagation();
-                    setSelectedActorId(kf.actorId);
-                    setCurrentTime(kf.time);
-                  }}
-                  className="absolute bottom-1 z-30 flex flex-col items-center cursor-pointer group pointer-events-auto"
-                  style={{ left: `${kfPct}%`, transform: 'translateX(-50%)' }}
-                  title={`${kf.actorName} Keyframe @ ${kf.time.toFixed(1)}s (X:${kf.position.x}, Y:${kf.position.y})`}
-                >
-                  <div
-                    className={`h-2.5 w-2.5 rotate-45 border shadow-sm transition-transform group-hover:scale-150 ${
-                      isSelected ? 'border-white scale-125' : 'border-white/70'
-                    }`}
-                    style={{ backgroundColor: cueColor }}
-                  />
-                  <span
-                    className="opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[#090D16]/95 px-1 font-mono text-[8px] -mt-6 whitespace-nowrap pointer-events-none border shadow-lg"
-                    style={{ color: cueColor, borderColor: cueColor }}
-                  >
-                    {kf.actorName} @ {kf.time.toFixed(1)}s
-                  </span>
-                </div>
+                <React.Fragment key={`swimlane-${act.id}`}>
+                  {/* Subject Cue Span Bar (Drag body to shift cue timing, drag left/right edges to speed up or slow down!) */}
+                  {kfs.length >= 2 && (
+                    <div
+                      data-cue-handle="true"
+                      data-testid={`timeline-cue-span-${act.id}`}
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        timelineRef.current?.setPointerCapture(e.pointerId);
+                        setSelectedActorId(act.id);
+                        setDraggingTimelineCue({
+                          kind: 'actor-span',
+                          actorId: act.id,
+                          side: 'move',
+                          initialStart: spanStart,
+                          initialEnd: spanEnd,
+                          startClientX: e.clientX,
+                        });
+                      }}
+                      className={`absolute z-20 h-3 rounded-full flex items-center justify-between cursor-grab active:cursor-grabbing pointer-events-auto transition-opacity ${
+                        isSelected ? 'opacity-100 ring-1 ring-white/70' : 'opacity-65 hover:opacity-95'
+                      }`}
+                      style={{
+                        bottom: `${bottomOffsetPx}px`,
+                        left: `${startPct}%`,
+                        width: `${Math.max(2, endPct - startPct)}%`,
+                        backgroundColor: `${laneColor}38`,
+                        border: `1px solid ${laneColor}`,
+                      }}
+                      title={`${act.name} Cues (${spanStart.toFixed(1)}s → ${spanEnd.toFixed(1)}s) — Drag bar to shift, or drag edges to change speed`}
+                    >
+                      {/* Left Speed Handle */}
+                      <div
+                        data-cue-handle="true"
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          timelineRef.current?.setPointerCapture(e.pointerId);
+                          setSelectedActorId(act.id);
+                          setDraggingTimelineCue({
+                            kind: 'actor-span',
+                            actorId: act.id,
+                            side: 'start',
+                            initialStart: spanStart,
+                            initialEnd: spanEnd,
+                            startClientX: e.clientX,
+                          });
+                        }}
+                        className="h-full w-2 cursor-ew-resize bg-white/30 hover:bg-white rounded-l-full shrink-0"
+                        title={`Drag to change ${act.name} start time & speed`}
+                      />
+
+                      {/* Subject Identity Pill Badge */}
+                      <span
+                        className="px-1 text-[7.5px] font-mono font-bold text-white truncate pointer-events-none drop-shadow"
+                        style={{ color: '#ffffff' }}
+                      >
+                        {shortTag} • {act.name.slice(0, 10)}
+                      </span>
+
+                      {/* Right Speed Handle */}
+                      <div
+                        data-cue-handle="true"
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          timelineRef.current?.setPointerCapture(e.pointerId);
+                          setSelectedActorId(act.id);
+                          setDraggingTimelineCue({
+                            kind: 'actor-span',
+                            actorId: act.id,
+                            side: 'end',
+                            initialStart: spanStart,
+                            initialEnd: spanEnd,
+                            startClientX: e.clientX,
+                          });
+                        }}
+                        className="h-full w-2 cursor-ew-resize bg-white/30 hover:bg-white rounded-r-full shrink-0"
+                        title={`Drag left/right to speed up or slow down ${act.name} cues`}
+                      />
+                    </div>
+                  )}
+
+                  {/* Individual Draggable Shape-Coded Cue Nodes */}
+                  {kfs.map((kf, kfIdx) => {
+                    // For dense procedural clips (e.g. 12-36 keyframes), show start, end, and key milestones so the lane stays clean & draggable
+                    const isMilestone =
+                      kfIdx === 0 ||
+                      kfIdx === kfs.length - 1 ||
+                      kfs.length <= 8 ||
+                      kfIdx % Math.max(2, Math.floor(kfs.length / 5)) === 0;
+                    const isBeingDragged =
+                      draggingTimelineCue?.kind === 'actor-cue' && draggingTimelineCue.cueId === kf.id;
+                    if (!isMilestone && !isBeingDragged) return null;
+
+                    const kfPct = Math.max(0.5, Math.min(99.5, (kf.time / duration) * 100));
+                    const isAirborne = (kf.position.z ?? 0) > 2;
+                    const isLocomotion = kf.gait === 'walk' || kf.gait === 'run' || kf.gait === 'sneak';
+                    const shapeClass = isAirborne
+                      ? 'rounded-[2px] rotate-12' // Jump / Airborne
+                      : isLocomotion
+                      ? 'rotate-45' // Locomotion Diamond ◆
+                      : 'rounded-full'; // Acting / Pose Circle ●
+
+                    return (
+                      <div
+                        key={kf.id}
+                        data-cue-handle="true"
+                        data-testid={`timeline-actor-cue-${act.id}-${kf.id}`}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          timelineRef.current?.setPointerCapture(e.pointerId);
+                          setSelectedActorId(act.id);
+                          setCurrentTime(kf.time);
+                          setDraggingTimelineCue({
+                            kind: 'actor-cue',
+                            actorId: act.id,
+                            cueId: kf.id,
+                            origTime: kf.time,
+                          });
+                        }}
+                        className={`absolute z-30 flex flex-col items-center cursor-ew-resize group pointer-events-auto transition-opacity ${
+                          isSelected ? 'opacity-100' : 'opacity-75 hover:opacity-100'
+                        }`}
+                        style={{
+                          bottom: `${bottomOffsetPx + 1}px`,
+                          left: `${kfPct}%`,
+                          transform: 'translateX(-50%)',
+                        }}
+                        title={`[${shortTag}] ${act.name} Cue @ ${kf.time.toFixed(2)}s (X:${Math.round(kf.position.x)}, Y:${Math.round(kf.position.y)}) — Drag left/right to retime`}
+                      >
+                        <div
+                          className={`h-2.5 w-2.5 border shadow-sm transition-transform group-hover:scale-150 ${shapeClass} ${
+                            isSelected ? 'border-white scale-125 ring-1 ring-black/60' : 'border-white/75'
+                          }`}
+                          style={{ backgroundColor: laneColor }}
+                        />
+                        <span
+                          className="opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[#090D16]/95 px-1.5 py-0.5 font-mono text-[8px] -mt-7 whitespace-nowrap pointer-events-none border shadow-lg z-40"
+                          style={{ color: laneColor, borderColor: laneColor }}
+                        >
+                          [{shortTag}] {act.name} @ {kf.time.toFixed(2)}s (⇄ Drag)
+                        </span>
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
               );
-            })}
+            });
+          })()}
+
+          {/* Camera Keyframe Cues on Timeline Track (Draggable) */}
+          {(shot.camera.movement.keyframes || []).map((ckf) => {
+            const kfPct = Math.max(0.5, Math.min(99.5, (ckf.time / duration) * 100));
+            const isCamSelected = selectedActorId === '__camera__';
+            const camColor = shot.camera.color || '#F0AE42';
+            return (
+              <div
+                key={ckf.id}
+                data-cue-handle="true"
+                data-testid={`timeline-camera-cue-${ckf.id}`}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  timelineRef.current?.setPointerCapture(e.pointerId);
+                  setSelectedActorId('__camera__');
+                  setCurrentTime(ckf.time);
+                  setDraggingTimelineCue({
+                    kind: 'camera-cue',
+                    cueId: ckf.id,
+                    origTime: ckf.time,
+                  });
+                }}
+                className="absolute top-1.5 z-30 flex flex-col items-center cursor-ew-resize group pointer-events-auto"
+                style={{ left: `${kfPct}%`, transform: 'translateX(-50%)' }}
+                title={`[CAM] Camera Cue @ ${ckf.time.toFixed(2)}s — Drag left/right to retime`}
+              >
+                <div
+                  className={`h-2.5 w-2.5 rotate-45 border shadow-sm transition-transform group-hover:scale-150 ${
+                    isCamSelected ? 'border-white scale-125' : 'border-white/75'
+                  }`}
+                  style={{ backgroundColor: camColor }}
+                />
+                <span
+                  className="opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[#090D16]/95 px-1 font-mono text-[8px] mt-1 whitespace-nowrap pointer-events-none border shadow-lg"
+                  style={{ color: camColor, borderColor: camColor }}
+                >
+                  [CAM] @ {ckf.time.toFixed(2)}s
+                </span>
+              </div>
+            );
+          })}
 
           {/* Active Cinema Scrubber Playhead */}
           <div
@@ -952,8 +1243,8 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
 
         {/* Collapsible Secondary Tool Drawers (Trim Range / Keyframe Cues) */}
         {activeTool === 'markers' && (
-          <div className="flex items-center justify-between bg-[#121A2A] border border-[#6658F5]/40 rounded-lg px-3 py-1.5 font-mono text-[10px]">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between bg-[#121A2A] border border-[#6658F5]/40 rounded-lg px-3 py-1.5 font-mono text-[10px] gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[#C4BEFF] font-bold">Keyframe Cues:</span>
               <div className="flex items-center gap-1.5 flex-wrap">
                 {markers.length === 0 && (
@@ -980,12 +1271,37 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                 ))}
               </div>
             </div>
-            <button
-              onClick={handleAddMarker}
-              className="rounded-lg bg-[#6658F5] hover:bg-[#7669FF] px-2.5 py-0.5 text-white font-bold transition-colors text-[10.5px]"
-            >
-              + Add Cue @ {currentTime.toFixed(1)}s
-            </button>
+            <div className="flex items-center gap-1.5">
+              {selectedActorId && selectedActorId !== '__camera__' && (
+                <div className="flex items-center gap-1 mr-1">
+                  <span className="text-[#98A5BC] text-[9px]">Pacing:</span>
+                  {(
+                    [
+                      { id: 'linear' as const, label: 'Linear' },
+                      { id: 'ease-in-out' as const, label: 'Smooth' },
+                      { id: 'fast-start' as const, label: 'Burst ⚡' },
+                      { id: 'slow-start' as const, label: 'Ramp ↗' },
+                    ]
+                  ).map((curve) => (
+                    <button
+                      key={curve.id}
+                      type="button"
+                      onClick={() => applyActorMotionCurve(selectedActorId, curve.id)}
+                      className="rounded bg-[#1A2436] hover:bg-[#223047] border border-[#273247] px-1.5 py-0.5 text-[9px] text-[#D0D9E8] hover:text-white"
+                      title={`Apply ${curve.label} speed curve to selected subject cues`}
+                    >
+                      {curve.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={handleAddMarker}
+                className="rounded-lg bg-[#6658F5] hover:bg-[#7669FF] px-2.5 py-0.5 text-white font-bold transition-colors text-[10.5px]"
+              >
+                + Add Cue @ {currentTime.toFixed(1)}s
+              </button>
+            </div>
           </div>
         )}
 
