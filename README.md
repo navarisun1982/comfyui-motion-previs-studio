@@ -14,6 +14,7 @@
 - 🎥 **Camera-POV Frustum Visibility Engine (`povVisibilityEngine.ts`)**: Prompts automatically describe **only** the characters, props, and objects that actually appear inside the active 3D Camera Viewfinder (`[0, Duration]`), including exact entry/exit timestamps (`enters frame at 1.2s`, `exits frame at 2.8s`) while completely excluding off-camera stage elements.
 - 🧬 **Universal Previs-to-Reality Entity Instantiation**: Treats `<Video 1>` strictly as a 3D spatial and camera-path blueprint (`weak_reference`) while instantiating every visible character, prop, natural element, and environment from `<picture 1>`–`<picture 4>` as a living, three-dimensional real-world entity (`fully_preserved`) with organic secondary motion rather than texture-wrapped 3D proxy geometry.
 - 🧠 **Local & Cloud AI Directing Assistants**: Connect local **Ollama** / **LM Studio** models or **Google Gemini** / **OpenAI** from the in-app Settings panel for natural-language character choreography, camera blocking, and official model-specific prompt compilation (**LTX-2.5**, **MiniMax H3 Ref2VA**, **Seedance 2.0**).
+- 🤸 **Universal 6-Effector IK Synthesizer & Multi-Subject Cue Swimlanes**: Direct any arbitrary single or multi-step movement in English or Arabic (`crawl on ground then stand up`, `kneel`, `push`, `climb`, `swim`, `clap`, etc.) with smart **`Direct` / `(Replay)`** state detection, **`+ Chain`** cumulative motion continuation, **Drag-and-Drop Cue Retiming & Speed Stretch Bars**, **Pacing Curves (`Linear`, `Smooth`, `Burst ⚡`, `Ramp ↗`)**, and color/shape-coded multi-character timeline swimlanes.
 
 ---
 
@@ -77,22 +78,25 @@ All **5 official ComfyUI workflows** powering this studio are bundled directly i
 - **Center Dual-Viewport Stage (`3D Soundstage` + `Camera Viewfinder`)**:
   - **Left Viewport (`3D Soundstage`)**: Free-orbit director's perspective showing the 3D set, volumetric lighting cones, compact camera frustum rig, motion paths, and actor transform gizmos.
   - **Right Viewport (`Camera Viewfinder`)**: Live through-the-lens render locked to your chosen aspect ratio (`16:9`, `2.39:1`, `9:16`, `1:1`), focal length (`14mm`–`135mm`), and depth-of-field aperture (`f/1.4`–`f/22`).
-- **Bottom Transport & Keyframe Scrubber**: Frame-accurate `24fps` timeline with camera and subject keyframe diamonds, playback loop controls, and timecode readout.
+- **Bottom Transport & Multi-Subject Cue Swimlanes**: Frame-accurate `24fps` timeline with staggered, color- and shape-coded **Cue Swimlanes** per character (`◆` locomotion, `●` acting/pose, `▱` airborne/jump) plus a dedicated `[CAM]` camera cue lane, interactive **Drag-and-Drop Cue Retiming**, **Cue Span Speed Stretch Handles** (drag bar edges to speed up or slow down an entire action), and **1-Click Motion Pacing Curves (`Linear`, `Smooth`, `Burst ⚡`, `Ramp ↗`)**.
 
-### 2. 3D Character Control Panel & Biomechanical Human Gait Engine
+### 2. 3D Character Control Panel, Universal IK Synthesizer & Biomechanical Gait Engine
 ![3D Character Control Panel](docs/screenshots/02-character-control-panel.png)
 - **Biomechanical Human Locomotion (`gaitEngine.ts`)**: Anatomically grounded walking and running with asymmetric stance/swing timing (`60/40` walk, `38/62` run), **heel-strike → flat-foot → toe-off** ankle roll (`createFootRollController`), natural bent-elbow arm swing (`24°–38°` walk, `~90°` athletic pump in run), contrapposto pelvic sway/roll, `Spine`+`Chest` counter-torsion, `solveLookAt` horizon head stabilization, and smooth acceleration/deceleration stride envelopes.
-- **Ready-Made Motion Studio**: One-click procedural biomechanical animations across **Move / Jump** (`Walk Forward`, `Run / Sprint`, `Jump / Leap`, `Sneak / Stealth`, `Back Up / Retreat`), **Fight / Action** (`Sword Slash`, `Dodge / Roll`, `Martial Combo`, `Aim & Fire`), and **Act / Emote** (`Wave / Greet`, `Heroic Taunt`, `Look Around`, `Victory Cheer`, `Talk / Dialogue`).
+- **Ready-Made Motion Studio & Ground/Transitional Clips**: One-click procedural biomechanical animations across **Move / Jump** (`Walk Forward`, `Run / Sprint`, `Jump / Leap`, `Sneak / Stealth`, `Back Up / Retreat`, `Crawl (Prone)`, `Climb / Scale`), **Fight / Action** (`Sword Slash`, `Dodge / Roll`, `Martial Combo`, `Aim & Fire`, `Push / Shove`, `Fall / Collapse`), and **Act / Emote** (`Wave / Greet`, `Heroic Taunt`, `Look Around`, `Victory Cheer`, `Talk / Dialogue`, `Sit Down`, `Stand Up / Rise`, `Kneel / Bow`).
 - **Auto / Move / Spot Execution Modes & Action Cycles (`1x`–`5x`)**: Automatically calculate floor travel paths or lock actions in-place, define exact **Action Cycles (`1x`–`5x`)** across the shot duration so gestures play naturally without robotic looping, and dial in **Facing Direction (`Body Yaw`)** (`Face Cam`, `3/4 Left`, `Profile`, `OTS Back`).
-- **Natural-Language Acting Director**: Type stage directions (e.g., `"walks slowly from 30 to 48 then waves"`) to synthesize multi-cue keyframe trajectories and skeletal poses.
+- **Universal 6-Effector IK Synthesizer (`universalMotionSynthesizer.ts`) & Chained AI Directing**:
+  - **Open-Ended Bilingual Choreography (English & Arabic)**: Understands both single-beat and multi-step sequential prompts (`"then"`, `"after that"`, `"ثم"`, `"وبعدها"`, e.g. `"رجلا يزحف علي الارض ثم يقوم"` or `"walk to right, then sit down"`), synthesizing analytical 2-bone IK trajectories (`pelvis + spine + 2 hands + 2 feet + head look-at`) for any described human movement — with optional live LLM upgrade via `generateUniversalKinematicProgramFromPrompt`.
+  - **Smart `Direct` / `(Replay)` State + `+ Chain` Cumulative Directing**: Automatically marks compiled prompts as **`✓ Directed (Replay)`**, unlocks **`+ Chain`** when you type a new action so the character seamlessly continues from their previous ending position and timestamp (auto-extending shot duration if at the end), and provides a full **`Clear` (`resetActorMotion`)** option to cancel all motion, rewind to `0.0s`, and start fresh.
+  - **Interactive Cue Ribbon & Speed Shaper**: Drag individual cue nodes or stretch/compress the colored cue span bar right inside the character card to change movement speed and apply `Linear`, `Smooth`, `Burst ⚡`, or `Ramp ↗` pacing curves.
 - **ComfyUI Reference Image Sync (`<picture 1>`–`<picture 3>`) & `.GLB` Rigging**:
   - Upload a **ComfyUI Reference Image** directly on any character, vehicle, or prop in Directing Mode (or auto-populate it from ComfyUI 3D `.GLB` generation) — automatically synced to the Render & Export Studio with zero re-uploading.
   - Interactive **FK/IK Bone Manipulation** right in the 3D viewport (`Pose Bones` mode) + **Socket to Character Bone** (attach props like swords, lanterns, or relics directly to `Right Hand`, `Left Hand`, `Head`, or `Spine`).
 
-### 3. Camera & Lens Optics Deck — Close-Ups, OTS & Dynamic Trajectories
+### 3. Camera & Lens Optics Deck — Close-Ups, OTS & Live Top-View Radar Sync
 ![Camera & Lens Optics Deck](docs/screenshots/03-camera-optics-deck.png)
 - **True Cinema Lenses & Sensor Profiles**: `14mm` Ultra-Wide through `85mm` Portrait and `135mm` Telephoto Close-Up with adaptive eye-level target framing (`Close-Up`, `Extreme Close-Up`, `Medium Close-Up`, `Medium`, `Wide`), camera roll/Dutch tilt (`-45°` to `+45°`), and path smoothing.
-- **Dynamic Camera Trajectories**: `Static`, `Dolly In`, `Pull Back`, `Track Left/Right`, `Orbit 360`, `Crane Up`, `Pedestal Down`, `Handheld`, and `Whip Pan` with customizable start/end path coordinates and easing curves.
+- **Dynamic Camera Trajectories & Live Top-View Radar (`evaluateLiveCameraStageState`)**: `Static`, `Dolly In`, `Pull Back`, `Track Left/Right`, `Orbit Clockwise/Counter-Clockwise`, `Spiral Orbit In`, `Crane Arc`, `FPV Dive`, `Steadicam Follow`, `Pan Left/Right`, and `Whip Pan` — all synchronized live in both the 3D viewports and the 2D **Top-View Radar** (including curved orbital arcs, pan aim sweeps, and subject-tracking lock).
 
 ### 4. 3D Set & Environment Builder + Multi-Light Studio Rig
 ![Set & Lighting Studio](docs/screenshots/04-environment-and-lighting.png)
@@ -206,16 +210,19 @@ npm run build
 │   │   ├── AssetLibraryModal.tsx     # 200+ Curated 3D Assets + Custom ComfyUI .GLB Library
 │   │   ├── ShotBible.tsx             # Multi-scene storyboard manager with built-in learning demo
 │   │   ├── StagePrevis3D.tsx         # Dual-viewport Three.js soundstage & camera viewfinder
+│   │   ├── MotionPrevisStage.tsx     # Transport bar, multi-subject Cue swimlanes & drag-and-drop retiming
 │   │   ├── PrevisParametersDeck.tsx  # Right-hand inspector (Actors, Camera, Set, Lights, Render)
-│   │   ├── CharacterControlCard.tsx  # Modular 3D Character & Auto-Rig Control Panel
+│   │   ├── CharacterControlCard.tsx  # Modular 3D Character, AI Motion Director & Cue Ribbon Panel
 │   │   └── PrevisExportDeck.tsx      # 24fps MP4, ControlNet pass & ComfyUI video renderer
 │   ├── engine/
-│   │   ├── kinematics/       # Auto-rigging engine (humanoid/quadruped/spine/prop), gait engine, 2-bone IK
+│   │   ├── kinematics/       # Auto-rigging engine, biomechanical gait, 2-bone IK & Universal 6-Effector IK Synthesizer
 │   │   ├── staging/          # 3D environment builder & subject mesh factory
+│   │   ├── trajectoryMath.ts         # Live camera & actor trajectory interpolation + Top-View Radar evaluator
 │   │   ├── povVisibilityEngine.ts    # 3D Camera-POV frustum visibility & entry/exit timestamp analyzer
 │   │   ├── promptCompiler.ts         # Official model-specific compilers (LTX-2.5, MiniMax H3, Seedance 2.0)
 │   │   └── offlinePrevisRenderer.ts  # Deterministic multi-pass MP4 muxer pipeline
 │   ├── services/
+│   │   ├── aiActingDirector.ts       # Bilingual acting cue & Universal IK program LLM generator
 │   │   ├── comfy3dGenerator.ts       # Live ComfyUI Image-to-3D & Text-to-3D .GLB pipeline
 │   │   ├── bundledWorkflowsCatalog.ts# Catalog & downloader for all bundled ComfyUI workflows
 │   │   └── modelStorage.ts           # Persistent IndexedDB & disk .GLB model storage
