@@ -116,7 +116,14 @@ interface ShotState {
   setActors: (actors: Actor[]) => void;
   updateActorPositionAtTime: (actorId: string, time: number, position: Point2D, duration: number, forceMode?: 'base' | 'keyframe') => void;
   moveActorKeyframeTime: (actorId: string, keyframeId: string, newTime: number) => void;
-  scaleActorCuesInRange: (actorId: string, oldStart: number, oldEnd: number, newStart: number, newEnd: number) => void;
+  scaleActorCuesInRange: (
+    actorId: string,
+    oldStart: number,
+    oldEnd: number,
+    newStart: number,
+    newEnd: number,
+    initialTimesById?: Record<string, number>
+  ) => void;
   applyActorMotionCurve: (actorId: string, curve: 'linear' | 'ease-in-out' | 'fast-start' | 'slow-start', startTimeSec?: number, endTimeSec?: number) => void;
   removeActorKeyframe: (actorId: string, keyframeId: string) => void;
   recordActorPoseAtTime: (actorId: string, time: number, pose?: ActorPose, posePreset?: string, gait?: ActorGait, duration?: number) => void;
@@ -1511,7 +1518,7 @@ export const useShotStore = create<ShotState>((set, get) => {
       commitShot(updated, { currentTime: clampedTime });
     },
 
-    scaleActorCuesInRange: (actorId, oldStart, oldEnd, newStart, newEnd) => {
+    scaleActorCuesInRange: (actorId, oldStart, oldEnd, newStart, newEnd, initialTimesById) => {
       const { shot } = get();
       const target = shot.actors.find((a) => a.id === actorId);
       if (!target) return;
@@ -1523,8 +1530,9 @@ export const useShotStore = create<ShotState>((set, get) => {
 
       const updatedKfs = (target.trajectory.keyframes || [])
         .map((k) => {
-          if (k.time >= oldStart - 0.08 && k.time <= oldEnd + 0.08) {
-            const norm = Math.max(0, Math.min(1, (k.time - oldStart) / oldSpan));
+          const srcTime = initialTimesById?.[k.id] ?? k.time;
+          if (srcTime >= oldStart - 0.08 && srcTime <= oldEnd + 0.08) {
+            const norm = Math.max(0, Math.min(1, (srcTime - oldStart) / oldSpan));
             const mappedTime = Number(Math.max(0, Math.min(safeDur, clampedStart + norm * newSpan)).toFixed(2));
             return { ...k, time: mappedTime };
           }

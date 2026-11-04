@@ -5,8 +5,14 @@ import {
   normalizeWorkflowUrl,
   autoDetectWorkflowBindings,
   syncActiveMinimaxTemplateToRegistry,
+  getWorkflowChoicesForEngine,
+  selectActiveWorkflowForEngine,
+  addUploadedWorkflowToLibrary,
+  removeWorkflowFromLibrary,
+  syncActiveEngineWorkflowToRegistry,
 } from '../src/pipeline/customWorkflowResolver';
 import { bindTemplate } from '../src/pipeline/templateBinder';
+import { installMemoryStorage } from './helpers/memoryStorage';
 
 describe('customWorkflowResolver', () => {
   it('normalizes local ComfyUI workflow URLs, local file paths, and relative workflow names', () => {
@@ -110,6 +116,54 @@ describe('customWorkflowResolver', () => {
     expect(reg).not.toBeNull();
     expect(reg?.verification.ok).toBe(true);
     expect(reg?.binding.label).toContain('Custom User MiniMax Workflow');
+  });
+
+  it('provides curated built-in workflows and user-added URL workflows for both MiniMax H3 and LTX-2.5', () => {
+    installMemoryStorage();
+
+    // 1. Check built-in choices for MiniMax H3 and LTX-2.5
+    const minimaxChoices = getWorkflowChoicesForEngine('minimax-h3');
+    expect(minimaxChoices.map((c) => c.id)).toEqual([
+      'minimax_h3_ref2va',
+      'h3_stubelius',
+      'minimax_h3_fast_draft',
+    ]);
+
+    const ltxChoices = getWorkflowChoicesForEngine('ltx-2.5');
+    expect(ltxChoices.map((c) => c.id)).toEqual([
+      'ltx25_stubelius',
+      'ltx25_fast_native',
+      'ltx25_ic_lora_motion',
+    ]);
+
+    // 2. Switch MiniMax H3 active workflow to h3_stubelius and verify registry sync
+    const selectedStub = selectActiveWorkflowForEngine('minimax-h3', 'h3_stubelius');
+    expect(selectedStub.id).toBe('h3_stubelius');
+    const syncedStub = syncActiveEngineWorkflowToRegistry('minimax-h3');
+    expect(syncedStub.templateId).toBe('h3_stubelius');
+    expect(syncedStub.registered?.binding.modes).toContain('control');
+
+    // 3. Add a custom LTX-2.5 workflow and verify it appears in the LTX-2.5 dropdown & binds
+    const ltxApiPath = path.resolve(__dirname, '../workflows/templates/ltx25_stubelius.api.json');
+    const rawLtxApi = fs.readFileSync(ltxApiPath, 'utf-8');
+    const { entry, activeChoice } = addUploadedWorkflowToLibrary(
+      'custom_ltx_url_workflow.json',
+      rawLtxApi,
+      'ltx-2.5'
+    );
+    expect(activeChoice.id).toBe(entry.id);
+    expect(activeChoice.kind).toBe('custom');
+
+    const updatedLtxChoices = getWorkflowChoicesForEngine('ltx-2.5');
+    expect(updatedLtxChoices.some((c) => c.id === entry.id)).toBe(true);
+
+    const syncedCustomLtx = syncActiveEngineWorkflowToRegistry('ltx-2.5');
+    expect(syncedCustomLtx.templateId).toBe(entry.id);
+    expect(syncedCustomLtx.registered?.verification.ok).toBe(true);
+
+    // 4. Remove custom LTX workflow and verify fallback to built-in ltx25_stubelius
+    const afterRemove = removeWorkflowFromLibrary(entry.id, 'ltx-2.5');
+    expect(afterRemove.id).toBe('ltx25_stubelius');
   });
 });
 

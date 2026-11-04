@@ -172,6 +172,20 @@ const h3FirstFramePatcher: TimelinePatcher = {
         file: ctx.firstFrameFile,
         name: 'First Frame',
       };
+    } else if (ctx.mode === 'control') {
+      const refFiles = [ctx.refImage1File, ctx.refImage2File, ctx.refImage3File, ctx.refImage4File];
+      refFiles.forEach((f, idx) => {
+        if (f && f.trim()) {
+          characters[idx] = {
+            file: f.trim(),
+            name: ctx.refImageDescriptions?.[idx] || `Ref ${idx + 1}`,
+          };
+        }
+      });
+      if (ctx.controlVideoFile) {
+        data.retakeVideo = ctx.controlVideoFile;
+        data.retakeMode = true;
+      }
     } else if (ctx.mode === 't2v') {
       characters[0] = null;
     }

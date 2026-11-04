@@ -12,6 +12,7 @@ export interface ExecuteJobOptions {
   engine: EngineId;
   mode: GenerationMode;
   profile: QualityProfile;
+  templateId?: string;
   prompt: string;
   negative: string;
   seed: number;
@@ -50,8 +51,10 @@ export class JobRunner {
     const comfyStore = useComfyStore.getState();
     const historyStore = useHistoryStore.getState();
 
-    // 1. Template discovery
-    const reg = templateRegistry.find(options.engine, options.mode);
+    // 1. Template discovery (prefer explicit templateId from Workflow Selector if provided)
+    const reg =
+      (options.templateId ? templateRegistry.get(options.templateId) : undefined) ||
+      templateRegistry.find(options.engine, options.mode);
     if (!reg) {
       const err = new Error(
         `No registered template found for engine "${options.engine}" and mode "${options.mode}". Please supply workflow templates in workflows/templates.`

@@ -127,9 +127,9 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   const [isDraggingTrimLeft, setIsDraggingTrimLeft] = useState(false);
   const [isDraggingTrimRight, setIsDraggingTrimRight] = useState(false);
   const [draggingTimelineCue, setDraggingTimelineCue] = useState<
-    | { kind: 'actor-cue'; actorId: string; cueId: string; origTime: number }
-    | { kind: 'camera-cue'; cueId: string; origTime: number }
-    | { kind: 'marker'; markerId: string; origTime: number }
+    | { kind: 'actor-cue'; actorId: string; cueId: string; origTime: number; grabOffsetSec?: number }
+    | { kind: 'camera-cue'; cueId: string; origTime: number; grabOffsetSec?: number }
+    | { kind: 'marker'; markerId: string; origTime: number; grabOffsetSec?: number }
     | {
         kind: 'actor-span';
         actorId: string;
@@ -137,6 +137,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
         initialStart: number;
         initialEnd: number;
         startClientX: number;
+        initialTimesById: Record<string, number>;
       }
     | null
   >(null);
@@ -269,15 +270,24 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
       const rect = timelineRef.current.getBoundingClientRect();
       if (rect.width <= 0) return;
       const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const newTime = Number(Math.min(duration, Math.max(0, pct * duration)).toFixed(2));
+      const rawPointerTime = pct * duration;
 
       if (draggingTimelineCue.kind === 'actor-cue') {
+        const newTime = Number(
+          Math.min(duration, Math.max(0, rawPointerTime + (draggingTimelineCue.grabOffsetSec || 0))).toFixed(2)
+        );
         moveActorKeyframeTime(draggingTimelineCue.actorId, draggingTimelineCue.cueId, newTime);
         setCurrentTime(newTime);
       } else if (draggingTimelineCue.kind === 'camera-cue') {
+        const newTime = Number(
+          Math.min(duration, Math.max(0, rawPointerTime + (draggingTimelineCue.grabOffsetSec || 0))).toFixed(2)
+        );
         moveCameraKeyframeTime(draggingTimelineCue.cueId, newTime);
         setCurrentTime(newTime);
       } else if (draggingTimelineCue.kind === 'marker') {
+        const newTime = Number(
+          Math.min(duration, Math.max(0, rawPointerTime + (draggingTimelineCue.grabOffsetSec || 0))).toFixed(2)
+        );
         setMarkers((prev) =>
           prev.map((m) =>
             m.id === draggingTimelineCue.markerId
@@ -294,48 +304,42 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
         const targetAct = shot.actors.find((a) => a.id === draggingTimelineCue.actorId);
         const kfs = targetAct?.trajectory.keyframes || [];
         if (kfs.length >= 2) {
-          const curStart = kfs[0].time;
-          const curEnd = kfs[kfs.length - 1].time;
+          const initStart = draggingTimelineCue.initialStart;
+          const initEnd = draggingTimelineCue.initialEnd;
           const deltaSec = ((e.clientX - draggingTimelineCue.startClientX) / rect.width) * duration;
           if (draggingTimelineCue.side === 'start') {
-            const nextStart = Math.max(
-              0,
-              Math.min(draggingTimelineCue.initialEnd - 0.3, draggingTimelineCue.initialStart + deltaSec)
-            );
+            const nextStart = Math.max(0, Math.min(initEnd - 0.3, initStart + deltaSec));
             scaleActorCuesInRange(
               draggingTimelineCue.actorId,
-              curStart,
-              curEnd,
+              initStart,
+              initEnd,
               Number(nextStart.toFixed(2)),
-              curEnd
+              initEnd,
+              draggingTimelineCue.initialTimesById
             );
             setCurrentTime(Number(nextStart.toFixed(2)));
           } else if (draggingTimelineCue.side === 'end') {
-            const nextEnd = Math.max(
-              draggingTimelineCue.initialStart + 0.3,
-              Math.min(duration, draggingTimelineCue.initialEnd + deltaSec)
-            );
+            const nextEnd = Math.max(initStart + 0.3, Math.min(duration, initEnd + deltaSec));
             scaleActorCuesInRange(
               draggingTimelineCue.actorId,
-              curStart,
-              curEnd,
-              curStart,
-              Number(nextEnd.toFixed(2))
+              initStart,
+              initEnd,
+              initStart,
+              Number(nextEnd.toFixed(2)),
+              draggingTimelineCue.initialTimesById
             );
             setCurrentTime(Number(nextEnd.toFixed(2)));
           } else if (draggingTimelineCue.side === 'move') {
-            const spanLen = draggingTimelineCue.initialEnd - draggingTimelineCue.initialStart;
-            const nextStart = Math.max(
-              0,
-              Math.min(duration - spanLen, draggingTimelineCue.initialStart + deltaSec)
-            );
+            const spanLen = initEnd - initStart;
+            const nextStart = Math.max(0, Math.min(duration - spanLen, initStart + deltaSec));
             const nextEnd = Math.min(duration, nextStart + spanLen);
             scaleActorCuesInRange(
               draggingTimelineCue.actorId,
-              curStart,
-              curEnd,
+              initStart,
+              initEnd,
               Number(nextStart.toFixed(2)),
-              Number(nextEnd.toFixed(2))
+              Number(nextEnd.toFixed(2)),
+              draggingTimelineCue.initialTimesById
             );
           }
         }
@@ -861,385 +865,493 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
         </div>
       </div>
 
-      {/* 4. Cinema Filmstrip Timeline with Interactive Scrubbing & Trim Handles */}
-      <div className="flex flex-col bg-[#090D16] px-2.5 py-2 shrink-0 space-y-1.5">
+      {/* 4. Cinema Multi-Track Timeline with Spacious Element Swimlanes, Interactive Scrubbing & Trim Handles */}
+      <div className="flex flex-col bg-[#090D16] px-3 py-2.5 shrink-0 space-y-1.5 border-t border-[#1D2638]">
         {/* Dynamic Time Ruler based on duration */}
-        <div className="relative h-3.5 w-full select-none">
-          <div className="absolute inset-0 flex justify-between font-mono text-[8.5px] text-[#98A5BC] px-1 pointer-events-none">
+        <div className="relative h-5 w-full select-none">
+          <div className="absolute inset-0 flex justify-between font-mono text-[10px] font-semibold text-[#B0BDD4] px-1 pointer-events-none">
             {rulerTicks.map((tick, i) => (
               <div key={i} className="flex flex-col items-center">
                 <span>{tick.label}</span>
-                <div className="h-1 w-[1px] bg-[#384764] mt-0.5" />
+                <div className="h-1.5 w-[1px] bg-[#4A5B7C] mt-0.5" />
               </div>
             ))}
           </div>
         </div>
 
-        {/* Filmstrip Clip Box with Interactive Scrubbing Track */}
-        <div
-          ref={timelineRef}
-          onPointerDown={handleTimelinePointerDown}
-          onPointerMove={handleTimelinePointerMove}
-          onPointerUp={handleTimelinePointerUp}
-          onPointerCancel={handleTimelinePointerUp}
-          className="relative h-12 w-full rounded-lg bg-[#0D1320] border border-[#273247] overflow-hidden cursor-crosshair select-none touch-none shadow-inner"
-        >
-          {/* Filmstrip Frame Thumbnails */}
-          <div className="absolute inset-0 flex opacity-65 pointer-events-none select-none">
-            {Array.from({ length: 14 }).map((_, i) => (
-              <div
-                key={i}
-                className="flex-1 border-r border-[#090D16] bg-gradient-to-b from-[#151F32] via-[#0F1726] to-[#151F32] relative flex flex-col justify-between p-1 overflow-hidden"
-              >
-                <div className="flex justify-between items-center">
-                  <div className="w-1.5 h-1 rounded-[1px] bg-[#090D16] border border-[#273247]" />
-                  <span className="font-mono text-[7px] text-[#64748B] font-bold select-none">
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
-                  <div className="w-1.5 h-1 rounded-[1px] bg-[#090D16] border border-[#273247]" />
-                </div>
-                <div className="h-3.5 rounded border border-[#273247]/50 bg-gradient-to-r from-[#6658F5]/15 via-[#18B8D8]/10 to-[#6658F5]/15 flex items-center justify-center">
-                  <div className="w-6 h-0.5 rounded bg-white/10" />
-                </div>
-                <div className="flex justify-between items-center">
-                  <div className="w-1.5 h-1 rounded-[1px] bg-[#090D16] border border-[#273247]" />
-                  <div className="h-0.5 w-2 bg-white/5" />
-                  <div className="w-1.5 h-1 rounded-[1px] bg-[#090D16] border border-[#273247]" />
-                </div>
-              </div>
-            ))}
-          </div>
+        {/* Multi-Track Timeline Box with Dedicated Rows for Trim/Filmstrip, Camera, and Each Scene Element */}
+        {(() => {
+          const activeActorCount = Math.max(1, shot.actors.length);
+          const headerRowHeight = 28;
+          const cameraRowHeight = 26;
+          const actorRowHeight = 28;
+          const totalTimelineHeight = Math.max(
+            116,
+            headerRowHeight + cameraRowHeight + activeActorCount * actorRowHeight + 6
+          );
 
-          {/* Interactive Selected Clip Range with Working Trim Handles */}
-          <div
-            className="absolute top-0 bottom-0 rounded-md border-2 border-[#6658F5] bg-[#6658F5]/20 flex items-center justify-between px-1 pointer-events-none"
-            style={{
-              left: `${trimStartPct}%`,
-              width: `${trimEndPct - trimStartPct}%`,
-            }}
-          >
-            {/* Left Trim Handle */}
+          return (
             <div
-              data-trim-handle="true"
-              onPointerDown={(e) => handleTrimPointerDown(e, 'left')}
-              onPointerMove={(e) => handleTrimPointerMove(e, 'left')}
-              onPointerUp={(e) => handleTrimPointerUp(e, 'left')}
-              onPointerCancel={(e) => handleTrimPointerUp(e, 'left')}
-              className="h-9 w-2.5 rounded-l bg-[#8E84FF] hover:bg-white cursor-ew-resize flex items-center justify-center shadow-md active:scale-95 pointer-events-auto"
-              title={`Trim In Point (${((trimStartPct / 100) * duration).toFixed(1)}s)`}
+              ref={timelineRef}
+              onPointerDown={handleTimelinePointerDown}
+              onPointerMove={handleTimelinePointerMove}
+              onPointerUp={handleTimelinePointerUp}
+              onPointerCancel={handleTimelinePointerUp}
+              style={{ height: `${totalTimelineHeight}px` }}
+              className="relative w-full rounded-xl bg-[#0D1320] border border-[#273247] overflow-hidden cursor-crosshair select-none touch-none shadow-inner"
             >
-              <div className="h-3.5 w-0.5 bg-black/60 rounded" />
-            </div>
-
-            <div className="flex items-center gap-2 px-2 pointer-events-none drop-shadow">
-              <span className="font-mono text-[10px] font-bold text-white truncate">
-                {shot.name || shotTitle} • {duration}s
-              </span>
-              {(trimStartPct > 0 || trimEndPct < 100) && (
-                <span className="rounded bg-[#090D16]/85 px-1.5 py-0.2 font-mono text-[8px] text-[#F0AE42] border border-[#F0AE42]/35">
-                  IN: {((trimStartPct / 100) * duration).toFixed(1)}s • OUT: {((trimEndPct / 100) * duration).toFixed(1)}s
-                </span>
-              )}
-            </div>
-
-            {/* Right Trim Handle */}
-            <div
-              data-trim-handle="true"
-              onPointerDown={(e) => handleTrimPointerDown(e, 'right')}
-              onPointerMove={(e) => handleTrimPointerMove(e, 'right')}
-              onPointerUp={(e) => handleTrimPointerUp(e, 'right')}
-              onPointerCancel={(e) => handleTrimPointerUp(e, 'right')}
-              className="h-9 w-2.5 rounded-r bg-[#8E84FF] hover:bg-white cursor-ew-resize flex items-center justify-center shadow-md active:scale-95 pointer-events-auto"
-              title={`Trim Out Point (${((trimEndPct / 100) * duration).toFixed(1)}s)`}
-            >
-              <div className="h-3.5 w-0.5 bg-black/60 rounded" />
-            </div>
-          </div>
-
-          {/* Timeline User Cue Markers (Draggable) */}
-          {markers.map((m) => {
-            const mPct = (m.time / duration) * 100;
-            const liveActorColor =
-              m.actorId === '__camera__'
-                ? shot.camera.color
-                : m.actorId
-                ? shot.actors.find((a) => a.id === m.actorId)?.color
-                : undefined;
-            const effectiveMarkerColor = liveActorColor || m.color || '#f59e0b';
-            return (
-              <div
-                key={m.id}
-                data-cue-handle="true"
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  timelineRef.current?.setPointerCapture(e.pointerId);
-                  if (m.actorId) setSelectedActorId(m.actorId);
-                  setCurrentTime(m.time);
-                  setDraggingTimelineCue({
-                    kind: 'marker',
-                    markerId: m.id,
-                    origTime: m.time,
-                  });
-                }}
-                className="absolute top-1 z-30 flex flex-col items-center cursor-ew-resize group pointer-events-auto"
-                style={{ left: `${mPct}%`, transform: 'translateX(-50%)' }}
-                title={`${m.label} (${m.time.toFixed(1)}s) — Drag left/right to retime`}
-              >
-                <div
-                  className="h-3 w-3 rotate-45 border border-white shadow-sm transition-transform group-hover:scale-125"
-                  style={{ backgroundColor: effectiveMarkerColor }}
-                />
-                <span
-                  className="opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[#090D16]/95 px-1 font-mono text-[8px] text-white mt-1 whitespace-nowrap pointer-events-none border border-[#273247] shadow-lg"
-                  style={{ borderColor: effectiveMarkerColor, color: effectiveMarkerColor }}
-                >
-                  {m.label}
-                </span>
+              {/* Vertical Time Grid Lines across all tracks */}
+              <div className="absolute inset-0 flex justify-between pointer-events-none select-none px-1">
+                {rulerTicks.map((_, i) => (
+                  <div key={i} className="h-full w-[1px] bg-white/[0.04]" />
+                ))}
               </div>
-            );
-          })}
 
-          {/* Multi-Subject Distinct Cue Swimlanes (Color + Initials Badge + Shape-Coded Draggable Cues + Speed Stretch Bar) */}
-          {(() => {
-            const fallbackPalette = ['#eab308', '#06b6d4', '#ec4899', '#10b981', '#a855f7', '#f97316', '#3b82f6'];
-            const totalLanes = Math.max(1, shot.actors.length);
-
-            return shot.actors.map((act, laneIdx) => {
-              const kfs = act.trajectory.keyframes || [];
-              if (kfs.length === 0) return null;
-
-              const isSelected = act.id === selectedActorId;
-              const laneColor = act.color || fallbackPalette[laneIdx % fallbackPalette.length];
-              // Stagger vertical position per actor so 3+ characters never overlap on the same horizontal line!
-              const bottomOffsetPx =
-                totalLanes === 1
-                  ? 5
-                  : Math.round(3 + (laneIdx / Math.max(1, totalLanes - 1)) * 22);
-
-              const spanStart = kfs[0].time;
-              const spanEnd = kfs[kfs.length - 1].time;
-              const startPct = Math.max(0, Math.min(100, (spanStart / duration) * 100));
-              const endPct = Math.max(startPct + 1.5, Math.min(100, (spanEnd / duration) * 100));
-              const shortTag =
-                act.name
-                  .replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '')
-                  .slice(0, 2)
-                  .toUpperCase() || `C${laneIdx + 1}`;
-
-              return (
-                <React.Fragment key={`swimlane-${act.id}`}>
-                  {/* Subject Cue Span Bar (Drag body to shift cue timing, drag left/right edges to speed up or slow down!) */}
-                  {kfs.length >= 2 && (
+              {/* ROW 1 (Top 28px): Filmstrip Header & Interactive Selected Clip Trim Range */}
+              <div
+                className="absolute left-0 right-0 top-0 border-b border-[#1E293B] overflow-hidden"
+                style={{ height: `${headerRowHeight}px` }}
+              >
+                {/* Filmstrip Frame Thumbnails */}
+                <div className="absolute inset-0 flex opacity-55 pointer-events-none select-none">
+                  {Array.from({ length: 14 }).map((_, i) => (
                     <div
+                      key={i}
+                      className="flex-1 border-r border-[#090D16] bg-gradient-to-b from-[#151F32] via-[#0F1726] to-[#151F32] relative flex items-center justify-between px-1.5 overflow-hidden"
+                    >
+                      <span className="font-mono text-[8px] text-[#64748B] font-bold select-none">
+                        {String(i + 1).padStart(2, '0')}
+                      </span>
+                      <div className="h-2.5 flex-1 mx-1 rounded border border-[#273247]/40 bg-gradient-to-r from-[#6658F5]/15 via-[#18B8D8]/10 to-[#6658F5]/15" />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Interactive Selected Clip Range with Working Trim Handles */}
+                <div
+                  className="absolute top-0 bottom-0 rounded-t-md border-2 border-[#6658F5] bg-[#6658F5]/20 flex items-center justify-between px-0.5 pointer-events-none"
+                  style={{
+                    left: `${trimStartPct}%`,
+                    width: `${trimEndPct - trimStartPct}%`,
+                  }}
+                >
+                  {/* Left Trim Handle */}
+                  <div
+                    data-trim-handle="true"
+                    onPointerDown={(e) => handleTrimPointerDown(e, 'left')}
+                    onPointerMove={(e) => handleTrimPointerMove(e, 'left')}
+                    onPointerUp={(e) => handleTrimPointerUp(e, 'left')}
+                    onPointerCancel={(e) => handleTrimPointerUp(e, 'left')}
+                    className="h-6 w-3 rounded-l bg-[#8E84FF] hover:bg-white cursor-ew-resize flex items-center justify-center shadow-md active:scale-95 pointer-events-auto"
+                    title={`Trim In Point (${((trimStartPct / 100) * duration).toFixed(1)}s)`}
+                  >
+                    <div className="h-3.5 w-0.5 bg-black/70 rounded" />
+                  </div>
+
+                  <div className="flex items-center gap-2 px-2 pointer-events-none drop-shadow">
+                    <span className="font-mono text-[10.5px] font-bold text-white truncate">
+                      {shot.name || shotTitle} • {duration}s
+                    </span>
+                    {(trimStartPct > 0 || trimEndPct < 100) && (
+                      <span className="rounded bg-[#090D16]/90 px-1.5 py-0.5 font-mono text-[9px] text-[#F0AE42] border border-[#F0AE42]/40">
+                        IN: {((trimStartPct / 100) * duration).toFixed(1)}s • OUT: {((trimEndPct / 100) * duration).toFixed(1)}s
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Right Trim Handle */}
+                  <div
+                    data-trim-handle="true"
+                    onPointerDown={(e) => handleTrimPointerDown(e, 'right')}
+                    onPointerMove={(e) => handleTrimPointerMove(e, 'right')}
+                    onPointerUp={(e) => handleTrimPointerUp(e, 'right')}
+                    onPointerCancel={(e) => handleTrimPointerUp(e, 'right')}
+                    className="h-6 w-3 rounded-r bg-[#8E84FF] hover:bg-white cursor-ew-resize flex items-center justify-center shadow-md active:scale-95 pointer-events-auto"
+                    title={`Trim Out Point (${((trimEndPct / 100) * duration).toFixed(1)}s)`}
+                  >
+                    <div className="h-3.5 w-0.5 bg-black/70 rounded" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Timeline User Cue Markers (Draggable on Header Row) */}
+              {markers.map((m) => {
+                const mPct = Math.max(0, Math.min(100, (m.time / duration) * 100));
+                const liveActorColor =
+                  m.actorId === '__camera__'
+                    ? shot.camera.color
+                    : m.actorId
+                    ? shot.actors.find((a) => a.id === m.actorId)?.color
+                    : undefined;
+                const effectiveMarkerColor = liveActorColor || m.color || '#f59e0b';
+                return (
+                  <div
+                    key={m.id}
+                    data-cue-handle="true"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      timelineRef.current?.setPointerCapture(e.pointerId);
+                      if (m.actorId) setSelectedActorId(m.actorId);
+                      setCurrentTime(m.time);
+                      const rect = timelineRef.current?.getBoundingClientRect();
+                      const clickedTime =
+                        rect && rect.width > 0 ? ((e.clientX - rect.left) / rect.width) * duration : m.time;
+                      const rawOffset = m.time - clickedTime;
+                      setDraggingTimelineCue({
+                        kind: 'marker',
+                        markerId: m.id,
+                        origTime: m.time,
+                        grabOffsetSec: Math.abs(rawOffset) <= 0.12 ? rawOffset : 0,
+                      });
+                    }}
+                    className="absolute top-1 z-30 h-5 w-5 flex items-center justify-center cursor-ew-resize group pointer-events-auto"
+                    style={{ left: `${mPct}%`, transform: 'translateX(-50%)' }}
+                    title={`${m.label} (${m.time.toFixed(1)}s) — Drag left/right to retime`}
+                  >
+                    <div
+                      className="h-3.5 w-3.5 rotate-45 border-2 border-white shadow-md transition-transform group-hover:scale-125"
+                      style={{ backgroundColor: effectiveMarkerColor }}
+                    />
+                    <span
+                      className="absolute left-full ml-1 top-1/2 -translate-y-1/2 rounded bg-[#090D16]/95 px-1.5 py-0.5 font-mono text-[9px] font-bold whitespace-nowrap pointer-events-none border shadow-md"
+                      style={{ borderColor: effectiveMarkerColor, color: effectiveMarkerColor }}
+                    >
+                      {m.label}
+                    </span>
+                  </div>
+                );
+              })}
+
+              {/* ROW 2: Dedicated Camera Keyframe Lane */}
+              {(() => {
+                const isCamSelected = selectedActorId === '__camera__';
+                const camColor = shot.camera.color || '#F0AE42';
+                const camKfs = shot.camera.movement.keyframes || [];
+                return (
+                  <div
+                    className={`absolute left-0 right-0 border-b border-[#1E293B]/80 flex items-center transition-colors ${
+                      isCamSelected ? 'bg-[#F0AE42]/10' : 'bg-[#0B101B]/70'
+                    }`}
+                    style={{ top: `${headerRowHeight}px`, height: `${cameraRowHeight}px` }}
+                  >
+                    {/* Track Center Guide Line */}
+                    <div
+                      className="absolute left-0 right-0 h-[1px] pointer-events-none"
+                      style={{ backgroundColor: `${camColor}30` }}
+                    />
+
+                    {/* Left Track Label Pill */}
+                    <button
+                      type="button"
                       data-cue-handle="true"
-                      data-testid={`timeline-cue-span-${act.id}`}
                       onPointerDown={(e) => {
                         e.stopPropagation();
-                        e.preventDefault();
-                        timelineRef.current?.setPointerCapture(e.pointerId);
-                        setSelectedActorId(act.id);
-                        setDraggingTimelineCue({
-                          kind: 'actor-span',
-                          actorId: act.id,
-                          side: 'move',
-                          initialStart: spanStart,
-                          initialEnd: spanEnd,
-                          startClientX: e.clientX,
-                        });
+                        setSelectedActorId('__camera__');
                       }}
-                      className={`absolute z-20 h-3 rounded-full flex items-center justify-between cursor-grab active:cursor-grabbing pointer-events-auto transition-opacity ${
-                        isSelected ? 'opacity-100 ring-1 ring-white/70' : 'opacity-65 hover:opacity-95'
+                      className={`relative z-20 ml-1.5 flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-[9.5px] font-bold border pointer-events-auto transition-all cursor-pointer ${
+                        isCamSelected
+                          ? 'bg-[#090D16] text-white shadow-md ring-1 ring-white/50'
+                          : 'bg-[#090D16]/90 text-slate-200 hover:text-white'
                       }`}
-                      style={{
-                        bottom: `${bottomOffsetPx}px`,
-                        left: `${startPct}%`,
-                        width: `${Math.max(2, endPct - startPct)}%`,
-                        backgroundColor: `${laneColor}38`,
-                        border: `1px solid ${laneColor}`,
-                      }}
-                      title={`${act.name} Cues (${spanStart.toFixed(1)}s → ${spanEnd.toFixed(1)}s) — Drag bar to shift, or drag edges to change speed`}
+                      style={{ borderColor: camColor, color: camColor }}
+                      title="Select Camera Track"
                     >
-                      {/* Left Speed Handle */}
-                      <div
-                        data-cue-handle="true"
-                        onPointerDown={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          timelineRef.current?.setPointerCapture(e.pointerId);
-                          setSelectedActorId(act.id);
-                          setDraggingTimelineCue({
-                            kind: 'actor-span',
-                            actorId: act.id,
-                            side: 'start',
-                            initialStart: spanStart,
-                            initialEnd: spanEnd,
-                            startClientX: e.clientX,
-                          });
-                        }}
-                        className="h-full w-2 cursor-ew-resize bg-white/30 hover:bg-white rounded-l-full shrink-0"
-                        title={`Drag to change ${act.name} start time & speed`}
-                      />
+                      <span className="h-2 w-2 rotate-45 shrink-0" style={{ backgroundColor: camColor }} />
+                      <span>CAM • {shot.camera.movement.type}</span>
+                    </button>
 
-                      {/* Subject Identity Pill Badge */}
-                      <span
-                        className="px-1 text-[7.5px] font-mono font-bold text-white truncate pointer-events-none drop-shadow"
-                        style={{ color: '#ffffff' }}
-                      >
-                        {shortTag} • {act.name.slice(0, 10)}
-                      </span>
-
-                      {/* Right Speed Handle */}
-                      <div
-                        data-cue-handle="true"
-                        onPointerDown={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          timelineRef.current?.setPointerCapture(e.pointerId);
-                          setSelectedActorId(act.id);
-                          setDraggingTimelineCue({
-                            kind: 'actor-span',
-                            actorId: act.id,
-                            side: 'end',
-                            initialStart: spanStart,
-                            initialEnd: spanEnd,
-                            startClientX: e.clientX,
-                          });
-                        }}
-                        className="h-full w-2 cursor-ew-resize bg-white/30 hover:bg-white rounded-r-full shrink-0"
-                        title={`Drag left/right to speed up or slow down ${act.name} cues`}
-                      />
-                    </div>
-                  )}
-
-                  {/* Individual Draggable Shape-Coded Cue Nodes */}
-                  {kfs.map((kf, kfIdx) => {
-                    // For dense procedural clips (e.g. 12-36 keyframes), show start, end, and key milestones so the lane stays clean & draggable
-                    const isMilestone =
-                      kfIdx === 0 ||
-                      kfIdx === kfs.length - 1 ||
-                      kfs.length <= 8 ||
-                      kfIdx % Math.max(2, Math.floor(kfs.length / 5)) === 0;
-                    const isBeingDragged =
-                      draggingTimelineCue?.kind === 'actor-cue' && draggingTimelineCue.cueId === kf.id;
-                    if (!isMilestone && !isBeingDragged) return null;
-
-                    const kfPct = Math.max(0.5, Math.min(99.5, (kf.time / duration) * 100));
-                    const isAirborne = (kf.position.z ?? 0) > 2;
-                    const isLocomotion = kf.gait === 'walk' || kf.gait === 'run' || kf.gait === 'sneak';
-                    const shapeClass = isAirborne
-                      ? 'rounded-[2px] rotate-12' // Jump / Airborne
-                      : isLocomotion
-                      ? 'rotate-45' // Locomotion Diamond ◆
-                      : 'rounded-full'; // Acting / Pose Circle ●
-
-                    return (
-                      <div
-                        key={kf.id}
-                        data-cue-handle="true"
-                        data-testid={`timeline-actor-cue-${act.id}-${kf.id}`}
-                        onPointerDown={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          timelineRef.current?.setPointerCapture(e.pointerId);
-                          setSelectedActorId(act.id);
-                          setCurrentTime(kf.time);
-                          setDraggingTimelineCue({
-                            kind: 'actor-cue',
-                            actorId: act.id,
-                            cueId: kf.id,
-                            origTime: kf.time,
-                          });
-                        }}
-                        className={`absolute z-30 flex flex-col items-center cursor-ew-resize group pointer-events-auto transition-opacity ${
-                          isSelected ? 'opacity-100' : 'opacity-75 hover:opacity-100'
-                        }`}
-                        style={{
-                          bottom: `${bottomOffsetPx + 1}px`,
-                          left: `${kfPct}%`,
-                          transform: 'translateX(-50%)',
-                        }}
-                        title={`[${shortTag}] ${act.name} Cue @ ${kf.time.toFixed(2)}s (X:${Math.round(kf.position.x)}, Y:${Math.round(kf.position.y)}) — Drag left/right to retime`}
-                      >
+                    {/* Draggable Camera Keyframe Diamonds (Strictly Centered at Exact Time%) */}
+                    {camKfs.map((ckf) => {
+                      const kfPct = Math.max(0, Math.min(100, (ckf.time / duration) * 100));
+                      return (
                         <div
-                          className={`h-2.5 w-2.5 border shadow-sm transition-transform group-hover:scale-150 ${shapeClass} ${
-                            isSelected ? 'border-white scale-125 ring-1 ring-black/60' : 'border-white/75'
-                          }`}
-                          style={{ backgroundColor: laneColor }}
-                        />
-                        <span
-                          className="opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[#090D16]/95 px-1.5 py-0.5 font-mono text-[8px] -mt-7 whitespace-nowrap pointer-events-none border shadow-lg z-40"
-                          style={{ color: laneColor, borderColor: laneColor }}
+                          key={ckf.id}
+                          data-cue-handle="true"
+                          data-testid={`timeline-camera-cue-${ckf.id}`}
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            timelineRef.current?.setPointerCapture(e.pointerId);
+                            setSelectedActorId('__camera__');
+                            setCurrentTime(ckf.time);
+                            const rect = timelineRef.current?.getBoundingClientRect();
+                            const clickedTime =
+                              rect && rect.width > 0 ? ((e.clientX - rect.left) / rect.width) * duration : ckf.time;
+                            const rawOffset = ckf.time - clickedTime;
+                            setDraggingTimelineCue({
+                              kind: 'camera-cue',
+                              cueId: ckf.id,
+                              origTime: ckf.time,
+                              grabOffsetSec: Math.abs(rawOffset) <= 0.12 ? rawOffset : 0,
+                            });
+                          }}
+                          className="absolute top-1/2 z-30 h-6 w-6 flex items-center justify-center cursor-ew-resize group pointer-events-auto"
+                          style={{ left: `${kfPct}%`, transform: 'translate(-50%, -50%)' }}
+                          title={`[CAM] Camera Cue @ ${ckf.time.toFixed(2)}s — Drag left/right to retime`}
                         >
-                          [{shortTag}] {act.name} @ {kf.time.toFixed(2)}s (⇄ Drag)
+                          <div
+                            className={`h-3.5 w-3.5 rotate-45 border-2 shadow-md transition-transform group-hover:scale-125 ${
+                              isCamSelected ? 'border-white scale-110' : 'border-white/85'
+                            }`}
+                            style={{ backgroundColor: camColor }}
+                          />
+                          <span
+                            className="hidden sm:inline-block absolute left-full ml-0.5 top-1/2 -translate-y-1/2 opacity-85 group-hover:opacity-100 rounded bg-[#090D16]/95 px-1 py-0.2 font-mono text-[8.5px] font-bold whitespace-nowrap pointer-events-none border shadow"
+                            style={{ color: camColor, borderColor: `${camColor}66` }}
+                          >
+                            {ckf.time.toFixed(1)}s
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* ROWS 3+: Dedicated Full-Height Swimlane Per Scene Element / Actor */}
+              {(() => {
+                const fallbackPalette = ['#eab308', '#06b6d4', '#ec4899', '#10b981', '#a855f7', '#f97316', '#3b82f6'];
+
+                return shot.actors.map((act, laneIdx) => {
+                  const kfs = act.trajectory.keyframes || [];
+                  const isSelected = act.id === selectedActorId;
+                  const laneColor = act.color || fallbackPalette[laneIdx % fallbackPalette.length];
+                  const rowTopPx = headerRowHeight + cameraRowHeight + laneIdx * actorRowHeight;
+
+                  const spanStart = kfs.length > 0 ? kfs[0].time : 0;
+                  const spanEnd = kfs.length > 0 ? kfs[kfs.length - 1].time : duration;
+                  const startPct = Math.max(0, Math.min(100, (spanStart / duration) * 100));
+                  const endPct = Math.max(startPct + 2, Math.min(100, (spanEnd / duration) * 100));
+                  const shortTag =
+                    act.name
+                      .replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '')
+                      .slice(0, 2)
+                      .toUpperCase() || `C${laneIdx + 1}`;
+
+                  const captureInitialTimes = () => {
+                    const map: Record<string, number> = {};
+                    kfs.forEach((k) => {
+                      map[k.id] = k.time;
+                    });
+                    return map;
+                  };
+
+                  return (
+                    <div
+                      key={`swimlane-${act.id}`}
+                      className={`absolute left-0 right-0 border-b border-[#1E293B]/60 flex items-center transition-colors ${
+                        isSelected
+                          ? 'bg-white/[0.07]'
+                          : laneIdx % 2 === 0
+                          ? 'bg-[#0E1625]/60'
+                          : 'bg-[#0A101C]/60'
+                      }`}
+                      style={{ top: `${rowTopPx}px`, height: `${actorRowHeight}px` }}
+                    >
+                      {/* Subtle Horizontal Lane Guide Line */}
+                      <div
+                        className="absolute left-0 right-0 h-[1px] pointer-events-none"
+                        style={{ backgroundColor: `${laneColor}28` }}
+                      />
+
+                      {/* Left-Pinned Element Identity Badge (Always visible & clickable to select element) */}
+                      <button
+                        type="button"
+                        data-cue-handle="true"
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          setSelectedActorId(act.id);
+                        }}
+                        className={`relative z-25 ml-1.5 flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-[10px] font-bold border pointer-events-auto transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#090D16] text-white shadow-md ring-1 ring-white/70'
+                            : 'bg-[#090D16]/90 text-slate-200 hover:text-white'
+                        }`}
+                        style={{ borderColor: laneColor }}
+                        title={`Select "${act.name}" (${kfs.length} cues)`}
+                      >
+                        <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: laneColor }} />
+                        <span className="truncate max-w-[115px]" style={{ color: isSelected ? '#ffffff' : laneColor }}>
+                          {act.name}
                         </span>
-                      </div>
-                    );
-                  })}
-                </React.Fragment>
-              );
-            });
-          })()}
+                      </button>
 
-          {/* Camera Keyframe Cues on Timeline Track (Draggable) */}
-          {(shot.camera.movement.keyframes || []).map((ckf) => {
-            const kfPct = Math.max(0.5, Math.min(99.5, (ckf.time / duration) * 100));
-            const isCamSelected = selectedActorId === '__camera__';
-            const camColor = shot.camera.color || '#F0AE42';
-            return (
+                      {/* Subject Cue Span Bar (Drag body to shift cue timing, drag left/right edges to speed up or slow down!) */}
+                      {kfs.length >= 2 && (
+                        <div
+                          data-cue-handle="true"
+                          data-testid={`timeline-cue-span-${act.id}`}
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            timelineRef.current?.setPointerCapture(e.pointerId);
+                            setSelectedActorId(act.id);
+                            setDraggingTimelineCue({
+                              kind: 'actor-span',
+                              actorId: act.id,
+                              side: 'move',
+                              initialStart: spanStart,
+                              initialEnd: spanEnd,
+                              startClientX: e.clientX,
+                              initialTimesById: captureInitialTimes(),
+                            });
+                          }}
+                          className={`absolute z-20 h-5 rounded-md flex items-center justify-between cursor-grab active:cursor-grabbing pointer-events-auto transition-opacity ${
+                            isSelected ? 'opacity-100 ring-1 ring-white/80 shadow-md' : 'opacity-80 hover:opacity-100'
+                          }`}
+                          style={{
+                            top: '4px',
+                            left: `${startPct}%`,
+                            width: `${Math.max(3, endPct - startPct)}%`,
+                            backgroundColor: `${laneColor}35`,
+                            border: `1.5px solid ${laneColor}`,
+                          }}
+                          title={`${act.name} Cues (${spanStart.toFixed(1)}s → ${spanEnd.toFixed(1)}s) — Drag bar to shift all cues, or drag edges to change speed`}
+                        >
+                          {/* Left Speed Handle */}
+                          <div
+                            data-cue-handle="true"
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              timelineRef.current?.setPointerCapture(e.pointerId);
+                              setSelectedActorId(act.id);
+                              setDraggingTimelineCue({
+                                kind: 'actor-span',
+                                actorId: act.id,
+                                side: 'start',
+                                initialStart: spanStart,
+                                initialEnd: spanEnd,
+                                startClientX: e.clientX,
+                                initialTimesById: captureInitialTimes(),
+                              });
+                            }}
+                            className="h-full w-2.5 cursor-ew-resize bg-white/40 hover:bg-white rounded-l-[4px] shrink-0 flex items-center justify-center"
+                            title={`Drag to change ${act.name} start time & speed`}
+                          >
+                            <div className="h-2.5 w-[1px] bg-black/60" />
+                          </div>
+
+                          {/* Span Timing & Action Summary */}
+                          <span className="px-2 text-[9.5px] font-mono font-bold text-white truncate pointer-events-none drop-shadow">
+                            {shortTag} • {spanStart.toFixed(1)}s → {spanEnd.toFixed(1)}s ({kfs.length} cues)
+                          </span>
+
+                          {/* Right Speed Handle */}
+                          <div
+                            data-cue-handle="true"
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              timelineRef.current?.setPointerCapture(e.pointerId);
+                              setSelectedActorId(act.id);
+                              setDraggingTimelineCue({
+                                kind: 'actor-span',
+                                actorId: act.id,
+                                side: 'end',
+                                initialStart: spanStart,
+                                initialEnd: spanEnd,
+                                startClientX: e.clientX,
+                                initialTimesById: captureInitialTimes(),
+                              });
+                            }}
+                            className="h-full w-2.5 cursor-ew-resize bg-white/40 hover:bg-white rounded-r-[4px] shrink-0 flex items-center justify-center"
+                            title={`Drag left/right to speed up or slow down ${act.name} cues`}
+                          >
+                            <div className="h-2.5 w-[1px] bg-black/60" />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Individual Draggable Shape-Coded Cue Nodes (Strictly Centered at Exact Time% with 24x24 Hit-Box) */}
+                      {kfs.map((kf) => {
+                        const kfPct = Math.max(0, Math.min(100, (kf.time / duration) * 100));
+                        const isAirborne = (kf.position.z ?? 0) > 2;
+                        const isLocomotion = kf.gait === 'walk' || kf.gait === 'run' || kf.gait === 'sneak';
+                        const shapeClass = isAirborne
+                          ? 'rounded-[3px] rotate-12' // Jump / Airborne
+                          : isLocomotion
+                          ? 'rotate-45' // Locomotion Diamond ◆
+                          : 'rounded-full'; // Acting / Pose Circle ●
+                        const cueTag =
+                          kf.posePreset && kf.posePreset !== 'neutral-stand'
+                            ? kf.posePreset.replace(/^universal-ik:llm_/, 'AI-IK ').slice(0, 12)
+                            : kf.gait && kf.gait !== 'none'
+                            ? kf.gait
+                            : `${kf.time.toFixed(1)}s`;
+
+                        return (
+                          <div
+                            key={kf.id}
+                            data-cue-handle="true"
+                            data-testid={`timeline-actor-cue-${act.id}-${kf.id}`}
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              timelineRef.current?.setPointerCapture(e.pointerId);
+                              setSelectedActorId(act.id);
+                              setCurrentTime(kf.time);
+                              const rect = timelineRef.current?.getBoundingClientRect();
+                              const clickedTime =
+                                rect && rect.width > 0 ? ((e.clientX - rect.left) / rect.width) * duration : kf.time;
+                              const rawOffset = kf.time - clickedTime;
+                              setDraggingTimelineCue({
+                                kind: 'actor-cue',
+                                actorId: act.id,
+                                cueId: kf.id,
+                                origTime: kf.time,
+                                grabOffsetSec: Math.abs(rawOffset) <= 0.12 ? rawOffset : 0,
+                              });
+                            }}
+                            className={`absolute top-1/2 z-30 h-6 w-6 flex items-center justify-center cursor-ew-resize group pointer-events-auto transition-opacity ${
+                              isSelected ? 'opacity-100' : 'opacity-85 hover:opacity-100'
+                            }`}
+                            style={{
+                              left: `${kfPct}%`,
+                              transform: 'translate(-50%, -50%)',
+                            }}
+                            title={`[${shortTag}] ${act.name} Cue @ ${kf.time.toFixed(2)}s (${cueTag} | X:${Math.round(kf.position.x)}, Y:${Math.round(kf.position.y)}) — Drag left/right to retime`}
+                          >
+                            <div
+                              className={`h-3.5 w-3.5 border-2 shadow-md transition-transform group-hover:scale-125 ${shapeClass} ${
+                                isSelected ? 'border-white scale-110 ring-1 ring-black/70' : 'border-white/85'
+                              }`}
+                              style={{ backgroundColor: laneColor }}
+                            />
+                            <span
+                              className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[#090D16]/95 px-1.5 py-0.5 font-mono text-[9px] font-bold whitespace-nowrap pointer-events-none border shadow-lg z-40"
+                              style={{ color: laneColor, borderColor: laneColor }}
+                            >
+                              [{shortTag}] {act.name} • {cueTag} @ {kf.time.toFixed(2)}s (⇄ Drag)
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                });
+              })()}
+
+              {/* Active Cinema Scrubber Playhead */}
               <div
-                key={ckf.id}
-                data-cue-handle="true"
-                data-testid={`timeline-camera-cue-${ckf.id}`}
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  timelineRef.current?.setPointerCapture(e.pointerId);
-                  setSelectedActorId('__camera__');
-                  setCurrentTime(ckf.time);
-                  setDraggingTimelineCue({
-                    kind: 'camera-cue',
-                    cueId: ckf.id,
-                    origTime: ckf.time,
-                  });
+                className="absolute top-0 bottom-0 pointer-events-none z-40 transition-transform duration-75"
+                style={{
+                  left: `${Math.min(100, Math.max(0, (currentTime / duration) * 100))}%`,
+                  transform: 'translateX(-50%)',
                 }}
-                className="absolute top-1.5 z-30 flex flex-col items-center cursor-ew-resize group pointer-events-auto"
-                style={{ left: `${kfPct}%`, transform: 'translateX(-50%)' }}
-                title={`[CAM] Camera Cue @ ${ckf.time.toFixed(2)}s — Drag left/right to retime`}
               >
-                <div
-                  className={`h-2.5 w-2.5 rotate-45 border shadow-sm transition-transform group-hover:scale-150 ${
-                    isCamSelected ? 'border-white scale-125' : 'border-white/75'
-                  }`}
-                  style={{ backgroundColor: camColor }}
-                />
-                <span
-                  className="opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[#090D16]/95 px-1 font-mono text-[8px] mt-1 whitespace-nowrap pointer-events-none border shadow-lg"
-                  style={{ color: camColor, borderColor: camColor }}
-                >
-                  [CAM] @ {ckf.time.toFixed(2)}s
-                </span>
+                <div className="flex flex-col items-center">
+                  <div className="rounded bg-[#F0AE42] px-1.5 py-0.5 font-mono text-[9.5px] font-bold text-[#090D16] shadow-lg flex items-center gap-0.5 border border-[#F8CA78]">
+                    <span>{currentTime.toFixed(2)}s</span>
+                  </div>
+                  <div className="w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[6px] border-t-[#F0AE42] -mt-0.5" />
+                </div>
+                <div className="w-0.5 h-full bg-[#F0AE42] shadow-[0_0_8px_rgba(240,174,66,0.9)] mx-auto -mt-1" />
               </div>
-            );
-          })}
-
-          {/* Active Cinema Scrubber Playhead */}
-          <div
-            className="absolute top-0 bottom-0 pointer-events-none z-30 transition-transform duration-75"
-            style={{
-              left: `${Math.min(100, Math.max(0, (currentTime / duration) * 100))}%`,
-              transform: 'translateX(-50%)',
-            }}
-          >
-            <div className="flex flex-col items-center">
-              <div className="rounded bg-[#F0AE42] px-1 py-0.2 font-mono text-[8.5px] font-bold text-[#090D16] shadow-lg flex items-center gap-0.5 border border-[#F8CA78]">
-                <span>{currentTime.toFixed(2)}s</span>
-              </div>
-              <div className="w-0 h-0 border-l-[4px] border-l-transparent border-r-[4px] border-r-transparent border-t-[5px] border-t-[#F0AE42] -mt-0.5" />
             </div>
-            <div className="w-0.5 h-full bg-[#F0AE42] shadow-[0_0_8px_rgba(240,174,66,0.85)] mx-auto -mt-1" />
-          </div>
-        </div>
+          );
+        })()}
 
         {/* Collapsible Secondary Tool Drawers (Trim Range / Keyframe Cues) */}
         {activeTool === 'markers' && (

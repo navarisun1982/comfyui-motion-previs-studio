@@ -1492,8 +1492,8 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                         onResetActorMotion={(id) => resetActorMotion(id)}
                         onExtendShotDuration={(nextDur) => updateDuration(nextDur)}
                         onMoveActorCueTime={(id, cueId, nextTime) => moveActorKeyframeTime(id, cueId, nextTime)}
-                        onScaleActorCuesInRange={(id, oldStart, oldEnd, newStart, newEnd) =>
-                          scaleActorCuesInRange(id, oldStart, oldEnd, newStart, newEnd)
+                        onScaleActorCuesInRange={(id, oldStart, oldEnd, newStart, newEnd, initialTimesById) =>
+                          scaleActorCuesInRange(id, oldStart, oldEnd, newStart, newEnd, initialTimesById)
                         }
                         onApplyActorMotionCurve={(id, curve, startSec, endSec) =>
                           applyActorMotionCurve(id, curve, startSec, endSec)

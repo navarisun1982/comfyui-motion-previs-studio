@@ -518,6 +518,14 @@ export function autoDetectWorkflowBindings(
     }
   }
   if (!prompt) {
+    const ltxDirector = nodeEntries.find(
+      ([_, n]) => /LTXDirectorCS25|LTXDirector/i.test(n.class_type) && 'local_prompts' in n.inputs
+    );
+    if (ltxDirector) {
+      prompt = { node: ltxDirector[0], input: 'local_prompts' };
+    }
+  }
+  if (!prompt) {
     warnings.push('No Prompt input node detected.');
   }
 
@@ -569,7 +577,7 @@ export function autoDetectWorkflowBindings(
   } else {
     const unlinkedSeedNode = nodeEntries.find(
       ([_, n]) =>
-        /easy seed|RandomNoise|KSampler|StubeliusH3Director/i.test(n.class_type) &&
+        /easy seed|RandomNoise|KSampler|StubeliusH3Director|StubeliusLTXSetup/i.test(n.class_type) &&
         (('seed' in n.inputs && !isLink(n.inputs['seed'])) ||
           ('noise_seed' in n.inputs && !isLink(n.inputs['noise_seed'])))
     );
@@ -591,11 +599,13 @@ export function autoDetectWorkflowBindings(
   } else {
     const durNode = nodeEntries.find(
       ([_, n]) =>
-        n.class_type === 'PrimitiveFloat' &&
-        /duration|seconds|length/i.test(String(n._meta?.title || ''))
+        (n.class_type === 'PrimitiveFloat' &&
+          /duration|seconds|length/i.test(String(n._meta?.title || ''))) ||
+        (/StubeliusH3Director|LTXDirector/i.test(n.class_type) && 'duration_seconds' in n.inputs)
     );
     if (durNode) {
-      durationSeconds = { node: durNode[0], input: 'value' };
+      const inName = 'duration_seconds' in durNode[1].inputs ? 'duration_seconds' : 'value';
+      durationSeconds = { node: durNode[0], input: inName };
     }
   }
 
@@ -651,11 +661,19 @@ export function autoDetectWorkflowBindings(
   }
   nodesFingerprint[outputNode] = api[outputNode].class_type;
 
+  const isLtxWorkflow = nodeEntries.some(([_, n]) =>
+    /LTXDirector|StubeliusLTX|LTXV|LTX2/i.test(n.class_type)
+  );
+  const detectedEngine: 'ltx-2.5' | 'minimax-h3' = isLtxWorkflow ? 'ltx-2.5' : 'minimax-h3';
+
   const binding: TemplateBinding = {
     schema: 1,
-    templateId: 'minimax_h3_custom_user',
-    engine: 'minimax-h3',
-    label: 'Custom User MiniMax Workflow (Auto-Detected Bindings)',
+    templateId: detectedEngine === 'ltx-2.5' ? 'ltx25_custom_user' : 'minimax_h3_custom_user',
+    engine: detectedEngine,
+    label:
+      detectedEngine === 'ltx-2.5'
+        ? 'Custom User LTX 2.5 Workflow (Auto-Detected Bindings)'
+        : 'Custom User MiniMax Workflow (Auto-Detected Bindings)',
     api: 'custom_user_workflow.api.json',
     modes: ['control'],
     nodes: nodesFingerprint,
@@ -667,7 +685,7 @@ export function autoDetectWorkflowBindings(
     output: {
       node: outputNode,
     },
-    frameRule: 'any',
+    frameRule: detectedEngine === 'ltx-2.5' ? '8n+1' : 'any',
   };
 
   return {
@@ -879,4 +897,459 @@ export function syncActiveMinimaxTemplateToRegistry(
   }
 
   return templateRegistry.find('minimax-h3', 'control') || null;
+}
+
+// ============================================================================
+// Multi-Workflow Library & Curated Presets (MiniMax H3 + LTX-2.5)
+// ============================================================================
+
+export type RenderEngineId = 'ltx-2.5' | 'minimax-h3';
+
+export interface CuratedBuiltinWorkflow {
+  id: string;
+  engine: RenderEngineId;
+  label: string;
+  shortLabel: string;
+  description: string;
+  baseTemplateId: string;
+  forcedProfile?: 'draft' | 'final';
+  requiresFourRefs?: boolean;
+}
+
+export const CURATED_BUILTIN_WORKFLOWS: CuratedBuiltinWorkflow[] = [
+  // MiniMax H3 Built-in Workflows
+  {
+    id: 'minimax_h3_ref2va',
+    engine: 'minimax-h3',
+    label: 'MiniMax H3 Ref2VA Native (SolAttn + 8-Step Turbo LoRA • 4 Refs + 60fps Audio)',
+    shortLabel: 'MiniMax H3 Ref2VA (SolAttn + 8-Step Turbo)',
+    description: 'Node 638 Previs Video + 4 Ref Images (<pic 1..4>) → Node 145 60fps RIFE + Audio MP4',
+    baseTemplateId: 'minimax_h3_ref2va',
+    requiresFourRefs: true,
+  },
+  {
+    id: 'h3_stubelius',
+    engine: 'minimax-h3',
+    label: 'Stubelius Ultimate MiniMax H3 (15-Node Hybrid Director V2)',
+    shortLabel: 'Stubelius Ultimate H3 (Hybrid Director V2)',
+    description: 'Node 4 StubeliusH3DirectorV2 Multi-Character Timeline + Previs → Node 12 1080p RTX VSR MP4',
+    baseTemplateId: 'h3_stubelius',
+    requiresFourRefs: false,
+  },
+  {
+    id: 'minimax_h3_fast_draft',
+    engine: 'minimax-h3',
+    label: 'MiniMax H3 Fast Draft (1.0MP Native • Rapid Previs Iteration)',
+    shortLabel: 'MiniMax H3 Fast Draft (1.0MP Native)',
+    description: 'Fast 1.0MP native pass with 8-Step Turbo LoRA for quick camera & blocking verification',
+    baseTemplateId: 'minimax_h3_ref2va',
+    forcedProfile: 'draft',
+    requiresFourRefs: true,
+  },
+  // LTX-2.5 Built-in Workflows
+  {
+    id: 'ltx25_stubelius',
+    engine: 'ltx-2.5',
+    label: 'Stubelius Ultimate LTX 2.5 (Distilled 22B INT8 • 1080p Polish + 4 Refs)',
+    shortLabel: 'Stubelius Ultimate LTX 2.5 (1080p Polish)',
+    description: 'Node 7 LTXDirectorCS25 Previs Video + 4 Ref Images (@ref1..4) → Node 15 1080p Upscaled MP4',
+    baseTemplateId: 'ltx25_stubelius',
+    requiresFourRefs: false,
+  },
+  {
+    id: 'ltx25_fast_native',
+    engine: 'ltx-2.5',
+    label: 'LTX 2.5 Fast Native Direct (Single-Pass Distilled 22B INT8 • No Upscale)',
+    shortLabel: 'LTX 2.5 Fast Native Direct (Single-Pass)',
+    description: 'Single-pass native resolution directly from Node 7 LTXDirectorCS25 for fast turnaround',
+    baseTemplateId: 'ltx25_stubelius',
+    forcedProfile: 'draft',
+    requiresFourRefs: false,
+  },
+  {
+    id: 'ltx25_ic_lora_motion',
+    engine: 'ltx-2.5',
+    label: 'LTX 2.5 High-Adherence IC-LoRA Motion (Strict Camera & Pose Lock)',
+    shortLabel: 'LTX 2.5 High-Adherence IC-LoRA Control',
+    description: 'Boosted IC-LoRA motion strength (1.0) on Distilled 22B INT8 for strict 3D Previs locking',
+    baseTemplateId: 'ltx25_stubelius',
+    requiresFourRefs: false,
+  },
+];
+
+export interface SavedWorkflowEntry {
+  id: string;
+  engine: RenderEngineId;
+  label: string;
+  url: string;
+  rawJson: string;
+  overrides?: CustomWorkflowSlotOverrides;
+  nodeCount: number;
+  addedAt: string;
+}
+
+export interface WorkflowLibraryState {
+  activeWorkflowByEngine: Record<RenderEngineId, string>;
+  savedWorkflows: SavedWorkflowEntry[];
+}
+
+export interface WorkflowChoiceItem {
+  id: string;
+  engine: RenderEngineId;
+  label: string;
+  shortLabel: string;
+  description: string;
+  kind: 'builtin' | 'custom';
+  url?: string;
+  nodeCount?: number;
+  requiresFourRefs?: boolean;
+  forcedProfile?: 'draft' | 'final';
+  savedEntry?: SavedWorkflowEntry;
+}
+
+const WORKFLOW_LIBRARY_KEY = 'cmpvs_workflow_library_v2';
+
+export function loadWorkflowLibrary(): WorkflowLibraryState {
+  const defaultState: WorkflowLibraryState = {
+    activeWorkflowByEngine: {
+      'minimax-h3': 'minimax_h3_ref2va',
+      'ltx-2.5': 'ltx25_stubelius',
+    },
+    savedWorkflows: [],
+  };
+
+  try {
+    const raw = localStorage.getItem(WORKFLOW_LIBRARY_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<WorkflowLibraryState>;
+      const savedWorkflows = Array.isArray(parsed.savedWorkflows) ? parsed.savedWorkflows : [];
+      const activeMinimax =
+        parsed.activeWorkflowByEngine?.['minimax-h3'] || defaultState.activeWorkflowByEngine['minimax-h3'];
+      const activeLtx =
+        parsed.activeWorkflowByEngine?.['ltx-2.5'] || defaultState.activeWorkflowByEngine['ltx-2.5'];
+      return {
+        activeWorkflowByEngine: {
+          'minimax-h3': activeMinimax,
+          'ltx-2.5': activeLtx,
+        },
+        savedWorkflows,
+      };
+    }
+
+    // Migrate legacy single custom workflow if present
+    const legacy = loadStoredCustomWorkflowConfig();
+    if (legacy.rawJson && legacy.url) {
+      const detected = autoDetectWorkflowBindings(legacy.rawJson, legacy.overrides);
+      const entryId = `custom_wf_${Date.now()}`;
+      const migratedEntry: SavedWorkflowEntry = {
+        id: entryId,
+        engine: 'minimax-h3',
+        label: legacy.label || 'Custom Workflow',
+        url: legacy.url,
+        rawJson: legacy.rawJson,
+        overrides: legacy.overrides || {},
+        nodeCount: detected.candidates.length,
+        addedAt: legacy.updatedAt || new Date().toISOString(),
+      };
+      return {
+        activeWorkflowByEngine: {
+          'minimax-h3': legacy.activeSource === 'custom' ? entryId : 'minimax_h3_ref2va',
+          'ltx-2.5': 'ltx25_stubelius',
+        },
+        savedWorkflows: [migratedEntry],
+      };
+    }
+  } catch {
+    // ignore storage errors
+  }
+
+  return defaultState;
+}
+
+export function saveWorkflowLibrary(lib: WorkflowLibraryState): void {
+  try {
+    localStorage.setItem(WORKFLOW_LIBRARY_KEY, JSON.stringify(lib));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+export function getWorkflowChoicesForEngine(engine: RenderEngineId): WorkflowChoiceItem[] {
+  const lib = loadWorkflowLibrary();
+  const builtins: WorkflowChoiceItem[] = CURATED_BUILTIN_WORKFLOWS.filter(
+    (w) => w.engine === engine
+  ).map((w) => ({
+    id: w.id,
+    engine: w.engine,
+    label: w.label,
+    shortLabel: w.shortLabel,
+    description: w.description,
+    kind: 'builtin',
+    requiresFourRefs: w.requiresFourRefs,
+    forcedProfile: w.forcedProfile,
+  }));
+
+  const customs: WorkflowChoiceItem[] = lib.savedWorkflows
+    .filter((w) => w.engine === engine)
+    .map((w) => ({
+      id: w.id,
+      engine: w.engine,
+      label: `${w.label} (${w.nodeCount} nodes)`,
+      shortLabel: w.label,
+      description: `Added via URL: ${w.url} • ${w.nodeCount} ComfyUI nodes (Auto-Bound)`,
+      kind: 'custom',
+      url: w.url,
+      nodeCount: w.nodeCount,
+      requiresFourRefs: false,
+      savedEntry: w,
+    }));
+
+  return [...builtins, ...customs];
+}
+
+export function getActiveWorkflowForEngine(engine: RenderEngineId): WorkflowChoiceItem {
+  const lib = loadWorkflowLibrary();
+  const choices = getWorkflowChoicesForEngine(engine);
+  const activeId = lib.activeWorkflowByEngine[engine];
+  return choices.find((c) => c.id === activeId) || choices[0];
+}
+
+export function selectActiveWorkflowForEngine(
+  engine: RenderEngineId,
+  workflowId: string
+): WorkflowChoiceItem {
+  const lib = loadWorkflowLibrary();
+  const choices = getWorkflowChoicesForEngine(engine);
+  const found = choices.find((c) => c.id === workflowId) || choices[0];
+  lib.activeWorkflowByEngine[engine] = found.id;
+  saveWorkflowLibrary(lib);
+
+  // Keep legacy minimax config synced for backward compatibility
+  if (engine === 'minimax-h3') {
+    if (found.kind === 'custom' && found.savedEntry) {
+      saveStoredCustomWorkflowConfig({
+        activeSource: 'custom',
+        url: found.savedEntry.url,
+        label: found.savedEntry.label,
+        rawJson: found.savedEntry.rawJson,
+        overrides: found.savedEntry.overrides || {},
+        updatedAt: found.savedEntry.addedAt,
+      });
+    } else {
+      const prev = loadStoredCustomWorkflowConfig();
+      saveStoredCustomWorkflowConfig({
+        ...prev,
+        activeSource: 'builtin',
+      });
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Add one or multiple workflow URLs (separated by newlines or commas) into the
+ * workflow library for `engine`, auto-detect their bindings, and select the newly added workflow.
+ */
+export async function addWorkflowUrlsToLibrary(
+  rawUrlInput: string,
+  engine: RenderEngineId,
+  objectInfo?: Record<string, unknown> | null
+): Promise<{ added: SavedWorkflowEntry[]; activeChoice: WorkflowChoiceItem }> {
+  const urls = rawUrlInput
+    .split(/[\r\n,]+/)
+    .map((u) => u.trim())
+    .filter(Boolean);
+
+  if (urls.length === 0) {
+    throw new Error('Please paste at least one workflow URL or local .json path.');
+  }
+
+  const lib = loadWorkflowLibrary();
+  const added: SavedWorkflowEntry[] = [];
+
+  for (const rawUrl of urls) {
+    const { normalizedUrl, rawJson, result } = await fetchAndDetectWorkflowFromUrl(
+      rawUrl,
+      {},
+      objectInfo
+    );
+    const rawName = decodeURIComponent(
+      normalizedUrl.split(/[\\/]/).pop() || 'custom_workflow.json'
+    ).replace(/^.*\?path=/, '');
+    const cleanLabel = rawName.split(/[\\/]/).pop() || 'custom_workflow.json';
+
+    // Check if an entry with the same URL & engine already exists; update it if so
+    const existingIdx = lib.savedWorkflows.findIndex(
+      (w) => w.engine === engine && (w.url === rawUrl || w.url === normalizedUrl)
+    );
+    const entry: SavedWorkflowEntry = {
+      id: existingIdx >= 0 ? lib.savedWorkflows[existingIdx].id : `wf_${engine}_${Date.now()}_${added.length}`,
+      engine,
+      label: cleanLabel,
+      url: rawUrl,
+      rawJson,
+      overrides: {},
+      nodeCount: result.candidates.length,
+      addedAt: new Date().toISOString(),
+    };
+
+    if (existingIdx >= 0) {
+      lib.savedWorkflows[existingIdx] = entry;
+    } else {
+      lib.savedWorkflows.push(entry);
+    }
+    added.push(entry);
+  }
+
+  const lastAdded = added[added.length - 1];
+  lib.activeWorkflowByEngine[engine] = lastAdded.id;
+  saveWorkflowLibrary(lib);
+
+  const activeChoice = selectActiveWorkflowForEngine(engine, lastAdded.id);
+  return { added, activeChoice };
+}
+
+export function addUploadedWorkflowToLibrary(
+  filename: string,
+  rawJson: string,
+  engine: RenderEngineId,
+  objectInfo?: Record<string, unknown> | null
+): { entry: SavedWorkflowEntry; detected: AutoDetectedWorkflowResult; activeChoice: WorkflowChoiceItem } {
+  const detected = autoDetectWorkflowBindings(rawJson, {}, objectInfo);
+  const lib = loadWorkflowLibrary();
+  const existingIdx = lib.savedWorkflows.findIndex(
+    (w) => w.engine === engine && w.label === filename
+  );
+  const entry: SavedWorkflowEntry = {
+    id: existingIdx >= 0 ? lib.savedWorkflows[existingIdx].id : `wf_${engine}_${Date.now()}`,
+    engine,
+    label: filename,
+    url: filename,
+    rawJson,
+    overrides: {},
+    nodeCount: detected.candidates.length,
+    addedAt: new Date().toISOString(),
+  };
+
+  if (existingIdx >= 0) {
+    lib.savedWorkflows[existingIdx] = entry;
+  } else {
+    lib.savedWorkflows.push(entry);
+  }
+  lib.activeWorkflowByEngine[engine] = entry.id;
+  saveWorkflowLibrary(lib);
+
+  const activeChoice = selectActiveWorkflowForEngine(engine, entry.id);
+  return { entry, detected, activeChoice };
+}
+
+export function updateSavedWorkflowOverrides(
+  workflowId: string,
+  overrides: CustomWorkflowSlotOverrides,
+  objectInfo?: Record<string, unknown> | null
+): AutoDetectedWorkflowResult | null {
+  const lib = loadWorkflowLibrary();
+  const idx = lib.savedWorkflows.findIndex((w) => w.id === workflowId);
+  if (idx < 0) return null;
+
+  const entry = lib.savedWorkflows[idx];
+  const detected = autoDetectWorkflowBindings(entry.rawJson, overrides, objectInfo);
+  lib.savedWorkflows[idx] = {
+    ...entry,
+    overrides,
+    nodeCount: detected.candidates.length,
+  };
+  saveWorkflowLibrary(lib);
+  return detected;
+}
+
+export function removeWorkflowFromLibrary(
+  workflowId: string,
+  engine: RenderEngineId
+): WorkflowChoiceItem {
+  const lib = loadWorkflowLibrary();
+  lib.savedWorkflows = lib.savedWorkflows.filter((w) => w.id !== workflowId);
+  if (lib.activeWorkflowByEngine[engine] === workflowId) {
+    const defaultBuiltin = CURATED_BUILTIN_WORKFLOWS.find((w) => w.engine === engine);
+    lib.activeWorkflowByEngine[engine] = defaultBuiltin ? defaultBuiltin.id : 'minimax_h3_ref2va';
+  }
+  saveWorkflowLibrary(lib);
+  return getActiveWorkflowForEngine(engine);
+}
+
+/**
+ * Sync the currently selected workflow (built-in preset or user-added URL workflow)
+ * for `engine` into `templateRegistry` and return its `templateId` and metadata.
+ */
+export function syncActiveEngineWorkflowToRegistry(
+  engine: RenderEngineId,
+  objectInfo?: Record<string, unknown> | null
+): {
+  choice: WorkflowChoiceItem;
+  templateId: string;
+  registered: RegisteredTemplate | null;
+} {
+  templateRegistry.clear();
+  loadBundledTemplates();
+
+  const choice = getActiveWorkflowForEngine(engine);
+
+  if (choice.kind === 'custom' && choice.savedEntry) {
+    try {
+      const detected = autoDetectWorkflowBindings(
+        choice.savedEntry.rawJson,
+        choice.savedEntry.overrides,
+        objectInfo
+      );
+      const customTemplateId = choice.savedEntry.id;
+      const customBinding: TemplateBinding = {
+        ...detected.binding,
+        templateId: customTemplateId,
+        engine,
+        label: choice.savedEntry.label,
+        modes: ['control'],
+      };
+      const reg = templateRegistry.register(customBinding, detected.api);
+      return { choice, templateId: customTemplateId, registered: reg };
+    } catch (err) {
+      console.warn('[customWorkflowResolver] Failed to register custom URL workflow, falling back to built-in:', err);
+    }
+  }
+
+  // Built-in Curated Workflow preset
+  const builtinMeta =
+    CURATED_BUILTIN_WORKFLOWS.find((w) => w.id === choice.id) ||
+    CURATED_BUILTIN_WORKFLOWS.find((w) => w.engine === engine)!;
+
+  const baseReg = templateRegistry.get(builtinMeta.baseTemplateId);
+  if (baseReg) {
+    // Ensure 'control' mode is enabled on the selected built-in workflow (e.g. h3_stubelius)
+    const modes = baseReg.binding.modes.includes('control')
+      ? baseReg.binding.modes
+      : [...baseReg.binding.modes, 'control' as const];
+
+    const presetBinding: TemplateBinding = {
+      ...structuredClone(baseReg.binding),
+      templateId: builtinMeta.id,
+      label: builtinMeta.label,
+      modes,
+    };
+    const presetApi = structuredClone(baseReg.api);
+
+    // Apply preset-specific tuning (e.g. High-Adherence IC-LoRA Motion strength 1.0)
+    if (builtinMeta.id === 'ltx25_ic_lora_motion' && presetApi['5']?.inputs) {
+      presetApi['5'].inputs['ic_lora_strength'] = 1.0;
+    }
+
+    const reg = templateRegistry.register(presetBinding, presetApi);
+    return { choice, templateId: builtinMeta.id, registered: reg };
+  }
+
+  const fallback = templateRegistry.find(engine, 'control') || null;
+  return {
+    choice,
+    templateId: fallback?.binding.templateId || builtinMeta.id,
+    registered: fallback,
+  };
 }

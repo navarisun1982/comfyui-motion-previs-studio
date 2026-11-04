@@ -143,7 +143,7 @@ export default function App() {
     const unsubUpdate = subscribeAppUpdateStatus((st) => {
       if (mounted) setAppUpdateStatus(st);
     });
-    (async () => {
+    const probeComfy = async () => {
       const health = await defaultComfyClient.checkHealth();
       if (!mounted) return;
       if (health.ok && health.stats) {
@@ -152,10 +152,17 @@ export default function App() {
       } else {
         setComfyConnectionStatus('disconnected');
       }
-    })();
+    };
+    probeComfy();
+    const retryInterval = setInterval(() => {
+      if (useComfyStore.getState().connectionStatus !== 'connected') {
+        probeComfy();
+      }
+    }, 8000);
     checkForAppUpdates(true).catch(() => {});
     return () => {
       mounted = false;
+      clearInterval(retryInterval);
       unsubUpdate();
     };
   }, [setComfyConnectionStatus, setComfySystemStats]);

@@ -171,6 +171,9 @@ function startLocalProxyServer() {
     } else if (rawUrl.startsWith('/api/llamacpp')) {
       targetPort = 8080;
       forwardPath = rawUrl.replace(/^\/api\/llamacpp/, '') || '/';
+    } else if (rawUrl.startsWith('/api/lmstudio')) {
+      targetPort = 1234;
+      forwardPath = rawUrl.replace(/^\/api\/lmstudio/, '') || '/';
     }
 
     const outHeaders = { ...req.headers };
@@ -352,6 +355,8 @@ app.whenReady().then(() => {
     'http://localhost:11434/*',
     'http://127.0.0.1:8080/*',
     'http://localhost:8080/*',
+    'http://127.0.0.1:1234/*',
+    'http://localhost:1234/*',
   ];
 
   // Prevent ComfyUI (8188) and Ollama (11434) from rejecting requests with HTTP 403 due to mismatched Origin headers

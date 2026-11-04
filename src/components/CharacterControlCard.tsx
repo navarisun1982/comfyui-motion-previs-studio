@@ -120,7 +120,14 @@ export interface CharacterControlCardProps {
   onResetActorMotion?: (actorId: string) => void;
   onExtendShotDuration?: (nextDurationSec: number) => void;
   onMoveActorCueTime?: (actorId: string, cueId: string, newTime: number) => void;
-  onScaleActorCuesInRange?: (actorId: string, oldStart: number, oldEnd: number, newStart: number, newEnd: number) => void;
+  onScaleActorCuesInRange?: (
+    actorId: string,
+    oldStart: number,
+    oldEnd: number,
+    newStart: number,
+    newEnd: number,
+    initialTimesById?: Record<string, number>
+  ) => void;
   onApplyActorMotionCurve?: (
     actorId: string,
     curve: 'linear' | 'ease-in-out' | 'fast-start' | 'slow-start',
@@ -190,11 +197,13 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const [showRigLandmarksDrawer, setShowRigLandmarksDrawer] = useState<boolean>(false);
   const [lastDirectedSignature, setLastDirectedSignature] = useState<string | null>(null);
   const [draggingCueId, setDraggingCueId] = useState<string | null>(null);
+  const [draggingCueGrabOffsetSec, setDraggingCueGrabOffsetSec] = useState<number>(0);
   const [draggingSpanEdge, setDraggingSpanEdge] = useState<{
     side: 'start' | 'end' | 'move';
     initialStart: number;
     initialEnd: number;
     startClientX: number;
+    initialTimesById: Record<string, number>;
   } | null>(null);
   const [activePacingCurve, setActivePacingCurve] = useState<'linear' | 'ease-in-out' | 'fast-start' | 'slow-start'>('linear');
 
@@ -1437,56 +1446,54 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         if (rect.width <= 0) return;
                         if (draggingCueId) {
                           const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-                          const nextTime = Number((pct * shotDur).toFixed(2));
+                          const nextTime = Number(
+                            Math.min(shotDur, Math.max(0, pct * shotDur + draggingCueGrabOffsetSec)).toFixed(2)
+                          );
                           onMoveActorCueTime?.(actor.id, draggingCueId, nextTime);
                           onSeekTime?.(nextTime);
                         } else if (draggingSpanEdge) {
+                          const initStart = draggingSpanEdge.initialStart;
+                          const initEnd = draggingSpanEdge.initialEnd;
                           const deltaSec = ((e.clientX - draggingSpanEdge.startClientX) / rect.width) * shotDur;
                           if (draggingSpanEdge.side === 'start') {
-                            const nextStart = Math.max(
-                              0,
-                              Math.min(draggingSpanEdge.initialEnd - 0.3, draggingSpanEdge.initialStart + deltaSec)
-                            );
+                            const nextStart = Math.max(0, Math.min(initEnd - 0.3, initStart + deltaSec));
                             onScaleActorCuesInRange?.(
                               actor.id,
-                              cueSpanStart,
-                              cueSpanEnd,
+                              initStart,
+                              initEnd,
                               Number(nextStart.toFixed(2)),
-                              cueSpanEnd
+                              initEnd,
+                              draggingSpanEdge.initialTimesById
                             );
                             onUpdateMotionWindow(actor.id, {
                               start: Number(nextStart.toFixed(1)),
-                              end: Number(cueSpanEnd.toFixed(1)),
+                              end: Number(initEnd.toFixed(1)),
                             });
                           } else if (draggingSpanEdge.side === 'end') {
-                            const nextEnd = Math.max(
-                              draggingSpanEdge.initialStart + 0.3,
-                              Math.min(shotDur, draggingSpanEdge.initialEnd + deltaSec)
-                            );
+                            const nextEnd = Math.max(initStart + 0.3, Math.min(shotDur, initEnd + deltaSec));
                             onScaleActorCuesInRange?.(
                               actor.id,
-                              cueSpanStart,
-                              cueSpanEnd,
-                              cueSpanStart,
-                              Number(nextEnd.toFixed(2))
+                              initStart,
+                              initEnd,
+                              initStart,
+                              Number(nextEnd.toFixed(2)),
+                              draggingSpanEdge.initialTimesById
                             );
                             onUpdateMotionWindow(actor.id, {
-                              start: Number(cueSpanStart.toFixed(1)),
+                              start: Number(initStart.toFixed(1)),
                               end: Number(nextEnd.toFixed(1)),
                             });
                           } else if (draggingSpanEdge.side === 'move') {
-                            const spanLen = draggingSpanEdge.initialEnd - draggingSpanEdge.initialStart;
-                            const nextStart = Math.max(
-                              0,
-                              Math.min(shotDur - spanLen, draggingSpanEdge.initialStart + deltaSec)
-                            );
+                            const spanLen = initEnd - initStart;
+                            const nextStart = Math.max(0, Math.min(shotDur - spanLen, initStart + deltaSec));
                             const nextEnd = Math.min(shotDur, nextStart + spanLen);
                             onScaleActorCuesInRange?.(
                               actor.id,
-                              cueSpanStart,
-                              cueSpanEnd,
+                              initStart,
+                              initEnd,
                               Number(nextStart.toFixed(2)),
-                              Number(nextEnd.toFixed(2))
+                              Number(nextEnd.toFixed(2)),
+                              draggingSpanEdge.initialTimesById
                             );
                             onUpdateMotionWindow(actor.id, {
                               start: Number(nextStart.toFixed(1)),
@@ -1498,6 +1505,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                       onPointerUp={(e) => {
                         if (draggingCueId || draggingSpanEdge) {
                           setDraggingCueId(null);
+                          setDraggingCueGrabOffsetSec(0);
                           setDraggingSpanEdge(null);
                           try {
                             cueRibbonRef.current?.releasePointerCapture(e.pointerId);
@@ -1506,6 +1514,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                       }}
                       onPointerCancel={() => {
                         setDraggingCueId(null);
+                        setDraggingCueGrabOffsetSec(0);
                         setDraggingSpanEdge(null);
                       }}
                       className="relative h-7 w-full rounded-md bg-[#111726] border border-white/[0.1] overflow-hidden touch-none"
@@ -1517,11 +1526,16 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         onPointerDown={(e) => {
                           e.stopPropagation();
                           cueRibbonRef.current?.setPointerCapture(e.pointerId);
+                          const initialTimesById: Record<string, number> = {};
+                          kfs.forEach((k) => {
+                            initialTimesById[k.id] = k.time;
+                          });
                           setDraggingSpanEdge({
                             side: 'move',
                             initialStart: cueSpanStart,
                             initialEnd: cueSpanEnd,
                             startClientX: e.clientX,
+                            initialTimesById,
                           });
                         }}
                         className="absolute top-1 bottom-1 rounded flex items-center justify-between cursor-grab active:cursor-grabbing"
@@ -1538,11 +1552,16 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                           onPointerDown={(e) => {
                             e.stopPropagation();
                             cueRibbonRef.current?.setPointerCapture(e.pointerId);
+                            const initialTimesById: Record<string, number> = {};
+                            kfs.forEach((k) => {
+                              initialTimesById[k.id] = k.time;
+                            });
                             setDraggingSpanEdge({
                               side: 'start',
                               initialStart: cueSpanStart,
                               initialEnd: cueSpanEnd,
                               startClientX: e.clientX,
+                              initialTimesById,
                             });
                           }}
                           className="h-full w-2 cursor-ew-resize flex items-center justify-center hover:bg-white/30 rounded-l"
@@ -1561,11 +1580,16 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                           onPointerDown={(e) => {
                             e.stopPropagation();
                             cueRibbonRef.current?.setPointerCapture(e.pointerId);
+                            const initialTimesById: Record<string, number> = {};
+                            kfs.forEach((k) => {
+                              initialTimesById[k.id] = k.time;
+                            });
                             setDraggingSpanEdge({
                               side: 'end',
                               initialStart: cueSpanStart,
                               initialEnd: cueSpanEnd,
                               startClientX: e.clientX,
+                              initialTimesById,
                             });
                           }}
                           className="h-full w-2 cursor-ew-resize flex items-center justify-center hover:bg-white/30 rounded-r"
@@ -1575,13 +1599,11 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         </div>
                       </div>
 
-                      {/* Draggable Individual Cue Nodes */}
-                      {kfs.map((kf, idx) => {
-                        const kfPct = Math.max(1, Math.min(99, (kf.time / shotDur) * 100));
+                      {/* Draggable Individual Cue Nodes (All Cues Rendered Stably & Centered 1:1) */}
+                      {kfs.map((kf) => {
+                        const kfPct = Math.max(0, Math.min(100, (kf.time / shotDur) * 100));
                         const isAirborne = (kf.position.z ?? 0) > 2;
                         const isLocomotion = kf.gait === 'walk' || kf.gait === 'run' || kf.gait === 'sneak';
-                        const isEndpoint = idx === 0 || idx === kfs.length - 1 || kfs.length <= 8 || idx % 3 === 0;
-                        if (!isEndpoint && draggingCueId !== kf.id) return null;
 
                         return (
                           <div
@@ -1590,10 +1612,15 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                             onPointerDown={(e) => {
                               e.stopPropagation();
                               cueRibbonRef.current?.setPointerCapture(e.pointerId);
+                              const rect = cueRibbonRef.current?.getBoundingClientRect();
+                              const clickedTime =
+                                rect && rect.width > 0 ? ((e.clientX - rect.left) / rect.width) * shotDur : kf.time;
+                              const rawOffset = kf.time - clickedTime;
+                              setDraggingCueGrabOffsetSec(Math.abs(rawOffset) <= 0.12 ? rawOffset : 0);
                               setDraggingCueId(kf.id);
                               onSeekTime?.(kf.time);
                             }}
-                            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-20 cursor-ew-resize group"
+                            className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-30 h-5 w-5 flex items-center justify-center cursor-ew-resize group"
                             style={{ left: `${kfPct}%` }}
                             title={`Drag Cue @ ${kf.time.toFixed(2)}s (${kf.motionClip || kf.posePreset || kf.gait || 'pose'})`}
                           >

@@ -11,8 +11,9 @@ import { defaultJobRunner } from '../pipeline/jobRunner';
 import { loadBundledTemplates } from '../pipeline/templateLoader';
 import { templateRegistry } from '../pipeline/templateRegistry';
 import {
-  loadStoredCustomWorkflowConfig,
-  syncActiveMinimaxTemplateToRegistry,
+  WorkflowChoiceItem,
+  getActiveWorkflowForEngine,
+  syncActiveEngineWorkflowToRegistry,
 } from '../pipeline/customWorkflowResolver';
 import { CustomWorkflowConfigBar } from './CustomWorkflowConfigBar';
 import { BundledWorkflowsModal } from './BundledWorkflowsModal';
@@ -136,6 +137,9 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     null,
   ]);
   const [comfySeed, setComfySeed] = useState<number>(532752046112665);
+  const [activeWorkflowChoice, setActiveWorkflowChoice] = useState<WorkflowChoiceItem>(() =>
+    getActiveWorkflowForEngine(activeEngineTab === 'ltx-2.5' ? 'ltx-2.5' : 'minimax-h3')
+  );
   const [isSubmittingComfy, setIsSubmittingComfy] = useState<boolean>(false);
   const [comfyStatusText, setComfyStatusText] = useState<string | null>(null);
   const [comfyErrorText, setComfyErrorText] = useState<string | null>(null);
@@ -320,11 +324,11 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     }
 
     const targetEngine: 'ltx-2.5' | 'minimax-h3' = activeEngineTab === 'ltx-2.5' ? 'ltx-2.5' : 'minimax-h3';
-    const customConfig = loadStoredCustomWorkflowConfig();
+    const currentWorkflow = getActiveWorkflowForEngine(targetEngine);
     const trimmedRefs = refImageNames.map((n) => n.trim()) as [string, string, string, string];
-    // Validate that all 4 Reference Image slots are filled when using the built-in 4-ref MiniMax H3 Ref2VA workflow
-    if (targetEngine === 'minimax-h3' && customConfig.activeSource !== 'custom' && trimmedRefs.some((n) => n.length === 0)) {
-      setComfyErrorText('All 4 Reference Image slots (<picture 1> to <picture 4>) must be filled before submitting to MiniMax H3 Ref2VA.');
+    // Validate that all 4 Reference Image slots are filled when using a 4-ref workflow
+    if (currentWorkflow.requiresFourRefs && trimmedRefs.some((n) => n.length === 0)) {
+      setComfyErrorText('All 4 Reference Image slots (<picture 1> to <picture 4>) must be filled before submitting to this workflow.');
       return;
     }
 
@@ -391,12 +395,8 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       } catch {
         objInfo = null;
       }
-      if (targetEngine === 'minimax-h3') {
-        syncActiveMinimaxTemplateToRegistry(customConfig, objInfo);
-      }
-      if (templateRegistry.list().length === 0) {
-        loadBundledTemplates();
-      }
+      const { choice: activeWf, templateId: selectedTemplateId } =
+        syncActiveEngineWorkflowToRegistry(targetEngine, objInfo);
 
       // 2. Queue job via JobRunner using active engine template (LTX-2.5 or MiniMax H3)
       const engineCompiled = getAdapter(targetEngine).compilePrompt(shot);
@@ -410,17 +410,14 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
           : engineCompiled.positivePrompt;
 
       setComfyStatusText(
-        targetEngine === 'ltx-2.5'
-          ? 'Step 3/3: Binding ltx25_stubelius (Distilled 22B INT8) & queuing in ComfyUI...'
-          : customConfig.activeSource === 'custom'
-          ? `Step 3/3: Binding Custom Workflow (${customConfig.label || 'Custom JSON'}) & queuing in ComfyUI...`
-          : 'Step 3/3: Binding minimax_h3_ref2va (SolAttn + 8-Step Turbo LoRA) & queuing in ComfyUI...'
+        `Step 3/3: Binding "${activeWf.shortLabel}" (${selectedTemplateId}) & queuing in ComfyUI...`
       );
       await defaultJobRunner.run({
         shot,
         engine: targetEngine,
         mode: 'control',
-        profile: selectedResolution === '1080p' ? 'final' : 'draft',
+        templateId: selectedTemplateId,
+        profile: activeWf.forcedProfile || (selectedResolution === '1080p' ? 'final' : 'draft'),
         prompt: effectivePrompt,
         negative: displayNegativePrompt,
         seed: Math.max(0, Math.floor(comfySeed)),
@@ -1047,15 +1044,17 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                     </button>
                   </div>
                   <p className="text-[10px] font-mono text-slate-400">
-                    {activeEngineTab === 'ltx-2.5' ? (
-                      <>
-                        Template: <span className="text-amber-300 font-semibold">ltx25_stubelius</span> (Distilled 22B INT8 • Node 7 LTXDirectorCS25 Previs Video + 4 Ref Images → Node 15 MP4)
-                      </>
-                    ) : (
-                      <>
-                        Template: <span className="text-indigo-300 font-semibold">minimax_h3_ref2va</span> (SolAttn + 8-Step Turbo LoRA @ 0.7 • Node 638 Previs Video + 4 Ref Images → Node 145 60fps MP4+Audio)
-                      </>
-                    )}
+                    Active Workflow:{' '}
+                    <span
+                      className={
+                        activeEngineTab === 'ltx-2.5'
+                          ? 'text-amber-300 font-semibold'
+                          : 'text-indigo-300 font-semibold'
+                      }
+                    >
+                      {activeWorkflowChoice.shortLabel}
+                    </span>{' '}
+                    ({activeWorkflowChoice.description})
                   </p>
                 </div>
               </div>
@@ -1084,7 +1083,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   onClick={handleRenderInComfyUI}
                   disabled={isSubmittingComfy || activeJob?.status === 'executing'}
                   className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-indigo-500/25 disabled:opacity-50 transition-all cursor-pointer"
-                  title="Auto-upload 3D RGB Previs MP4 + 4 Reference Images and execute MiniMax H3 Ref2VA in ComfyUI"
+                  title="Auto-upload 3D RGB Previs MP4 + 4 Reference Images and execute the selected workflow in ComfyUI"
                 >
                   {isSubmittingComfy || activeJob?.status === 'executing' ? (
                     <>
@@ -1101,8 +1100,12 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
               </div>
             </div>
 
-            {/* Workflow Source Switcher + Custom Workflow URL / .JSON Auto-Detector */}
-            <CustomWorkflowConfigBar compact />
+            {/* Workflow Library Selector + Add Workflow by URL Bar (supports MiniMax H3 & LTX-2.5) */}
+            <CustomWorkflowConfigBar
+              compact
+              engine={activeEngineTab === 'ltx-2.5' ? 'ltx-2.5' : 'minimax-h3'}
+              onWorkflowChanged={(choice) => setActiveWorkflowChoice(choice)}
+            />
 
             {/* Collapsible Workflow Setup & Required Models Guide */}
             <details className="rounded-xl bg-black/40 border border-white/10 px-3.5 py-2 text-[10px] font-mono text-slate-300">

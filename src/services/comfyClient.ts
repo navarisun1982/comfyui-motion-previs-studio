@@ -96,9 +96,15 @@ export class ComfyClient {
   }
 
   private resolveUrl(targetUrl?: string): string {
+    if (
+      this.baseUrl === '/api/comfy' ||
+      this.baseUrl.includes('127.0.0.1:51731') ||
+      this.baseUrl.includes('127.0.0.1:5173/api/comfy')
+    ) {
+      return this.baseUrl;
+    }
     const isDevServer = this.isHttpDevContext();
     if (!targetUrl) return this.baseUrl;
-    if (this.baseUrl.includes('127.0.0.1:51731')) return this.baseUrl;
     const cleanUrl = targetUrl.replace(/\/+$/, '');
     if (isDevServer && (cleanUrl.includes('127.0.0.1:8188') || cleanUrl.includes('localhost:8188'))) {
       return '/api/comfy';
@@ -156,8 +162,25 @@ export class ComfyClient {
   }
 
   async checkHealth(): Promise<{ ok: boolean; stats?: ComfySystemStats; raw?: unknown; error?: string }> {
+    const isFileProtocol = typeof window !== 'undefined' && window.location?.protocol?.startsWith('file:');
+    const rawCandidates = isFileProtocol
+      ? [
+          'http://127.0.0.1:51731/api/comfy',
+          'http://127.0.0.1:5173/api/comfy',
+          this.baseUrl,
+          'http://127.0.0.1:8188',
+          'http://127.0.0.1:8000',
+        ]
+      : [
+          this.baseUrl,
+          '/api/comfy',
+          'http://127.0.0.1:5173/api/comfy',
+          'http://127.0.0.1:51731/api/comfy',
+          'http://127.0.0.1:8188',
+          'http://127.0.0.1:8000',
+        ];
     const candidates = Array.from(
-      new Set([this.baseUrl, 'http://127.0.0.1:51731/api/comfy', '/api/comfy', 'http://127.0.0.1:8188'])
+      new Set(rawCandidates.filter((c) => Boolean(c) && !(isFileProtocol && c.startsWith('/'))))
     );
     let lastError = 'Connection failed';
     for (const candidate of candidates) {
