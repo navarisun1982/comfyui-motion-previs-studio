@@ -50,6 +50,7 @@ import {
   Zap,
   Download,
   GitBranch,
+  ChevronDown,
   X,
 } from 'lucide-react';
 import { GlbResourcesDirectory } from './GlbResourcesDirectory';
@@ -57,7 +58,7 @@ import { CustomWorkflowConfigBar } from './CustomWorkflowConfigBar';
 
 type Status = { tone: 'ok' | 'err' | 'info'; text: string } | null;
 
-const ORDER: ReasonerProvider[] = ['ollama', 'llamacpp', 'openai', 'gemini'];
+const ORDER: ReasonerProvider[] = ['ollama', 'lmstudio', 'llamacpp', 'openai', 'gemini'];
 
 const toConfig = (
   s: ReasonerSettings,
@@ -117,6 +118,7 @@ export const ReasonerSettingsPanel: React.FC<{
   const [showAdvancedOpenAi, setShowAdvancedOpenAi] = useState(false);
   const [openAiAuth, setOpenAiAuth] = useState<OpenAiAuthStatus | null>(null);
   const [openAiMode, setOpenAiMode] = useState<'apikey' | 'browser'>('browser');
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
 
   // ComfyUI Server Connection State
   const {
@@ -277,6 +279,27 @@ export const ReasonerSettingsPanel: React.FC<{
   const patch = (fields: Partial<typeof p>) =>
     setDraft((d) => ({ ...d, providers: { ...d.providers, [d.provider]: { ...d.providers[d.provider], ...fields } } }));
 
+  // Auto-discover available models in the background when opening or switching to a local provider (Ollama / LM Studio / llama.cpp)
+  useEffect(() => {
+    let cancelled = false;
+    if (info.local && cfg.url) {
+      listReasonerModels(cfg)
+        .then((list) => {
+          if (cancelled) return;
+          setModels(list);
+          if (active === 'lmstudio' && list.length > 0 && (!cfg.model || cfg.model === 'local')) {
+            patch({ model: list[0] });
+          }
+        })
+        .catch(() => {
+          /* silent background probe; user can click Check connection for explicit status */
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [active, cfg.url]);
+
   const selectProvider = (id: ReasonerProvider) => {
     setDraft((d) => {
       const next = { ...d, provider: id };
@@ -345,7 +368,10 @@ export const ReasonerSettingsPanel: React.FC<{
     try {
       const list = await listReasonerModels(cfg);
       setModels(list);
-      const hasCurrent = !cfg.model || list.includes(cfg.model) || active === 'llamacpp';
+      if (active === 'lmstudio' && list.length > 0 && (!cfg.model || cfg.model === 'local')) {
+        patch({ model: list[0] });
+      }
+      const hasCurrent = !cfg.model || list.includes(cfg.model) || active === 'llamacpp' || active === 'lmstudio';
       setStatus({
         tone: list.length ? 'ok' : 'info',
         text: list.length
@@ -591,7 +617,7 @@ export const ReasonerSettingsPanel: React.FC<{
           </div>
 
           {/* Provider selector (properly bounded & truncated so buttons never overflow) */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
             {ORDER.map((id) => {
               const pi = PROVIDERS[id];
               const on = id === active;
@@ -787,11 +813,11 @@ export const ReasonerSettingsPanel: React.FC<{
         </div>
       )}
 
-      {(active === 'ollama' || active === 'llamacpp') && (
+      {(active === 'ollama' || active === 'lmstudio' || active === 'llamacpp') && (
         <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200" id="reasoner-vision-note">
           <Info className="h-4 w-4 shrink-0 text-amber-400" />
           <span>
-            <strong className="font-semibold text-amber-300">Vision model recommended:</strong> Please use a model with vision support (e.g. <span className="font-mono text-white">Gemma 4</span> or <span className="font-mono text-white">Qwen 3.8 / Qwen2.5-VL</span> with <span className="font-mono text-white">--mmproj</span>) for visual scene understanding and image references.
+            <strong className="font-semibold text-amber-300">Vision model recommended:</strong> Please use a model with vision support (e.g. <span className="font-mono text-white">Gemma 4</span> or <span className="font-mono text-white">Qwen 3.8 / Qwen2.5-VL</span>{active === 'llamacpp' ? <> with <span className="font-mono text-white">--mmproj</span></> : null}) for visual scene understanding and image references.
           </span>
         </div>
       )}
@@ -867,24 +893,74 @@ export const ReasonerSettingsPanel: React.FC<{
               <input id="reasoner-base-url" className={inputCls} value={p.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} />
             </label>
 
-            <label className="space-y-1">
-              <span className="text-[10px] uppercase tracking-wider text-slate-500">
+            <div className="space-y-1 relative">
+              <span className="text-[10px] uppercase tracking-wider text-slate-500 block">
                 Model {active === 'llamacpp' && '(optional — llama-server uses the GGUF it was started with)'}
+                {active === 'lmstudio' && '(optional — uses loaded model or click refresh to pick)'}
               </span>
-              <div className="flex gap-2">
-                <input
-                  id="reasoner-model"
-                  className={inputCls}
-                  list="reasoner-model-options"
-                  value={p.model}
-                  placeholder={active === 'openai' ? 'e.g. gpt-5.6-sol or meta-llama/llama-3.3-70b-instruct:free' : ''}
-                  onChange={(e) => patch({ model: e.target.value })}
-                />
-                <datalist id="reasoner-model-options">
-                  {models.map((m) => (
-                    <option key={m} value={m} />
-                  ))}
-                </datalist>
+              <div className="flex gap-2 relative">
+                <div className="relative flex-1 min-w-0">
+                  <input
+                    id="reasoner-model"
+                    className={`${inputCls} pr-8`}
+                    value={p.model}
+                    placeholder={active === 'openai' ? 'e.g. gpt-5.6-sol or meta-llama/llama-3.3-70b-instruct:free' : ''}
+                    onFocus={() => {
+                      if (models.length > 0) setModelDropdownOpen(true);
+                    }}
+                    onBlur={() => {
+                      setTimeout(() => setModelDropdownOpen(false), 180);
+                    }}
+                    onChange={(e) => patch({ model: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    id="reasoner-model-dropdown-toggle"
+                    tabIndex={-1}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      if (models.length === 0 && busy === null) {
+                        refreshModels().then(() => setModelDropdownOpen(true));
+                      } else {
+                        setModelDropdownOpen((v) => !v);
+                      }
+                    }}
+                    title={models.length > 0 ? `Show all ${models.length} available models` : 'Load & show available models'}
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    <ChevronDown className={`h-3.5 w-3.5 transition-transform ${modelDropdownOpen ? 'rotate-180 text-amber-400' : ''}`} />
+                  </button>
+
+                  {modelDropdownOpen && models.length > 0 && (
+                    <div
+                      id="reasoner-model-dropdown-list"
+                      className="absolute left-0 right-0 top-full mt-1 z-50 max-h-56 overflow-y-auto rounded-lg border border-white/15 bg-slate-900/95 backdrop-blur-md shadow-2xl py-1 divide-y divide-white/5"
+                    >
+                      {models.map((m) => {
+                        const isSelected = m === p.model;
+                        return (
+                          <button
+                            key={m}
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              patch({ model: m });
+                              setModelDropdownOpen(false);
+                            }}
+                            className={`w-full px-3 py-1.5 text-left text-xs font-mono flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                              isSelected
+                                ? 'bg-amber-500/20 text-amber-200 font-bold'
+                                : 'text-slate-200 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            <span className="truncate">{m}</span>
+                            {isSelected && <CheckCircle2 className="h-3.5 w-3.5 text-amber-400 shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   id="reasoner-refresh-models"
@@ -896,7 +972,7 @@ export const ReasonerSettingsPanel: React.FC<{
                   {busy === 'models' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 </button>
               </div>
-            </label>
+            </div>
 
             {(info.needsKey || active === 'openai' || active === 'llamacpp') && (
               <label className="space-y-1 md:col-span-2">

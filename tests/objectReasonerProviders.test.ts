@@ -66,6 +66,14 @@ describe('reasoner settings', () => {
     expect(s.providers.gemini.model).toBe('gemini-2.5-flash');
     expect(getReasonerConfig().url).toBe('http://127.0.0.1:9090/v1');
   });
+
+  it('includes LM Studio as a first-class local provider defaulting to port 1234', () => {
+    const s = getReasonerSettings();
+    expect(s.providers.lmstudio.baseUrl).toBe('http://127.0.0.1:1234/v1');
+    expect(s.providers.lmstudio.model).toBe('local');
+    expect(PROVIDERS.lmstudio.local).toBe(true);
+    expect(PROVIDERS.lmstudio.protocol).toBe('openai');
+  });
 });
 
 describe('request builders', () => {
@@ -86,10 +94,18 @@ describe('request builders', () => {
     expect(buildOpenAiRequest(cfg('openai'), 'x', 'none').body.response_format).toBeUndefined();
   });
 
-  it('llama.cpp omits the placeholder model name and auth header', () => {
-    const r = buildOpenAiRequest(cfg('llamacpp', { model: 'local' }), 'chair');
-    expect(r.body.model).toBeUndefined();
-    expect(r.headers.Authorization).toBeUndefined();
+  it('llama.cpp and LM Studio omit the placeholder "local" model name and auth header, while sending explicit LM Studio model IDs', () => {
+    const rLlama = buildOpenAiRequest(cfg('llamacpp', { model: 'local' }), 'chair');
+    expect(rLlama.body.model).toBeUndefined();
+    expect(rLlama.headers.Authorization).toBeUndefined();
+
+    const rLmLocal = buildOpenAiRequest(cfg('lmstudio', { url: 'http://127.0.0.1:1234/v1', model: 'local' }), 'chair');
+    expect(rLmLocal.url).toBe('http://127.0.0.1:1234/v1/chat/completions');
+    expect(rLmLocal.body.model).toBeUndefined();
+    expect(rLmLocal.headers.Authorization).toBeUndefined();
+
+    const rLmExplicit = buildOpenAiRequest(cfg('lmstudio', { url: 'http://127.0.0.1:1234/v1', model: 'qwen2.5-vl-7b-instruct' }), 'chair');
+    expect(rLmExplicit.body.model).toBe('qwen2.5-vl-7b-instruct');
   });
 
   it('Gemini uses generateContent with x-goog-api-key and responseJsonSchema', () => {
@@ -265,11 +281,12 @@ describe('reasonObject transport', () => {
   describe('resolveWireUrl (CORS dev proxy)', () => {
     it('returns raw URL unchanged in non-browser/test environment', () => {
       expect(resolveWireUrl('http://127.0.0.1:11434/api/chat', 'ollama')).toBe('http://127.0.0.1:11434/api/chat');
+      expect(resolveWireUrl('http://127.0.0.1:1234/v1/models', 'lmstudio')).toBe('http://127.0.0.1:1234/v1/models');
       expect(resolveWireUrl('http://localhost:8080/v1/models', 'llamacpp')).toBe('http://localhost:8080/v1/models');
       expect(resolveWireUrl('https://api.openai.com/v1/chat/completions', 'openai')).toBe('https://api.openai.com/v1/chat/completions');
     });
 
-    it('rewrites local Ollama and llamacpp endpoints when simulated in dev browser', () => {
+    it('rewrites local Ollama, LM Studio, and llamacpp endpoints when simulated in dev browser', () => {
       const originalWindow = globalThis.window;
       try {
         (globalThis as any).window = {
@@ -278,6 +295,8 @@ describe('reasonObject transport', () => {
 
         expect(resolveWireUrl('http://127.0.0.1:11434/api/chat', 'ollama')).toBe('/api/ollama/api/chat');
         expect(resolveWireUrl('http://localhost:11434/api/tags', 'ollama')).toBe('/api/ollama/api/tags');
+        expect(resolveWireUrl('http://127.0.0.1:1234/v1/models', 'lmstudio')).toBe('/api/lmstudio/v1/models');
+        expect(resolveWireUrl('http://localhost:1234/v1/chat/completions', 'lmstudio')).toBe('/api/lmstudio/v1/chat/completions');
         expect(resolveWireUrl('http://127.0.0.1:8080/v1/models', 'llamacpp')).toBe('/api/llamacpp/v1/models');
         // Non-local or external endpoints are unchanged
         expect(resolveWireUrl('https://api.openai.com/v1', 'openai')).toBe('https://api.openai.com/v1');
@@ -302,7 +321,7 @@ describe('reasonObject transport', () => {
         } catch {}
 
         expect(resolveWireUrl('http://127.0.0.1:11434/api/tags', 'ollama')).toBe('http://127.0.0.1:11434/api/tags');
-        expect(resolveWireUrl('http://127.0.0.1:11434/api/chat', 'ollama')).toBe('http://127.0.0.1:11434/api/chat');
+        expect(resolveWireUrl('http://127.0.0.1:1234/v1/models', 'lmstudio')).toBe('http://127.0.0.1:1234/v1/models');
         expect(resolveWireUrl('http://127.0.0.1:8080/v1/models', 'llamacpp')).toBe('http://127.0.0.1:8080/v1/models');
       } finally {
         (globalThis as any).window = originalWindow;
@@ -318,4 +337,3 @@ describe('reasonObject transport', () => {
     });
   });
 });
-

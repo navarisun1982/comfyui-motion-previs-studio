@@ -46,6 +46,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api\/llamacpp/, ''),
       },
+      '/api/lmstudio': {
+        target: 'http://127.0.0.1:1234',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/lmstudio/, ''),
+      },
       '/api/openai-proxy': {
         target: 'https://api.openai.com/v1',
         changeOrigin: true,

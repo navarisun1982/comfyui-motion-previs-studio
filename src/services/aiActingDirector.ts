@@ -220,13 +220,23 @@ No preamble, markdown backticks, or explanation.`;
         rawText = extractResponseText('ollama', data);
       }
     } else {
-      const { url, headers, body } = buildOpenAiRequest(cfg, prompt, 'object', systemInstruction);
-      const res = await fetch(resolveWireUrl(url, cfg.provider), {
+      const mode = cfg.provider === 'lmstudio' || cfg.provider === 'llamacpp' ? 'none' : 'object';
+      const { url, headers, body } = buildOpenAiRequest(cfg, prompt, mode, systemInstruction);
+      let res = await fetch(resolveWireUrl(url, cfg.provider), {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
         signal,
       });
+      if (!res.ok && mode !== 'none') {
+        const fallbackReq = buildOpenAiRequest(cfg, prompt, 'none', systemInstruction);
+        res = await fetch(resolveWireUrl(fallbackReq.url, cfg.provider), {
+          method: 'POST',
+          headers: fallbackReq.headers,
+          body: JSON.stringify(fallbackReq.body),
+          signal,
+        });
+      }
       if (res.ok) {
         const data = await res.json();
         rawText = extractResponseText('openai', data);
@@ -239,10 +249,10 @@ No preamble, markdown backticks, or explanation.`;
       const parsedArray = Array.isArray(parsed)
         ? parsed
         : Array.isArray(parsed?.cues)
-        ? parsed.cues
-        : Array.isArray(parsed?.beats)
-        ? parsed.beats
-        : null;
+          ? parsed.cues
+          : Array.isArray(parsed?.beats)
+            ? parsed.beats
+            : null;
       if (parsedArray && parsedArray.length > 0) {
         const validated: ActingCueProposal[] = parsedArray.map((item: any, idx: number) => {
           const t = Math.max(0, Math.min(safeDuration, Number(item.time ?? (idx / parsedArray.length) * safeDuration)));
@@ -385,13 +395,23 @@ No markdown fences or commentary.`;
         rawText = extractResponseText('ollama', data);
       }
     } else {
-      const { url, headers, body } = buildOpenAiRequest(cfg, prompt, 'object', systemInstruction);
-      const res = await fetch(resolveWireUrl(url, cfg.provider), {
+      const mode = cfg.provider === 'lmstudio' || cfg.provider === 'llamacpp' ? 'none' : 'object';
+      const { url, headers, body } = buildOpenAiRequest(cfg, prompt, mode, systemInstruction);
+      let res = await fetch(resolveWireUrl(url, cfg.provider), {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
         signal,
       });
+      if (!res.ok && mode !== 'none') {
+        const fallbackReq = buildOpenAiRequest(cfg, prompt, 'none', systemInstruction);
+        res = await fetch(resolveWireUrl(fallbackReq.url, cfg.provider), {
+          method: 'POST',
+          headers: fallbackReq.headers,
+          body: JSON.stringify(fallbackReq.body),
+          signal,
+        });
+      }
       if (res.ok) {
         const data = await res.json();
         rawText = extractResponseText('openai', data);
@@ -419,17 +439,17 @@ No markdown fences or commentary.`;
             lookAt: clampTuple3(p.lookAt, [0, 0.90, 0.95], -1.5, 1.5),
             oscillation: p.oscillation
               ? {
-                  frequencyHz: Math.max(0.2, Math.min(6, Number(p.oscillation.frequencyHz) || 1.5)),
-                  handsAmp: p.oscillation.handsAmp
-                    ? clampTuple3(p.oscillation.handsAmp, [0, 0, 0], -0.5, 0.5)
-                    : undefined,
-                  handsPhaseDiffRad: Number(p.oscillation.handsPhaseDiffRad ?? Math.PI),
-                  feetAmp: p.oscillation.feetAmp
-                    ? clampTuple3(p.oscillation.feetAmp, [0, 0, 0], -0.4, 0.4)
-                    : undefined,
-                  feetPhaseDiffRad: Number(p.oscillation.feetPhaseDiffRad ?? Math.PI),
-                  hipsBobAmp: Number(p.oscillation.hipsBobAmp ?? 0),
-                }
+                frequencyHz: Math.max(0.2, Math.min(6, Number(p.oscillation.frequencyHz) || 1.5)),
+                handsAmp: p.oscillation.handsAmp
+                  ? clampTuple3(p.oscillation.handsAmp, [0, 0, 0], -0.5, 0.5)
+                  : undefined,
+                handsPhaseDiffRad: Number(p.oscillation.handsPhaseDiffRad ?? Math.PI),
+                feetAmp: p.oscillation.feetAmp
+                  ? clampTuple3(p.oscillation.feetAmp, [0, 0, 0], -0.4, 0.4)
+                  : undefined,
+                feetPhaseDiffRad: Number(p.oscillation.feetPhaseDiffRad ?? Math.PI),
+                hipsBobAmp: Number(p.oscillation.hipsBobAmp ?? 0),
+              }
               : undefined,
             stageDelta: p.stageDelta ? clampTuple3(p.stageDelta, [0, 0, 0], -45, 45) : undefined,
           };

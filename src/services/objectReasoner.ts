@@ -36,7 +36,7 @@ export const sanitizePartGraph = sanitizeSculptSpec;
 /* Provider settings                                                                           */
 /* ------------------------------------------------------------------------------------------ */
 
-export type ReasonerProvider = 'ollama' | 'llamacpp' | 'openai' | 'gemini';
+export type ReasonerProvider = 'ollama' | 'lmstudio' | 'llamacpp' | 'openai' | 'gemini';
 
 export interface ProviderSettings {
   baseUrl: string;
@@ -67,6 +67,14 @@ export const PROVIDERS: Record<ReasonerProvider, ProviderInfo> = {
     local: true,
     needsKey: false,
     hint: 'Local open-weights models. Note: use a model with vision (e.g. Gemma 4 or Qwen 3.5). Start with: ollama serve',
+  },
+  lmstudio: {
+    id: 'lmstudio',
+    label: 'LM Studio',
+    protocol: 'openai',
+    local: true,
+    needsKey: false,
+    hint: 'Local open-weights models via LM Studio Developer Server (default http://127.0.0.1:1234/v1). Enable Local Server in LM Studio.',
   },
   llamacpp: {
     id: 'llamacpp',
@@ -136,6 +144,8 @@ export function defaultReasonerSettings(): ReasonerSettings {
     provider: 'ollama',
     providers: {
       ollama: { baseUrl: DEFAULT_OLLAMA_URL, model: DEFAULT_REASONER_MODEL, apiKey: '' },
+      // LM Studio serves whichever GGUF/MLX model is loaded on port 1234 (or auto-loads if a model ID is specified).
+      lmstudio: { baseUrl: 'http://127.0.0.1:1234/v1', model: 'local', apiKey: '' },
       // llama-server serves whatever GGUF it was started with; the model field is informational.
       llamacpp: { baseUrl: 'http://127.0.0.1:8080/v1', model: 'local', apiKey: '' },
       openai: { baseUrl: OPENAI_COMPATIBLE_PRESETS[0].baseUrl, model: 'gpt-5.6-sol', apiKey: '' },
@@ -209,7 +219,10 @@ export function setReasonerConfig(cfg: { provider?: ReasonerProvider; url?: stri
 }
 
 export function describeReasoner(cfg: ReasonerConfig = getReasonerConfig()) {
-  const model = cfg.provider === 'llamacpp' && (!cfg.model || cfg.model === 'local') ? 'loaded GGUF' : cfg.model || '(no model)';
+  const model =
+    (cfg.provider === 'llamacpp' || cfg.provider === 'lmstudio') && (!cfg.model || cfg.model === 'local')
+      ? 'loaded GGUF'
+      : cfg.model || '(no model)';
   return `${model} · ${cfg.info.label}${cfg.info.local ? ' (local)' : ''}`;
 }
 
@@ -652,7 +665,7 @@ export function buildOpenAiRequest(
     max_tokens: 4096,
     stream: false,
   };
-  if (cfg.model && !(cfg.provider === 'llamacpp' && cfg.model === 'local')) body.model = cfg.model;
+  if (cfg.model && !((cfg.provider === 'llamacpp' || cfg.provider === 'lmstudio') && cfg.model === 'local')) body.model = cfg.model;
   if (mode === 'schema') {
     // llama-server turns this into a GBNF grammar; OpenAI/OpenRouter/LM Studio honour it natively.
     body.response_format = {
@@ -832,6 +845,9 @@ export function resolveWireUrl(url: string, provider: ReasonerProvider): string 
 
   if (provider === 'ollama') {
     return url.replace(/^(?:https?:\/\/)?(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]):11434/i, '/api/ollama');
+  }
+  if (provider === 'lmstudio' || (provider === 'openai' && /:1234\b/.test(url))) {
+    return url.replace(/^(?:https?:\/\/)?(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]):1234/i, '/api/lmstudio');
   }
   if (provider === 'llamacpp') {
     return url.replace(/^(?:https?:\/\/)?(?:127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]):8080/i, '/api/llamacpp');
