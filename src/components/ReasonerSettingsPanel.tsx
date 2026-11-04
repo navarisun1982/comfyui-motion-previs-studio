@@ -276,6 +276,16 @@ export const ReasonerSettingsPanel: React.FC<{
     [draft, openAiAuth, showAdvancedOpenAi, openAiMode]
   );
 
+  const dropdownModels = useMemo(() => {
+    const presetIds =
+      active === 'gemini'
+        ? GEMINI_MODEL_PRESETS.map((m) => m.id)
+        : active === 'openai'
+          ? OPENAI_MODEL_PRESETS.map((m) => m.id)
+          : [];
+    return Array.from(new Set([...models, ...presetIds]));
+  }, [models, active]);
+
   const patch = (fields: Partial<typeof p>) =>
     setDraft((d) => ({ ...d, providers: { ...d.providers, [d.provider]: { ...d.providers[d.provider], ...fields } } }));
 
@@ -691,34 +701,26 @@ export const ReasonerSettingsPanel: React.FC<{
                 </div>
               </div>
 
-              {/* Models selection pills */}
+              {/* Model selection dropdown */}
               <div className="space-y-1.5 pt-1 border-t border-white/10">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold flex items-center gap-1">
-                    <Sparkles className="h-3 w-3 text-amber-400" /> ChatGPT Reasoning Models:
-                  </span>
+                  <label htmlFor="openai-browser-model-select" className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold flex items-center gap-1">
+                    <Sparkles className="h-3 w-3 text-amber-400" /> ChatGPT Reasoning Model:
+                  </label>
                   <span className="text-[10px] text-slate-500 font-mono">Via browser subscription</span>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {(openAiAuth.availableModels || []).map((m) => {
-                    const isSelected = p.model === m.id;
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => patch({ model: m.id, baseUrl: '/api/openai' })}
-                        className={`rounded-lg border px-3 py-1.5 text-xs font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
-                          isSelected
-                            ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200 font-bold shadow-sm shadow-emerald-500/20'
-                            : 'border-white/10 bg-white/[0.03] text-slate-300 hover:border-white/30 hover:text-white'
-                        }`}
-                      >
-                        {isSelected && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />}
-                        <span>{m.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+                <select
+                  id="openai-browser-model-select"
+                  value={p.model || (openAiAuth.availableModels?.[0]?.id ?? 'gpt-5.6-sol')}
+                  onChange={(e) => patch({ model: e.target.value, baseUrl: '/api/openai' })}
+                  className={`${inputCls} h-9 cursor-pointer`}
+                >
+                  {(openAiAuth.availableModels || []).map((m) => (
+                    <option key={m.id} value={m.id} className="bg-slate-900 text-slate-100">
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="flex items-center gap-1.5 text-[10px] text-emerald-300/80">
@@ -822,29 +824,6 @@ export const ReasonerSettingsPanel: React.FC<{
         </div>
       )}
 
-      {active === 'gemini' && (
-        <div className="space-y-1">
-          <span className="text-[10px] uppercase tracking-wider text-slate-400">Quick Model Presets (Google AI Studio Free Tier):</span>
-          <div className="flex flex-wrap gap-1.5">
-            {GEMINI_MODEL_PRESETS.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => patch({ model: m.id })}
-                className={`rounded-md border px-2 py-1 text-[10px] font-mono transition-colors ${
-                  p.model === m.id
-                    ? 'border-amber-400 bg-amber-500/20 text-amber-200 font-bold'
-                    : 'border-white/10 text-slate-300 hover:text-white hover:border-white/30'
-                }`}
-                title={m.desc}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Manual Input Fields (Always visible for Ollama, llama.cpp, Gemini, and collapsible for OpenAI) */}
       {(active !== 'openai' || showAdvancedOpenAi) && (
         <div className="space-y-3 pt-1 border-t border-white/10">
@@ -863,23 +842,6 @@ export const ReasonerSettingsPanel: React.FC<{
                       }`}
                     >
                       {pr.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div className="space-y-1">
-                <span className="text-[10px] uppercase tracking-wider text-slate-400">Model Presets:</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {OPENAI_MODEL_PRESETS.map((om) => (
-                    <button
-                      key={om.id}
-                      type="button"
-                      onClick={() => patch({ model: om.id })}
-                      className={`rounded-md border px-2 py-1 text-[10px] font-mono transition-colors ${
-                        p.model === om.id ? 'border-cyan-400 bg-cyan-500/20 text-cyan-200 font-bold' : 'border-white/10 text-slate-300 hover:text-white'
-                      }`}
-                    >
-                      {om.label}
                     </button>
                   ))}
                 </div>
@@ -913,7 +875,7 @@ export const ReasonerSettingsPanel: React.FC<{
                     value={p.model}
                     placeholder={active === 'openai' ? 'e.g. gpt-5.6-sol or meta-llama/llama-3.3-70b-instruct:free' : ''}
                     onFocus={() => {
-                      if (models.length > 0) setModelDropdownOpen(true);
+                      if (dropdownModels.length > 0) setModelDropdownOpen(true);
                     }}
                     onBlur={() => {
                       setTimeout(() => setModelDropdownOpen(false), 180);
@@ -926,24 +888,24 @@ export const ReasonerSettingsPanel: React.FC<{
                     tabIndex={-1}
                     onMouseDown={(e) => {
                       e.preventDefault();
-                      if (models.length === 0 && busy === null) {
+                      if (dropdownModels.length === 0 && busy === null) {
                         refreshModels().then(() => setModelDropdownOpen(true));
                       } else {
                         setModelDropdownOpen((v) => !v);
                       }
                     }}
-                    title={models.length > 0 ? `Show all ${models.length} available models` : 'Load & show available models'}
+                    title={dropdownModels.length > 0 ? `Show all ${dropdownModels.length} available models` : 'Load & show available models'}
                     className="absolute inset-y-0 right-1 my-auto flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                   >
                     <ChevronDown className={`h-3.5 w-3.5 transition-transform ${modelDropdownOpen ? 'rotate-180 text-amber-400' : ''}`} />
                   </button>
 
-                  {modelDropdownOpen && models.length > 0 && (
+                  {modelDropdownOpen && dropdownModels.length > 0 && (
                     <div
                       id="reasoner-model-dropdown-list"
                       className="absolute left-0 right-0 top-full mt-1 z-50 max-h-56 overflow-y-auto rounded-lg border border-white/15 bg-slate-900/95 backdrop-blur-md shadow-2xl py-1 divide-y divide-white/5"
                     >
-                      {models.map((m) => {
+                      {dropdownModels.map((m) => {
                         const isSelected = m === p.model;
                         return (
                           <button
@@ -1016,23 +978,6 @@ export const ReasonerSettingsPanel: React.FC<{
               </label>
             )}
           </div>
-        </div>
-      )}
-
-      {models.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
-          {models.map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => patch({ model: m })}
-              className={`rounded-md border px-2 py-0.5 text-[10px] font-mono transition-colors ${
-                m === p.model ? 'border-amber-400 bg-amber-500/10 text-amber-200' : 'border-white/10 text-slate-400 hover:text-white hover:border-white/25'
-              }`}
-            >
-              {m}
-            </button>
-          ))}
         </div>
       )}
 
