@@ -887,22 +887,29 @@ export const ReasonerSettingsPanel: React.FC<{
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="space-y-1">
-              <span className="text-[10px] uppercase tracking-wider text-slate-500">Base URL</span>
-              <input id="reasoner-base-url" className={inputCls} value={p.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} />
-            </label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="reasoner-base-url" className="text-[10px] leading-4 uppercase tracking-wider text-slate-400 truncate">
+                Base URL
+              </label>
+              <input
+                id="reasoner-base-url"
+                className={`${inputCls} h-9`}
+                value={p.baseUrl}
+                onChange={(e) => patch({ baseUrl: e.target.value })}
+              />
+            </div>
 
-            <div className="space-y-1 relative">
-              <span className="text-[10px] uppercase tracking-wider text-slate-500 block">
-                Model {active === 'llamacpp' && '(optional — llama-server uses the GGUF it was started with)'}
-                {active === 'lmstudio' && '(optional — uses loaded model or click refresh to pick)'}
-              </span>
-              <div className="flex gap-2 relative">
+            <div className="flex flex-col gap-1.5 relative">
+              <label htmlFor="reasoner-model" className="text-[10px] leading-4 uppercase tracking-wider text-slate-400 truncate">
+                Model {active === 'llamacpp' && '(optional — uses started GGUF)'}
+                {active === 'lmstudio' && '(optional — uses loaded model)'}
+              </label>
+              <div className="flex items-center gap-2 relative">
                 <div className="relative flex-1 min-w-0">
                   <input
                     id="reasoner-model"
-                    className={`${inputCls} pr-8`}
+                    className={`${inputCls} h-9 pr-8`}
                     value={p.model}
                     placeholder={active === 'openai' ? 'e.g. gpt-5.6-sol or meta-llama/llama-3.3-70b-instruct:free' : ''}
                     onFocus={() => {
@@ -926,7 +933,7 @@ export const ReasonerSettingsPanel: React.FC<{
                       }
                     }}
                     title={models.length > 0 ? `Show all ${models.length} available models` : 'Load & show available models'}
-                    className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                    className="absolute inset-y-0 right-1 my-auto flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                   >
                     <ChevronDown className={`h-3.5 w-3.5 transition-transform ${modelDropdownOpen ? 'rotate-180 text-amber-400' : ''}`} />
                   </button>
@@ -967,7 +974,7 @@ export const ReasonerSettingsPanel: React.FC<{
                   onClick={refreshModels}
                   disabled={busy !== null}
                   title="Check connection and list models"
-                  className="shrink-0 rounded-lg border border-white/15 px-2.5 text-slate-300 hover:text-white hover:border-white/30 disabled:opacity-50"
+                  className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg border border-white/15 text-slate-300 hover:text-white hover:border-white/30 disabled:opacity-50"
                 >
                   {busy === 'models' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 </button>
