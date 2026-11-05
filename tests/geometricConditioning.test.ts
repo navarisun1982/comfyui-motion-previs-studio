@@ -81,7 +81,7 @@ describe('ltx.geometricControl@1 patcher', () => {
 });
 
 describe('ltx.firstFrameSegment@1 patcher control mode support', () => {
-  it('injects geometric control video when mode is control', () => {
+  it('injects geometric control video into motionSegments (with retakeMode false so LTXDirectorGuideCS25 does not crash)', () => {
     const patcher = getPatcher('ltx.firstFrameSegment@1');
     expect(patcher).toBeDefined();
 
@@ -93,9 +93,11 @@ describe('ltx.firstFrameSegment@1 patcher control mode support', () => {
       frameRate: 24,
     }) as Record<string, unknown>;
 
-    expect(patched.reference_mode).toBe('VIDEO');
-    expect(patched.retakeVideo).toBe('viewport_previs.mp4');
-    expect(patched.retakeMode).toBe(true);
+    expect(patched.reference_mode).toBe('OFF');
+    expect(patched.retakeVideo).toBeNull();
+    expect(patched.retakeMode).toBe(false);
+    expect(patched.motionTrackEnabled).toBe(true);
+    expect((patched.motionSegments as Array<Record<string, unknown>>)[0].videoFile).toBe('viewport_previs.mp4');
     expect(patched.disable_prompt_relay).toBe(true);
   });
 });

@@ -111,6 +111,37 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
         }
       }
 
+      // Switch StubeliusH3DirectorV2 to Reference (Omni) mode when running in control mode
+      if (
+        field === 'timeline' &&
+        workflow[target.node]?.class_type === 'StubeliusH3DirectorV2' &&
+        values.mode === 'control'
+      ) {
+        const nodeInputs = workflow[target.node].inputs;
+        if ('mode' in nodeInputs) {
+          nodeInputs.mode = 'Reference (Omni) — up to 9 images, 3 videos, 3 audio';
+        }
+      }
+
+      // Prune unused LoadImage reference slots when no reference image was supplied for that slot
+      if (
+        (field === 'refImage1' || field === 'refImage2' || field === 'refImage3' || field === 'refImage4') &&
+        workflow[target.node]?.class_type === 'LoadImage'
+      ) {
+        const rawSlotVal =
+          field === 'refImage1'
+            ? values.refImage1File
+            : field === 'refImage2'
+            ? values.refImage2File
+            : field === 'refImage3'
+            ? values.refImage3File
+            : values.refImage4File;
+        if (!rawSlotVal || !rawSlotVal.trim()) {
+          delete workflow[target.node];
+          pruneBrokenRefImageLinks(workflow, target.node);
+        }
+      }
+
       // Keep LTXDirectorCS25 companion frame/second inputs synchronized with durationSeconds
       if (
         field === 'durationSeconds' &&
@@ -203,9 +234,56 @@ function fieldValue(field: BindableField, v: BindValues): unknown {
     case 'refImage4':
       return v.refImage4File ?? 'char4.png';
     case 'icLora':
-      return v.icLora ?? 'none';
+      return v.icLora ?? (v.mode === 'control' ? 'LTX2.5\\ltx-2.5-22b-ic-lora-layout-to-render-1.0.safetensors' : 'none');
     case 'icLoraStrength':
-      return v.icLoraStrength ?? 0.6;
+      return v.icLoraStrength ?? (v.mode === 'control' ? 0.85 : 0.6);
+  }
+}
+
+/**
+ * Removes references to a pruned LoadImage node from MiniMaxH3ReferenceToVideo.inputs.ref_images
+ * and re-packs remaining ref_image_0..N keys sequentially.
+ */
+function pruneBrokenRefImageLinks(workflow: ApiWorkflow, deletedNodeId: string): void {
+  for (const node of Object.values(workflow)) {
+    if (!node?.inputs) continue;
+
+    // 1. Handle flat dotted keys on node.inputs: "ref_images.ref_image_0", "ref_images.ref_image_1", etc.
+    const flatRefKeys = Object.keys(node.inputs)
+      .filter((k) => /^ref_images\.ref_image_\d+$/.test(k))
+      .sort();
+    if (flatRefKeys.length > 0) {
+      const keptFlatLinks: unknown[] = [];
+      for (const k of flatRefKeys) {
+        const v = node.inputs[k];
+        delete node.inputs[k];
+        if (!Array.isArray(v) || String(v[0]) !== String(deletedNodeId)) {
+          keptFlatLinks.push(v);
+        }
+      }
+      keptFlatLinks.forEach((link, idx) => {
+        node.inputs[`ref_images.ref_image_${idx}`] = link;
+      });
+    }
+
+    // 2. Handle nested object: node.inputs.ref_images = { ref_image_0: [...] }
+    const refImages = node.inputs.ref_images;
+    if (refImages && typeof refImages === 'object' && !Array.isArray(refImages)) {
+      const record = refImages as Record<string, unknown>;
+      const keptLinks: unknown[] = [];
+      for (const [k, v] of Object.entries(record)) {
+        if (!k.startsWith('ref_image_')) continue;
+        if (Array.isArray(v) && String(v[0]) === String(deletedNodeId)) {
+          delete record[k];
+        } else {
+          keptLinks.push(v);
+          delete record[k];
+        }
+      }
+      keptLinks.forEach((link, idx) => {
+        record[`ref_image_${idx}`] = link;
+      });
+    }
   }
 }
 

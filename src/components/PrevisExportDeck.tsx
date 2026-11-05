@@ -402,6 +402,19 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       } catch {
         objInfo = null;
       }
+      const existingComfyInputImages: string[] = Array.isArray(
+        (objInfo as Record<string, any>)?.LoadImage?.input?.required?.image?.[0]
+      )
+        ? ((objInfo as Record<string, any>).LoadImage.input.required.image[0] as string[])
+        : [];
+      const verifiedRefFilenames: [string, string, string, string] = [0, 1, 2, 3].map((idx) => {
+        if (resolvedRefBlobs[idx]) return trimmedRefs[idx] || `char${idx + 1}.png`;
+        if (trimmedRefs[idx] && existingComfyInputImages.includes(trimmedRefs[idx])) {
+          return trimmedRefs[idx];
+        }
+        return '';
+      }) as [string, string, string, string];
+
       const { choice: activeWf, templateId: selectedTemplateId } =
         syncActiveEngineWorkflowToRegistry(targetEngine, objInfo);
       await ensureWorkflowSyncedToComfyUI(activeWf);
@@ -432,7 +445,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
         promptSource: 'compiled',
         controlVideoBlob: previsBlob,
         refImageBlobs: resolvedRefBlobs,
-        refImageFilenames: trimmedRefs,
+        refImageFilenames: verifiedRefFilenames,
         refImageDescriptions,
         onProgress: (pct, title) => {
           setComfyStatusText(`ComfyUI Executing (${pct}%): ${title}`);
@@ -507,6 +520,9 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   const handleSelectEngine = (engineId: 'ltx-2.5' | 'minimax-h3' | 'seedance') => {
     setActiveEngineTab(engineId);
     updateTargetModel(engineId);
+    if (engineId === 'ltx-2.5' || engineId === 'minimax-h3') {
+      setActiveWorkflowChoice(getActiveWorkflowForEngine(engineId));
+    }
     const adapter = getAdapter(engineId);
     setCompiledPrompt(adapter.compilePrompt({ ...shot, targetModel: engineId }));
     setAiDirectorFeedback(null);
@@ -1069,13 +1085,21 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
               <div className="flex flex-wrap items-center gap-2">
                 <a
-                  href="./workflows/Stubelius_Ultimate_H3.json"
-                  download="Stubelius_Ultimate_H3.json"
+                  href={`./workflows/${
+                    activeWorkflowChoice.uiFilename ||
+                    (activeEngineTab === 'ltx-2.5' ? 'Stubelius_Ultimate_LTX.json' : 'Stubelius_Ultimate_H3.json')
+                  }`}
+                  download={
+                    activeWorkflowChoice.uiFilename ||
+                    (activeEngineTab === 'ltx-2.5' ? 'Stubelius_Ultimate_LTX.json' : 'Stubelius_Ultimate_H3.json')
+                  }
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-amber-200 border border-amber-400/30 font-mono text-[11px] font-semibold transition-all cursor-pointer"
-                  title="Download the Stubelius Ultimate H3 (stuubszzz) ComfyUI workflow (.json) to drag-and-drop into ComfyUI"
+                  title={`Download the active ${
+                    activeEngineTab === 'ltx-2.5' ? 'LTX-2.5' : 'MiniMax H3'
+                  } ComfyUI workflow (.json) to drag-and-drop into ComfyUI`}
                 >
                   <Download className="h-3.5 w-3.5 text-amber-400" />
-                  <span>Stubelius JSON</span>
+                  <span>{activeEngineTab === 'ltx-2.5' ? 'LTX Workflow JSON' : 'MiniMax Workflow JSON'}</span>
                 </a>
                 <button
                   type="button"
@@ -1091,7 +1115,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   onClick={handleRenderInComfyUI}
                   disabled={isSubmittingComfy || activeJob?.status === 'executing'}
                   className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-indigo-500/25 disabled:opacity-50 transition-all cursor-pointer"
-                  title="Auto-upload 3D RGB Previs MP4 + 4 Reference Images and execute the selected workflow in ComfyUI"
+                  title="Auto-upload 3D RGB Previs MP4 + Reference Images and execute the selected workflow in ComfyUI"
                 >
                   {isSubmittingComfy || activeJob?.status === 'executing' ? (
                     <>
@@ -1108,63 +1132,99 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
               </div>
             </div>
 
-            {/* Workflow Library Selector + Add Workflow by URL Bar (supports MiniMax H3 & LTX-2.5) */}
+            {/* Workflow Library Selector + Add Workflow by URL Bar (strictly isolated by activeEngineTab) */}
             <CustomWorkflowConfigBar
               compact
               engine={activeEngineTab === 'ltx-2.5' ? 'ltx-2.5' : 'minimax-h3'}
               onWorkflowChanged={(choice) => setActiveWorkflowChoice(choice)}
             />
 
-            {/* Collapsible Workflow Setup & Required Models Guide */}
+            {/* Collapsible Engine-Specific Workflow Setup & Required Models Guide */}
             <details className="rounded-xl bg-black/40 border border-white/10 px-3.5 py-2 text-[10px] font-mono text-slate-300">
               <summary className="cursor-pointer font-semibold text-indigo-300 hover:text-indigo-200 select-none">
-                📦 First time rendering? Click here for Stubelius Ultimate H3 (stuubszzz) Workflow &amp; Model Setup
+                {activeEngineTab === 'ltx-2.5'
+                  ? '📦 First time rendering LTX-2.5? Click here for Stubelius Ultimate LTX 2.5 Workflow & Model Setup'
+                  : '📦 First time rendering MiniMax H3? Click here for Stubelius Ultimate H3 Workflow & Model Setup'}
               </summary>
-              <div className="mt-2.5 space-y-2 border-t border-white/10 pt-2.5 text-slate-300 leading-relaxed">
-                <div>
-                  <span className="text-amber-300 font-bold">1. Install Stubelius Ultimate H3 Custom Node &amp; Workflow:</span> Install{' '}
-                  <a
-                    href="https://github.com/stuubszzz/Stubelius-Ultimate-H3"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-indigo-300 underline hover:text-indigo-200 font-semibold"
-                  >
-                    stuubszzz/Stubelius-Ultimate-H3
-                  </a>{' '}
-                  via ComfyUI Manager (or clone into <code className="text-slate-200">ComfyUI/custom_nodes/</code>), then click{' '}
-                  <span className="text-amber-200 font-semibold">Download Stubelius H3 Workflow (.json)</span> above and drag &amp; drop it into ComfyUI (<code className="text-indigo-300">http://127.0.0.1:8188</code>).
+              {activeEngineTab === 'ltx-2.5' ? (
+                <div className="mt-2.5 space-y-2 border-t border-white/10 pt-2.5 text-slate-300 leading-relaxed">
+                  <div>
+                    <span className="text-amber-300 font-bold">1. Install Stubelius Ultimate LTX 2.5 Custom Node &amp; Workflow:</span> Install{' '}
+                    <a
+                      href="https://github.com/stuubszzz/Stubelius-Ultimate-LTX2.5"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-indigo-300 underline hover:text-indigo-200 font-semibold"
+                    >
+                      stuubszzz/Stubelius-Ultimate-LTX2.5
+                    </a>{' '}
+                    into <code className="text-slate-200">ComfyUI/custom_nodes/</code>, or use Auto-Sync above to copy all LTX-2.5 workflows into ComfyUI (<code className="text-indigo-300">http://127.0.0.1:8188</code>).
+                  </div>
+                  <div>
+                    <span className="text-emerald-300 font-bold">2. Required LTX-2.5 Model Weights</span> in <code className="text-white">ComfyUI/models/</code>:
+                    <ul className="list-disc pl-5 mt-1 space-y-0.5 text-slate-400">
+                      <li>
+                        <code className="text-slate-200">models/diffusion_models/LTX2.5/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors</code>
+                      </li>
+                      <li>
+                        <code className="text-slate-200">models/text_encoders/LTX2.5/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors</code>
+                      </li>
+                      <li>
+                        <code className="text-slate-200">models/loras/LTX2.5/ltx-2.5-22b-ic-lora-layout-to-render-1.0.safetensors</code> (IC-LoRA Control Video)
+                      </li>
+                      <li>
+                        <code className="text-slate-200">models/vae/LTX2.5/ltx-2.5-video-vae-bf16.safetensors</code> &amp;{' '}
+                        <code className="text-slate-200">ltx-2.5-audio-vae-bf16.safetensors</code>
+                      </li>
+                    </ul>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-emerald-300 font-bold">2. Download Required MiniMax H3 Model Weights</span> from{' '}
-                  <a
-                    href="https://huggingface.co/Comfy-Org/MiniMax-H3"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-indigo-300 underline hover:text-indigo-200"
-                  >
-                    huggingface.co/Comfy-Org/MiniMax-H3
-                  </a>{' '}
-                  into your <code className="text-white">ComfyUI/models/</code> directory:
-                  <ul className="list-disc pl-5 mt-1 space-y-0.5 text-slate-400">
-                    <li>
-                      <code className="text-slate-200">models/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors</code> (Ref2VA Model)
-                    </li>
-                    <li>
-                      <code className="text-slate-200">models/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors</code> (FL2VA Model)
-                    </li>
-                    <li>
-                      <code className="text-slate-200">models/text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors</code> (Text Encoder)
-                    </li>
-                    <li>
-                      <code className="text-slate-200">models/loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors</code> (8-Step Speedup LoRA)
-                    </li>
-                    <li>
-                      <code className="text-slate-200">models/vae/minimax_h3_video_vae_fp16.safetensors</code> &amp;{' '}
-                      <code className="text-slate-200">minimax_h3_audio_vae_fp32.safetensors</code>
-                    </li>
-                  </ul>
+              ) : (
+                <div className="mt-2.5 space-y-2 border-t border-white/10 pt-2.5 text-slate-300 leading-relaxed">
+                  <div>
+                    <span className="text-amber-300 font-bold">1. Install Stubelius Ultimate H3 Custom Node &amp; Workflow:</span> Install{' '}
+                    <a
+                      href="https://github.com/stuubszzz/Stubelius-Ultimate-H3"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-indigo-300 underline hover:text-indigo-200 font-semibold"
+                    >
+                      stuubszzz/Stubelius-Ultimate-H3
+                    </a>{' '}
+                    via ComfyUI Manager (or clone into <code className="text-slate-200">ComfyUI/custom_nodes/</code>), or use Auto-Sync above to copy all MiniMax H3 workflows into ComfyUI (<code className="text-indigo-300">http://127.0.0.1:8188</code>).
+                  </div>
+                  <div>
+                    <span className="text-emerald-300 font-bold">2. Download Required MiniMax H3 Model Weights</span> from{' '}
+                    <a
+                      href="https://huggingface.co/Comfy-Org/MiniMax-H3"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-indigo-300 underline hover:text-indigo-200"
+                    >
+                      huggingface.co/Comfy-Org/MiniMax-H3
+                    </a>{' '}
+                    into your <code className="text-white">ComfyUI/models/</code> directory:
+                    <ul className="list-disc pl-5 mt-1 space-y-0.5 text-slate-400">
+                      <li>
+                        <code className="text-slate-200">models/diffusion_models/Minimax h3/minimax_h3_ref2va_pruned_int8_convrot.safetensors</code> (Ref2VA Model)
+                      </li>
+                      <li>
+                        <code className="text-slate-200">models/diffusion_models/Minimax h3/minimax_h3_fl2va_pruned_int8_convrot.safetensors</code> (FL2VA Model)
+                      </li>
+                      <li>
+                        <code className="text-slate-200">models/text_encoders/Minimax h3/qwen3vl_32b_minimax_h3_int8_convrot.safetensors</code> (Text Encoder)
+                      </li>
+                      <li>
+                        <code className="text-slate-200">models/loras/MiniMax H3/MiniMax-H3-Ref2VA-Acc-8Step.safetensors</code> (8-Step Speedup LoRA)
+                      </li>
+                      <li>
+                        <code className="text-slate-200">models/vae/minimax/minimax_h3_video_vae_fp16.safetensors</code> &amp;{' '}
+                        <code className="text-slate-200">minimax_h3_audio_vae_fp32.safetensors</code>
+                      </li>
+                    </ul>
+                  </div>
                 </div>
-              </div>
+              )}
             </details>
 
             {/* 4 Required Reference Image Slots (<picture 1> to <picture 4> -> Nodes 137, 139, 144, 151) + Seed */}

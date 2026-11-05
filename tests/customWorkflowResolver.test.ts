@@ -240,6 +240,97 @@ describe('customWorkflowResolver', () => {
     expect(fs.existsSync(img3dPath)).toBe(true);
     expect(fs.existsSync(txt3dPath)).toBe(true);
     expect(typeof ensure3DWorkflowsSyncedToComfyUI).toBe('function');
+
+    // 6. Verify strict engine isolation when localStorage contains misclassified cross-engine entries
+    const minimaxApiPath = path.resolve(__dirname, '../workflows/templates/minimax_h3_ref2va.api.json');
+    const rawMinimaxApi = fs.readFileSync(minimaxApiPath, 'utf-8');
+    globalThis.localStorage.setItem(
+      'cmpvs_workflow_library_v2',
+      JSON.stringify({
+        activeWorkflowByEngine: {
+          'minimax-h3': 'ltx25_stubelius',
+          'ltx-2.5': 'minimax_h3_ref2va',
+        },
+        savedWorkflows: [
+          {
+            id: 'misplaced_minimax_on_ltx',
+            engine: 'ltx-2.5',
+            label: 'My_MiniMax_Workflow.json',
+            url: 'My_MiniMax_Workflow.json',
+            rawJson: rawMinimaxApi,
+            nodeCount: 25,
+            addedAt: new Date().toISOString(),
+          },
+          {
+            id: 'misplaced_ltx_on_minimax',
+            engine: 'minimax-h3',
+            label: 'My_LTX_Workflow.json',
+            url: 'My_LTX_Workflow.json',
+            rawJson: rawLtxApi,
+            nodeCount: 15,
+            addedAt: new Date().toISOString(),
+          },
+        ],
+      })
+    );
+
+    const ltxIsolated = getWorkflowChoicesForEngine('ltx-2.5');
+    const minimaxIsolated = getWorkflowChoicesForEngine('minimax-h3');
+    expect(ltxIsolated.every((c) => c.engine === 'ltx-2.5')).toBe(true);
+    expect(ltxIsolated.some((c) => c.id === 'misplaced_minimax_on_ltx')).toBe(false);
+    expect(ltxIsolated.some((c) => c.id === 'misplaced_ltx_on_minimax')).toBe(true);
+    expect(minimaxIsolated.every((c) => c.engine === 'minimax-h3')).toBe(true);
+    expect(minimaxIsolated.some((c) => c.id === 'misplaced_ltx_on_minimax')).toBe(false);
+    expect(minimaxIsolated.some((c) => c.id === 'misplaced_minimax_on_ltx')).toBe(true);
+
+    // 7. End-to-End Binding Audit of ALL built-in LTX-2.5 and MiniMax H3 workflows:
+    // Verify each workflow receives Reference Video, Reference Images, Prompt, Seed, and has valid internal node links
+    installMemoryStorage();
+    for (const engine of ['ltx-2.5', 'minimax-h3'] as const) {
+      const choices = getWorkflowChoicesForEngine(engine);
+      expect(choices.length).toBe(5);
+      for (const choice of choices) {
+        selectActiveWorkflowForEngine(engine, choice.id);
+        const synced = syncActiveEngineWorkflowToRegistry(engine);
+        expect(synced.registered, `Registry entry for ${choice.id}`).not.toBeNull();
+        const bound = bindTemplate(synced.registered!.api, synced.registered!.binding, {
+          mode: 'control',
+          profile: choice.forcedProfile || 'final',
+          prompt: 'Cinematic tracking shot of Agent Mercer in neon alley',
+          negative: 'blurry, low quality',
+          seed: 777888,
+          durationSeconds: 5,
+          frameRate: 24,
+          aspectRatio: '16:9',
+          width: 1280,
+          height: 720,
+          filenamePrefix: `audit_${choice.id}`,
+          controlVideoFile: 'previs_motion_ref.mp4',
+          refImage1File: 'hero_ref1.png',
+          refImage2File: 'drone_ref2.png',
+          refImageDescriptions: ['Agent Mercer', 'Combat Drone', '', ''],
+        });
+
+        // Verify every link [sourceNodeId, slotIdx] in the bound workflow points to an existing node in bound.workflow
+        for (const [nodeId, node] of Object.entries(bound.workflow)) {
+          for (const [inputName, val] of Object.entries(node.inputs)) {
+            if (Array.isArray(val) && val.length === 2 && typeof val[0] === 'string' && typeof val[1] === 'number') {
+              expect(
+                bound.workflow[val[0]],
+                `Workflow ${choice.id} node ${nodeId}.${inputName} links to missing node ${val[0]}`
+              ).toBeDefined();
+            }
+          }
+        }
+
+        // Verify Reference Video and Reference Images were genuinely injected
+        const serialized = JSON.stringify(bound.workflow);
+        expect(serialized, `${choice.id} must contain controlVideoFile`).toContain('previs_motion_ref.mp4');
+        expect(serialized, `${choice.id} must contain refImage1File`).toContain('hero_ref1.png');
+        expect(serialized, `${choice.id} must contain refImage2File`).toContain('drone_ref2.png');
+        expect(serialized, `${choice.id} must contain prompt`).toContain('Cinematic tracking shot of Agent Mercer');
+      }
+    }
   });
 });
 

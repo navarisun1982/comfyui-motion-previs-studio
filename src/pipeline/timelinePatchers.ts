@@ -105,25 +105,30 @@ const ltxFirstFramePatcher: TimelinePatcher = {
       disable_prompt_relay: true, // Use global prompt exclusively (Q5)
     };
 
+    const refFiles = [ctx.refImage1File, ctx.refImage2File, ctx.refImage3File, ctx.refImage4File];
+    const hasAnyRef = refFiles.some((f) => typeof f === 'string' && f.trim().length > 0);
+
     if (ctx.mode === 'control' && ctx.controlVideoFile) {
-      result.reference_mode = 'VIDEO';
-      result.retakeVideo = ctx.controlVideoFile;
-      result.retakeMode = true;
-      result.retakeStrength = 0.8;
+      result.reference_mode = hasAnyRef ? 'Ghost Mask (End)' : 'OFF';
+      result.retakeVideo = null;
+      result.retakeMode = false;
       result.motionTrackEnabled = true;
       result.motionSegments = [
         {
           id: 'previs_motion_1',
           videoFile: ctx.controlVideoFile,
+          fileName: ctx.controlVideoFile,
           start: 0,
           length: snappedFrames,
           trimStart: 0,
+          videoDurationFrames: snappedFrames,
+          videoStrength: 0.85,
+          videoAttentionStrength: 0.65,
+          resampleMode: 'nearest',
         },
       ];
     }
 
-    const refFiles = [ctx.refImage1File, ctx.refImage2File, ctx.refImage3File, ctx.refImage4File];
-    const hasAnyRef = refFiles.some((f) => typeof f === 'string' && f.trim().length > 0);
     if (hasAnyRef) {
       const existingChars = Array.isArray(data.characters) ? [...data.characters] : [];
       const nextChars = [0, 1, 2, 3, 4].map((idx) => {
@@ -142,7 +147,11 @@ const ltxFirstFramePatcher: TimelinePatcher = {
             description: desc,
           };
         }
-        return existing;
+        return {
+          ...existing,
+          images: [],
+          description: desc,
+        };
       });
       result.characters = nextChars;
       result.reference_mode = 'Ghost Mask (End)';
@@ -176,13 +185,29 @@ const h3FirstFramePatcher: TimelinePatcher = {
       const refFiles = [ctx.refImage1File, ctx.refImage2File, ctx.refImage3File, ctx.refImage4File];
       refFiles.forEach((f, idx) => {
         if (f && f.trim()) {
+          const desc = ctx.refImageDescriptions?.[idx] || '';
           characters[idx] = {
             file: f.trim(),
-            name: ctx.refImageDescriptions?.[idx] || `Ref ${idx + 1}`,
+            name: desc || `Ref ${idx + 1}`,
+            description: desc,
+            retention: 'fully_preserved',
           };
+        } else {
+          characters[idx] = null;
         }
       });
       if (ctx.controlVideoFile) {
+        data.refVideos = [
+          {
+            file: ctx.controlVideoFile,
+            fileName: ctx.controlVideoFile,
+            role: 'reference',
+            retention: 'weak_reference',
+            description: '',
+            includeAudio: false,
+            trimStartSec: 0,
+          },
+        ];
         data.retakeVideo = ctx.controlVideoFile;
         data.retakeMode = true;
       }

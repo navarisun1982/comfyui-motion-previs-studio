@@ -92,12 +92,11 @@ export class JobRunner {
       controlVideoFilename = uploadRes.name;
     }
 
-    const defaultFallback = options.engine === 'minimax-h3';
     const resolvedRefImages: [string | undefined, string | undefined, string | undefined, string | undefined] = [
-      options.refImageFilenames?.[0]?.trim() || (defaultFallback ? 'char1.png' : undefined),
-      options.refImageFilenames?.[1]?.trim() || (defaultFallback ? 'char2.png' : undefined),
-      options.refImageFilenames?.[2]?.trim() || (defaultFallback ? 'char3.png' : undefined),
-      options.refImageFilenames?.[3]?.trim() || (defaultFallback ? 'char4.png' : undefined),
+      options.refImageFilenames?.[0]?.trim() || undefined,
+      options.refImageFilenames?.[1]?.trim() || undefined,
+      options.refImageFilenames?.[2]?.trim() || undefined,
+      options.refImageFilenames?.[3]?.trim() || undefined,
     ];
     if (options.refImageBlobs && options.refImageBlobs.length > 0) {
       for (let i = 0; i < 4; i++) {

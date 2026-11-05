@@ -6,7 +6,8 @@
   "api": "h3_stubelius.api.json",
   "modes": [
     "t2v",
-    "i2v"
+    "i2v",
+    "control"
   ],
   "nodes": {
     "1": "StubeliusH3Setup",

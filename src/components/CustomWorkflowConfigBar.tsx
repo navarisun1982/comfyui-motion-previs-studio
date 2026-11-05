@@ -118,7 +118,9 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
     const nextActive = getActiveWorkflowForEngine(engine);
     setChoices(nextChoices);
     setActiveChoice(nextActive);
+    setLocalSavedWorkflows([]);
     setErrorText(null);
+    setStatusText(null);
 
     let nextDetected: AutoDetectedWorkflowResult | null = null;
     if (nextActive.kind === 'custom' && nextActive.savedEntry?.rawJson) {
@@ -261,18 +263,19 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
   const handleScanLocalComfy = async () => {
     setIsScanningLocal(true);
     setErrorText(null);
-    setStatusText('Scanning local ComfyUI (127.0.0.1:8188) for saved workflows...');
+    const engineLabel = engine === 'ltx-2.5' ? 'LTX-2.5' : 'MiniMax H3';
+    setStatusText(`Scanning local ComfyUI (127.0.0.1:8188) for saved ${engineLabel} workflows...`);
     try {
-      const list = await listLocalComfyWorkflows();
+      const list = await listLocalComfyWorkflows(engine);
       setLocalSavedWorkflows(list);
       if (list.length > 0) {
         setStatusText(
-          `Found ${list.length} saved workflow(s) on your local ComfyUI server. Click any workflow below to add it to the dropdown.`
+          `Found ${list.length} saved ${engineLabel} workflow(s) on your local ComfyUI server. Click any workflow below to add it to the dropdown.`
         );
       } else {
         setStatusText(null);
         setErrorText(
-          'No saved workflows found in ComfyUI/user/default/workflows/ on 127.0.0.1:8188. Save your workflow inside ComfyUI (Ctrl+S), paste a workflow URL above, or click "Upload .JSON".'
+          `No saved ${engineLabel} workflows found in ComfyUI/user/default/workflows/ on 127.0.0.1:8188. Save your workflow inside ComfyUI (Ctrl+S), paste a workflow URL above, or click "Upload .JSON".`
         );
       }
     } catch (err: unknown) {

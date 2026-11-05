@@ -783,6 +783,53 @@ export interface WorkflowValidationReport {
 }
 
 /**
+ * Detect which studio engine ('ltx-2.5' | 'minimax-h3' | '3d' | null) a workflow belongs to
+ * by inspecting its JSON node classes and/or its filename/URL.
+ */
+export function detectWorkflowEngine(
+  rawJson?: string,
+  nameOrUrl?: string
+): 'ltx-2.5' | 'minimax-h3' | '3d' | null {
+  if (rawJson && typeof rawJson === 'string') {
+    if (/"(?:class_type|type)"\s*:\s*"[^"]*(?:Hy3D|Hunyuan3D|TripoSR|TreLLIS|VoxelToMesh)/i.test(rawJson)) {
+      return '3d';
+    }
+    const hasMinimax =
+      /"(?:class_type|type)"\s*:\s*"[^"]*(?:MiniMax|StubeliusH3|H3Prompt)/i.test(rawJson) ||
+      /minimax_h3_(?:ref2va|fl2va|video_vae|audio_vae)|qwen3vl_32b_minimax_h3/i.test(rawJson);
+    const hasLtx =
+      /"(?:class_type|type)"\s*:\s*"[^"]*(?:LTXDirector|StubeliusLTX|EmptyLTXVLatentVideo|LTXVConditioning|LTXVScheduler|LTXV|LTX2)/i.test(
+        rawJson
+      ) || /ltx-2\.5-22b|gemma4-12b-with-proj-ltx/i.test(rawJson);
+    if (hasMinimax && !hasLtx) return 'minimax-h3';
+    if (hasLtx && !hasMinimax) return 'ltx-2.5';
+  }
+
+  if (nameOrUrl && typeof nameOrUrl === 'string') {
+    const s = nameOrUrl.trim();
+    if (/(?:^|[\\/_\-\s])3d(?:[\\/_\-\s.]|$)|image_to_3d|text_to_3d|glb_workflow/i.test(s)) {
+      return '3d';
+    }
+    if (
+      /^(?:workflows[\\/])?minimax[\\/]|minimax|stubelius_ultimate_h3|stubeliush3|\bh3_stubelius\b|2834514|2881362|3233131|3383710/i.test(
+        s
+      )
+    ) {
+      return 'minimax-h3';
+    }
+    if (
+      /^(?:workflows[\\/])?ltx[\\/]|\bltx\b|ltx2|ltx-2|ltx_2|stubelius_ultimate_ltx|2422765|2318870|3368860|3231942/i.test(
+        s
+      )
+    ) {
+      return 'ltx-2.5';
+    }
+  }
+
+  return null;
+}
+
+/**
  * Strictly validate a user-submitted workflow to ensure it can render a 3D Previs shot
  * without conflicts (must have Reference/Control Video node, Prompt node, Video Output node,
  * and match the selected engine).
@@ -793,6 +840,16 @@ export function validateWorkflowForStudioRender(
 ): WorkflowValidationReport {
   const errors: string[] = [];
   const nodeEntries = Object.entries(detected.api || {});
+
+  // 0. Reject 3D mesh generation workflows if submitted to the video Previs render deck
+  const has3DCore = nodeEntries.some(([_, n]) =>
+    /Hy3D|Hunyuan3D|TripoSR|TreLLIS|VoxelToMesh/i.test(n.class_type)
+  );
+  if (has3DCore) {
+    errors.push(
+      'تعارض في نوع الوركفلو (3D Workflow Mismatch): هذا الوركفلو مخصص لتوليد المجسمات ثلاثية الأبعاد (3D Mesh) وليس لريندر الفيديو.'
+    );
+  }
 
   // 1. Must have a Reference / Control Video Input node
   if (!detected.detectedSlots.controlVideo) {
@@ -823,19 +880,17 @@ export function validateWorkflowForStudioRender(
     const hasMinimaxCore = nodeEntries.some(([_, n]) =>
       /MiniMax|StubeliusH3|H3Prompt/i.test(n.class_type)
     );
-    const hasLtxCore =
-      !hasMinimaxCore &&
-      nodeEntries.some(([_, n]) =>
-        /LTXDirector|StubeliusLTX|EmptyLTXVLatentVideo|LTXVConditioning|LTXVScheduler|LTX2/i.test(
-          n.class_type
-        )
-      );
+    const hasLtxCore = nodeEntries.some(([_, n]) =>
+      /LTXDirector|StubeliusLTX|EmptyLTXVLatentVideo|LTXVConditioning|LTXVScheduler|LTXV|LTX2/i.test(
+        n.class_type
+      )
+    );
 
-    if (targetEngine === 'minimax-h3' && hasLtxCore) {
+    if (targetEngine === 'minimax-h3' && hasLtxCore && !hasMinimaxCore) {
       errors.push(
         'تعارض في المحرك (Engine Mismatch): هذا الوركفلو مخصص لمحرك LTX-2.5 ولا يمكن تشغيله تحت قسم MiniMax H3.'
       );
-    } else if (targetEngine === 'ltx-2.5' && hasMinimaxCore) {
+    } else if (targetEngine === 'ltx-2.5' && hasMinimaxCore && !hasLtxCore) {
       errors.push(
         'تعارض في المحرك (Engine Mismatch): هذا الوركفلو مخصص لمحرك MiniMax H3 ولا يمكن تشغيله تحت قسم LTX-2.5.'
       );
@@ -851,13 +906,24 @@ export function validateWorkflowForStudioRender(
 /**
  * List saved workflow `.json` files stored inside the user's local ComfyUI server
  * (`ComfyUI/user/default/workflows/` via `/api/userdata?dir=workflows` or IPC sync status).
+ * When `engine` is provided, strictly filters out workflows belonging to other engines or 3D.
  */
-export async function listLocalComfyWorkflows(): Promise<string[]> {
+export async function listLocalComfyWorkflows(engine?: RenderEngineId): Promise<string[]> {
+  const filterByEngine = (list: string[]): string[] => {
+    if (!engine) return list;
+    return list.filter((name) => {
+      const detected = detectWorkflowEngine(undefined, name);
+      if (detected === '3d') return false;
+      if (detected && detected !== engine) return false;
+      return true;
+    });
+  };
+
   if (typeof window !== 'undefined' && window.electronComfyBridge?.getSyncStatus) {
     try {
       const status = await window.electronComfyBridge.getSyncStatus();
       if (status?.ok && Array.isArray(status.existingWorkflows) && status.existingWorkflows.length > 0) {
-        return status.existingWorkflows;
+        return filterByEngine(status.existingWorkflows);
       }
     } catch {
       // fall through
@@ -874,9 +940,10 @@ export async function listLocalComfyWorkflows(): Promise<string[]> {
       if (res.ok) {
         const list = await res.json();
         if (Array.isArray(list)) {
-          return list
+          const names = list
             .map((item) => (typeof item === 'string' ? item : item?.path || item?.name || ''))
             .filter((name: string) => name.toLowerCase().endsWith('.json'));
+          return filterByEngine(names);
         }
       }
     } catch {
@@ -1136,7 +1203,7 @@ export const CURATED_BUILTIN_WORKFLOWS: CuratedBuiltinWorkflow[] = [
     description: 'Node 638 Previs Video + 4 Ref Images (<pic 1..4>) → Node 145 60fps RIFE + Audio MP4',
     baseTemplateId: 'minimax_h3_ref2va',
     uiFilename: 'MiniMax_H3_Ref2VA_ComfyUI_Workflow.json',
-    requiresFourRefs: true,
+    requiresFourRefs: false,
   },
   {
     id: 'minimax_h3_t2v_i2v_ref2v_advanced',
@@ -1180,7 +1247,7 @@ export const CURATED_BUILTIN_WORKFLOWS: CuratedBuiltinWorkflow[] = [
     baseTemplateId: 'minimax_h3_ref2va',
     uiFilename: 'MiniMax_H3_Ref2VA_ComfyUI_Workflow.json',
     forcedProfile: 'draft',
-    requiresFourRefs: true,
+    requiresFourRefs: false,
   },
   // LTX-2.5 Built-in & Default Workflows
   {
@@ -1285,28 +1352,94 @@ export function loadWorkflowLibrary(): WorkflowLibraryState {
     const raw = localStorage.getItem(WORKFLOW_LIBRARY_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<WorkflowLibraryState>;
-      const savedWorkflows = Array.isArray(parsed.savedWorkflows) ? parsed.savedWorkflows : [];
+      const rawSaved = Array.isArray(parsed.savedWorkflows) ? parsed.savedWorkflows : [];
+      let mutated = false;
+
+      // Built-in default source URLs (so legacy pasted duplicates of built-in defaults are deduplicated)
+      const builtinUrls = new Set(
+        CURATED_BUILTIN_WORKFLOWS.map((b) => b.sourceUrl?.trim().toLowerCase()).filter(Boolean)
+      );
+
+      const savedWorkflows: SavedWorkflowEntry[] = [];
+      for (const w of rawSaved) {
+        if (!w || typeof w !== 'object') {
+          mutated = true;
+          continue;
+        }
+        // Remove legacy custom duplicates of the 6 built-in default URLs
+        if (w.url && builtinUrls.has(w.url.trim().toLowerCase())) {
+          mutated = true;
+          continue;
+        }
+        const detected = detectWorkflowEngine(w.rawJson, `${w.label || ''} ${w.url || ''}`);
+        if (detected === '3d') {
+          mutated = true;
+          continue;
+        }
+        const trueEngine: RenderEngineId =
+          detected === 'ltx-2.5' || detected === 'minimax-h3' ? detected : w.engine;
+        if (trueEngine !== w.engine) {
+          mutated = true;
+        }
+        savedWorkflows.push({
+          ...w,
+          engine: trueEngine,
+        });
+      }
+
+      const validMinimaxIds = new Set([
+        ...CURATED_BUILTIN_WORKFLOWS.filter((b) => b.engine === 'minimax-h3').map((b) => b.id),
+        ...savedWorkflows.filter((w) => w.engine === 'minimax-h3').map((w) => w.id),
+      ]);
+      const validLtxIds = new Set([
+        ...CURATED_BUILTIN_WORKFLOWS.filter((b) => b.engine === 'ltx-2.5').map((b) => b.id),
+        ...savedWorkflows.filter((w) => w.engine === 'ltx-2.5').map((w) => w.id),
+      ]);
+
+      const rawMinimaxActive = parsed.activeWorkflowByEngine?.['minimax-h3'];
+      const rawLtxActive = parsed.activeWorkflowByEngine?.['ltx-2.5'];
+
       const activeMinimax =
-        parsed.activeWorkflowByEngine?.['minimax-h3'] || defaultState.activeWorkflowByEngine['minimax-h3'];
+        rawMinimaxActive && validMinimaxIds.has(rawMinimaxActive)
+          ? rawMinimaxActive
+          : defaultState.activeWorkflowByEngine['minimax-h3'];
       const activeLtx =
-        parsed.activeWorkflowByEngine?.['ltx-2.5'] || defaultState.activeWorkflowByEngine['ltx-2.5'];
-      return {
+        rawLtxActive && validLtxIds.has(rawLtxActive)
+          ? rawLtxActive
+          : defaultState.activeWorkflowByEngine['ltx-2.5'];
+
+      if (activeMinimax !== rawMinimaxActive || activeLtx !== rawLtxActive) {
+        mutated = true;
+      }
+
+      const nextState: WorkflowLibraryState = {
         activeWorkflowByEngine: {
           'minimax-h3': activeMinimax,
           'ltx-2.5': activeLtx,
         },
         savedWorkflows,
       };
+
+      if (mutated) {
+        saveWorkflowLibrary(nextState);
+      }
+
+      return nextState;
     }
 
     // Migrate legacy single custom workflow if present
     const legacy = loadStoredCustomWorkflowConfig();
     if (legacy.rawJson && legacy.url) {
       const detected = autoDetectWorkflowBindings(legacy.rawJson, legacy.overrides);
+      const detectedEng = detectWorkflowEngine(legacy.rawJson, `${legacy.label || ''} ${legacy.url || ''}`);
+      if (detectedEng === '3d') {
+        return defaultState;
+      }
+      const entryEngine: RenderEngineId = detectedEng || 'minimax-h3';
       const entryId = `custom_wf_${Date.now()}`;
       const migratedEntry: SavedWorkflowEntry = {
         id: entryId,
-        engine: 'minimax-h3',
+        engine: entryEngine,
         label: legacy.label || 'Custom Workflow',
         url: legacy.url,
         rawJson: legacy.rawJson,
@@ -1316,8 +1449,14 @@ export function loadWorkflowLibrary(): WorkflowLibraryState {
       };
       return {
         activeWorkflowByEngine: {
-          'minimax-h3': legacy.activeSource === 'custom' ? entryId : 'minimax_h3_ref2va',
-          'ltx-2.5': 'ltx25_stubelius',
+          'minimax-h3':
+            entryEngine === 'minimax-h3' && legacy.activeSource === 'custom'
+              ? entryId
+              : 'minimax_h3_ref2va',
+          'ltx-2.5':
+            entryEngine === 'ltx-2.5' && legacy.activeSource === 'custom'
+              ? entryId
+              : 'ltx25_stubelius',
         },
         savedWorkflows: [migratedEntry],
       };

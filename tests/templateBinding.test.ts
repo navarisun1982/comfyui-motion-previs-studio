@@ -429,6 +429,35 @@ describe('bundled production templates', () => {
     expect(finalRes.workflow['17'].inputs.final_resolution).toBe('1080p');
     const timelineData = JSON.parse(finalRes.workflow['4'].inputs.timeline_data as string);
     expect(timelineData.characters[0].file).toBe('cyberpunk_first.png');
+
+    // Bind Control mode with 3D Previs video + Reference Images & verify Omni mode + socket links
+    const controlRes = bindTemplate(apiRaw, parsed.binding!, {
+      mode: 'control',
+      profile: 'final',
+      prompt: 'Agent Mercer sprints down the alley',
+      negative: '',
+      seed: 9001,
+      durationSeconds: 5,
+      frameRate: 24,
+      aspectRatio: '16:9',
+      width: 1280,
+      height: 720,
+      filenamePrefix: 'h3_control_shot',
+      controlVideoFile: 'alley_previs_control.mp4',
+      refImage1File: 'char1.png',
+      refImage2File: 'char2.png',
+      refImageDescriptions: ['Agent Mercer', 'Armored Drone', '', ''],
+    });
+
+    expect(controlRes.workflow['4'].inputs.mode).toBe('Reference (Omni) — up to 9 images, 3 videos, 3 audio');
+    expect(controlRes.workflow['11'].inputs.takes).toEqual(['4', 16]);
+    expect(controlRes.workflow['17'].inputs.mode).toEqual(['1', 1]);
+    const h3ControlTimeline = JSON.parse(controlRes.workflow['4'].inputs.timeline_data as string);
+    expect(h3ControlTimeline.refVideos[0].file).toBe('alley_previs_control.mp4');
+    expect(h3ControlTimeline.characters[0].file).toBe('char1.png');
+    expect(h3ControlTimeline.characters[0].description).toBe('Agent Mercer');
+    expect(h3ControlTimeline.characters[1].file).toBe('char2.png');
+    expect(h3ControlTimeline.characters[2]).toBeNull();
   });
 
   it('loads, verifies, and binds minimax_h3_ref2va (SolAttn + 8-step Turbo LoRA + 4 Ref Images) without errors', async () => {
@@ -477,6 +506,31 @@ describe('bundled production templates', () => {
     expect(bound.workflow['151'].inputs.image).toBe('char4.png');
     expect(bound.workflow['145'].inputs.filename_prefix).toBe('mmh3_alley_oner');
     expect((bound.workflow['674'].inputs.lora_1 as Record<string, unknown>).strength).toBe(0.7);
+
+    // Verify partial reference images (e.g. only 2 ref images supplied) prunes unused LoadImage nodes 144 & 151
+    const partialBound = bindTemplate(apiRaw, parsed.binding!, {
+      mode: 'control',
+      profile: 'final',
+      prompt: 'subject_definitions:\n<Subject 1> is Agent Mercer...',
+      negative: '',
+      seed: 12345,
+      durationSeconds: 5,
+      frameRate: 24,
+      aspectRatio: '16:9',
+      width: 1280,
+      height: 720,
+      filenamePrefix: 'mmh3_partial_refs',
+      controlVideoFile: 'alley_pursuit_rgb_previs.mp4',
+      refImage1File: 'char1.png',
+      refImage2File: 'char2.png',
+    });
+    expect(partialBound.workflow['137']?.inputs.image).toBe('char1.png');
+    expect(partialBound.workflow['139']?.inputs.image).toBe('char2.png');
+    expect(partialBound.workflow['144']).toBeUndefined();
+    expect(partialBound.workflow['151']).toBeUndefined();
+    expect(partialBound.workflow['136'].inputs['ref_images.ref_image_0']).toEqual(['137', 0]);
+    expect(partialBound.workflow['136'].inputs['ref_images.ref_image_1']).toEqual(['139', 0]);
+    expect(partialBound.workflow['136'].inputs['ref_images.ref_image_2']).toBeUndefined();
   });
 });
 
