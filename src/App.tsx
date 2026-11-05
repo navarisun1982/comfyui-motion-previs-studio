@@ -7,6 +7,7 @@ import { PrevisParametersDeck } from './components/PrevisParametersDeck';
 import { useLogStore } from './stores/useLogStore';
 import { useComfyStore } from './stores/useComfyStore';
 import { defaultComfyClient } from './services/comfyClient';
+import { syncAllWorkflowsToComfyUI } from './pipeline/customWorkflowResolver';
 import { getReasonerConfig, PROVIDERS } from './services/objectReasoner';
 import {
   AppUpdateStatus,
@@ -143,26 +144,38 @@ export default function App() {
     const unsubUpdate = subscribeAppUpdateStatus((st) => {
       if (mounted) setAppUpdateStatus(st);
     });
+    // Automatically sync bundled & saved workflows to ComfyUI on startup if missing
+    void syncAllWorkflowsToComfyUI(false);
+
     const probeComfy = async () => {
       const health = await defaultComfyClient.checkHealth();
       if (!mounted) return;
       if (health.ok && health.stats) {
+        const wasConnected = useComfyStore.getState().connectionStatus === 'connected';
         setComfyConnectionStatus('connected');
         setComfySystemStats(health.stats);
+        if (!wasConnected) {
+          void syncAllWorkflowsToComfyUI(false);
+        }
       } else {
         setComfyConnectionStatus('disconnected');
       }
     };
     probeComfy();
     const retryInterval = setInterval(() => {
+      probeComfy();
+    }, 5000);
+    const onWindowFocus = () => {
       if (useComfyStore.getState().connectionStatus !== 'connected') {
         probeComfy();
       }
-    }, 8000);
+    };
+    window.addEventListener('focus', onWindowFocus);
     checkForAppUpdates(true).catch(() => {});
     return () => {
       mounted = false;
       clearInterval(retryInterval);
+      window.removeEventListener('focus', onWindowFocus);
       unsubUpdate();
     };
   }, [setComfyConnectionStatus, setComfySystemStats]);

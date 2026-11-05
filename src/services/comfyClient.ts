@@ -3,6 +3,51 @@ import { ComfySystemStats } from '../stores/useComfyStore';
 import { logger } from '../stores/useLogStore';
 import { sha256Hex } from '../pipeline/hash';
 
+export interface ElectronComfyBridge {
+  isElectron?: boolean;
+  request: (options: {
+    path: string;
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string | null;
+    responseType?: 'json' | 'text' | 'base64';
+    timeoutMs?: number;
+    targetUrl?: string | null;
+  }) => Promise<{
+    ok: boolean;
+    status: number;
+    statusText?: string;
+    activePort?: number;
+    contentType?: string;
+    text?: string;
+    data?: any;
+    base64?: string;
+    error?: string;
+  }>;
+  uploadImage: (options: {
+    filename: string;
+    mimeType: string;
+    base64Data: string;
+    overwrite?: boolean;
+    targetUrl?: string | null;
+  }) => Promise<{
+    ok: boolean;
+    status: number;
+    data?: { name: string; subfolder: string; type: string };
+    text?: string;
+    error?: string;
+  }>;
+  syncWorkflows?: (options?: Record<string, unknown>) => Promise<any>;
+  getSyncStatus?: () => Promise<any>;
+  fetchRemoteWorkflow?: (url: string) => Promise<any>;
+}
+
+declare global {
+  interface Window {
+    electronComfyBridge?: ElectronComfyBridge;
+  }
+}
+
 export interface ComfyWsMessage {
   type: string;
   data: Record<string, unknown>;
@@ -19,8 +64,45 @@ export interface WsJobListener {
   onError?: (message: string, details?: unknown) => void;
 }
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (typeof FileReader !== 'undefined') {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const res = String(reader.result || '');
+        const comma = res.indexOf(',');
+        resolve(comma >= 0 ? res.slice(comma + 1) : res);
+      };
+      reader.onerror = () => reject(reader.error || new Error('Failed to read blob'));
+      reader.readAsDataURL(blob);
+      return;
+    }
+    blob
+      .arrayBuffer()
+      .then((buf) => {
+        const bytes = new Uint8Array(buf);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        resolve(btoa(binary));
+      })
+      .catch(reject);
+  });
+}
+
+function base64ToUint8Array(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
 export class ComfyClient {
   private baseUrl: string;
+  private targetServerUrl: string;
   private wsUrl: string;
   private ws: WebSocket | null = null;
   private clientId: string;
@@ -30,9 +112,14 @@ export class ComfyClient {
   private isConnecting = false;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
+  private isFileProtocol(): boolean {
+    if (typeof window === 'undefined') return false;
+    return Boolean(window.location?.protocol?.startsWith('file:'));
+  }
+
   private isHttpDevContext(): boolean {
     if (typeof window === 'undefined') return false;
-    if (window.location.protocol.startsWith('file:')) return false;
+    if (this.isFileProtocol()) return false;
     return (
       Boolean(import.meta.env.DEV) ||
       ['5173', '5174', '5175', '4173', '51265', '51266'].includes(window.location.port) ||
@@ -41,19 +128,33 @@ export class ComfyClient {
     );
   }
 
-  constructor(serverUrl: string = 'http://127.0.0.1:8188') {
-    const isDevServer = this.isHttpDevContext();
+  private getElectronBridge(): ElectronComfyBridge | null {
+    if (typeof window !== 'undefined' && window.electronComfyBridge) {
+      return window.electronComfyBridge;
+    }
+    return null;
+  }
 
-    // In Vite dev mode, use proxy '/api/comfy' to avoid CORS issues.
-    // In Electron or production desktop builds, connect directly to ComfyUI.
-    this.baseUrl = isDevServer ? '/api/comfy' : serverUrl;
+  constructor(serverUrl: string = 'http://127.0.0.1:8188') {
+    this.targetServerUrl = serverUrl.replace(/\/+$/, '') || 'http://127.0.0.1:8188';
+    const isDevServer = this.isHttpDevContext();
+    const isFile = this.isFileProtocol();
+
+    // In Vite dev mode, use '/api/comfy'. In Electron file:// mode, prefer local proxy 51731.
+    if (isDevServer) {
+      this.baseUrl = '/api/comfy';
+    } else if (isFile) {
+      this.baseUrl = 'http://127.0.0.1:51731/api/comfy';
+    } else {
+      this.baseUrl = this.targetServerUrl;
+    }
 
     if (isDevServer) {
       const loc = window.location;
       const wsProtocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
       this.wsUrl = `${wsProtocol}//${loc.host}/ws`;
     } else {
-      this.wsUrl = serverUrl.replace(/^http/, 'ws') + '/ws';
+      this.wsUrl = this.targetServerUrl.replace(/^http/, 'ws') + '/ws';
     }
 
     this.clientId = `cmpvs_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
@@ -68,18 +169,26 @@ export class ComfyClient {
   }
 
   updateServerUrl(serverUrl: string) {
-    const isDevServer =
-      this.isHttpDevContext() &&
-      (serverUrl.includes('127.0.0.1:8188') || serverUrl.includes('localhost:8188'));
+    const cleanTarget = (serverUrl || 'http://127.0.0.1:8188').trim().replace(/\/+$/, '');
+    this.targetServerUrl = cleanTarget;
+    const isLocalDefault =
+      cleanTarget.includes('127.0.0.1:8188') ||
+      cleanTarget.includes('localhost:8188') ||
+      cleanTarget.includes('127.0.0.1:8000') ||
+      cleanTarget.includes('localhost:8000');
 
-    this.baseUrl = isDevServer ? '/api/comfy' : serverUrl.replace(/\/+$/, '');
-
-    if (isDevServer) {
+    if (this.isHttpDevContext() && isLocalDefault) {
+      this.baseUrl = '/api/comfy';
       const loc = window.location;
       const wsProtocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
       this.wsUrl = `${wsProtocol}//${loc.host}/ws`;
+    } else if (this.isFileProtocol() && isLocalDefault) {
+      // Never clobber Electron's local proxy with a raw 127.0.0.1:8188 URL that lacks CORS headers
+      this.baseUrl = 'http://127.0.0.1:51731/api/comfy';
+      this.wsUrl = cleanTarget.replace(/^http/, 'ws') + '/ws';
     } else {
-      this.wsUrl = serverUrl.replace(/\/+$/, '').replace(/^http/, 'ws') + '/ws';
+      this.baseUrl = cleanTarget;
+      this.wsUrl = cleanTarget.replace(/^http/, 'ws') + '/ws';
     }
 
     this.objectInfoCache = null;
@@ -92,146 +201,282 @@ export class ComfyClient {
       }
       this.ws = null;
     }
-    logger.system(`ComfyUI client updated endpoint to: ${this.baseUrl}`);
+    logger.system(`ComfyUI client updated endpoint to: ${this.baseUrl} (target: ${this.targetServerUrl})`);
   }
 
-  private resolveUrl(targetUrl?: string): string {
-    if (
-      this.baseUrl === '/api/comfy' ||
-      this.baseUrl.includes('127.0.0.1:51731') ||
-      this.baseUrl.includes('127.0.0.1:5173/api/comfy')
-    ) {
-      return this.baseUrl;
-    }
-    const isDevServer = this.isHttpDevContext();
-    if (!targetUrl) return this.baseUrl;
-    const cleanUrl = targetUrl.replace(/\/+$/, '');
-    if (isDevServer && (cleanUrl.includes('127.0.0.1:8188') || cleanUrl.includes('localhost:8188'))) {
-      return '/api/comfy';
-    }
-    return cleanUrl;
-  }
+  private getCandidateEndpoints(overrideTargetUrl?: string): string[] {
+    const isFile = this.isFileProtocol();
+    const isDev = this.isHttpDevContext();
+    const cleanOverride = overrideTargetUrl ? overrideTargetUrl.trim().replace(/\/+$/, '') : '';
 
-  async ping(targetUrl?: string): Promise<{ ok: boolean; latencyMs: number; stats?: ComfySystemStats; error?: string }> {
-    const start = performance.now();
-    const url = this.resolveUrl(targetUrl);
-    try {
-      const res = await fetch(`${url}/system_stats`, { signal: AbortSignal.timeout(5000) });
-      const latencyMs = Math.round(performance.now() - start);
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      }
-      const data = await res.json();
-
-      const gpu = data.devices?.[0];
-      const stats: ComfySystemStats = {
-        os: data.system?.os || 'windows',
-        ramTotalGb: Math.round((data.system?.ram_total || 0) / (1024 * 1024 * 1024)),
-        ramFreeGb: Math.round((data.system?.ram_free || 0) / (1024 * 1024 * 1024)),
-        comfyVersion: data.system?.comfyui_version || 'unknown',
-        gpuName: gpu?.name || 'NVIDIA GPU',
-        vramTotalGb: Math.round((gpu?.vram_total || 0) / (1024 * 1024 * 1024)),
-        vramFreeGb: Math.round((gpu?.vram_free || 0) / (1024 * 1024 * 1024)),
-      };
-
-      return { ok: true, latencyMs, stats };
-    } catch (err: unknown) {
-      const latencyMs = Math.round(performance.now() - start);
-      const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, latencyMs, error: msg };
-    }
-  }
-
-  async detectModels(targetUrl?: string): Promise<{ ltxDetected: boolean; minimaxDetected: boolean; wanDetected: boolean; customNodes: string[] }> {
-    const url = this.resolveUrl(targetUrl);
-    try {
-      const res = await fetch(`${url}/object_info`, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) return { ltxDetected: false, minimaxDetected: false, wanDetected: false, customNodes: [] };
-      const data = await res.json();
-      const nodeKeys = Object.keys(data);
-      const ltxDetected = nodeKeys.some((k) => k.toLowerCase().includes('ltx'));
-      const minimaxDetected = nodeKeys.some((k) => k.toLowerCase().includes('minimax') || k.toLowerCase().includes('hailuo'));
-      const wanDetected = nodeKeys.some((k) => k.toLowerCase().includes('wan'));
-      const customNodes = nodeKeys
-        .filter((k) => k.toLowerCase().includes('ltx') || k.toLowerCase().includes('director') || k.toLowerCase().includes('video'))
-        .slice(0, 15);
-      return { ltxDetected, minimaxDetected, wanDetected, customNodes };
-    } catch {
-      return { ltxDetected: false, minimaxDetected: false, wanDetected: false, customNodes: [] };
-    }
-  }
-
-  async checkHealth(): Promise<{ ok: boolean; stats?: ComfySystemStats; raw?: unknown; error?: string }> {
-    const isFileProtocol = typeof window !== 'undefined' && window.location?.protocol?.startsWith('file:');
-    const rawCandidates = isFileProtocol
+    const raw = isFile
       ? [
           'http://127.0.0.1:51731/api/comfy',
           'http://127.0.0.1:5173/api/comfy',
           this.baseUrl,
+          cleanOverride,
+          this.targetServerUrl,
+          'http://127.0.0.1:8188',
+          'http://127.0.0.1:8000',
+        ]
+      : isDev
+      ? [
+          '/api/comfy',
+          this.baseUrl,
+          'http://127.0.0.1:5173/api/comfy',
+          'http://127.0.0.1:51731/api/comfy',
+          cleanOverride,
+          this.targetServerUrl,
           'http://127.0.0.1:8188',
           'http://127.0.0.1:8000',
         ]
       : [
           this.baseUrl,
-          '/api/comfy',
-          'http://127.0.0.1:5173/api/comfy',
+          cleanOverride,
+          this.targetServerUrl,
           'http://127.0.0.1:51731/api/comfy',
+          'http://127.0.0.1:5173/api/comfy',
           'http://127.0.0.1:8188',
           'http://127.0.0.1:8000',
         ];
-    const candidates = Array.from(
-      new Set(rawCandidates.filter((c) => Boolean(c) && !(isFileProtocol && c.startsWith('/'))))
+
+    return Array.from(
+      new Set(raw.filter((c) => Boolean(c) && !(isFile && c.startsWith('/'))))
     );
+  }
+
+  private updateActivePortAndWs(candidateUrl: string, activePort?: number | string | null) {
+    const portStr = activePort
+      ? String(activePort)
+      : candidateUrl.includes(':8000')
+      ? '8000'
+      : '8188';
+    if (this.isHttpDevContext() && candidateUrl === '/api/comfy' && portStr === '8188') {
+      const loc = window.location;
+      const wsProtocol = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+      this.wsUrl = `${wsProtocol}//${loc.host}/ws`;
+    } else {
+      this.wsUrl = `ws://127.0.0.1:${portStr}/ws`;
+    }
+  }
+
+  private async requestComfy<T = any>(
+    path: string,
+    options: {
+      method?: string;
+      headers?: Record<string, string>;
+      body?: string | null;
+      timeoutMs?: number;
+      targetUrl?: string;
+      expectSystemStats?: boolean;
+    } = {}
+  ): Promise<{
+    ok: boolean;
+    status: number;
+    data: T | null;
+    text: string;
+    error?: string;
+  }> {
+    const normPath = path.startsWith('/') ? path : `/${path}`;
+    const method = options.method || 'GET';
+    const timeoutMs = options.timeoutMs ?? 8000;
+    const targetUrl = options.targetUrl || this.targetServerUrl;
+
+    // Channel 1: Native Electron IPC Bridge (100% immune to Chromium CORS, Origin, or port conflicts)
+    const bridge = this.getElectronBridge();
+    if (bridge?.request) {
+      try {
+        const ipcRes = await bridge.request({
+          path: normPath,
+          method,
+          headers: options.headers,
+          body: options.body ?? null,
+          responseType: 'json',
+          timeoutMs,
+          targetUrl,
+        });
+        if (ipcRes && ipcRes.ok) {
+          if (!options.expectSystemStats || (ipcRes.data && typeof ipcRes.data === 'object' && ipcRes.data.system)) {
+            this.updateActivePortAndWs('http://127.0.0.1:51731/api/comfy', ipcRes.activePort);
+            return {
+              ok: true,
+              status: ipcRes.status || 200,
+              data: (ipcRes.data ?? null) as T | null,
+              text: ipcRes.text || '',
+            };
+          }
+        } else if (ipcRes && ipcRes.status >= 400 && ipcRes.status < 500) {
+          // Genuine 4xx from ComfyUI (e.g. prompt validation error 400) — return immediately!
+          return {
+            ok: false,
+            status: ipcRes.status,
+            data: (ipcRes.data ?? null) as T | null,
+            text: ipcRes.text || ipcRes.error || '',
+            error: ipcRes.error || `HTTP ${ipcRes.status}`,
+          };
+        }
+      } catch {
+        // Fall through to HTTP channels
+      }
+    }
+
+    // Channel 2 & 3: Self-healing HTTP Candidate Loop (Local Proxy 51731 -> Vite /api/comfy -> Direct 8188/8000)
+    const candidates = this.getCandidateEndpoints(options.targetUrl);
     let lastError = 'Connection failed';
+    let lastStatus = 0;
+    let lastText = '';
+
     for (const candidate of candidates) {
       try {
-        const res = await fetch(`${candidate}/system_stats`, { signal: AbortSignal.timeout(4000) });
+        const reqHeaders: Record<string, string> = { ...(options.headers || {}) };
+        if (
+          (candidate.includes('51731') || candidate.startsWith('/api/comfy') || candidate.includes('5173/api/comfy')) &&
+          targetUrl &&
+          !targetUrl.includes('5173')
+        ) {
+          reqHeaders['X-Comfy-Target'] = targetUrl;
+        }
+
+        const res = await fetch(`${candidate}${normPath}`, {
+          method,
+          headers: Object.keys(reqHeaders).length > 0 ? reqHeaders : undefined,
+          body: options.body ?? undefined,
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+
+        lastStatus = res.status;
+        const text = await res.text();
+        lastText = text;
+        let parsed: any = null;
+        try {
+          parsed = text ? JSON.parse(text) : null;
+        } catch {
+          parsed = null;
+        }
+
         if (!res.ok) {
+          // If ComfyUI returned a 400 Bad Request on /prompt (node error), don't retry other ports
+          if (res.status >= 400 && res.status < 500 && normPath === '/prompt') {
+            return {
+              ok: false,
+              status: res.status,
+              data: parsed,
+              text,
+              error: `HTTP ${res.status}: ${res.statusText}`,
+            };
+          }
           lastError = `HTTP ${res.status}: ${res.statusText}`;
           continue;
         }
-        const data = await res.json();
-        if (!data || typeof data !== 'object' || !data.system) {
+
+        if (options.expectSystemStats && (!parsed || typeof parsed !== 'object' || !parsed.system)) {
+          lastError = 'Invalid system_stats payload';
           continue;
         }
+
         if (candidate !== this.baseUrl) {
           this.baseUrl = candidate;
         }
-        const gpu = data.devices?.[0];
-        const stats: ComfySystemStats = {
-          os: data.system?.os || 'windows',
-          ramTotalGb: Math.round((data.system?.ram_total || 0) / (1024 * 1024 * 1024)),
-          ramFreeGb: Math.round((data.system?.ram_free || 0) / (1024 * 1024 * 1024)),
-          comfyVersion: data.system?.comfyui_version || 'unknown',
-          gpuName: gpu?.name || 'NVIDIA GPU',
-          vramTotalGb: Math.round((gpu?.vram_total || 0) / (1024 * 1024 * 1024)),
-          vramFreeGb: Math.round((gpu?.vram_free || 0) / (1024 * 1024 * 1024)),
-        };
+        const activePortHeader = res.headers.get('X-Comfy-Active-Port');
+        this.updateActivePortAndWs(candidate, activePortHeader);
 
-        return { ok: true, stats, raw: data };
+        return {
+          ok: true,
+          status: res.status,
+          data: parsed as T,
+          text,
+        };
       } catch (err: unknown) {
         lastError = err instanceof Error ? err.message : String(err);
       }
     }
-    return { ok: false, error: lastError };
+
+    return {
+      ok: false,
+      status: lastStatus || 502,
+      data: null,
+      text: lastText,
+      error: lastError,
+    };
+  }
+
+  private parseSystemStats(data: any): ComfySystemStats {
+    const gpu = data?.devices?.[0];
+    return {
+      os: data?.system?.os || 'windows',
+      ramTotalGb: Math.round((data?.system?.ram_total || 0) / (1024 * 1024 * 1024)),
+      ramFreeGb: Math.round((data?.system?.ram_free || 0) / (1024 * 1024 * 1024)),
+      comfyVersion: data?.system?.comfyui_version || 'unknown',
+      gpuName: gpu?.name || 'NVIDIA GPU',
+      vramTotalGb: Math.round((gpu?.vram_total || 0) / (1024 * 1024 * 1024)),
+      vramFreeGb: Math.round((gpu?.vram_free || 0) / (1024 * 1024 * 1024)),
+    };
+  }
+
+  async ping(targetUrl?: string): Promise<{ ok: boolean; latencyMs: number; stats?: ComfySystemStats; error?: string }> {
+    const start = performance.now();
+    const res = await this.requestComfy<any>('/system_stats', {
+      timeoutMs: 5000,
+      targetUrl,
+      expectSystemStats: true,
+    });
+    const latencyMs = Math.round(performance.now() - start);
+    if (!res.ok || !res.data) {
+      return { ok: false, latencyMs, error: res.error || 'ComfyUI unreachable' };
+    }
+    return {
+      ok: true,
+      latencyMs,
+      stats: this.parseSystemStats(res.data),
+    };
+  }
+
+  async detectModels(targetUrl?: string): Promise<{ ltxDetected: boolean; minimaxDetected: boolean; wanDetected: boolean; customNodes: string[] }> {
+    const res = await this.requestComfy<Record<string, unknown>>('/object_info', {
+      timeoutMs: 8000,
+      targetUrl,
+    });
+    if (!res.ok || !res.data || typeof res.data !== 'object') {
+      return { ltxDetected: false, minimaxDetected: false, wanDetected: false, customNodes: [] };
+    }
+    const nodeKeys = Object.keys(res.data);
+    const ltxDetected = nodeKeys.some((k) => k.toLowerCase().includes('ltx'));
+    const minimaxDetected = nodeKeys.some((k) => k.toLowerCase().includes('minimax') || k.toLowerCase().includes('hailuo'));
+    const wanDetected = nodeKeys.some((k) => k.toLowerCase().includes('wan'));
+    const customNodes = nodeKeys
+      .filter((k) => k.toLowerCase().includes('ltx') || k.toLowerCase().includes('director') || k.toLowerCase().includes('video'))
+      .slice(0, 15);
+    return { ltxDetected, minimaxDetected, wanDetected, customNodes };
+  }
+
+  async checkHealth(): Promise<{ ok: boolean; stats?: ComfySystemStats; raw?: unknown; error?: string }> {
+    const res = await this.requestComfy<any>('/system_stats', {
+      timeoutMs: 4500,
+      expectSystemStats: true,
+    });
+    if (!res.ok || !res.data) {
+      return { ok: false, error: res.error || 'Connection failed' };
+    }
+    return {
+      ok: true,
+      stats: this.parseSystemStats(res.data),
+      raw: res.data,
+    };
   }
 
   async getObjectInfo(nodeClass?: string): Promise<Record<string, unknown> | null> {
     if (!nodeClass && this.objectInfoCache) {
       return this.objectInfoCache;
     }
-    try {
-      const url = nodeClass ? `${this.baseUrl}/object_info/${encodeURIComponent(nodeClass)}` : `${this.baseUrl}/object_info`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
-      if (!res.ok) return null;
-      const data = await res.json();
-      if (!nodeClass) {
-        this.objectInfoCache = data;
-      }
-      return data;
-    } catch {
+    const path = nodeClass ? `/object_info/${encodeURIComponent(nodeClass)}` : '/object_info';
+    const res = await this.requestComfy<Record<string, unknown>>(path, { timeoutMs: 12000 });
+    if (!res.ok || !res.data || typeof res.data !== 'object') {
       return null;
     }
+    if (!nodeClass) {
+      this.objectInfoCache = res.data;
+    }
+    return res.data;
   }
 
   async uploadContentAddressed(fileOrBlob: Blob, originalName = 'frame.png'): Promise<{ name: string; subfolder: string; type: string }> {
@@ -241,28 +486,75 @@ export class ComfyClient {
     const filename = `cmpvs_${hash.slice(0, 12)}.${ext}`;
 
     logger.api(`Content-addressed upload to ComfyUI: ${filename} (${Math.round(fileOrBlob.size / 1024)} KB)`);
-    const formData = new FormData();
-    formData.append('image', fileOrBlob, filename);
-    formData.append('overwrite', 'true');
 
-    const res = await fetch(`${this.baseUrl}/upload/image`, {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const err = `Failed to upload media to ComfyUI: ${res.status} ${res.statusText}`;
-      logger.error(err);
-      throw new Error(err);
+    // Channel 1: Native Electron IPC Bridge upload
+    const bridge = this.getElectronBridge();
+    if (bridge?.uploadImage) {
+      try {
+        const base64Data = await blobToBase64(fileOrBlob);
+        const ipcUp = await bridge.uploadImage({
+          filename,
+          mimeType: fileOrBlob.type || (ext === 'mp4' ? 'video/mp4' : 'image/png'),
+          base64Data,
+          overwrite: true,
+          targetUrl: this.targetServerUrl,
+        });
+        if (ipcUp && ipcUp.ok && ipcUp.data?.name) {
+          logger.api(`Media successfully uploaded via IPC bridge: ${ipcUp.data.name}`);
+          return ipcUp.data;
+        }
+      } catch {
+        // Fall through to HTTP FormData upload
+      }
     }
 
-    const data = await res.json();
-    logger.api(`Media successfully uploaded: ${data.name}`);
-    return data;
+    // Channel 2 & 3: HTTP FormData across candidate endpoints
+    const candidates = this.getCandidateEndpoints();
+    let lastError = 'Upload failed';
+    for (const candidate of candidates) {
+      try {
+        const formData = new FormData();
+        formData.append('image', fileOrBlob, filename);
+        formData.append('overwrite', 'true');
+
+        const res = await fetch(`${candidate}/upload/image`, {
+          method: 'POST',
+          body: formData,
+        });
+        if (!res.ok) {
+          lastError = `${res.status} ${res.statusText}`;
+          continue;
+        }
+        const data = await res.json();
+        if (candidate !== this.baseUrl) {
+          this.baseUrl = candidate;
+        }
+        logger.api(`Media successfully uploaded: ${data.name}`);
+        return data;
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    const errMsg = `Failed to upload media to ComfyUI: ${lastError}`;
+    logger.error(errMsg);
+    throw new Error(errMsg);
   }
 
   async uploadImage(file: File | Blob, customFilename?: string): Promise<{ name: string; subfolder: string; type: string }> {
     return this.uploadContentAddressed(file, customFilename || (file instanceof File ? file.name : undefined));
+  }
+
+  async saveUserWorkflow(filename: string, rawJson: string): Promise<boolean> {
+    const cleanRel = filename.replace(/^workflows[\\/]/i, '').replace(/\\/g, '/');
+    const encodedPath = encodeURIComponent(`workflows/${cleanRel}`);
+    const res = await this.requestComfy(`/api/userdata/${encodedPath}?overwrite=true`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: rawJson,
+      timeoutMs: 6000,
+    });
+    return res.ok;
   }
 
   async submitPrompt(graph: ComfyWorkflowGraph): Promise<{ promptId: string; number: number }> {
@@ -276,18 +568,19 @@ export class ComfyClient {
     };
 
     logger.api(`Submitting prompt to ComfyUI POST /prompt...`, { client_id: this.clientId });
-    const res = await fetch(`${this.baseUrl}/prompt`, {
+    const res = await this.requestComfy<any>('/prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      timeoutMs: 15000,
     });
 
-    if (!res.ok) {
-      const errText = await res.text();
+    if (!res.ok || !res.data) {
+      const errText = res.text || res.error || 'Unknown error';
       let parsed = errText;
       let errorDetails: unknown = null;
       try {
-        const json = JSON.parse(errText);
+        const json = res.data || JSON.parse(errText);
         parsed = json.error?.message || json.error || errText;
         errorDetails = json.node_errors || null;
       } catch {
@@ -297,7 +590,7 @@ export class ComfyClient {
       throw new Error(`ComfyUI prompt rejection: ${parsed}`);
     }
 
-    const data = await res.json();
+    const data = res.data;
     logger.api(`Prompt successfully queued in ComfyUI: PromptID=${data.prompt_id}`, data);
     return {
       promptId: data.prompt_id,
@@ -306,28 +599,20 @@ export class ComfyClient {
   }
 
   async interrupt(): Promise<boolean> {
-    try {
-      logger.action('Sending POST /interrupt to ComfyUI...');
-      const res = await fetch(`${this.baseUrl}/interrupt`, { method: 'POST' });
-      return res.ok;
-    } catch (e) {
-      logger.error('Failed to interrupt ComfyUI execution', e);
-      return false;
-    }
+    logger.action('Sending POST /interrupt to ComfyUI...');
+    const res = await this.requestComfy('/interrupt', { method: 'POST', timeoutMs: 5000 });
+    return res.ok;
   }
 
   async deleteQueueItem(promptId: string): Promise<boolean> {
-    try {
-      logger.action(`Deleting queued prompt ${promptId}...`);
-      const res = await fetch(`${this.baseUrl}/queue`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ delete: [promptId] }),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    logger.action(`Deleting queued prompt ${promptId}...`);
+    const res = await this.requestComfy('/queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delete: [promptId] }),
+      timeoutMs: 5000,
+    });
+    return res.ok;
   }
 
   ensureWebSocket(): void {
@@ -473,14 +758,11 @@ export class ComfyClient {
   }
 
   async getPromptHistory(promptId: string): Promise<Record<string, unknown> | null> {
-    try {
-      const res = await fetch(`${this.baseUrl}/history/${promptId}`);
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data[promptId] || null;
-    } catch {
-      return null;
-    }
+    const res = await this.requestComfy<Record<string, Record<string, unknown>>>(`/history/${promptId}`, {
+      timeoutMs: 8000,
+    });
+    if (!res.ok || !res.data) return null;
+    return res.data[promptId] || null;
   }
 
   async fetchLatestCompletedOutput(maxItems = 15): Promise<{
@@ -493,9 +775,11 @@ export class ComfyClient {
     duration?: number;
   } | null> {
     try {
-      const res = await fetch(`${this.baseUrl}/history?max_items=${maxItems}`);
-      if (!res.ok) return null;
-      const data = (await res.json()) as Record<string, Record<string, unknown>>;
+      const res = await this.requestComfy<Record<string, Record<string, unknown>>>(`/history?max_items=${maxItems}`, {
+        timeoutMs: 8000,
+      });
+      if (!res.ok || !res.data) return null;
+      const data = res.data;
       const entries = Object.entries(data).sort((a, b) => {
         const qa = Array.isArray(a[1]?.prompt) ? Number(a[1].prompt[0] ?? 0) : 0;
         const qb = Array.isArray(b[1]?.prompt) ? Number(b[1].prompt[0] ?? 0) : 0;
@@ -546,20 +830,56 @@ export class ComfyClient {
   private blobUrlCache = new Map<string, string>();
 
   async fetchVideoBlobUrl(filename: string, subfolder = '', type = 'output'): Promise<string> {
-    const viewUrl = this.getViewUrl(filename, subfolder, type);
-    const cached = this.blobUrlCache.get(viewUrl);
+    const params = new URLSearchParams({
+      filename,
+      subfolder,
+      type,
+    });
+    const relViewPath = `/view?${params.toString()}`;
+    const cacheKey = `${filename}|${subfolder}|${type}`;
+    const cached = this.blobUrlCache.get(cacheKey);
     if (cached) return cached;
-    try {
-      const res = await fetch(viewUrl);
-      if (!res.ok) return viewUrl;
-      const rawBlob = await res.blob();
-      const videoBlob = new Blob([rawBlob], { type: 'video/mp4' });
-      const blobUrl = URL.createObjectURL(videoBlob);
-      this.blobUrlCache.set(viewUrl, blobUrl);
-      return blobUrl;
-    } catch {
-      return viewUrl;
+
+    // Channel 1: Electron IPC Bridge binary fetch
+    const bridge = this.getElectronBridge();
+    if (bridge?.request) {
+      try {
+        const ipcRes = await bridge.request({
+          path: relViewPath,
+          method: 'GET',
+          responseType: 'base64',
+          timeoutMs: 25000,
+          targetUrl: this.targetServerUrl,
+        });
+        if (ipcRes && ipcRes.ok && ipcRes.base64) {
+          const bytes = base64ToUint8Array(ipcRes.base64);
+          const videoBlob = new Blob([bytes.buffer as ArrayBuffer], { type: 'video/mp4' });
+          const blobUrl = URL.createObjectURL(videoBlob);
+          this.blobUrlCache.set(cacheKey, blobUrl);
+          return blobUrl;
+        }
+      } catch {
+        // Fall through to HTTP fetch
+      }
     }
+
+    // Channel 2 & 3: HTTP candidate loop
+    const candidates = this.getCandidateEndpoints();
+    for (const candidate of candidates) {
+      try {
+        const res = await fetch(`${candidate}${relViewPath}`);
+        if (!res.ok) continue;
+        const rawBlob = await res.blob();
+        const videoBlob = new Blob([rawBlob], { type: 'video/mp4' });
+        const blobUrl = URL.createObjectURL(videoBlob);
+        this.blobUrlCache.set(cacheKey, blobUrl);
+        return blobUrl;
+      } catch {
+        // try next candidate
+      }
+    }
+
+    return this.getViewUrl(filename, subfolder, type);
   }
 
   extractVideoOutput(

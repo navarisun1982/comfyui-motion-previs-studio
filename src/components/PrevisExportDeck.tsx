@@ -12,6 +12,7 @@ import { loadBundledTemplates } from '../pipeline/templateLoader';
 import { templateRegistry } from '../pipeline/templateRegistry';
 import {
   WorkflowChoiceItem,
+  ensureWorkflowSyncedToComfyUI,
   getActiveWorkflowForEngine,
   syncActiveEngineWorkflowToRegistry,
 } from '../pipeline/customWorkflowResolver';
@@ -188,12 +189,18 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     }
   }, [storeConnectionStatus, storeSystemStats, storeServerUrl]);
 
-  // Ensure bundled workflow templates are registered and probe ComfyUI on mount
+  // Ensure bundled workflow templates are registered and probe ComfyUI on mount + auto-reconnect
   useEffect(() => {
     if (templateRegistry.list().length === 0) {
       loadBundledTemplates();
     }
     probeComfyHealth();
+    const timer = setInterval(() => {
+      if (useComfyStore.getState().connectionStatus !== 'connected') {
+        probeComfyHealth();
+      }
+    }, 5000);
+    return () => clearInterval(timer);
   }, []);
 
   const handleLoadLatestComfyRender = async () => {
@@ -397,6 +404,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       }
       const { choice: activeWf, templateId: selectedTemplateId } =
         syncActiveEngineWorkflowToRegistry(targetEngine, objInfo);
+      await ensureWorkflowSyncedToComfyUI(activeWf);
 
       // 2. Queue job via JobRunner using active engine template (LTX-2.5 or MiniMax H3)
       const engineCompiled = getAdapter(targetEngine).compilePrompt(shot);

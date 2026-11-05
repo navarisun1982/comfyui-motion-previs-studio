@@ -1,7 +1,43 @@
-const { app, BrowserWindow, Menu, nativeTheme, shell, session, screen, nativeImage } = require('electron');
+const { app, BrowserWindow, Menu, nativeTheme, shell, session, screen, nativeImage, ipcMain } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+
+let ipcHandlersRegistered = false;
+function registerComfyIpcHandlers() {
+  if (ipcHandlersRegistered) return;
+  ipcHandlersRegistered = true;
+
+  const getComfySyncService = () => {
+    try {
+      const resolved = require.resolve('../src/server/comfyWorkflowSyncService.cjs');
+      delete require.cache[resolved];
+    } catch {
+      // ignore
+    }
+    return require('../src/server/comfyWorkflowSyncService.cjs');
+  };
+
+  ipcMain.handle('comfy:request', async (_event, options) => {
+    return await getComfySyncService().comfyRequestDirect(options || {});
+  });
+
+  ipcMain.handle('comfy:upload-image', async (_event, options) => {
+    return await getComfySyncService().comfyUploadImageDirect(options || {});
+  });
+
+  ipcMain.handle('comfy:sync-workflows', async (_event, options) => {
+    return await getComfySyncService().syncWorkflowsToComfyUI(options || {});
+  });
+
+  ipcMain.handle('comfy:sync-status', async () => {
+    return getComfySyncService().getComfyWorkflowSyncStatus();
+  });
+
+  ipcMain.handle('comfy:fetch-remote-workflow', async (_event, rawUrl) => {
+    return await getComfySyncService().fetchRemoteWorkflowJson(rawUrl);
+  });
+}
 
 const APP_TITLE = 'ComfyUI Motion Previs Studio';
 
@@ -110,6 +146,7 @@ function startLocalProxyServer() {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Access-Control-Expose-Headers', '*');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -119,6 +156,94 @@ function startLocalProxyServer() {
 
     const rawUrl = req.url || '/';
     const pathname = rawUrl.split('?')[0].replace(/\/+$/, '') || '/';
+
+    if (rawUrl.startsWith('/api/comfy-glb-output')) {
+      try {
+        const parsedUrl = new URL(rawUrl, 'http://127.0.0.1:51731');
+        const listMode = parsedUrl.searchParams.get('list') === '1';
+        const explicitPath = (parsedUrl.searchParams.get('path') || '').trim();
+        const sinceMs = Number(parsedUrl.searchParams.get('sinceMs') || '0');
+        const comfyOutputDirs = ['D:\\ComfyUI\\output\\3d', 'D:\\ComfyUI\\output', 'D:\\ComfyUI\\temp'];
+
+        if (listMode) {
+          const items = [];
+          const seen = new Set();
+          const collectDir = (dir, depth = 0) => {
+            if (depth > 2 || !fs.existsSync(dir)) return;
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                collectDir(full, depth + 1);
+              } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.glb')) {
+                const norm = full.toLowerCase();
+                if (seen.has(norm)) continue;
+                seen.add(norm);
+                const stat = fs.statSync(full);
+                items.push({
+                  filename: entry.name,
+                  path: full,
+                  sizeBytes: stat.size,
+                  mtimeMs: stat.mtimeMs,
+                  downloadUrl: `http://127.0.0.1:51731/api/comfy-glb-output?path=${encodeURIComponent(full)}`,
+                });
+              }
+            }
+          };
+          for (const d of ['D:\\ComfyUI\\output\\3d', 'D:\\ComfyUI\\output']) {
+            collectDir(d, 0);
+          }
+          items.sort((a, b) => b.mtimeMs - a.mtimeMs);
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ items }));
+          return;
+        }
+
+        let targetFile = '';
+        if (explicitPath && explicitPath.toLowerCase().endsWith('.glb') && fs.existsSync(explicitPath)) {
+          targetFile = explicitPath;
+        } else {
+          let newestMtime = Math.max(0, sinceMs - 5000);
+          const scanDir = (dir, depth = 0) => {
+            if (depth > 2 || !fs.existsSync(dir)) return;
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                scanDir(full, depth + 1);
+              } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.glb')) {
+                const stat = fs.statSync(full);
+                if (stat.mtimeMs >= newestMtime) {
+                  newestMtime = stat.mtimeMs;
+                  targetFile = full;
+                }
+              }
+            }
+          };
+          for (const d of comfyOutputDirs) {
+            scanDir(d, 0);
+          }
+        }
+
+        if (!targetFile || !fs.existsSync(targetFile)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'No generated .glb file found in ComfyUI output directory yet.' }));
+          return;
+        }
+
+        const buf = fs.readFileSync(targetFile);
+        res.setHeader('X-Comfy-Glb-Path', encodeURIComponent(targetFile));
+        res.writeHead(200, {
+          'Content-Type': 'model/gltf-binary',
+          'Content-Length': buf.length,
+        });
+        res.end(buf);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message || 'Failed to read generated .glb file' }));
+      }
+      return;
+    }
 
     if (pathname.startsWith('/api/app-update')) {
       const appUpdateService = require('../src/server/appUpdateService.cjs');
@@ -159,13 +284,105 @@ function startLocalProxyServer() {
       }
     }
 
+    if (rawUrl.startsWith('/api/comfy-sync-workflows')) {
+      const comfySyncService = require('../src/server/comfyWorkflowSyncService.cjs');
+      if (req.method === 'GET') {
+        try {
+          const status = comfySyncService.getComfyWorkflowSyncStatus();
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify(status));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+        return;
+      }
+      if (req.method === 'POST') {
+        let bodyStr = '';
+        req.on('data', (chunk) => {
+          bodyStr += chunk;
+        });
+        req.on('end', () => {
+          const payload = bodyStr ? JSON.parse(bodyStr) : {};
+          comfySyncService
+            .syncWorkflowsToComfyUI(payload)
+            .then((result) => {
+              res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+              res.end(JSON.stringify(result));
+            })
+            .catch((err) => {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: err.message }));
+            });
+        });
+        return;
+      }
+    }
+
+    if (rawUrl.startsWith('/api/fetch-remote-workflow')) {
+      const comfySyncService = require('../src/server/comfyWorkflowSyncService.cjs');
+      try {
+        const parsedUrl = new URL(rawUrl, 'http://127.0.0.1:51731');
+        const target = (parsedUrl.searchParams.get('url') || '').trim();
+        comfySyncService
+          .fetchRemoteWorkflowJson(target)
+          .then((result) => {
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(result));
+          })
+          .catch((err) => {
+            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: err.message }));
+          });
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+      return;
+    }
+
+    if (rawUrl.startsWith('/api/local-workflow')) {
+      try {
+        const parsedUrl = new URL(rawUrl, 'http://127.0.0.1:51731');
+        let filePath = (parsedUrl.searchParams.get('path') || '').trim();
+        filePath = filePath.replace(/^["']+|["']+$/g, '');
+        if (filePath.toLowerCase().startsWith('file:///')) {
+          filePath = decodeURIComponent(filePath.replace(/^file:\/\/\//i, ''));
+        } else if (filePath.toLowerCase().startsWith('file://')) {
+          filePath = decodeURIComponent(filePath.replace(/^file:\/\//i, ''));
+        }
+        if (!filePath || !filePath.toLowerCase().endsWith('.json') || !fs.existsSync(filePath)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: `Local workflow JSON file not found at: ${filePath}` }));
+          return;
+        }
+        const resolved = path.resolve(filePath);
+        const rawContent = fs.readFileSync(resolved, 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(rawContent);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message || 'Failed to read local workflow file' }));
+      }
+      return;
+    }
+
+    if (
+      rawUrl.startsWith('/api/comfy/') ||
+      rawUrl === '/api/comfy' ||
+      rawUrl.startsWith('/api/comfy?')
+    ) {
+      const comfySyncService = require('../src/server/comfyWorkflowSyncService.cjs');
+      const forwardPath = rawUrl.replace(/^\/api\/comfy/, '') || '/';
+      comfySyncService.forwardComfyRequest(req, res, forwardPath);
+      return;
+    }
+
     let targetHost = '127.0.0.1';
     let targetPort = 8188;
     let forwardPath = rawUrl;
 
-    if (rawUrl.startsWith('/api/comfy')) {
-      forwardPath = rawUrl.replace(/^\/api\/comfy/, '') || '/';
-    } else if (rawUrl.startsWith('/api/ollama')) {
+    if (rawUrl.startsWith('/api/ollama')) {
       targetPort = 11434;
       forwardPath = rawUrl.replace(/^\/api\/ollama/, '') || '/';
     } else if (rawUrl.startsWith('/api/llamacpp')) {
@@ -174,10 +391,17 @@ function startLocalProxyServer() {
     } else if (rawUrl.startsWith('/api/lmstudio')) {
       targetPort = 1234;
       forwardPath = rawUrl.replace(/^\/api\/lmstudio/, '') || '/';
+    } else {
+      // Any other direct route goes through ComfyUI multi-port forwarder
+      const comfySyncService = require('../src/server/comfyWorkflowSyncService.cjs');
+      comfySyncService.forwardComfyRequest(req, res, forwardPath);
+      return;
     }
 
     const outHeaders = { ...req.headers };
-    delete outHeaders['host'];
+    for (const k of Object.keys(outHeaders)) {
+      if (/^(host|origin|referer)$/i.test(k)) delete outHeaders[k];
+    }
     outHeaders['host'] = `${targetHost}:${targetPort}`;
     outHeaders['origin'] = `http://${targetHost}:${targetPort}`;
     outHeaders['referer'] = `http://${targetHost}:${targetPort}/`;
@@ -191,11 +415,16 @@ function startLocalProxyServer() {
         headers: outHeaders,
       },
       (proxyRes) => {
-        const resHeaders = { ...proxyRes.headers };
-        resHeaders['access-control-allow-origin'] = '*';
-        resHeaders['access-control-allow-headers'] = '*';
-        resHeaders['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
-        res.writeHead(proxyRes.statusCode || 200, resHeaders);
+        const cleanHeaders = {};
+        for (const [k, v] of Object.entries(proxyRes.headers || {})) {
+          if (!/^access-control-allow-/i.test(k)) {
+            cleanHeaders[k] = v;
+          }
+        }
+        cleanHeaders['Access-Control-Allow-Origin'] = '*';
+        cleanHeaders['Access-Control-Allow-Headers'] = '*';
+        cleanHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+        res.writeHead(proxyRes.statusCode || 200, cleanHeaders);
         proxyRes.pipe(res);
       }
     );
@@ -239,6 +468,7 @@ function createWindow() {
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false,
@@ -298,23 +528,29 @@ function createWindow() {
     });
   };
 
-  const distDir = path.join(__dirname, '../dist');
-  let reloadTimeout = null;
-
-  if (fs.existsSync(distDir)) {
-    try {
-      fs.watch(distDir, { recursive: true }, () => {
-        if (reloadTimeout) clearTimeout(reloadTimeout);
-        reloadTimeout = setTimeout(() => {
-          if (mainWindow && !mainWindow.isDestroyed() && fs.existsSync(prodPath)) {
-            mainWindow.webContents.reloadIgnoringCache();
-          }
-        }, 1200);
-      });
-    } catch {
-      // ignore
+  let lastDistMtimeMs = 0;
+  try {
+    if (fs.existsSync(prodPath)) {
+      lastDistMtimeMs = fs.statSync(prodPath).mtimeMs;
     }
+  } catch {
+    // ignore
   }
+
+  const distPollInterval = setInterval(() => {
+    try {
+      if (!mainWindow || mainWindow.isDestroyed() || !fs.existsSync(prodPath)) return;
+      const currentMtime = fs.statSync(prodPath).mtimeMs;
+      if (lastDistMtimeMs > 0 && currentMtime > lastDistMtimeMs + 50) {
+        lastDistMtimeMs = currentMtime;
+        mainWindow.webContents.reloadIgnoringCache();
+      } else if (lastDistMtimeMs === 0) {
+        lastDistMtimeMs = currentMtime;
+      }
+    } catch {
+      // ignore transient stat errors during vite build
+    }
+  }, 1500);
 
   mainWindow.webContents.on('did-fail-load', (_event, _errorCode, _errorDescription, validatedURL) => {
     if (validatedURL && validatedURL.startsWith(devUrl) && fs.existsSync(prodPath)) {
@@ -342,15 +578,23 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
+    clearInterval(distPollInterval);
     mainWindow = null;
   });
 }
 
 app.whenReady().then(() => {
+  registerComfyIpcHandlers();
   const localDaemonUrls = [
     'http://127.0.0.1:8188/*',
     'ws://127.0.0.1:8188/*',
     'http://localhost:8188/*',
+    'ws://localhost:8188/*',
+    'http://127.0.0.1:8000/*',
+    'ws://127.0.0.1:8000/*',
+    'http://localhost:8000/*',
+    'ws://localhost:8000/*',
+    'http://127.0.0.1:51731/*',
     'http://127.0.0.1:11434/*',
     'http://localhost:11434/*',
     'http://127.0.0.1:8080/*',
@@ -359,37 +603,56 @@ app.whenReady().then(() => {
     'http://localhost:1234/*',
   ];
 
-  // Prevent ComfyUI (8188) and Ollama (11434) from rejecting requests with HTTP 403 due to mismatched Origin headers
+  // Prevent ComfyUI (8188 / 8000) and Ollama (11434) from rejecting requests with HTTP 403 due to mismatched Origin headers
   session.defaultSession.webRequest.onBeforeSendHeaders(
     { urls: localDaemonUrls },
     (details, callback) => {
-      const headers = { ...details.requestHeaders };
+      const headers = {};
+      for (const [k, v] of Object.entries(details.requestHeaders || {})) {
+        if (!/^(origin|referer)$/i.test(k)) {
+          headers[k] = v;
+        }
+      }
       if (details.url.includes(':8188')) {
         headers['Origin'] = 'http://127.0.0.1:8188';
         headers['Referer'] = 'http://127.0.0.1:8188/';
-      } else if (!headers['Origin'] || headers['Origin'] === 'null' || headers['Origin'].startsWith('file:')) {
+      } else if (details.url.includes(':8000')) {
+        headers['Origin'] = 'http://127.0.0.1:8000';
+        headers['Referer'] = 'http://127.0.0.1:8000/';
+      } else {
         headers['Origin'] = 'http://127.0.0.1';
       }
       callback({ requestHeaders: headers });
     }
   );
 
-  // Inject CORS headers for local previs & reasoning daemons (ComfyUI, Ollama, llama.cpp)
+  // Inject single-value CORS headers for local previs & reasoning daemons (strip duplicates first!)
   session.defaultSession.webRequest.onHeadersReceived(
     { urls: localDaemonUrls },
     (details, callback) => {
+      const cleanHeaders = {};
+      for (const [k, v] of Object.entries(details.responseHeaders || {})) {
+        if (!/^access-control-allow-/i.test(k)) {
+          cleanHeaders[k] = v;
+        }
+      }
+      cleanHeaders['Access-Control-Allow-Origin'] = ['*'];
+      cleanHeaders['Access-Control-Allow-Headers'] = ['*'];
+      cleanHeaders['Access-Control-Allow-Methods'] = ['GET, POST, OPTIONS, PUT, DELETE'];
+      cleanHeaders['Access-Control-Expose-Headers'] = ['*'];
       callback({
-        responseHeaders: {
-          ...details.responseHeaders,
-          'Access-Control-Allow-Origin': ['*'],
-          'Access-Control-Allow-Headers': ['*'],
-          'Access-Control-Allow-Methods': ['GET, POST, OPTIONS, PUT, DELETE'],
-        },
+        responseHeaders: cleanHeaders,
       });
     }
   );
 
   startLocalProxyServer();
+  try {
+    const comfySyncService = require('../src/server/comfyWorkflowSyncService.cjs');
+    comfySyncService.syncWorkflowsToComfyUI({ overwrite: false }).catch(() => {});
+  } catch {
+    // ignore
+  }
   createWindow();
 
   app.on('activate', () => {

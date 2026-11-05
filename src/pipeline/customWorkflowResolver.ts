@@ -92,6 +92,11 @@ export function normalizeWorkflowUrl(rawUrl: string): string {
     return `/api/comfy/api/userdata/${encodedPath}`;
   }
 
+  // Civitai model / modelVersion URL -> resolve via backend remote workflow fetcher
+  if (/^https?:\/\/(?:www\.)?civitai\.com\//i.test(trimmed)) {
+    return `/api/fetch-remote-workflow?url=${encodeURIComponent(trimmed)}`;
+  }
+
   // GitHub blob -> raw.githubusercontent.com
   const ghMatch = trimmed.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)$/i);
   if (ghMatch) {
@@ -113,6 +118,11 @@ export function normalizeWorkflowUrl(rawUrl: string): string {
  */
 const KNOWN_WIDGET_ORDERS: Record<string, string[]> = {
   LoadImage: ['image', 'upload'],
+  'LoadImageCrop (obvpm)': ['image', 'crop_data', 'aspect_ratio', 'crop_mode', 'upload'],
+  MiniMaxH3MediaLoader: ['media', 'image', 'video', 'upload'],
+  H3PromptIDE: ['prompt'],
+  TKMultiImagePrompt: ['prompt'],
+  PixaromaText: ['text'],
   VHS_LoadVideo: [
     'video',
     'force_rate',
@@ -188,6 +198,13 @@ interface UiWorkflowNode {
 interface UiWorkflowJson {
   nodes: UiWorkflowNode[];
   links?: Array<[number, number | string, number, number | string, number, string]>;
+  definitions?: {
+    subgraphs?: Array<{
+      id?: string;
+      name?: string;
+      nodes?: UiWorkflowNode[];
+    }>;
+  };
 }
 
 function isUiWorkflowFormat(parsed: unknown): parsed is UiWorkflowJson {
@@ -219,8 +236,21 @@ export function convertUiWorkflowToApi(
   ui: UiWorkflowJson,
   objectInfo?: Record<string, unknown> | null
 ): ApiWorkflow {
+  const allNodes: UiWorkflowNode[] = [...ui.nodes];
+  if (Array.isArray(ui.definitions?.subgraphs)) {
+    for (const sg of ui.definitions!.subgraphs!) {
+      if (Array.isArray(sg.nodes)) {
+        for (const sgNode of sg.nodes) {
+          if (!allNodes.some((existing) => String(existing.id) === String(sgNode.id))) {
+            allNodes.push(sgNode);
+          }
+        }
+      }
+    }
+  }
+
   const nodeMap = new Map<string, UiWorkflowNode>();
-  for (const n of ui.nodes) {
+  for (const n of allNodes) {
     nodeMap.set(String(n.id), n);
   }
 
@@ -254,11 +284,16 @@ export function convertUiWorkflowToApi(
   const api: ApiWorkflow = {};
   const skippedTypes = new Set(['Reroute', 'Note', 'MarkdownNote', 'PrimitiveNode']);
 
-  for (const node of ui.nodes) {
+  for (const node of allNodes) {
     const id = String(node.id);
     if (!/^[0-9]+(:[0-9]+)*$/.test(id)) continue;
-    // Skip muted (2) or bypassed (4) or visual-only nodes
-    if (node.mode === 2 || node.mode === 4) continue;
+    // Skip muted (2) or bypassed (4) or visual-only nodes, except essential video/image loader or output nodes
+    // that workflow authors save bypassed by default in multi-mode templates
+    const isEssentialMediaNode =
+      /VHS_LoadVideo|LoadVideo|MiniMaxH3MediaLoader|LoadImage|VHS_VideoCombine|SaveVideo/i.test(
+        node.type
+      );
+    if ((node.mode === 2 || node.mode === 4) && !isEssentialMediaNode) continue;
     if (skippedTypes.has(node.type)) continue;
 
     const inputs: Record<string, unknown> = {};
@@ -460,13 +495,23 @@ export function autoDetectWorkflowBindings(
       }
     }
     if (!controlVideo) {
-      const loadVid = nodeEntries.find(([_, n]) => /VHS_LoadVideo|LoadVideo/i.test(n.class_type));
+      const loadVid = nodeEntries.find(([_, n]) =>
+        /VHS_LoadVideo|LoadVideo|MiniMaxH3MediaLoader/i.test(n.class_type)
+      );
       if (loadVid) {
-        const inName = 'video' in loadVid[1].inputs ? 'video' : 'file' in loadVid[1].inputs ? 'file' : 'video';
+        const inName =
+          'video' in loadVid[1].inputs
+            ? 'video'
+            : 'file' in loadVid[1].inputs
+            ? 'file'
+            : 'media' in loadVid[1].inputs
+            ? 'media'
+            : 'video';
         controlVideo = { node: loadVid[0], input: inName };
       } else {
-        const directorNode = nodeEntries.find(([_, n]) =>
-          /StubeliusH3Director|LTXDirector/i.test(n.class_type) && 'timeline_data' in n.inputs
+        const directorNode = nodeEntries.find(
+          ([_, n]) =>
+            /StubeliusH3Director|LTXDirector/i.test(n.class_type) && 'timeline_data' in n.inputs
         );
         if (directorNode) {
           controlVideo = { node: directorNode[0], input: 'timeline_data' };
@@ -484,10 +529,13 @@ export function autoDetectWorkflowBindings(
     prompt = overrides.prompt;
   } else {
     if (minimaxEntry) {
-      const pVal = minimaxEntry[1].inputs['prompt'] ?? minimaxEntry[1].inputs['positive_prompt'] ?? minimaxEntry[1].inputs['text'];
+      const pVal =
+        minimaxEntry[1].inputs['prompt'] ??
+        minimaxEntry[1].inputs['positive_prompt'] ??
+        minimaxEntry[1].inputs['text'];
       if (isLink(pVal)) {
         const tracedPromptId = traceUpstreamNode(api, pVal, (_id, n) =>
-          /PrimitiveString|String|Text|CLIPTextEncode/i.test(n.class_type)
+          /PrimitiveString|String|Text|CLIPTextEncode|H3PromptIDE|PixaromaText/i.test(n.class_type)
         );
         if (tracedPromptId) {
           const pNode = api[tracedPromptId];
@@ -496,6 +544,8 @@ export function autoDetectWorkflowBindings(
               ? 'value'
               : 'text' in pNode.inputs
               ? 'text'
+              : 'prompt' in pNode.inputs
+              ? 'prompt'
               : 'string' in pNode.inputs
               ? 'string'
               : Object.keys(pNode.inputs)[0] || 'value';
@@ -508,11 +558,19 @@ export function autoDetectWorkflowBindings(
     if (!prompt) {
       const strNode = nodeEntries.find(
         ([_, n]) =>
-          /PrimitiveStringMultiline|PrimitiveString|CLIPTextEncode/i.test(n.class_type) &&
-          !String(n._meta?.title || '').toLowerCase().includes('negative')
+          /PrimitiveStringMultiline|PrimitiveString|CLIPTextEncode|H3PromptIDE|TKMultiImagePrompt|PixaromaText/i.test(
+            n.class_type
+          ) && !String(n._meta?.title || '').toLowerCase().includes('negative')
       );
       if (strNode) {
-        const inName = 'value' in strNode[1].inputs ? 'value' : 'text' in strNode[1].inputs ? 'text' : 'value';
+        const inName =
+          'value' in strNode[1].inputs
+            ? 'value'
+            : 'text' in strNode[1].inputs
+            ? 'text'
+            : 'prompt' in strNode[1].inputs
+            ? 'prompt'
+            : 'value';
         prompt = { node: strNode[0], input: inName };
       }
     }
@@ -543,7 +601,9 @@ export function autoDetectWorkflowBindings(
     for (let i = 0; i < 4; i++) {
       for (const k of imgKeys[i]) {
         const linkVal = minimaxEntry[1].inputs[k];
-        const tracedImgId = traceUpstreamNode(api, linkVal, (_id, n) => /LoadImage/i.test(n.class_type));
+        const tracedImgId = traceUpstreamNode(api, linkVal, (_id, n) =>
+          /LoadImage|LoadImageCrop/i.test(n.class_type)
+        );
         if (tracedImgId && !usedImageNodes.has(tracedImgId)) {
           detectedRefImages[i] = { node: tracedImgId, input: 'image' };
           usedImageNodes.add(tracedImgId);
@@ -553,8 +613,10 @@ export function autoDetectWorkflowBindings(
     }
   }
 
-  // Fill any remaining slots with LoadImage nodes in numeric order
-  const allLoadImageNodes = nodeEntries.filter(([_, n]) => /^LoadImage$/i.test(n.class_type));
+  // Fill any remaining slots with LoadImage / LoadImageCrop nodes in numeric order
+  const allLoadImageNodes = nodeEntries.filter(([_, n]) =>
+    /^(LoadImage|LoadImageCrop \(obvpm\))$/i.test(n.class_type)
+  );
   for (let i = 0; i < 4; i++) {
     const overrideKey = (`refImage${i + 1}` as 'refImage1' | 'refImage2' | 'refImage3' | 'refImage4');
     if (overrides?.[overrideKey]) {
@@ -661,9 +723,16 @@ export function autoDetectWorkflowBindings(
   }
   nodesFingerprint[outputNode] = api[outputNode].class_type;
 
-  const isLtxWorkflow = nodeEntries.some(([_, n]) =>
-    /LTXDirector|StubeliusLTX|LTXV|LTX2/i.test(n.class_type)
+  const hasMinimaxCore = nodeEntries.some(([_, n]) =>
+    /MiniMax|StubeliusH3|H3Prompt/i.test(n.class_type)
   );
+  const isLtxWorkflow =
+    !hasMinimaxCore &&
+    nodeEntries.some(([_, n]) =>
+      /LTXDirector|StubeliusLTX|EmptyLTXVLatentVideo|LTXVConditioning|LTXVScheduler|LTXV|LTX2/i.test(
+        n.class_type
+      )
+    );
   const detectedEngine: 'ltx-2.5' | 'minimax-h3' = isLtxWorkflow ? 'ltx-2.5' : 'minimax-h3';
 
   const binding: TemplateBinding = {
@@ -708,12 +777,94 @@ export function autoDetectWorkflowBindings(
   };
 }
 
+export interface WorkflowValidationReport {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Strictly validate a user-submitted workflow to ensure it can render a 3D Previs shot
+ * without conflicts (must have Reference/Control Video node, Prompt node, Video Output node,
+ * and match the selected engine).
+ */
+export function validateWorkflowForStudioRender(
+  detected: AutoDetectedWorkflowResult,
+  targetEngine?: RenderEngineId
+): WorkflowValidationReport {
+  const errors: string[] = [];
+  const nodeEntries = Object.entries(detected.api || {});
+
+  // 1. Must have a Reference / Control Video Input node
+  if (!detected.detectedSlots.controlVideo) {
+    errors.push(
+      'مفقود نود الفيديو المرجعي (Missing Reference/Control Video Node): الوركفلو لا يحتوي على نود لتحميل فيديو الـ 3D Previs (مثل VHS_LoadVideo أو LoadVideo أو Director Node).'
+    );
+  }
+
+  // 2. Must have a Prompt Input node
+  if (!detected.detectedSlots.prompt) {
+    errors.push(
+      'مفقود نود الوصف النصي (Missing Prompt Input Node): الوركفلو لا يحتوي على نود لإدخال النص الوصفي (مثل PrimitiveString أو CLIPTextEncode).'
+    );
+  }
+
+  // 3. Must have a real Video Save / Output node
+  const hasExplicitVideoOutput = nodeEntries.some(([_, n]) =>
+    /VHS_VideoCombine|SaveVideo|SaveWEBM|PreviewVideo/i.test(n.class_type)
+  );
+  if (!hasExplicitVideoOutput) {
+    errors.push(
+      'مفقود نود حفظ الفيديو (Missing Video Output Node): الوركفلو لا يحتوي على نود لتصدير وحفظ الفيديو النهائي (مثل VHS_VideoCombine أو SaveVideo).'
+    );
+  }
+
+  // 4. Engine Compatibility Check (LTX-2.5 vs MiniMax H3)
+  if (targetEngine) {
+    const hasMinimaxCore = nodeEntries.some(([_, n]) =>
+      /MiniMax|StubeliusH3|H3Prompt/i.test(n.class_type)
+    );
+    const hasLtxCore =
+      !hasMinimaxCore &&
+      nodeEntries.some(([_, n]) =>
+        /LTXDirector|StubeliusLTX|EmptyLTXVLatentVideo|LTXVConditioning|LTXVScheduler|LTX2/i.test(
+          n.class_type
+        )
+      );
+
+    if (targetEngine === 'minimax-h3' && hasLtxCore) {
+      errors.push(
+        'تعارض في المحرك (Engine Mismatch): هذا الوركفلو مخصص لمحرك LTX-2.5 ولا يمكن تشغيله تحت قسم MiniMax H3.'
+      );
+    } else if (targetEngine === 'ltx-2.5' && hasMinimaxCore) {
+      errors.push(
+        'تعارض في المحرك (Engine Mismatch): هذا الوركفلو مخصص لمحرك MiniMax H3 ولا يمكن تشغيله تحت قسم LTX-2.5.'
+      );
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
 /**
  * List saved workflow `.json` files stored inside the user's local ComfyUI server
- * (`ComfyUI/user/default/workflows/` via `/api/userdata?dir=workflows`).
+ * (`ComfyUI/user/default/workflows/` via `/api/userdata?dir=workflows` or IPC sync status).
  */
 export async function listLocalComfyWorkflows(): Promise<string[]> {
+  if (typeof window !== 'undefined' && window.electronComfyBridge?.getSyncStatus) {
+    try {
+      const status = await window.electronComfyBridge.getSyncStatus();
+      if (status?.ok && Array.isArray(status.existingWorkflows) && status.existingWorkflows.length > 0) {
+        return status.existingWorkflows;
+      }
+    } catch {
+      // fall through
+    }
+  }
   const endpoints = [
+    'http://127.0.0.1:51731/api/comfy/api/userdata?dir=workflows',
     '/api/comfy/api/userdata?dir=workflows',
     'http://127.0.0.1:8188/api/userdata?dir=workflows',
   ];
@@ -800,12 +951,69 @@ export async function fetchAndDetectWorkflowFromUrl(
     );
   }
 
+  // Check if normalizedUrl routes through our backend /api/fetch-remote-workflow resolver (e.g. Civitai or remote ZIP/JSON)
+  if (normalizedUrl.startsWith('/api/fetch-remote-workflow')) {
+    if (typeof window !== 'undefined' && window.electronComfyBridge?.fetchRemoteWorkflow) {
+      try {
+        const parsed = new URL(normalizedUrl, 'http://127.0.0.1:51731');
+        const target = (parsed.searchParams.get('url') || rawUrl).trim();
+        const ipcData = await window.electronComfyBridge.fetchRemoteWorkflow(target);
+        if (ipcData?.ok && ipcData.rawJson) {
+          const result = autoDetectWorkflowBindings(ipcData.rawJson, overrides, objectInfo);
+          return {
+            normalizedUrl: ipcData.filename || rawUrl,
+            rawJson: ipcData.rawJson,
+            result,
+          };
+        }
+      } catch {
+        // fall through to HTTP endpoints
+      }
+    }
+
+    const endpoints = [
+      `http://127.0.0.1:51731${normalizedUrl}`,
+      normalizedUrl,
+    ];
+    let payload: { ok?: boolean; filename?: string; rawJson?: string; error?: string } | null = null;
+    let lastErr: unknown = null;
+    for (const ep of endpoints) {
+      try {
+        const res = await fetch(ep);
+        const data = (await res.json()) as {
+          ok?: boolean;
+          filename?: string;
+          rawJson?: string;
+          error?: string;
+        };
+        payload = data;
+        if (res.ok && data.ok && data.rawJson) {
+          break;
+        }
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (!payload || !payload.ok || !payload.rawJson) {
+      throw new Error(
+        payload?.error ||
+          (lastErr instanceof Error ? lastErr.message : 'Failed to fetch remote workflow from URL.')
+      );
+    }
+    const result = autoDetectWorkflowBindings(payload.rawJson, overrides, objectInfo);
+    return {
+      normalizedUrl: payload.filename || rawUrl,
+      rawJson: payload.rawJson,
+      result,
+    };
+  }
+
   let res: Response;
   try {
     res = await fetch(normalizedUrl);
   } catch (err) {
     // If direct fetch to http://127.0.0.1:8188/... failed due to browser CORS, route via /api/comfy proxy
-    const localProxyMatch = normalizedUrl.match(/^https?:\/\/(?:127\.0\.0\.1|localhost):8188(\/.*)$/i);
+    const localProxyMatch = normalizedUrl.match(/^https?:\/\/(?:127\.0\.0\.1|localhost):(?:8188|8000)(\/.*)$/i);
     if (localProxyMatch) {
       res = await fetch(`/api/comfy${localProxyMatch[1]}`);
     } else {
@@ -814,13 +1022,13 @@ export async function fetchAndDetectWorkflowFromUrl(
   }
 
   if (!res.ok) {
-    throw new Error(`Failed to fetch workflow from local URL (HTTP ${res.status} ${res.statusText}).`);
+    throw new Error(`Failed to fetch workflow from URL (HTTP ${res.status} ${res.statusText}).`);
   }
 
   const rawJson = await res.text();
   if (rawJson.trim().startsWith('<!DOCTYPE') || rawJson.trim().startsWith('<html')) {
     throw new Error(
-      'The URL returned an HTML page instead of a ComfyUI .json workflow. Please use "Scan Local ComfyUI Workflows", paste the local .json path/URL, or click "Upload .JSON".'
+      'The URL returned an HTML page instead of a ComfyUI .json workflow. Please paste a direct .json link, Civitai model link, GitHub link, or click "Upload .JSON".'
     );
   }
 
@@ -912,12 +1120,14 @@ export interface CuratedBuiltinWorkflow {
   shortLabel: string;
   description: string;
   baseTemplateId: string;
+  uiFilename?: string;
+  sourceUrl?: string;
   forcedProfile?: 'draft' | 'final';
   requiresFourRefs?: boolean;
 }
 
 export const CURATED_BUILTIN_WORKFLOWS: CuratedBuiltinWorkflow[] = [
-  // MiniMax H3 Built-in Workflows
+  // MiniMax H3 Built-in & Default Workflows
   {
     id: 'minimax_h3_ref2va',
     engine: 'minimax-h3',
@@ -925,15 +1135,40 @@ export const CURATED_BUILTIN_WORKFLOWS: CuratedBuiltinWorkflow[] = [
     shortLabel: 'MiniMax H3 Ref2VA (SolAttn + 8-Step Turbo)',
     description: 'Node 638 Previs Video + 4 Ref Images (<pic 1..4>) → Node 145 60fps RIFE + Audio MP4',
     baseTemplateId: 'minimax_h3_ref2va',
+    uiFilename: 'MiniMax_H3_Ref2VA_ComfyUI_Workflow.json',
     requiresFourRefs: true,
+  },
+  {
+    id: 'minimax_h3_t2v_i2v_ref2v_advanced',
+    engine: 'minimax-h3',
+    label: 'MiniMax H3 T2V / I2V / REF2V Advanced Filmmaking Workflow v2.0 (All Speedups & QoL)',
+    shortLabel: 'MiniMax H3 Advanced Filmmaking v2.0 (Ref2V + Speedups)',
+    description: 'Civitai Default (#2834514 v3233131) • Ref2V Previs + 4 Refs + SolAttn + 8-Step Turbo + 60fps RIFE',
+    baseTemplateId: 'minimax_h3_ref2va',
+    uiFilename: 'minimaxH3T2VI2VREF2VAdvanced_v20.json',
+    sourceUrl: 'https://civitai.com/models/2834514/minimax-h3-t2v-i2v-ref2v-advanced-filmmaking-workflow-or-all-speedups-qol-features?modelVersionId=3233131',
+    requiresFourRefs: false,
+  },
+  {
+    id: 'minimax_h3_seed_hunter',
+    engine: 'minimax-h3',
+    label: 'MiniMax H3 Seed Hunter v2.51 (Latent Upscaler + Seamless Video Continuation + Ref Mods)',
+    shortLabel: 'MiniMax H3 Seed Hunter v2.51 (Latent Upscaler)',
+    description: 'Civitai Default (#2881362 v3383710) • Seed Hunter + Latent Upscaler + Seamless Video Continuation',
+    baseTemplateId: 'minimax_h3_ref2va',
+    uiFilename: 'minimaxH3SEEDHUNTERLatent_v251.json',
+    sourceUrl: 'https://civitai.com/models/2881362/minimax-h3-seed-hunter-latent-upscaler-seamless-video-continuation-speedups-ref-mods?modelVersionId=3383710',
+    requiresFourRefs: false,
   },
   {
     id: 'h3_stubelius',
     engine: 'minimax-h3',
     label: 'Stubelius Ultimate MiniMax H3 (15-Node Hybrid Director V2)',
     shortLabel: 'Stubelius Ultimate H3 (Hybrid Director V2)',
-    description: 'Node 4 StubeliusH3DirectorV2 Multi-Character Timeline + Previs → Node 12 1080p RTX VSR MP4',
+    description: 'GitHub Default • Node 4 StubeliusH3DirectorV2 Multi-Character Timeline + Previs → Node 12 1080p RTX VSR MP4',
     baseTemplateId: 'h3_stubelius',
+    uiFilename: 'Stubelius_Ultimate_H3.json',
+    sourceUrl: 'https://github.com/stuubszzz/Stubelius-Ultimate-H3/blob/main/example_workflows/Stubelius_Ultimate_H3.json',
     requiresFourRefs: false,
   },
   {
@@ -943,17 +1178,42 @@ export const CURATED_BUILTIN_WORKFLOWS: CuratedBuiltinWorkflow[] = [
     shortLabel: 'MiniMax H3 Fast Draft (1.0MP Native)',
     description: 'Fast 1.0MP native pass with 8-Step Turbo LoRA for quick camera & blocking verification',
     baseTemplateId: 'minimax_h3_ref2va',
+    uiFilename: 'MiniMax_H3_Ref2VA_ComfyUI_Workflow.json',
     forcedProfile: 'draft',
     requiresFourRefs: true,
   },
-  // LTX-2.5 Built-in Workflows
+  // LTX-2.5 Built-in & Default Workflows
   {
     id: 'ltx25_stubelius',
     engine: 'ltx-2.5',
     label: 'Stubelius Ultimate LTX 2.5 (Distilled 22B INT8 • 1080p Polish + 4 Refs)',
     shortLabel: 'Stubelius Ultimate LTX 2.5 (1080p Polish)',
-    description: 'Node 7 LTXDirectorCS25 Previs Video + 4 Ref Images (@ref1..4) → Node 15 1080p Upscaled MP4',
+    description: 'GitHub Default • Node 7 LTXDirectorCS25 Previs Video + 4 Ref Images (@ref1..4) → Node 15 1080p Upscaled MP4',
     baseTemplateId: 'ltx25_stubelius',
+    uiFilename: 'Stubelius_Ultimate_LTX.json',
+    sourceUrl: 'https://github.com/stuubszzz/Stubelius-Ultimate-LTX2.5/blob/main/example_workflows/Stubelius_Ultimate_LTX.json',
+    requiresFourRefs: false,
+  },
+  {
+    id: 'ltx25_devdist_ollama_vsr',
+    engine: 'ltx-2.5',
+    label: 'LTX 2.5 Dev/Dist I2V & T2V with Ollama + RTX VSR (IC-LoRA Control)',
+    shortLabel: 'LTX 2.5 Dev/Dist I2V & T2V (Ollama + RTX VSR)',
+    description: 'Civitai Default (#2318870 v3231942) • LTX-2.5 Dev/Distilled + Reference Video IC-LoRA + RTX Video Super Resolution',
+    baseTemplateId: 'ltx25_stubelius',
+    uiFilename: 'LTX_25_DevDist_I2V_T2V_Ollama_RTX_VSR.json',
+    sourceUrl: 'https://civitai.com/models/2318870/ltx-25-devdist-image-to-video-and-text-to-video-with-ollamartx-vsr?modelVersionId=3231942',
+    requiresFourRefs: false,
+  },
+  {
+    id: 'ltx25_unlimited_sing_talk',
+    engine: 'ltx-2.5',
+    label: 'LTX 2.5 Unlimited Video Length • Sing or Talk (Alternating Shots)',
+    shortLabel: 'LTX 2.5 Unlimited Length (Sing/Talk Alternating Shots)',
+    description: 'Civitai Default (#2422765 v3368860) • Multi-Shot Alternating Camera + Lip-Sync Audio + Reference Video',
+    baseTemplateId: 'ltx25_stubelius',
+    uiFilename: 'LTX_25_Unlimited_Video_Length_Sing_Talk.json',
+    sourceUrl: 'https://civitai.com/models/2422765/ltx-25-unlimited-video-length-sing-or-talk-alternating-shots?modelVersionId=3368860',
     requiresFourRefs: false,
   },
   {
@@ -963,6 +1223,7 @@ export const CURATED_BUILTIN_WORKFLOWS: CuratedBuiltinWorkflow[] = [
     shortLabel: 'LTX 2.5 Fast Native Direct (Single-Pass)',
     description: 'Single-pass native resolution directly from Node 7 LTXDirectorCS25 for fast turnaround',
     baseTemplateId: 'ltx25_stubelius',
+    uiFilename: 'Stubelius_Ultimate_LTX.json',
     forcedProfile: 'draft',
     requiresFourRefs: false,
   },
@@ -973,6 +1234,7 @@ export const CURATED_BUILTIN_WORKFLOWS: CuratedBuiltinWorkflow[] = [
     shortLabel: 'LTX 2.5 High-Adherence IC-LoRA Control',
     description: 'Boosted IC-LoRA motion strength (1.0) on Distilled 22B INT8 for strict 3D Previs locking',
     baseTemplateId: 'ltx25_stubelius',
+    uiFilename: 'Stubelius_Ultimate_LTX.json',
     requiresFourRefs: false,
   },
 ];
@@ -1001,6 +1263,7 @@ export interface WorkflowChoiceItem {
   description: string;
   kind: 'builtin' | 'custom';
   url?: string;
+  uiFilename?: string;
   nodeCount?: number;
   requiresFourRefs?: boolean;
   forcedProfile?: 'draft' | 'final';
@@ -1085,6 +1348,8 @@ export function getWorkflowChoicesForEngine(engine: RenderEngineId): WorkflowCho
     shortLabel: w.shortLabel,
     description: w.description,
     kind: 'builtin',
+    url: w.sourceUrl,
+    uiFilename: w.uiFilename,
     requiresFourRefs: w.requiresFourRefs,
     forcedProfile: w.forcedProfile,
   }));
@@ -1099,6 +1364,7 @@ export function getWorkflowChoicesForEngine(engine: RenderEngineId): WorkflowCho
       description: `Added via URL: ${w.url} • ${w.nodeCount} ComfyUI nodes (Auto-Bound)`,
       kind: 'custom',
       url: w.url,
+      uiFilename: w.label.endsWith('.json') ? w.label : `${w.label}.json`,
       nodeCount: w.nodeCount,
       requiresFourRefs: false,
       savedEntry: w,
@@ -1149,7 +1415,8 @@ export function selectActiveWorkflowForEngine(
 
 /**
  * Add one or multiple workflow URLs (separated by newlines or commas) into the
- * workflow library for `engine`, auto-detect their bindings, and select the newly added workflow.
+ * workflow library for `engine`, strictly validate them for studio rendering,
+ * auto-detect their bindings, and select + sync the newly added workflow.
  */
 export async function addWorkflowUrlsToLibrary(
   rawUrlInput: string,
@@ -1179,6 +1446,14 @@ export async function addWorkflowUrlsToLibrary(
     ).replace(/^.*\?path=/, '');
     const cleanLabel = rawName.split(/[\\/]/).pop() || 'custom_workflow.json';
 
+    // Strictly validate workflow before accepting it into the library
+    const validation = validateWorkflowForStudioRender(result, engine);
+    if (!validation.valid) {
+      throw new Error(
+        `تم رفض الوركفلو "${cleanLabel}" لعدم توافقه مع متطلبات الريندر (Workflow Rejected):\n• ${validation.errors.join('\n• ')}`
+      );
+    }
+
     // Check if an entry with the same URL & engine already exists; update it if so
     const existingIdx = lib.savedWorkflows.findIndex(
       (w) => w.engine === engine && (w.url === rawUrl || w.url === normalizedUrl)
@@ -1207,6 +1482,8 @@ export async function addWorkflowUrlsToLibrary(
   saveWorkflowLibrary(lib);
 
   const activeChoice = selectActiveWorkflowForEngine(engine, lastAdded.id);
+  // Best-effort sync of newly added workflow to ComfyUI
+  void ensureWorkflowSyncedToComfyUI(activeChoice);
   return { added, activeChoice };
 }
 
@@ -1217,6 +1494,15 @@ export function addUploadedWorkflowToLibrary(
   objectInfo?: Record<string, unknown> | null
 ): { entry: SavedWorkflowEntry; detected: AutoDetectedWorkflowResult; activeChoice: WorkflowChoiceItem } {
   const detected = autoDetectWorkflowBindings(rawJson, {}, objectInfo);
+
+  // Strictly validate workflow before accepting it into the library
+  const validation = validateWorkflowForStudioRender(detected, engine);
+  if (!validation.valid) {
+    throw new Error(
+      `تم رفض الوركفلو "${filename}" لعدم توافقه مع متطلبات الريندر (Workflow Rejected):\n• ${validation.errors.join('\n• ')}`
+    );
+  }
+
   const lib = loadWorkflowLibrary();
   const existingIdx = lib.savedWorkflows.findIndex(
     (w) => w.engine === engine && w.label === filename
@@ -1241,7 +1527,264 @@ export function addUploadedWorkflowToLibrary(
   saveWorkflowLibrary(lib);
 
   const activeChoice = selectActiveWorkflowForEngine(engine, entry.id);
+  void ensureWorkflowSyncedToComfyUI(activeChoice);
   return { entry, detected, activeChoice };
+}
+
+export interface ComfyWorkflowSyncSummary {
+  ok: boolean;
+  comfyWorkflowsDir?: string | null;
+  syncedCount: number;
+  totalCount: number;
+  allPresent?: boolean;
+  missingCount?: number;
+  results?: Array<{
+    id: string;
+    filename: string;
+    diskSynced?: boolean;
+    httpSynced?: boolean;
+    existsOnDisk?: boolean;
+    existsOnHttp?: boolean;
+  }>;
+  error?: string;
+}
+
+/**
+ * Check workflow sync status on ComfyUI (disk + HTTP API).
+ */
+export async function getWorkflowSyncStatusFromServer(): Promise<ComfyWorkflowSyncSummary> {
+  if (typeof window !== 'undefined' && window.electronComfyBridge?.getSyncStatus) {
+    try {
+      const data = await window.electronComfyBridge.getSyncStatus();
+      if (data?.ok) {
+        const total = data.totalCount ?? 9;
+        const missing = data.missingCount ?? (Array.isArray(data.missingDefaultFiles) ? data.missingDefaultFiles.length : 0);
+        return {
+          ok: true,
+          comfyWorkflowsDir: data.comfyWorkflowsDir || data.comfyDir,
+          syncedCount: data.syncedCount ?? total - missing,
+          totalCount: total,
+          allPresent: Boolean(data.allPresent ?? data.allDefaultPresent),
+          missingCount: missing,
+          results: data.items || [],
+        };
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  const endpoints = [
+    'http://127.0.0.1:51731/api/comfy-sync-workflows',
+    '/api/comfy-sync-workflows',
+  ];
+  for (const ep of endpoints) {
+    try {
+      const res = await fetch(ep);
+      if (res.ok) {
+        const data = await res.json();
+        const total = data.totalCount ?? 9;
+        const missing = data.missingCount ?? (Array.isArray(data.missingDefaultFiles) ? data.missingDefaultFiles.length : 0);
+        return {
+          ok: Boolean(data.ok),
+          comfyWorkflowsDir: data.comfyWorkflowsDir || data.comfyDir,
+          syncedCount: data.syncedCount ?? total - missing,
+          totalCount: total,
+          allPresent: Boolean(data.allPresent ?? data.allDefaultPresent),
+          missingCount: missing,
+          results: data.items || [],
+        };
+      }
+    } catch {
+      // try next
+    }
+  }
+  return { ok: false, syncedCount: 0, totalCount: 9, allPresent: false };
+}
+
+/**
+ * Sync all bundled default workflows (plus any custom workflows in localStorage)
+ * to ComfyUI's `user/default/workflows/` folder via backend disk write + ComfyUI HTTP userdata API.
+ */
+export async function syncAllWorkflowsToComfyUI(
+  overwrite = true
+): Promise<ComfyWorkflowSyncSummary> {
+  const lib = loadWorkflowLibrary();
+  const customWorkflows = lib.savedWorkflows.map((w) => ({
+    id: w.id,
+    filename: w.label.endsWith('.json') ? w.label : `${w.label}.json`,
+    subfolder: w.engine === 'ltx-2.5' ? 'LTX' : 'Minimax',
+    rawJson: w.rawJson,
+  }));
+
+  if (typeof window !== 'undefined' && window.electronComfyBridge?.syncWorkflows) {
+    try {
+      const data = await window.electronComfyBridge.syncWorkflows({ overwrite, customWorkflows });
+      if (data?.ok) {
+        return {
+          ok: true,
+          comfyWorkflowsDir: data.comfyWorkflowsDir || data.comfyDir,
+          syncedCount: data.syncedCount ?? data.totalCount ?? 9,
+          totalCount: data.totalCount ?? 9,
+          allPresent: true,
+          missingCount: 0,
+          results: data.results || [],
+        };
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  const endpoints = [
+    'http://127.0.0.1:51731/api/comfy-sync-workflows',
+    '/api/comfy-sync-workflows',
+  ];
+  for (const ep of endpoints) {
+    try {
+      const res = await fetch(ep, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ overwrite, customWorkflows }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          ok: Boolean(data.ok),
+          comfyWorkflowsDir: data.comfyWorkflowsDir || data.comfyDir,
+          syncedCount: data.syncedCount ?? data.totalCount ?? 9,
+          totalCount: data.totalCount ?? 9,
+          allPresent: true,
+          missingCount: 0,
+          results: data.results || [],
+        };
+      }
+    } catch {
+      // try next endpoint
+    }
+  }
+  return {
+    ok: false,
+    syncedCount: 0,
+    totalCount: 9,
+    error: 'Could not reach local workflow sync service.',
+  };
+}
+
+/**
+ * Ensure a specific workflow choice (built-in or custom) is synced to ComfyUI
+ * when selected from the dropdown or right before rendering.
+ */
+export async function ensureWorkflowSyncedToComfyUI(
+  choice: WorkflowChoiceItem
+): Promise<boolean> {
+  try {
+    const payload =
+      choice.kind === 'custom' && choice.savedEntry
+        ? {
+            overwrite: true,
+            customWorkflows: [
+              {
+                id: choice.savedEntry.id,
+                filename: choice.savedEntry.label.endsWith('.json')
+                  ? choice.savedEntry.label
+                  : `${choice.savedEntry.label}.json`,
+                subfolder: choice.engine === 'ltx-2.5' ? 'LTX' : 'Minimax',
+                rawJson: choice.savedEntry.rawJson,
+              },
+            ],
+          }
+        : {
+            overwrite: false,
+            onlyFilename: choice.uiFilename,
+          };
+
+    if (typeof window !== 'undefined' && window.electronComfyBridge?.syncWorkflows) {
+      try {
+        const ipcRes = await window.electronComfyBridge.syncWorkflows(payload);
+        if (ipcRes?.ok) return true;
+      } catch {
+        // fall through
+      }
+    }
+
+    const endpoints = [
+      'http://127.0.0.1:51731/api/comfy-sync-workflows',
+      '/api/comfy-sync-workflows',
+    ];
+    for (const ep of endpoints) {
+      try {
+        const res = await fetch(ep, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) return true;
+      } catch {
+        // try next
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Automatically sync both 3D workflows (Image-to-3D `ComfyUI_Image_to_3D_GLB_Workflow.json`
+ * and Text-to-3D `ComfyUI_Text_to_3D_GLB_Workflow.json`, plus any custom 3D workflow)
+ * to ComfyUI's `user/default/workflows/` and `user/default/workflows/3d/` without requiring
+ * the user to pick from a dropdown.
+ */
+export async function ensure3DWorkflowsSyncedToComfyUI(
+  custom3DWorkflow?: { filename: string; rawJson: string }
+): Promise<boolean> {
+  try {
+    const payload: Record<string, unknown> = {
+      overwrite: Boolean(custom3DWorkflow),
+      onlyEngine: '3d',
+    };
+    if (custom3DWorkflow?.rawJson) {
+      payload.customWorkflows = [
+        {
+          id: 'custom-3d-studio',
+          engine: '3d',
+          subfolder: '3d',
+          filename: custom3DWorkflow.filename || 'Custom_3D_Studio_Workflow.json',
+          rawJson: custom3DWorkflow.rawJson,
+        },
+      ];
+    }
+
+    if (typeof window !== 'undefined' && window.electronComfyBridge?.syncWorkflows) {
+      try {
+        const ipcRes = await window.electronComfyBridge.syncWorkflows(payload);
+        if (ipcRes?.ok) return true;
+      } catch {
+        // fall through
+      }
+    }
+
+    const endpoints = [
+      'http://127.0.0.1:51731/api/comfy-sync-workflows',
+      '/api/comfy-sync-workflows',
+    ];
+    for (const ep of endpoints) {
+      try {
+        const res = await fetch(ep, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) return true;
+      } catch {
+        // try next
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 export function updateSavedWorkflowOverrides(

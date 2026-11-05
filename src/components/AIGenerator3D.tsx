@@ -45,6 +45,7 @@ import {
   generate3DGlbInComfy,
 } from '../services/comfy3dGenerator';
 import {
+  ensure3DWorkflowsSyncedToComfyUI,
   listLocalComfyWorkflows,
   normalizeWorkflowUrl,
 } from '../pipeline/customWorkflowResolver';
@@ -164,6 +165,16 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     }
     setReferenceImageUrl(initialImageUrl || null);
   }, [initialPrompt, initialImageUrl, initialMode, targetActorId]);
+
+  // Automatically sync both 3D workflows (Image-to-3D & Text-to-3D) to ComfyUI whenever 3D Studio is opened or mode switches
+  useEffect(() => {
+    if (!isOpen) return;
+    void ensure3DWorkflowsSyncedToComfyUI(
+      workflowSource === 'custom' && customWorkflowJson
+        ? { filename: customWorkflowLabel || 'Custom_3D_Studio_Workflow.json', rawJson: customWorkflowJson }
+        : undefined
+    );
+  }, [isOpen, generationMode, workflowSource, customWorkflowJson, customWorkflowLabel]);
 
   // Elapsed timer during generation
   useEffect(() => {

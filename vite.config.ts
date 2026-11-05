@@ -16,15 +16,6 @@ export default defineConfig({
     port: 5173,
     host: '127.0.0.1',
     proxy: {
-      '/api/comfy': {
-        target: 'http://127.0.0.1:8188',
-        changeOrigin: true,
-        headers: {
-          Origin: 'http://127.0.0.1:8188',
-          Referer: 'http://127.0.0.1:8188/',
-        },
-        rewrite: (path) => path.replace(/^\/api\/comfy/, ''),
-      },
       '/ws': {
         target: 'ws://127.0.0.1:8188',
         ws: true,

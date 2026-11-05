@@ -1,7 +1,10 @@
 import builtinImageTo3dTemplateRaw from '../../workflows/templates/comfy_image_to_3d_glb.api.json';
 import builtinTextTo3dTemplateRaw from '../../workflows/templates/comfy_text_to_3d_glb.api.json';
 import { ApiNode, ApiWorkflow } from '../pipeline/templateTypes';
-import { convertUiWorkflowToApi } from '../pipeline/customWorkflowResolver';
+import {
+  convertUiWorkflowToApi,
+  ensure3DWorkflowsSyncedToComfyUI,
+} from '../pipeline/customWorkflowResolver';
 import { defaultComfyClient } from './comfyClient';
 import { registerModelFile } from './modelStorage';
 import { loadGltfModel } from '../engine/gltfModelLoader';
@@ -500,6 +503,16 @@ export async function generate3DGlbInComfy(
   const startedAtMs = Date.now();
   const mode: Comfy3DGenerationMode = options.generationMode || 'image-to-3d';
 
+  // Auto-sync both Image-to-3D and Text-to-3D workflows (plus any custom 3D workflow) to ComfyUI automatically
+  await ensure3DWorkflowsSyncedToComfyUI(
+    options.customWorkflowJson
+      ? {
+          filename: 'Custom_3D_Studio_Workflow.json',
+          rawJson: options.customWorkflowJson,
+        }
+      : undefined
+  );
+
   let api: ApiWorkflow;
   let outputNodeIds: string[];
 
@@ -683,21 +696,35 @@ export async function generate3DGlbInComfy(
   }
 
   if (!glbBuffer) {
-    const fallbackUrl = `/api/comfy-glb-output?sinceMs=${startedAtMs}${
+    const querySuffix = `?sinceMs=${startedAtMs}${
       extracted?.rawPath ? `&path=${encodeURIComponent(extracted.rawPath)}` : ''
     }`;
-    const res = await fetch(fallbackUrl);
-    if (!res.ok) {
+    const glbEndpoints = [
+      `http://127.0.0.1:51731/api/comfy-glb-output${querySuffix}`,
+      `/api/comfy-glb-output${querySuffix}`,
+    ];
+    let lastStatus = 404;
+    for (const ep of glbEndpoints) {
+      try {
+        const res = await fetch(ep);
+        lastStatus = res.status;
+        if (!res.ok) continue;
+        const headerPath = res.headers.get('X-Comfy-Glb-Path');
+        if (headerPath) {
+          diskPath = decodeURIComponent(headerPath);
+          glbFilename = diskPath.split(/[\\/]/).pop() || glbFilename;
+        }
+        glbBuffer = await res.arrayBuffer();
+        break;
+      } catch {
+        // try next endpoint
+      }
+    }
+    if (!glbBuffer) {
       throw new Error(
-        `ComfyUI finished the 3D workflow, but the generated .GLB file could not be fetched (HTTP ${res.status}).`
+        `ComfyUI finished the 3D workflow, but the generated .GLB file could not be fetched (HTTP ${lastStatus}).`
       );
     }
-    const headerPath = res.headers.get('X-Comfy-Glb-Path');
-    if (headerPath) {
-      diskPath = decodeURIComponent(headerPath);
-      glbFilename = diskPath.split(/[\\/]/).pop() || glbFilename;
-    }
-    glbBuffer = await res.arrayBuffer();
   }
 
   // Register the .GLB in Three.js GLTF cache and inspect geometry stats

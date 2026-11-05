@@ -1,61 +1,39 @@
 import type { Plugin } from 'vite';
 import { createRequire } from 'module';
-import http from 'http';
 const require = createRequire(import.meta.url);
+
+function getComfySyncService() {
+  try {
+    const resolved = require.resolve('./comfyWorkflowSyncService.cjs');
+    delete require.cache[resolved];
+  } catch {}
+  return require('./comfyWorkflowSyncService.cjs');
+}
 
 function attachComfyMiddleware(middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void }) {
   middlewares.use((req, res, next) => {
     const rawUrl = req.url || '';
-    if (!rawUrl.startsWith('/api/comfy')) {
+    if (
+      !rawUrl.startsWith('/api/comfy/') &&
+      rawUrl !== '/api/comfy' &&
+      !rawUrl.startsWith('/api/comfy?')
+    ) {
       next();
       return;
     }
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', '*');
-
     if (req.method === 'OPTIONS') {
-      res.writeHead(204);
+      res.writeHead(204, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+      });
       res.end();
       return;
     }
 
     const forwardPath = rawUrl.replace(/^\/api\/comfy/, '') || '/';
-    const outHeaders: Record<string, any> = { ...req.headers };
-    delete outHeaders['host'];
-    outHeaders['host'] = '127.0.0.1:8188';
-    outHeaders['origin'] = 'http://127.0.0.1:8188';
-    outHeaders['referer'] = 'http://127.0.0.1:8188/';
-
-    const proxyReq = http.request(
-      {
-        hostname: '127.0.0.1',
-        port: 8188,
-        path: forwardPath,
-        method: req.method,
-        headers: outHeaders,
-      },
-      (proxyRes) => {
-        const resHeaders = { ...proxyRes.headers };
-        resHeaders['access-control-allow-origin'] = '*';
-        resHeaders['access-control-allow-headers'] = '*';
-        resHeaders['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
-        res.writeHead(proxyRes.statusCode || 200, resHeaders);
-        proxyRes.pipe(res);
-      }
-    );
-
-    proxyReq.on('error', (err) => {
-      if (!res.headersSent) {
-        res.writeHead(502, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
-      } else {
-        res.destroy();
-      }
-    });
-
-    req.pipe(proxyReq);
+    getComfySyncService().forwardComfyRequest(req, res, forwardPath);
   });
 }
 
@@ -179,6 +157,75 @@ function attachLocalWorkflowMiddleware(middlewares: { use: (fn: (req: any, res: 
       } catch (err: any) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err?.message || 'Failed to read generated .glb file' }));
+      }
+      return;
+    }
+
+    if (rawUrl.startsWith('/api/comfy-sync-workflows')) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      if (req.method === 'GET') {
+        try {
+          const status = getComfySyncService().getComfyWorkflowSyncStatus();
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify(status));
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: err?.message || 'Failed to read sync status' }));
+        }
+        return;
+      }
+      if (req.method === 'POST') {
+        let bodyStr = '';
+        req.on('data', (chunk: any) => {
+          bodyStr += chunk;
+        });
+        req.on('end', async () => {
+          try {
+            const payload = bodyStr ? JSON.parse(bodyStr) : {};
+            const result = await getComfySyncService().syncWorkflowsToComfyUI(payload);
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(result));
+          } catch (err: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: err?.message || 'Failed to sync workflows' }));
+          }
+        });
+        return;
+      }
+    }
+
+    if (rawUrl.startsWith('/api/fetch-remote-workflow')) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', '*');
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+      try {
+        const parsedUrl = new URL(rawUrl, 'http://127.0.0.1:5173');
+        const target = (parsedUrl.searchParams.get('url') || '').trim();
+        getComfySyncService()
+          .fetchRemoteWorkflowJson(target)
+          .then((result: any) => {
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(result));
+          })
+          .catch((err: any) => {
+            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: err?.message || 'Failed to fetch remote workflow' }));
+          });
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: err?.message || 'Invalid URL' }));
       }
       return;
     }

@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Download, X, FileCode, Box, Film, Check, Sparkles } from 'lucide-react';
+import { Download, X, FileCode, Box, Film, Check, Sparkles, RefreshCw } from 'lucide-react';
 import {
   BUNDLED_WORKFLOWS_CATALOG,
   BundledWorkflowEntry,
   downloadBundledWorkflow,
   downloadAllBundledWorkflowsPack,
 } from '../services/bundledWorkflowsCatalog';
+import { syncAllWorkflowsToComfyUI } from '../pipeline/customWorkflowResolver';
 
 export interface BundledWorkflowsModalProps {
   isOpen: boolean;
@@ -18,18 +19,40 @@ export const BundledWorkflowsModal: React.FC<BundledWorkflowsModalProps> = ({
 }) => {
   const [filterCat, setFilterCat] = useState<'all' | '3d-generation' | 'video-render'>('all');
   const [downloadedId, setDownloadedId] = useState<string | null>(null);
+  const [isSyncingAll, setIsSyncingAll] = useState<boolean>(false);
+  const [syncDoneMessage, setSyncDoneMessage] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
   const filtered = BUNDLED_WORKFLOWS_CATALOG.filter(
     (w) => filterCat === 'all' || w.category === filterCat
   );
+  const videoRenderCount = BUNDLED_WORKFLOWS_CATALOG.filter((w) => w.category === 'video-render').length;
+  const gen3dCount = BUNDLED_WORKFLOWS_CATALOG.filter((w) => w.category === '3d-generation').length;
 
   const handleDownloadOne = (entry: BundledWorkflowEntry, format: 'ui' | 'api') => {
     downloadBundledWorkflow(entry, format);
     const key = `${entry.id}-${format}`;
     setDownloadedId(key);
     setTimeout(() => setDownloadedId(null), 1800);
+  };
+
+  const handleSyncToComfyUI = async () => {
+    setIsSyncingAll(true);
+    setSyncDoneMessage(null);
+    try {
+      const res = await syncAllWorkflowsToComfyUI(true);
+      if (res.ok) {
+        setSyncDoneMessage(`Synced ${res.syncedCount}/${res.totalCount} workflows to ComfyUI!`);
+      } else {
+        setSyncDoneMessage('Failed to sync to ComfyUI');
+      }
+    } catch {
+      setSyncDoneMessage('Failed to sync to ComfyUI');
+    } finally {
+      setIsSyncingAll(false);
+      setTimeout(() => setSyncDoneMessage(null), 3500);
+    }
   };
 
   const handleDownloadAllSequential = () => {
@@ -80,24 +103,46 @@ export const BundledWorkflowsModal: React.FC<BundledWorkflowsModalProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleDownloadAllSequential}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/20 transition-all cursor-pointer shrink-0 ml-auto"
-              title="Download all ComfyUI workflow .JSON files to your PC"
-            >
-              {downloadedId === 'all-pack' ? (
-                <>
-                  <Check className="h-4 w-4 text-emerald-300" />
-                  <span>Downloaded All Workflows!</span>
-                </>
-              ) : (
-                <>
-                  <Download className="h-4 w-4" />
-                  <span>Download All Workflows ({BUNDLED_WORKFLOWS_CATALOG.length})</span>
-                </>
-              )}
-            </button>
+            <div className="flex flex-wrap items-center gap-2 shrink-0 ml-auto">
+              <button
+                type="button"
+                onClick={handleSyncToComfyUI}
+                disabled={isSyncingAll}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/35 border border-emerald-400/40 text-emerald-200 text-xs font-bold transition-all cursor-pointer disabled:opacity-50"
+                title="Sync all bundled workflows directly to D:\\ComfyUI\\user\\default\\workflows"
+              >
+                {syncDoneMessage ? (
+                  <>
+                    <Check className="h-4 w-4 text-emerald-300" />
+                    <span>{syncDoneMessage}</span>
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className={`h-4 w-4 ${isSyncingAll ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingAll ? 'Syncing to ComfyUI...' : 'Sync All to ComfyUI'}</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadAllSequential}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white text-xs font-bold shadow-lg shadow-cyan-500/20 transition-all cursor-pointer"
+                title="Download all ComfyUI workflow .JSON files to your PC"
+              >
+                {downloadedId === 'all-pack' ? (
+                  <>
+                    <Check className="h-4 w-4 text-emerald-300" />
+                    <span>Downloaded All Workflows!</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-4 w-4" />
+                    <span>Download All Workflows ({BUNDLED_WORKFLOWS_CATALOG.length})</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
           <button
@@ -135,7 +180,7 @@ export const BundledWorkflowsModal: React.FC<BundledWorkflowsModalProps> = ({
               }`}
             >
               <Box className="h-3.5 w-3.5 text-cyan-400" />
-              <span>3D .GLB Workflows (2)</span>
+              <span>3D .GLB Workflows ({gen3dCount})</span>
             </button>
             <button
               type="button"
@@ -147,7 +192,7 @@ export const BundledWorkflowsModal: React.FC<BundledWorkflowsModalProps> = ({
               }`}
             >
               <Film className="h-3.5 w-3.5 text-amber-400" />
-              <span>Video Render Workflows (3)</span>
+              <span>Video Render Workflows ({videoRenderCount})</span>
             </button>
           </div>
 

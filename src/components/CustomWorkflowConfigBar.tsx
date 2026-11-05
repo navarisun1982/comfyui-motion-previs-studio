@@ -8,13 +8,16 @@ import {
   addUploadedWorkflowToLibrary,
   addWorkflowUrlsToLibrary,
   autoDetectWorkflowBindings,
+  ensureWorkflowSyncedToComfyUI,
   getActiveWorkflowForEngine,
   getWorkflowChoicesForEngine,
+  getWorkflowSyncStatusFromServer,
   listLocalComfyWorkflows,
   loadStoredCustomWorkflowConfig,
   removeWorkflowFromLibrary,
   selectActiveWorkflowForEngine,
   syncActiveEngineWorkflowToRegistry,
+  syncAllWorkflowsToComfyUI,
   updateSavedWorkflowOverrides,
 } from '../pipeline/customWorkflowResolver';
 import { defaultComfyClient } from '../services/comfyClient';
@@ -67,6 +70,8 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
   const [showGuide, setShowGuide] = useState<boolean>(false);
   const [localSavedWorkflows, setLocalSavedWorkflows] = useState<string[]>([]);
   const [isScanningLocal, setIsScanningLocal] = useState<boolean>(false);
+  const [isSyncingComfy, setIsSyncingComfy] = useState<boolean>(false);
+  const [comfySyncBadge, setComfySyncBadge] = useState<string>('Synced to ComfyUI');
   const [detected, setDetected] = useState<AutoDetectedWorkflowResult | null>(() => {
     const initial = getActiveWorkflowForEngine(engine);
     if (initial.kind === 'custom' && initial.savedEntry?.rawJson) {
@@ -81,6 +86,31 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
     }
     return null;
   });
+
+  // Check ComfyUI workflow sync status on mount and auto-sync if any bundled workflows are missing
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await getWorkflowSyncStatusFromServer();
+        if (cancelled) return;
+        if (status.ok && !status.allPresent) {
+          setComfySyncBadge('Auto-Syncing...');
+          const synced = await syncAllWorkflowsToComfyUI(false);
+          if (!cancelled && synced.ok) {
+            setComfySyncBadge(`✓ Synced (${synced.totalCount} workflows)`);
+          }
+        } else if (status.ok && status.allPresent) {
+          setComfySyncBadge(`✓ Synced (${status.totalCount} workflows)`);
+        }
+      } catch {
+        // ignore offline check
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Refresh choices & active workflow whenever `engine` changes (`ltx-2.5` <-> `minimax-h3`)
   useEffect(() => {
@@ -103,6 +133,7 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
     }
     setDetected(nextDetected);
     syncActiveEngineWorkflowToRegistry(engine);
+    void ensureWorkflowSyncedToComfyUI(nextActive);
     onWorkflowChanged?.(nextActive, nextDetected);
   }, [engine]);
 
@@ -131,13 +162,44 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
     onConfigChanged?.(loadStoredCustomWorkflowConfig(), nextDetected);
   };
 
-  const handleSelectWorkflow = (workflowId: string) => {
+  const handleSelectWorkflow = async (workflowId: string) => {
     setErrorText(null);
     const selected = selectActiveWorkflowForEngine(engine, workflowId);
     refreshStateForSelection(selected);
     setStatusText(
-      `Active ${engine === 'ltx-2.5' ? 'LTX-2.5' : 'MiniMax H3'} workflow set to: ${selected.shortLabel}`
+      `Active ${engine === 'ltx-2.5' ? 'LTX-2.5' : 'MiniMax H3'} workflow set to: ${selected.shortLabel} (Syncing to ComfyUI...)`
     );
+    const synced = await ensureWorkflowSyncedToComfyUI(selected);
+    setStatusText(
+      synced
+        ? `Active ${engine === 'ltx-2.5' ? 'LTX-2.5' : 'MiniMax H3'} workflow set to: ${selected.shortLabel} ✓ Synced to ComfyUI`
+        : `Active ${engine === 'ltx-2.5' ? 'LTX-2.5' : 'MiniMax H3'} workflow set to: ${selected.shortLabel}`
+    );
+  };
+
+  const handleSyncAllToComfy = async () => {
+    setIsSyncingComfy(true);
+    setErrorText(null);
+    setStatusText('Syncing all bundled & custom workflows to local ComfyUI (user/default/workflows)...');
+    try {
+      const res = await syncAllWorkflowsToComfyUI(true);
+      if (res.ok) {
+        setComfySyncBadge(`✓ Synced (${res.totalCount} workflows)`);
+        setStatusText(
+          `Successfully synced ${res.syncedCount}/${res.totalCount} workflows to ComfyUI${
+            res.comfyWorkflowsDir ? ` (${res.comfyWorkflowsDir})` : ''
+          }!`
+        );
+      } else {
+        setErrorText(res.error || 'Could not sync workflows to ComfyUI.');
+        setStatusText(null);
+      }
+    } catch (err: unknown) {
+      setErrorText(err instanceof Error ? err.message : String(err));
+      setStatusText(null);
+    } finally {
+      setIsSyncingComfy(false);
+    }
   };
 
   const handleAddFromUrl = async (customTargetUrl?: string) => {
@@ -373,9 +435,14 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
           <strong className="text-white">{activeChoice.shortLabel}</strong>
           <span className="text-slate-400"> — {activeChoice.description}</span>
         </div>
-        <span className="text-[9.5px] text-indigo-300 shrink-0">
-          {builtinChoices.length} Built-in + {customChoices.length} Added via URL
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="rounded bg-emerald-500/15 border border-emerald-400/30 px-1.5 py-0.5 text-[9.5px] font-semibold text-emerald-300">
+            {comfySyncBadge}
+          </span>
+          <span className="text-[9.5px] text-indigo-300">
+            {builtinChoices.length} Built-in + {customChoices.length} Added via URL
+          </span>
+        </div>
       </div>
 
       {/* Row 2: Add Workflow(s) by URL Input Bar (Always Accessible inside Render Panel) */}
@@ -391,9 +458,9 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
                 handleAddFromUrl();
               }
             }}
-            placeholder={`Paste workflow URL (or multiple URLs separated by commas) to add to ${
+            placeholder={`Paste Civitai / GitHub / ComfyUI workflow URL (or comma-separated URLs) for ${
               engine === 'ltx-2.5' ? 'LTX-2.5' : 'MiniMax H3'
-            } list...`}
+            }...`}
             className="flex-1 rounded-lg bg-black/70 border border-white/15 px-2.5 py-1.5 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
           />
           <button
@@ -401,7 +468,7 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
             onClick={() => handleAddFromUrl()}
             disabled={isLoadingUrl}
             className="flex items-center justify-center gap-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-3 py-1.5 text-[10.5px] transition-all disabled:opacity-50 cursor-pointer shrink-0"
-            title="Fetch workflow JSON from URL (or comma-separated URLs), auto-detect nodes, and add to the workflow selector list"
+            title="Fetch workflow JSON from Civitai/GitHub/local URL, validate nodes, and add to the workflow selector list"
           >
             {isLoadingUrl ? (
               <RefreshCw className="h-3 w-3 animate-spin" />
@@ -409,6 +476,16 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
               <Plus className="h-3.5 w-3.5 stroke-[2.5]" />
             )}
             <span>{isLoadingUrl ? 'Adding...' : '+ Add Workflow URL'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleSyncAllToComfy}
+            disabled={isSyncingComfy}
+            className="flex items-center justify-center gap-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/35 px-2.5 py-1.5 text-[10.5px] font-semibold cursor-pointer shrink-0"
+            title="Sync all bundled default & custom workflows to your local ComfyUI (D:\\ComfyUI\\user\\default\\workflows)"
+          >
+            <RefreshCw className={`h-3 w-3 text-emerald-300 ${isSyncingComfy ? 'animate-spin' : ''}`} />
+            <span>{isSyncingComfy ? 'Syncing...' : 'Sync Workflows'}</span>
           </button>
           <button
             type="button"
@@ -659,18 +736,18 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
         {/* Status / Error Banner */}
         {(errorText || statusText) && (
           <div
-            className={`rounded-lg px-2.5 py-1.5 text-[10px] flex items-center gap-1.5 ${
+            className={`rounded-lg px-2.5 py-1.5 text-[10px] flex items-start gap-1.5 ${
               errorText
                 ? 'bg-rose-500/15 border border-rose-500/35 text-rose-200'
                 : 'bg-emerald-500/15 border border-emerald-500/35 text-emerald-200'
             }`}
           >
             {errorText ? (
-              <AlertCircle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+              <AlertCircle className="h-3.5 w-3.5 text-rose-400 shrink-0 mt-0.5" />
             ) : (
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
             )}
-            <span>{errorText || statusText}</span>
+            <span className="whitespace-pre-line">{errorText || statusText}</span>
           </div>
         )}
       </div>
