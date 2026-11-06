@@ -41,6 +41,17 @@
       "node": "4",
       "input": "duration_seconds"
     },
+    "aspectRatio": {
+      "node": "4",
+      "input": "aspect_ratio",
+      "map": {
+        "16:9": "16:9 (Widescreen)",
+        "9:16": "9:16 (Portrait Widescreen)",
+        "1:1": "1:1 (Square)",
+        "4:3": "4:3 (Standard)",
+        "2.39:1": "21:9 (Ultrawide)"
+      }
+    },
     "timeline": {
       "node": "4",
       "input": "timeline_data",

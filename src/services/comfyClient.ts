@@ -566,12 +566,15 @@ export class ComfyClient {
       prompt: graph,
       client_id: this.clientId,
     };
+    const serializedPayload = JSON.stringify(payload)
+      .replace(/9:16 \(Vertical\)/g, '9:16 (Portrait Widescreen)')
+      .replace(/4:3 \(Classic TV\)/g, '4:3 (Standard)');
 
     logger.api(`Submitting prompt to ComfyUI POST /prompt...`, { client_id: this.clientId });
     const res = await this.requestComfy<any>('/prompt', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: serializedPayload,
       timeoutMs: 15000,
     });
 

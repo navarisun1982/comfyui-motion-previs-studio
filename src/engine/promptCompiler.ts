@@ -525,7 +525,7 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
   const closingActorAction = timeline[2].actorAction;
 
   const previsToRealityDirective =
-    'Every visible element in the frame is realized as an authentic, living real-world entity with natural three-dimensional silhouette, organic surface complexity, and unscripted secondary physics—using the 3D previz guide solely for spatial placement, scale volume, and camera perspective without preserving any synthetic proxy geometry or mechanical rigidity.';
+    'Strictly preserve the camera framing, subject screen placement, scale proportions, and choreographed action timing of the 3D previz guide, while realizing every visible element in the frame as an authentic, living real-world entity with natural three-dimensional silhouette, organic surface complexity, and fluid real-world kinematics (smoothing out any mechanical 3D keyframe stiffness without preserving synthetic proxy geometry).';
 
   const soundscapeSentence =
     pov.visibleAnalyses.length > 0
@@ -666,10 +666,10 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     );
 
     subjectDefLines.push(
-      `<Subject ${subjIdx}> is ${actor.name} (from <picture ${subjIdx}>): ${scalePrefix}${actor.token}${socketNote}, ${actor.actionDescription}. Completely supplants the ${hex} 3D placeholder proxy in the ${horizZone} of <Video 1> — use <Video 1> only for its 3D spatial placement, approximate scale volume, and camera perspective, and instantiate the true, living real-world entity from <picture ${subjIdx}> in its place with its own authentic silhouette, organic detail, and natural physical dynamics (do NOT merely texture-wrap or paint <picture ${subjIdx}> over the simplified 3D proxy mesh; the ${hex} tint is strictly a spatial placement cue).`
+      `<Subject ${subjIdx}> is ${actor.name} (from <Picture ${subjIdx}>): ${scalePrefix}${actor.token}${socketNote}, ${actor.actionDescription}. Strictly follows the screen position (${horizZone}), scale proportions, orientation, and choreographed motion trajectory of its ${hex} counterpart in <Video 1>, while instantiating the true, living real-world entity from <Picture ${subjIdx}> with its authentic silhouette, organic detail, and fluid, natural physical motion (smoothing out any stiff 3D keyframe mechanics; do NOT merely texture-wrap or paint <Picture ${subjIdx}> over the simplified 3D proxy mesh).`
     );
     retentionLines.push(
-      `<Subject ${subjIdx}> (${presenceTag}): fully_preserved - matches <picture ${subjIdx}>; instantiate the authentic real-world entity from <picture ${subjIdx}> at the ${horizZone} spatial coordinates and scale volume indicated in <Video 1>, with lifelike secondary motion and natural real-world physics rather than rigid proxy geometry.`
+      `<Subject ${subjIdx}> (${presenceTag}): fully_preserved - matches <Picture ${subjIdx}>; instantiate the authentic real-world entity from <Picture ${subjIdx}> following the exact ${horizZone} screen trajectory, scale volume, and action timing in <Video 1>, articulated with fluid real-world biomechanics and lifelike secondary motion rather than rigid proxy geometry.`
     );
   }
 
@@ -688,21 +688,21 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     envText ? ` (${envText})` : ''
   }`;
   subjectDefLines.push(
-    `<Subject 4> is the [Scene Environment] (from <picture 4>): ${envDesc}. Completely supplants the dark-slate #334155 3D previz stage blocks in <Video 1> — use <Video 1> only for camera perspective, horizon line, and ground-plane depth, while instantiating the full, living real-world environment from <picture 4> with authentic three-dimensional structure and atmospheric depth (never texture-wrap the simplified previz blocks).`
+    `<Subject 4> is the [Scene Environment] (from <Picture 4>): ${envDesc}. Completely supplants the dark-slate #334155 3D previz stage blocks in <Video 1> while strictly preserving <Video 1>'s camera perspective, horizon line, and ground-plane depth, instantiating the full, living real-world environment from <Picture 4> with authentic three-dimensional structure and atmospheric depth (never texture-wrap the simplified previz blocks).`
   );
   retentionLines.push(
-    `<Subject 4> (present throughout): fully_preserved - matches <picture 4>; instantiate the authentic real-world environment from <picture 4> across the 3D spatial layout and ground plane of <Video 1>.`
+    `<Subject 4> (present throughout): fully_preserved - matches <Picture 4>; instantiate the authentic real-world environment from <Picture 4> across the exact 3D camera perspective and ground plane of <Video 1>.`
   );
 
   const blockingDetail =
     proxySpatialAnchors.length > 0
-      ? ` and coarse spatial placement volumes (${proxySpatialAnchors.join('; ')})`
+      ? ` and subject spatial placement (${proxySpatialAnchors.join('; ')})`
       : ' and environmental spatial depth';
   subjectDefLines.push(
-    `<Video 1> is the 3D previz spatial and camera blueprint. Reference <Video 1> ONLY for 3D camera movement, lens perspective,${blockingDetail}. Do NOT treat <Video 1> as literal geometry to be colored or texture-wrapped: discard all synthetic 3D proxy shapes, polygon edges, and mechanical rigidity, and render every element as a fully realized, living real-world entity.`
+    `<Video 1> is the 3D previz composition, camera trajectory, and motion choreography guide. Strictly preserve the camera framing, lens perspective, subject screen positions, scale proportions, and choreographed action timing shown in <Video 1>${blockingDetail}, while translating simplified 3D previz shapes and rigid keyframe interpolation into photorealistic real-world entities with fluid, natural physical motion (do NOT treat <Video 1> as literal low-poly geometry to be texture-wrapped).`
   );
   retentionLines.push(
-    `<Video 1> (camera/motion reference): weak_reference - only structural/camera characteristics, spatial coordinates, and coarse scale volumes are retained; no visible 3D proxy content, simplified geometry, or rigid mechanical motion is reused.`
+    `<Video 1> (camera/motion reference): partially_preserved - preserve the exact camera trajectory, framing, subject screen placement, scale proportions, and choreographed motion timing from <Video 1>, while upgrading synthetic 3D previz geometry and mechanical keyframe interpolation into photorealistic appearance and fluid, natural real-world motion.`
   );
 
   // Subject micro-acting summary for metadata (POV-visible only)
@@ -726,12 +726,12 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
 
   const refRangePhrase =
     visibleTop3.length > 0
-      ? `<picture 1>–<picture ${visibleTop3.length}> and <picture 4> for full real-world entity and environment instantiation`
-      : `<picture 4> for full real-world environment instantiation`;
+      ? `<Picture 1>–<Picture ${visibleTop3.length}> and <Picture 4> for full real-world entity and environment instantiation`
+      : `<Picture 4> for full real-world environment instantiation`;
 
   const positivePrompt = [
     `subject_definitions:\n${subjectDefLines.join('\n\n')}`,
-    `summary: [reference generation] Create a cinematic, photorealistic ${shot.aspectRatio}, ${shot.durationSeconds.toFixed(1)}-second continuous shot ("${shot.name}"), using <Video 1> strictly as a spatial and camera-path blueprint and ${refRangePhrase}.`,
+    `summary: [reference generation] Create a cinematic, photorealistic ${shot.aspectRatio}, ${shot.durationSeconds.toFixed(1)}-second continuous shot ("${shot.name}"), following the exact camera framing, subject placement, and motion choreography of <Video 1> and using ${refRangePhrase}.`,
     `retention_analysis:\n${retentionLines.join('\n')}`,
     `detailed_description: ${styleLine}\n\n${beatParagraphs}\n\nThroughout, ${lightInfo}. Every entity in the frame exhibits authentic three-dimensional structure, natural secondary motion, and physical depth without any synthetic 3D previz rigidity. No readable text, subtitles, or interface graphics.`,
     `overall_soundscape: Natural environmental ambiance matching ${

@@ -5,7 +5,13 @@ import { CharacterControlCard } from '../src/components/CharacterControlCard';
 import { PrevisExportDeck } from '../src/components/PrevisExportDeck';
 import { buildDefaultShotSpec, DEFAULT_SCENES } from '../src/components/ShotBible';
 import { Actor } from '../src/types/shotspec';
-import { compileReadyMadeMotionKeyframes, findReadyMadeMotionById } from '../src/engine/kinematics';
+import * as THREE from 'three';
+import {
+  compileReadyMadeMotionKeyframes,
+  findReadyMadeMotionById,
+  createHumanoidSkeleton,
+  createStylizedHumanoidStandin,
+} from '../src/engine/kinematics';
 import { useShotStore } from '../src/stores/useShotStore';
 
 const mockActor: Actor = {
@@ -423,7 +429,7 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     const resetActor = useShotStore.getState().shot.actors[0];
     expect(resetActor.trajectory.keyframes).toEqual([]);
     expect(resetActor.motionClip).toBeUndefined();
-    expect(resetActor.gait).toBe('idle');
+    expect(resetActor.gait).toBe('none');
     expect(resetActor.posePreset).toBe('neutral-stand');
     expect(resetActor.trajectory.endPosition).toEqual(resetActor.trajectory.startPosition);
     expect(useShotStore.getState().currentTime).toBe(0);
@@ -548,6 +554,35 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     expect(queryByDisplayValue('agent_kael_ref.png')).toBeTruthy();
     expect(container.querySelector(`img[src="${kaelImg}"]`)).toBeTruthy();
     expect(container.querySelector(`img[src="${julianImg}"]`)).toBeNull();
+  });
+
+  it('spawns newly added characters completely stationary (gait: none, z: 0) and grounded above y = 0 without sinking', () => {
+    const store = useShotStore.getState();
+    store.resetToDefault();
+    store.addActor('Stationary Guard', 'human', 'an armored guard standing watch');
+
+    const added = useShotStore.getState().shot.actors.find((a) => a.name === 'Stationary Guard');
+    expect(added).toBeDefined();
+    expect(added!.gait).toBe('none');
+    expect(added!.posePreset).toBe('neutral-stand');
+    expect(added!.motionClip).toBeUndefined();
+    expect(added!.trajectory.startPosition.z).toBe(0);
+    expect(added!.trajectory.endPosition.z).toBe(0);
+    expect(added!.trajectory.startPosition.x).toBe(added!.trajectory.endPosition.x);
+    expect(added!.trajectory.startPosition.y).toBe(added!.trajectory.endPosition.y);
+
+    // Verify fallback humanoid stand-in sole rests at y >= 0 (no sinking into the floor)
+    const fallbackRig = createHumanoidSkeleton(5.06);
+    createStylizedHumanoidStandin(fallbackRig, 0x38bdf8);
+    const standinBox = new THREE.Box3().setFromObject(fallbackRig.root);
+    expect(standinBox.min.y).toBeGreaterThanOrEqual(-0.005);
+
+    // Verify Direct Bone Pose & Joint Control in Rig sub-tab
+    const onUpdateActor = vi.fn();
+    const { getByText } = render(<CharacterControlCard {...createProps({ onUpdateActor })} />);
+    fireEvent.click(getByText('Rig/XYZ'));
+    expect(getByText('Bone Pose & Joint Control')).toBeTruthy();
+    fireEvent.click(getByText('LeftArm'));
   });
 });
 

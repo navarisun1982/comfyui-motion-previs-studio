@@ -195,8 +195,11 @@ export function createSubjectMesh(
           child.scale.multiplyScalar(scaleMult);
           child.position.multiplyScalar(scaleMult);
         });
-        sceneRoot.updateMatrixWorld(true);
-        const reBox = new THREE.Box3().setFromObject(sceneRoot);
+      }
+      // Always recenter horizontally (X/Z) and snap lowest vertex (min.y) onto the floor plane (y = 0)
+      sceneRoot.updateMatrixWorld(true);
+      const reBox = new THREE.Box3().setFromObject(sceneRoot);
+      if (!reBox.isEmpty()) {
         const reCenter = reBox.getCenter(new THREE.Vector3());
         sceneRoot.children.forEach((child) => {
           child.position.x -= reCenter.x;
@@ -247,6 +250,10 @@ export function createSubjectMesh(
       });
 
       const finalBox = new THREE.Box3().setFromObject(sceneRoot);
+      if (!finalBox.isEmpty() && Math.abs(finalBox.min.y) > 0.005) {
+        sceneRoot.position.y -= finalBox.min.y;
+        sceneRoot.updateMatrixWorld(true);
+      }
       const finalSize = finalBox.getSize(new THREE.Vector3());
       group.userData.modelSize = finalSize;
       return finalSize;
@@ -500,6 +507,12 @@ export function createSubjectMesh(
           } else {
             applyPosePreset(loadedRig, 'neutral-stand');
           }
+          loadedRig.root.updateMatrixWorld(true);
+          const loadedBox = new THREE.Box3().setFromObject(loadedRig.root);
+          if (!loadedBox.isEmpty() && loadedBox.min.y < -0.002) {
+            loadedRig.root.position.y -= loadedBox.min.y;
+            loadedRig.root.updateMatrixWorld(true);
+          }
 
           // Dynamically adjust banner position above loaded rig head
           group.children.forEach((child) => {
@@ -524,8 +537,13 @@ export function createSubjectMesh(
     } else {
       applyPosePreset(rig, 'neutral-stand');
     }
+    rig.root.updateMatrixWorld(true);
 
     const bbox = new THREE.Box3().setFromObject(rig.root);
+    if (!bbox.isEmpty() && bbox.min.y < -0.002) {
+      rig.root.position.y -= bbox.min.y;
+      rig.root.updateMatrixWorld(true);
+    }
     const size = bbox.getSize(new THREE.Vector3());
     const baseRadius = Math.max(2.4, Math.max(size.x, size.z) * 0.55);
 

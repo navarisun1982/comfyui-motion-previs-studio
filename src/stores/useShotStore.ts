@@ -108,6 +108,7 @@ interface ShotState {
       rigType?: Actor['rigType'];
       rigLandmarks?: any;
       showBones?: boolean;
+      pose?: ActorPose;
       startPosition?: Point3D;
     }
   ) => void;
@@ -575,6 +576,15 @@ export const useShotStore = create<ShotState>((set, get) => {
       }
     }
 
+    const stageChanged =
+      currentShot.actors !== updated.actors ||
+      currentShot.camera !== updated.camera ||
+      currentShot.environment !== updated.environment ||
+      currentShot.lighting !== updated.lighting ||
+      currentShot.durationSeconds !== updated.durationSeconds ||
+      currentShot.aspectRatio !== updated.aspectRatio ||
+      currentShot.claymationMode !== updated.claymationMode;
+
     const currentShots = get().shotsById;
     const nextShots = { ...currentShots, [updated.id]: updated };
     persistShotsMap(nextShots, options?.immediatePersist || false);
@@ -585,6 +595,16 @@ export const useShotStore = create<ShotState>((set, get) => {
       isDirty: true,
       canUndo: shotHistory.past.length > 0,
       canRedo: shotHistory.future.length > 0,
+      ...(stageChanged
+        ? {
+            previsVideoUrl: undefined,
+            previsVideoBlob: undefined,
+            previsOpenPoseUrl: undefined,
+            previsOpenPoseBlob: undefined,
+            previsDepthUrl: undefined,
+            previsDepthBlob: undefined,
+          }
+        : {}),
       ...extraState,
     });
   };
@@ -2056,7 +2076,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         a.id === actorId
           ? {
               ...a,
-              gait: 'idle' as ActorGait,
+              gait: 'none' as ActorGait,
               motionClip: undefined,
               motionCycles: 1,
               posePreset: 'neutral-stand',
@@ -2150,7 +2170,12 @@ export const useShotStore = create<ShotState>((set, get) => {
 
       const spawnX = options?.startPosition?.x ?? (35 + Math.floor(Math.random() * 30));
       const spawnY = options?.startPosition?.y ?? (35 + Math.floor(Math.random() * 30));
-      const spawnZ = options?.startPosition?.z ?? 0; // Default on ground
+      const spawnZ = Math.max(0, options?.startPosition?.z ?? 0); // Always grounded at or above floor (z >= 0)
+      const isHumanoidActor =
+        resolvedKind === 'human' ||
+        resolvedKind === 'character' ||
+        resolvedKind === 'person' ||
+        options?.rigType === 'humanoid';
 
       const newActor: Actor = {
         id: `actor-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -2158,6 +2183,9 @@ export const useShotStore = create<ShotState>((set, get) => {
         kind,
         token: defaultToken,
         actionDescription: options?.actionDescription || defaultAction,
+        gait: 'none',
+        pose: options?.pose,
+        posePreset: options?.pose ? undefined : isHumanoidActor ? 'neutral-stand' : undefined,
         trajectory: {
           startTimeSeconds: 0,
           startPosition: { x: spawnX, y: spawnY, z: spawnZ },

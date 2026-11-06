@@ -344,22 +344,22 @@ describe('Camera-POV Frustum Visibility & Official Model Prompting (povVisibilit
     };
 
     const minimax = compileMiniMaxPrompt(shot);
-    // Both the non-human tree (<Subject 1>) and human (<Subject 2>) + environment (<Subject 4>) use fully_preserved
-    expect(minimax.positivePrompt).toContain('<Subject 1> is Ancient Blossom Tree (from <picture 1>)');
+    // Both the non-human tree (<Subject 1>) and human (<Subject 2>) + environment (<Subject 4>) use fully_preserved and capital <Picture N>
+    expect(minimax.positivePrompt).toContain('<Subject 1> is Ancient Blossom Tree (from <Picture 1>)');
     expect(minimax.positivePrompt).toContain('<Subject 1> (present throughout): fully_preserved');
-    expect(minimax.positivePrompt).toContain('<Subject 2> is Wanderer (from <picture 2>)');
+    expect(minimax.positivePrompt).toContain('<Subject 2> is Wanderer (from <Picture 2>)');
     expect(minimax.positivePrompt).toContain('<Subject 2> (present throughout): fully_preserved');
     expect(minimax.positivePrompt).toContain('<Subject 4> (present throughout): fully_preserved');
     expect(minimax.positivePrompt).not.toContain('attribute_transfer');
-    // <Video 1> uses weak_reference and explicitly forbids texture-wrapping
+    // <Video 1> uses partially_preserved (golden middle ground: preserves framing, placement & choreography while rendering natural fluid motion)
     expect(minimax.positivePrompt).toContain(
-      '<Video 1> (camera/motion reference): weak_reference - only structural/camera characteristics'
+      '<Video 1> (camera/motion reference): partially_preserved - preserve the exact camera trajectory, framing, subject screen placement, scale proportions, and choreographed motion timing from <Video 1>'
     );
     expect(minimax.positivePrompt).toContain('do NOT merely texture-wrap');
 
     const ltx = compileLtxPrompt(shot);
     expect(ltx.positivePrompt).toContain('living real-world entity');
-    expect(ltx.positivePrompt).toContain('without preserving any synthetic proxy geometry');
+    expect(ltx.positivePrompt).toContain('without preserving synthetic proxy geometry');
 
     const seedance = compileSeedancePrompt(shot);
     expect(seedance.positivePrompt).toContain('[Previs-to-Reality Spatial Instantiation]');

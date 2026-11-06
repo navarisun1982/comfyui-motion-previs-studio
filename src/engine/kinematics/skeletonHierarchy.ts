@@ -45,15 +45,15 @@ export const HUMANOID_BONE_TREE: BoneDefinition[] = [
   { name: 'RightForeArm', parent: 'RightArm', relativeOffset: [-0.15, 0, 0] },
   { name: 'RightHand', parent: 'RightForeArm', relativeOffset: [-0.14, 0, 0] },
 
-  // Left Leg (-Y downwards)
+  // Left Leg (-Y downwards; ankle sits at 0.03 * height so foot sole rests flush at y = 0)
   { name: 'LeftUpLeg', parent: 'Hips', relativeOffset: [0.09, -0.05, 0] },
-  { name: 'LeftLeg', parent: 'LeftUpLeg', relativeOffset: [0, -0.24, 0] },
-  { name: 'LeftFoot', parent: 'LeftLeg', relativeOffset: [0, -0.24, 0.04] },
+  { name: 'LeftLeg', parent: 'LeftUpLeg', relativeOffset: [0, -0.225, 0] },
+  { name: 'LeftFoot', parent: 'LeftLeg', relativeOffset: [0, -0.225, 0.04] },
 
-  // Right Leg (-Y downwards)
+  // Right Leg (-Y downwards; ankle sits at 0.03 * height so foot sole rests flush at y = 0)
   { name: 'RightUpLeg', parent: 'Hips', relativeOffset: [-0.09, -0.05, 0] },
-  { name: 'RightLeg', parent: 'RightUpLeg', relativeOffset: [0, -0.24, 0] },
-  { name: 'RightFoot', parent: 'RightLeg', relativeOffset: [0, -0.24, 0.04] },
+  { name: 'RightLeg', parent: 'RightUpLeg', relativeOffset: [0, -0.225, 0] },
+  { name: 'RightFoot', parent: 'RightLeg', relativeOffset: [0, -0.225, 0.04] },
 ];
 
 export interface HumanoidRig {
@@ -298,13 +298,13 @@ export function createStylizedHumanoidStandin(rig: HumanoidRig, colorHex = 0x38b
   addSegment('RightUpLeg', h * 0.038, h * 0.03, h * 0.23, '-y');
   addSegment('RightLeg', h * 0.03, h * 0.022, h * 0.23, '-y');
 
-  // Feet
+  // Feet (ankle is at +0.03*h; foot box height is 0.02*h centered at -0.02*h so sole rests at y = 0.00)
   const leftFoot = new THREE.Mesh(new THREE.BoxGeometry(h * 0.04, h * 0.02, h * 0.08), material);
-  leftFoot.position.set(0, -h * 0.01, h * 0.03);
+  leftFoot.position.set(0, -h * 0.02, h * 0.03);
   rig.bones.get('LeftFoot')?.add(leftFoot);
 
   const rightFoot = new THREE.Mesh(new THREE.BoxGeometry(h * 0.04, h * 0.02, h * 0.08), material);
-  rightFoot.position.set(0, -h * 0.01, h * 0.03);
+  rightFoot.position.set(0, -h * 0.02, h * 0.03);
   rig.bones.get('RightFoot')?.add(rightFoot);
 
   rig.root.updateMatrixWorld(true);

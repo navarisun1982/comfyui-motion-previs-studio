@@ -467,6 +467,26 @@ function resolveComfyPortsToTry(targetUrl) {
   return portsToTry;
 }
 
+function sanitizeComfyPromptBuffer(reqPath, buf) {
+  if (!buf || buf.length === 0) return buf;
+  if (!String(reqPath || '').includes('/prompt')) return buf;
+  try {
+    const str = buf.toString('utf-8');
+    if (
+      !str.includes('9:16 (Vertical)') &&
+      !str.includes('4:3 (Classic TV)')
+    ) {
+      return buf;
+    }
+    const fixed = str
+      .replace(/9:16 \(Vertical\)/g, '9:16 (Portrait Widescreen)')
+      .replace(/4:3 \(Classic TV\)/g, '4:3 (Standard)');
+    return Buffer.from(fixed, 'utf-8');
+  } catch {
+    return buf;
+  }
+}
+
 function comfyRequestDirect(options = {}) {
   const {
     path: reqPath = '/system_stats',
@@ -479,7 +499,7 @@ function comfyRequestDirect(options = {}) {
   } = options;
 
   const portsToTry = resolveComfyPortsToTry(targetUrl);
-  const bodyBuf =
+  const rawBodyBuf =
     body == null
       ? null
       : Buffer.isBuffer(body)
@@ -487,6 +507,7 @@ function comfyRequestDirect(options = {}) {
       : typeof body === 'string'
       ? Buffer.from(body, 'utf-8')
       : Buffer.from(JSON.stringify(body), 'utf-8');
+  const bodyBuf = sanitizeComfyPromptBuffer(reqPath, rawBodyBuf);
 
   return new Promise((resolve) => {
     const attemptPort = (idx) => {
@@ -635,7 +656,7 @@ function forwardComfyRequest(req, res, forwardPath) {
   const chunks = [];
   req.on('data', (chunk) => chunks.push(chunk));
   req.on('end', () => {
-    const bodyBuf = Buffer.concat(chunks);
+    const bodyBuf = sanitizeComfyPromptBuffer(forwardPath, Buffer.concat(chunks));
     const customTargetHeader = req.headers['x-comfy-target'];
     const portsToTry = resolveComfyPortsToTry(customTargetHeader);
 

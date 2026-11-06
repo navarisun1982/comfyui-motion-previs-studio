@@ -163,6 +163,31 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
     applied.push({ field: `profile:${values.profile}`, node: o.node, input: o.input, value: o.value });
   }
 
+  // Normalize any legacy ResolutionSelector / StubeliusH3DirectorV2 aspect_ratio strings
+  // to ComfyUI's exact nodes_resolution.py AspectRatio enum values.
+  const ASPECT_RATIO_NORMALIZATION: Record<string, string> = {
+    '9:16 (Vertical)': '9:16 (Portrait Widescreen)',
+    '4:3 (Classic TV)': '4:3 (Standard)',
+    '16:9': '16:9 (Widescreen)',
+    '9:16': '9:16 (Portrait Widescreen)',
+    '1:1': '1:1 (Square)',
+    '4:3': '4:3 (Standard)',
+    '2.39:1': '21:9 (Ultrawide)',
+    '21:9': '21:9 (Ultrawide)',
+  };
+  for (const node of Object.values(workflow)) {
+    if (!node?.inputs) continue;
+    if (
+      (node.class_type === 'ResolutionSelector' ||
+        node.class_type === 'StubeliusH3DirectorV2' ||
+        node.class_type === 'MuseMinimaxDirector') &&
+      typeof node.inputs.aspect_ratio === 'string' &&
+      ASPECT_RATIO_NORMALIZATION[node.inputs.aspect_ratio]
+    ) {
+      node.inputs.aspect_ratio = ASPECT_RATIO_NORMALIZATION[node.inputs.aspect_ratio];
+    }
+  }
+
   return { workflow, applied };
 }
 
@@ -184,7 +209,7 @@ function resolveTargetValue(
     return JSON.stringify(patcher.apply(parsed, patchCtx));
   }
 
-  const runtime = fieldValue(field, values);
+  const runtime = fieldValue(field, values, binding.engine);
   if (target.map) {
     const key = String(runtime);
     if (!Object.prototype.hasOwnProperty.call(target.map, key)) {
@@ -197,10 +222,10 @@ function resolveTargetValue(
   return runtime;
 }
 
-function fieldValue(field: BindableField, v: BindValues): unknown {
+function fieldValue(field: BindableField, v: BindValues, engine?: string): unknown {
   switch (field) {
     case 'prompt':
-      return v.prompt;
+      return engine === 'minimax-h3' ? normalizeMiniMaxPromptForConnectedRefs(v.prompt, v) : v.prompt;
     case 'negative':
       return v.negative;
     case 'seed':
@@ -293,4 +318,73 @@ export function snapFrames(durationSeconds: number, frameRate: number, rule: Tem
   if (rule !== '8n+1') return raw;
   const n = Math.max(1, Math.round((raw - 1) / 8));
   return n * 8 + 1;
+}
+
+/**
+ * Normalizes MiniMax H3 prompt tags to match ComfyUI's exact Qwen3-VL tokenizer (`minimax.py`
+ * injects `<Picture %d>: ` and `<Video %d>: ` with capital P/V in dense fill order 1..K).
+ * - Converts any lowercase `<picture N>` / `<video N>` to `<Picture N>` / `<Video N>`.
+ * - When a subset of `refImage1..4` slots are populated, strips `<Picture k>` citations for
+ *   empty slots and remaps remaining `<Picture k>` tags to their dense `1..K` index.
+ */
+export function normalizeMiniMaxPromptForConnectedRefs(prompt: string, v: BindValues): string {
+  if (!prompt) return prompt;
+  let out = prompt
+    .replace(/<picture\s+(\d+)>/gi, '<Picture $1>')
+    .replace(/<video\s+(\d+)>/gi, '<Video $1>');
+
+  if (!out.includes('<Picture ')) return out;
+
+  const slotFiles = [
+    (v.refImage1File || '').trim(),
+    (v.refImage2File || '').trim(),
+    (v.refImage3File || '').trim(),
+    (v.refImage4File || '').trim(),
+  ];
+
+  const denseMap: Array<number | null> = [null, null, null, null];
+  let denseCounter = 0;
+  for (let i = 0; i < 4; i++) {
+    if (slotFiles[i].length > 0) {
+      denseCounter += 1;
+      denseMap[i] = denseCounter;
+    }
+  }
+
+  // If all 4 slots are populated, 1..4 already match dense 1..4
+  if (denseCounter === 4) return out;
+
+  // Replace summary range phrase `<Picture 1>–<Picture N> and <Picture 4>` or `<Picture 4>`
+  const activeDenseTags = Array.from({ length: denseCounter }, (_, idx) => `<Picture ${idx + 1}>`);
+  const replacementRange =
+    activeDenseTags.length === 0
+      ? 'authentic real-world descriptions'
+      : activeDenseTags.length === 1
+      ? activeDenseTags[0]
+      : `${activeDenseTags.slice(0, -1).join(', ')} and ${activeDenseTags[activeDenseTags.length - 1]}`;
+
+  out = out.replace(
+    /<Picture \d+>[–-]<Picture \d+>\s+and\s+<Picture 4>/g,
+    replacementRange
+  );
+
+  // Strip or remap each slot 1..4
+  for (let i = 0; i < 4; i++) {
+    const origNum = i + 1;
+    const denseNum = denseMap[i];
+    if (denseNum === null) {
+      out = out
+        .replace(new RegExp(`\\s*\\(from <Picture ${origNum}>\\)`, 'g'), '')
+        .replace(new RegExp(`\\s+from <Picture ${origNum}>`, 'g'), '')
+        .replace(new RegExp(`matches <Picture ${origNum}>;\\s*`, 'g'), '')
+        .replace(new RegExp(`matches <Picture ${origNum}>\\.`, 'g'), 'preserves its authentic real-world identity.')
+        .replace(new RegExp(`\\s+and <Picture ${origNum}>`, 'g'), '')
+        .replace(new RegExp(`<Picture ${origNum}>\\s+for\\s+`, 'g'), 'for ');
+    } else if (denseNum !== origNum) {
+      out = out.replace(new RegExp(`<Picture ${origNum}>`, 'g'), `__DENSE_PIC_${denseNum}__`);
+    }
+  }
+
+  out = out.replace(/__DENSE_PIC_(\d+)__/g, '<Picture $1>');
+  return out;
 }

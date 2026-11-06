@@ -71,6 +71,8 @@ export interface AutoRigOptions {
   promptHint?: string;
   landmarks?: Partial<RigLandmarks>;
   showBones?: boolean;
+  /** When true (e.g. during live slider dragging on a 400k-vert mesh), updates the skeleton & joint overlay in <1ms without re-running O(N_verts) skinning */
+  fastPreviewOnly?: boolean;
 }
 
 export interface AutoRigResult {
@@ -1065,7 +1067,9 @@ function skinSceneMeshesToRig(
           const dSq = distToSegmentSq(vModel, seg.start, seg.end);
           const rSq = seg.radius * seg.radius;
           const normalizedDistSq = dSq / Math.max(1e-6, rSq);
-          const weight = (1.0 / Math.pow(1.0 + normalizedDistSq * 1.35, 2.6)) * penalty;
+          const denomBase = 1.0 + normalizedDistSq * 1.35;
+          const denomSq = denomBase * denomBase;
+          const weight = (1.0 / (denomSq * Math.sqrt(denomBase))) * penalty;
 
           // Accumulate if same boneIndex already in top 4
           if (w0 > 0 && b0 === seg.boneIndex) {
@@ -1185,10 +1189,11 @@ export function createRigVisualOverlay(rig: HumanoidRig, visible = false): THREE
     const isCore = boneName === 'Hips' || boneName === 'Chest' || boneName === 'Head';
     const sphere = new THREE.Mesh(jointGeo, isCore ? rootJointMat : limbJointMat);
     sphere.name = '__bone_joint_sphere__';
+    sphere.userData = { isBoneJointSphere: true, boneName };
     sphere.renderOrder = 999;
     sphere.visible = visible;
-    sphere.raycast = () => {};
-    sphere.layers.set(1); // Editor gizmo layer 1 on stage
+    sphere.layers.enable(0);
+    sphere.layers.enable(1); // Editor gizmo layer 1 on stage + layer 0 in 3D Studio preview
     bone.add(sphere);
   }
 
@@ -1216,7 +1221,8 @@ export function createRigVisualOverlay(rig: HumanoidRig, visible = false): THREE
   lineSegments.renderOrder = 998;
   lineSegments.frustumCulled = false;
   lineSegments.raycast = () => {};
-  lineSegments.layers.set(1);
+  lineSegments.layers.enable(0);
+  lineSegments.layers.enable(1);
 
   const pA = new THREE.Vector3();
   const pB = new THREE.Vector3();
@@ -1430,8 +1436,10 @@ export function autoRigGltfScene(
   sceneRoot.add(rig.root);
   sceneRoot.updateMatrixWorld(true);
 
-  // 4. Volumetric capsule skinning
-  const skinnedMeshCount = skinSceneMeshesToRig(sceneRoot, rig, segments, resolvedType, landmarks);
+  // 4. Volumetric capsule skinning (skipped during fast live slider preview to maintain 60 FPS on 400k+ vert meshes)
+  const skinnedMeshCount = options.fastPreviewOnly
+    ? 0
+    : skinSceneMeshesToRig(sceneRoot, rig, segments, resolvedType, landmarks);
 
   // 5. Make `rig.root` point to `sceneRoot` so `rigPoint(rig, ...)` and `StagePrevis3D` transform calculations work seamlessly
   rig.root = sceneRoot;

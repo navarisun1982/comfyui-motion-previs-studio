@@ -36,6 +36,8 @@ import {
   evaluateReadyMadeObjectClip,
   resetToRestPose,
 } from '../engine/kinematics';
+import { ActorPose } from '../types/shotspec';
+import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
 import {
   Comfy3DEngineMode,
   Comfy3DQualityMode,
@@ -125,6 +127,11 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     'bind' | 'idle' | 'walk' | 'run' | 'wave' | 'fight'
   >('bind');
   const [showLandmarkEditor, setShowLandmarkEditor] = useState<boolean>(false);
+  const [showBonePoseEditor, setShowBonePoseEditor] = useState<boolean>(false);
+  const [selectedPreviewBone, setSelectedPreviewBone] = useState<HumanoidBone>('RightArm');
+  const [customBonePose, setCustomBonePose] = useState<
+    Partial<Record<HumanoidBone, [number, number, number]>>
+  >({});
   const [rigInfo, setRigInfo] = useState<AutoRigResult | null>(null);
   const [customLandmarks, setCustomLandmarks] = useState<Partial<RigLandmarks> | null>(null);
 
@@ -132,6 +139,11 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   previewMotionRef.current = previewMotion;
   const showBonesRef = useRef(showBones);
   showBonesRef.current = showBones;
+  const customBonePoseRef = useRef<Partial<Record<HumanoidBone, [number, number, number]>>>(
+    customBonePose
+  );
+  customBonePoseRef.current = customBonePose;
+  const draggingPreviewBoneRef = useRef<HumanoidBone | null>(null);
   const loadedSceneRef = useRef<THREE.Group | null>(null);
 
   // 3D Canvas Mount Ref
@@ -187,13 +199,29 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     return () => window.clearInterval(interval);
   }, [isGenerating]);
 
+  const isUuidOrNoiseFilename = (raw: string): boolean => {
+    const s = raw.trim();
+    if (!s) return true;
+    // Matches UUIDs (with spaces or hyphens), long hex hashes, cmpvs_* hashes, or IMG_1234 / Screenshot_1234
+    if (/^[0-9a-f]{8}[\s_-][0-9a-f]{4}[\s_-][0-9a-f]{4}[\s_-][0-9a-f]{4}[\s_-][0-9a-f]{12}$/i.test(s)) return true;
+    if (/^[0-9a-f]{16,}$/i.test(s.replace(/[\s_-]/g, ''))) return true;
+    if (/^(cmpvs|img|dsc|screenshot|whatsapp\s+image|image|photo|untitled)[\s_-]*\d*/i.test(s)) return true;
+    return false;
+  };
+
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     e.stopPropagation();
     const file = e.target.files?.[0];
     if (!file) return;
-    const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
-    if (!actorName || actorName === 'Hero Character') {
-      setActorName(baseName || 'Hero Character');
+    const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
+    if (!actorName || actorName === 'Hero Character' || isUuidOrNoiseFilename(actorName)) {
+      const fallbackLabel =
+        actorCategory === 'prop'
+          ? 'Hero 3D Object'
+          : actorCategory === 'creature'
+          ? 'Hero 3D Creature'
+          : 'Hero Character';
+      setActorName(!isUuidOrNoiseFilename(baseName) ? baseName : fallbackLabel);
     }
     const reader = new FileReader();
     reader.onload = () => {
@@ -291,6 +319,9 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     renderer.shadowMap.enabled = false;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    renderer.domElement.style.display = 'block';
     rendererRef.current = renderer;
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
@@ -361,6 +392,16 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         modelGroup.add(loaded.scene);
         loadedSceneRef.current = loaded.scene;
 
+        loaded.scene.updateMatrixWorld(true);
+        const rawBox = new THREE.Box3().setFromObject(loaded.scene);
+        if (!rawBox.isEmpty()) {
+          const rawCenter = rawBox.getCenter(new THREE.Vector3());
+          loaded.scene.position.x -= rawCenter.x;
+          loaded.scene.position.z -= rawCenter.z;
+          loaded.scene.position.y -= rawBox.min.y;
+          loaded.scene.updateMatrixWorld(true);
+        }
+
         const box = new THREE.Box3().setFromObject(loaded.scene);
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
@@ -384,12 +425,67 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         console.error('Failed to display generated GLB in preview:', err);
       });
 
-    // Mouse Drag Orbit
+    // Mouse Drag Orbit + Interactive 3D Joint Sphere Clicking & Bone Posing
+    const previewRaycaster = new THREE.Raycaster();
+    previewRaycaster.layers.enable(0);
+    previewRaycaster.layers.enable(1);
+
     const onMouseDown = (e: MouseEvent) => {
-      isDraggingRef.current = true;
       prevMouseRef.current = { x: e.clientX, y: e.clientY };
+
+      // Check if clicking directly on a 3D bone joint sphere when Bones are visible
+      const activeScene = loadedSceneRef.current;
+      if (activeScene && showBonesRef.current && cameraRef.current) {
+        const rect = container.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+          const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+          previewRaycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), cameraRef.current);
+
+          const jointSpheres: THREE.Object3D[] = [];
+          activeScene.traverse((obj) => {
+            if (obj.name === '__bone_joint_sphere__' && obj.visible) {
+              jointSpheres.push(obj);
+            }
+          });
+
+          const hits = previewRaycaster.intersectObjects(jointSpheres, false);
+          if (hits.length > 0) {
+            const hitBone = hits[0].object.userData?.boneName as HumanoidBone | undefined;
+            if (hitBone) {
+              draggingPreviewBoneRef.current = hitBone;
+              setSelectedPreviewBone(hitBone);
+              setShowBonePoseEditor(true);
+              setPreviewMotion('bind');
+              setAutoSpin(false);
+              return;
+            }
+          }
+        }
+      }
+
+      draggingPreviewBoneRef.current = null;
+      isDraggingRef.current = true;
     };
     const onMouseMove = (e: MouseEvent) => {
+      if (draggingPreviewBoneRef.current) {
+        const dx = e.clientX - prevMouseRef.current.x;
+        const dy = e.clientY - prevMouseRef.current.y;
+        prevMouseRef.current = { x: e.clientX, y: e.clientY };
+        const bName = draggingPreviewBoneRef.current;
+        setCustomBonePose((prev) => {
+          const cur = prev[bName] || [0, 0, 0];
+          const nextX = e.shiftKey ? cur[0] : Number(Math.max(-2.2, Math.min(2.2, cur[0] + dy * 0.012)).toFixed(3));
+          const nextY = e.shiftKey ? cur[1] : Number(Math.max(-2.2, Math.min(2.2, cur[1] + dx * 0.012)).toFixed(3));
+          const nextZ = e.shiftKey ? Number(Math.max(-2.2, Math.min(2.2, cur[2] - dx * 0.012)).toFixed(3)) : cur[2];
+          return {
+            ...prev,
+            [bName]: [nextX, nextY, nextZ],
+          };
+        });
+        return;
+      }
+
       if (!isDraggingRef.current) return;
       const dx = e.clientX - prevMouseRef.current.x;
       const dy = e.clientY - prevMouseRef.current.y;
@@ -404,6 +500,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     };
     const onMouseUp = () => {
       isDraggingRef.current = false;
+      draggingPreviewBoneRef.current = null;
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -435,6 +532,23 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       } else if (activeScene && activeRig) {
         if (motion === 'bind') {
           resetToRestPose(activeRig);
+          if (customBonePoseRef.current && Object.keys(customBonePoseRef.current).length > 0) {
+            for (const [bName, eulerTuple] of Object.entries(customBonePoseRef.current)) {
+              const bone = activeRig.bones?.get(bName as HumanoidBone);
+              if (bone && eulerTuple) {
+                const restRot = activeRig.restRotations?.get(bName as HumanoidBone);
+                const deltaQ = new THREE.Quaternion().setFromEuler(
+                  new THREE.Euler(eulerTuple[0], eulerTuple[1], eulerTuple[2], 'XYZ')
+                );
+                if (restRot) {
+                  bone.quaternion.copy(restRot).multiply(deltaQ);
+                } else {
+                  bone.quaternion.copy(deltaQ);
+                }
+              }
+            }
+            activeRig.root?.updateMatrixWorld(true);
+          }
         } else if (activeRigType === 'humanoid') {
           if (motion === 'idle') {
             evaluateGait(activeRig, tSec, { gait: 'idle', speed: 0 });
@@ -529,7 +643,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     };
   }, [isOpen, generatedResult?.blobUrl]);
 
-  // Re-run auto-rigging live when rigType, actorCategory, or customLandmarks change
+  // Re-run auto-rigging live when rigType or actorCategory change (full skinning)
   useEffect(() => {
     const activeScene = loadedSceneRef.current;
     if (!activeScene) return;
@@ -542,7 +656,40 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     });
     setRigOverlayVisible(activeScene, showBones, true);
     setRigInfo(rigRes);
-  }, [rigType, actorCategory, customLandmarks]);
+  }, [rigType, actorCategory]);
+
+  // When dragging Joint Landmark sliders on high-poly meshes (e.g. 400k verts),
+  // immediately update the 3D skeleton & joint spheres in <1ms (fastPreviewOnly: true)
+  // and debounce the heavy volumetric vertex skinning pass by 140ms so sliders stay 60 FPS!
+  useEffect(() => {
+    const activeScene = loadedSceneRef.current;
+    if (!activeScene) return;
+    const fastRes = autoRigGltfScene(activeScene, {
+      rigType,
+      categoryHint: actorCategory,
+      nameHint: actorName,
+      landmarks: customLandmarks || undefined,
+      showBones,
+      fastPreviewOnly: true,
+    });
+    setRigOverlayVisible(activeScene, showBones, true);
+    setRigInfo(fastRes);
+
+    const timer = window.setTimeout(() => {
+      if (!loadedSceneRef.current) return;
+      const fullRes = autoRigGltfScene(loadedSceneRef.current, {
+        rigType,
+        categoryHint: actorCategory,
+        nameHint: actorName,
+        landmarks: customLandmarks || undefined,
+        showBones: showBonesRef.current,
+        fastPreviewOnly: false,
+      });
+      setRigOverlayVisible(loadedSceneRef.current, showBonesRef.current, true);
+      setRigInfo(fullRes);
+    }, 140);
+    return () => window.clearTimeout(timer);
+  }, [customLandmarks]);
 
   // Toggle bone overlay visibility on already-mounted mesh
   useEffect(() => {
@@ -609,11 +756,19 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     );
 
     try {
+      const fallbackCategoryName =
+        actorCategory === 'prop'
+          ? 'Hero 3D Object'
+          : actorCategory === 'creature'
+          ? 'Hero 3D Creature'
+          : 'Hero Character';
+      const rawActorName = actorName.trim();
       const effectiveActorName =
-        actorName.trim() ||
-        (generationMode === 'text-to-3d'
-          ? textPrompt.trim().slice(0, 36) || '3D Object'
-          : 'Hero Character');
+        rawActorName && !isUuidOrNoiseFilename(rawActorName)
+          ? rawActorName
+          : generationMode === 'text-to-3d'
+          ? textPrompt.trim().slice(0, 36) || fallbackCategoryName
+          : fallbackCategoryName;
 
       const result = await generate3DGlbInComfy({
         generationMode,
@@ -689,7 +844,15 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   // Save or update generated .GLB in 3D Asset Library with current name, category & rig settings
   const handleSaveToLibrary = async () => {
     if (!generatedResult) return;
-    const cleanName = actorName.trim() || 'ComfyUI 3D Character';
+    const rawTrimmed = actorName.trim();
+    const fallbackCategoryName =
+      actorCategory === 'prop'
+        ? 'Hero 3D Object'
+        : actorCategory === 'creature'
+        ? 'Hero 3D Creature'
+        : 'Hero Character';
+    const cleanName =
+      rawTrimmed && !isUuidOrNoiseFilename(rawTrimmed) ? rawTrimmed : fallbackCategoryName;
     const resolvedConceptImage =
       generationMode === 'text-to-3d'
         ? generatedResult.generatedConceptImageUrl || undefined
@@ -715,7 +878,19 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   // and ensures the 3D Asset Library entry is updated and both modals close so the rigged .GLB appears immediately on stage.
   const handleAddToScene = () => {
     if (!generatedResult) return;
-    const cleanName = actorName.trim() || 'ComfyUI 3D Character';
+    const rawTrimmed = actorName.trim();
+    const fallbackCategoryName =
+      actorCategory === 'prop'
+        ? 'Hero 3D Object'
+        : actorCategory === 'creature'
+        ? 'Hero 3D Creature'
+        : 'Hero Character';
+    const cleanName =
+      rawTrimmed && !isUuidOrNoiseFilename(rawTrimmed) ? rawTrimmed : fallbackCategoryName;
+    const resolvedToken =
+      generationMode === 'text-to-3d' && textPrompt.trim()
+        ? textPrompt.trim()
+        : cleanName;
     const resolvedConceptImage =
       generationMode === 'text-to-3d'
         ? generatedResult.generatedConceptImageUrl || undefined
@@ -735,10 +910,25 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       engineUsed: generatedResult.engineUsed,
     });
 
+    const customRotations: Record<string, [number, number, number, number]> = {};
+    for (const [bName, eulerTuple] of Object.entries(customBonePose)) {
+      if (!eulerTuple) continue;
+      const q = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(eulerTuple[0], eulerTuple[1], eulerTuple[2], 'XYZ')
+      );
+      customRotations[bName] = [q.x, q.y, q.z, q.w];
+    }
+    const serializedActorPose: ActorPose | undefined =
+      Object.keys(customRotations).length > 0 ? { rotations: customRotations } : undefined;
+
     if (targetActorId) {
       updateActor(targetActorId, {
         name: cleanName,
         kind: actorCategory,
+        token: resolvedToken,
+        ...(actorCategory === 'prop'
+          ? { actionDescription: 'maintains steady physical presence in the camera frame' }
+          : {}),
         modelUrl: generatedResult.blobUrl,
         conceptImageUrl: resolvedConceptImage,
         sculpt: undefined,
@@ -746,14 +936,16 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         rigType,
         rigLandmarks: customLandmarks || rigInfo?.landmarks,
         showBones,
+        pose: serializedActorPose,
       });
     } else {
-      addActor(cleanName, actorCategory, cleanName, {
+      addActor(cleanName, actorCategory, resolvedToken, {
         modelUrl: generatedResult.blobUrl,
         conceptImageUrl: resolvedConceptImage,
         rigType,
         rigLandmarks: customLandmarks || rigInfo?.landmarks,
         showBones,
+        pose: serializedActorPose,
       });
     }
 
@@ -1384,18 +1576,52 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                 )}
               </button>
             ) : (
-              <div className="w-full py-2.5 px-4 rounded-xl font-mono text-xs font-bold text-emerald-300 bg-emerald-950/30 border border-emerald-500/40 flex items-center justify-between gap-2">
-                <span className="flex items-center gap-1.5">
-                  <Lock className="h-3.5 w-3.5 text-emerald-400" />
-                  <span>✓ 3D .GLB Created &amp; Saved to Library</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={handleStartNew3DObject}
-                  className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[10.5px] font-semibold cursor-pointer"
-                >
-                  + New Object
-                </button>
+              <div className="w-full py-2.5 px-3.5 rounded-xl font-mono text-xs font-bold text-emerald-300 bg-emerald-950/30 border border-emerald-500/40 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5">
+                    <Lock className="h-3.5 w-3.5 text-emerald-400" />
+                    <span>✓ 3D .GLB Created &amp; Saved to Library</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleStartNew3DObject}
+                    className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[10.5px] font-semibold cursor-pointer"
+                  >
+                    + New Object
+                  </button>
+                </div>
+                {generatedResult && (
+                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-emerald-500/20">
+                    <button
+                      type="button"
+                      onClick={handleSaveToLibrary}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow cursor-pointer transition-all"
+                    >
+                      {savedLibrarySuccess ? (
+                        <>
+                          <Check className="h-3.5 w-3.5" />
+                          <span>Saved to 3D Library!</span>
+                        </>
+                      ) : (
+                        <span>Save to 3D Library</span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddToScene}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black text-[11px] font-bold shadow cursor-pointer transition-all"
+                    >
+                      {appliedSuccess ? (
+                        <>
+                          <Check className="h-3.5 w-3.5" />
+                          <span>Added to Stage!</span>
+                        </>
+                      ) : (
+                        <span>{targetActorId ? 'Apply .GLB to Actor' : 'Add to Active Scene (Stage)'}</span>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1435,7 +1661,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
           </div>
 
           {/* RIGHT COLUMN (7 Cols): Interactive 3D .GLB Viewport & Export Bar */}
-          <div className="lg:col-span-7 flex flex-col bg-[#080a10] relative min-h-[380px]">
+          <div className="lg:col-span-7 flex flex-col bg-[#080a10] relative min-h-0 overflow-hidden">
             {/* Top Viewport Overlay Badges & Controls */}
             <div className="absolute top-3 left-3 right-3 z-10 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
               <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto">
@@ -1508,7 +1734,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
             </div>
 
             {/* 3D WebGL Canvas Container */}
-            <div ref={canvasMountRef} className="flex-1 w-full h-full cursor-grab active:cursor-grabbing" />
+            <div
+              ref={canvasMountRef}
+              className="flex-1 min-h-[180px] w-full relative overflow-hidden cursor-grab active:cursor-grabbing"
+            />
 
             {/* Staged Image / Text Prompt / Empty State Guidance Overlay when no .GLB is generated yet */}
             {!generatedResult && (
@@ -1578,7 +1807,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
             {/* Auto-Rigging, Live Motion Preview & Joint Landmark Tuner Bar */}
             {generatedResult && (
-              <div className="px-4 py-2.5 border-t border-white/10 bg-[#0c101b] space-y-2 shrink-0">
+              <div className="px-4 py-2 border-t border-white/10 bg-[#0c101b] space-y-2 max-h-[42%] overflow-y-auto shrink-0">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   {/* Rig Type Selector */}
                   <div className="flex flex-wrap items-center gap-1">
@@ -1597,7 +1826,12 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                       <button
                         key={opt.id}
                         type="button"
-                        onClick={() => setRigType(opt.id)}
+                        onClick={() => {
+                          setRigType(opt.id);
+                          if (opt.id !== 'rigid_prop') {
+                            setShowBones(true);
+                          }
+                        }}
                         className={`px-2 py-1 rounded-md text-[10px] font-semibold border transition-all cursor-pointer ${rigType === opt.id
                             ? 'bg-cyan-500/25 border-cyan-400 text-cyan-100'
                             : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
@@ -1608,18 +1842,46 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     ))}
                   </div>
 
-                  {/* Fine-Tune Joint Landmarks Toggle */}
+                  {/* Fine-Tune Joint Landmarks & Direct Bone Pose Toggles */}
                   {rigInfo && rigInfo.rigType !== 'rigid_prop' && (
-                    <button
-                      type="button"
-                      onClick={() => setShowLandmarkEditor((v) => !v)}
-                      className={`px-2.5 py-1 rounded-md text-[10px] font-mono font-semibold border transition-all cursor-pointer ${showLandmarkEditor
-                          ? 'bg-amber-500/25 border-amber-400 text-amber-200'
-                          : 'bg-white/5 border-white/15 text-slate-300 hover:text-white'
-                        }`}
-                    >
-                      🎯 {showLandmarkEditor ? 'Hide Joint Tuner' : 'Adjust Joint Landmarks'}
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowBonePoseEditor((v) => {
+                            const next = !v;
+                            if (next) {
+                              setShowBones(true);
+                              setPreviewMotion('bind');
+                            }
+                            return next;
+                          });
+                        }}
+                        className={`px-2.5 py-1 rounded-md text-[10px] font-mono font-semibold border transition-all cursor-pointer ${showBonePoseEditor
+                            ? 'bg-indigo-500/25 border-indigo-400 text-indigo-200'
+                            : 'bg-white/5 border-white/15 text-slate-300 hover:text-white'
+                          }`}
+                      >
+                        🦴 {showBonePoseEditor ? 'Hide Bone Pose' : 'Pose Bones'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowLandmarkEditor((v) => {
+                            const next = !v;
+                            if (next) setShowBones(true);
+                            return next;
+                          });
+                        }}
+                        className={`px-2.5 py-1 rounded-md text-[10px] font-mono font-semibold border transition-all cursor-pointer ${showLandmarkEditor
+                            ? 'bg-amber-500/25 border-amber-400 text-amber-200'
+                            : 'bg-white/5 border-white/15 text-slate-300 hover:text-white'
+                          }`}
+                      >
+                        🎯 {showLandmarkEditor ? 'Hide Joint Tuner' : 'Adjust Joint Landmarks'}
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -1663,6 +1925,149 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                         {m.label}
                       </button>
                     ))}
+                  </div>
+                )}
+
+                {/* Interactive Bone Pose & Rotation Controls */}
+                {showBonePoseEditor && rigInfo && rigInfo.rigType !== 'rigid_prop' && (
+                  <div className="rounded-lg border border-indigo-500/35 bg-black/65 p-2.5 space-y-2 text-[10px] font-mono">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-indigo-300 font-bold">
+                        🦴 Interactive Bone Pose &amp; Rotation (Click any 3D joint sphere in viewport or pick bone below)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCustomBonePose({})}
+                        className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-indigo-200 border border-indigo-500/30 cursor-pointer"
+                      >
+                        ↺ Reset Bone Pose
+                      </button>
+                    </div>
+
+                    {/* Bone Selector Pills */}
+                    <div className="flex flex-wrap gap-1">
+                      {(rigInfo.rigType === 'humanoid'
+                        ? ([
+                            'Head',
+                            'Neck',
+                            'Chest',
+                            'Spine',
+                            'Hips',
+                            'LeftArm',
+                            'LeftForeArm',
+                            'LeftHand',
+                            'RightArm',
+                            'RightForeArm',
+                            'RightHand',
+                            'LeftUpLeg',
+                            'LeftLeg',
+                            'LeftFoot',
+                            'RightUpLeg',
+                            'RightLeg',
+                            'RightFoot',
+                          ] as HumanoidBone[])
+                        : (['Hips', 'Spine', 'Chest', 'Neck', 'Head'] as HumanoidBone[])
+                      ).map((bName) => {
+                        const hasEdit = Boolean(
+                          customBonePose[bName] &&
+                            (Math.abs(customBonePose[bName]![0]) > 0.01 ||
+                              Math.abs(customBonePose[bName]![1]) > 0.01 ||
+                              Math.abs(customBonePose[bName]![2]) > 0.01)
+                        );
+                        return (
+                          <button
+                            key={bName}
+                            type="button"
+                            onClick={() => {
+                              setSelectedPreviewBone(bName);
+                              setShowBones(true);
+                              setPreviewMotion('bind');
+                            }}
+                            className={`px-2 py-0.5 rounded border text-[9.5px] font-semibold transition-all cursor-pointer ${
+                              selectedPreviewBone === bName
+                                ? 'bg-indigo-500/30 border-indigo-400 text-indigo-100'
+                                : hasEdit
+                                  ? 'bg-cyan-500/20 border-cyan-400/40 text-cyan-200'
+                                  : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {bName}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Selected Bone X / Y / Z Rotation Sliders (in degrees) */}
+                    {(() => {
+                      const curEuler = customBonePose[selectedPreviewBone] || [0, 0, 0];
+                      const degX = Math.round((curEuler[0] * 180) / Math.PI);
+                      const degY = Math.round((curEuler[1] * 180) / Math.PI);
+                      const degZ = Math.round((curEuler[2] * 180) / Math.PI);
+                      const updateAxis = (axisIdx: 0 | 1 | 2, degVal: number) => {
+                        const radVal = (degVal * Math.PI) / 180;
+                        setPreviewMotion('bind');
+                        setShowBones(true);
+                        setCustomBonePose((prev) => {
+                          const existing = prev[selectedPreviewBone] || [0, 0, 0];
+                          const nextTuple: [number, number, number] = [
+                            existing[0],
+                            existing[1],
+                            existing[2],
+                          ];
+                          nextTuple[axisIdx] = radVal;
+                          return {
+                            ...prev,
+                            [selectedPreviewBone]: nextTuple,
+                          };
+                        });
+                      };
+                      return (
+                        <div className="grid grid-cols-3 gap-2 pt-1">
+                          <label className="flex flex-col gap-0.5 text-slate-300">
+                            <span>
+                              {selectedPreviewBone} Pitch (X): {degX}°
+                            </span>
+                            <input
+                              type="range"
+                              min={-120}
+                              max={120}
+                              step={1}
+                              value={degX}
+                              onChange={(e) => updateAxis(0, Number(e.target.value))}
+                              className="accent-indigo-400"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-0.5 text-slate-300">
+                            <span>
+                              {selectedPreviewBone} Twist (Y): {degY}°
+                            </span>
+                            <input
+                              type="range"
+                              min={-120}
+                              max={120}
+                              step={1}
+                              value={degY}
+                              onChange={(e) => updateAxis(1, Number(e.target.value))}
+                              className="accent-indigo-400"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-0.5 text-slate-300">
+                            <span>
+                              {selectedPreviewBone} Roll (Z): {degZ}°
+                            </span>
+                            <input
+                              type="range"
+                              min={-120}
+                              max={120}
+                              step={1}
+                              value={degZ}
+                              onChange={(e) => updateAxis(2, Number(e.target.value))}
+                              className="accent-indigo-400"
+                            />
+                          </label>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 

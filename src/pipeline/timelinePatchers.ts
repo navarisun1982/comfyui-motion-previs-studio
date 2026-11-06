@@ -202,8 +202,9 @@ const h3FirstFramePatcher: TimelinePatcher = {
             file: ctx.controlVideoFile,
             fileName: ctx.controlVideoFile,
             role: 'reference',
-            retention: 'weak_reference',
-            description: '',
+            retention: 'partially_preserved',
+            description:
+              '3D previz camera framing, subject screen placement, scale proportions, and motion choreography guide (preserve framing and action trajectory while rendering natural, fluid real-world motion)',
             includeAudio: false,
             trimStartSec: 0,
           },

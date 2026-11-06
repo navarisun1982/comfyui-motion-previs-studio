@@ -714,6 +714,54 @@ export function autoDetectWorkflowBindings(
   addBindingField('seed', seed);
   addBindingField('durationSeconds', durationSeconds);
 
+  // Auto-bind ResolutionSelector / StubeliusH3DirectorV2 aspect_ratio with valid ComfyUI AspectRatio enum values
+  const resSelectorEntry = nodeEntries.find(
+    ([_, n]) =>
+      /^(ResolutionSelector|StubeliusH3DirectorV2|MuseMinimaxDirector)$/i.test(n.class_type) &&
+      'aspect_ratio' in n.inputs &&
+      !isLink(n.inputs['aspect_ratio'])
+  );
+  if (resSelectorEntry) {
+    fields['aspectRatio'] = {
+      node: resSelectorEntry[0],
+      input: 'aspect_ratio',
+      map: {
+        '16:9': '16:9 (Widescreen)',
+        '9:16': '9:16 (Portrait Widescreen)',
+        '1:1': '1:1 (Square)',
+        '4:3': '4:3 (Standard)',
+        '2.39:1': '21:9 (Ultrawide)',
+      },
+      allowAbsent: true,
+    };
+    nodesFingerprint[resSelectorEntry[0]] = resSelectorEntry[1].class_type;
+  }
+
+  // Auto-bind LTXDirectorCS25 custom_width / custom_height
+  const ltxDirEntry = nodeEntries.find(
+    ([_, n]) =>
+      /^LTXDirectorCS25$/i.test(n.class_type) &&
+      'custom_width' in n.inputs &&
+      'custom_height' in n.inputs
+  );
+  if (ltxDirEntry) {
+    if (!isLink(ltxDirEntry[1].inputs['custom_width'])) {
+      fields['width'] = {
+        node: ltxDirEntry[0],
+        input: 'custom_width',
+        allowAbsent: true,
+      };
+    }
+    if (!isLink(ltxDirEntry[1].inputs['custom_height'])) {
+      fields['height'] = {
+        node: ltxDirEntry[0],
+        input: 'custom_height',
+        allowAbsent: true,
+      };
+    }
+    nodesFingerprint[ltxDirEntry[0]] = ltxDirEntry[1].class_type;
+  }
+
   if (api[outputNode] && 'filename_prefix' in api[outputNode].inputs) {
     fields['filenamePrefix'] = {
       node: outputNode,

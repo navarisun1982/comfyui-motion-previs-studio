@@ -42,6 +42,14 @@
       "node": "7",
       "input": "duration_seconds"
     },
+    "width": {
+      "node": "7",
+      "input": "custom_width"
+    },
+    "height": {
+      "node": "7",
+      "input": "custom_height"
+    },
     "timeline": {
       "node": "7",
       "input": "timeline_data",

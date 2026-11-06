@@ -329,6 +329,50 @@ describe('customWorkflowResolver', () => {
         expect(serialized, `${choice.id} must contain refImage1File`).toContain('hero_ref1.png');
         expect(serialized, `${choice.id} must contain refImage2File`).toContain('drone_ref2.png');
         expect(serialized, `${choice.id} must contain prompt`).toContain('Cinematic tracking shot of Agent Mercer');
+
+        // Verify all 5 aspect ratios map strictly to ComfyUI's nodes_resolution.py AspectRatio enum
+        const validComfyAspectRatios = new Set([
+          '1:1 (Square)',
+          '2:3 (Portrait Photo)',
+          '3:2 (Photo)',
+          '3:4 (Portrait Standard)',
+          '4:3 (Standard)',
+          '9:16 (Portrait Widescreen)',
+          '16:9 (Widescreen)',
+          '21:9 (Ultrawide)',
+        ]);
+        for (const ar of ['16:9', '9:16', '1:1', '4:3', '2.39:1'] as const) {
+          const boundAr = bindTemplate(synced.registered!.api, synced.registered!.binding, {
+            mode: 'control',
+            profile: choice.forcedProfile || 'final',
+            prompt: 'Aspect ratio verification',
+            negative: '',
+            seed: 42,
+            durationSeconds: 5,
+            frameRate: 24,
+            aspectRatio: ar,
+            width: ar === '9:16' ? 720 : 1280,
+            height: ar === '9:16' ? 1280 : 720,
+            filenamePrefix: `ar_${choice.id}`,
+            controlVideoFile: 'previs_motion_ref.mp4',
+          });
+          for (const [nodeId, node] of Object.entries(boundAr.workflow)) {
+            if (
+              node.class_type === 'ResolutionSelector' ||
+              node.class_type === 'StubeliusH3DirectorV2' ||
+              node.class_type === 'MuseMinimaxDirector'
+            ) {
+              expect(
+                validComfyAspectRatios.has(String(node.inputs.aspect_ratio)),
+                `Workflow ${choice.id} node ${nodeId} (${node.class_type}) has invalid aspect_ratio="${node.inputs.aspect_ratio}" for ${ar}`
+              ).toBe(true);
+            }
+            if (node.class_type === 'LTXDirectorCS25' && ar === '9:16') {
+              expect(node.inputs.custom_width).toBe(720);
+              expect(node.inputs.custom_height).toBe(1280);
+            }
+          }
+        }
       }
     }
   });

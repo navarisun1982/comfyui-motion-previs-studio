@@ -43,17 +43,17 @@ Your objective is to convert a 3D directorial ShotSpec into the canonical 6-sect
 CORE MINIMAX H3 REF2VA OFFICIAL SCHEMA & UNIVERSAL INSTANTIATION RULE:
 Structure the output strictly with these 6 sections:
 subject_definitions:
-Define <Subject 1> (<picture 1>) through <Subject N> (<picture N>) ONLY for the POV-visible entities listed in "POV-VISIBLE STAGE ACTORS" (up to 3 visible entities), plus <Subject 4> (<picture 4> Scene Environment).
+Define <Subject 1> (<Picture 1>) through <Subject N> (<Picture N>) ONLY for the POV-visible entities listed in "POV-VISIBLE STAGE ACTORS" (up to 3 visible entities), plus <Subject 4> (<Picture 4> Scene Environment).
 CRITICAL UNIVERSAL RULE FOR ALL ENTITIES (Humans, Animals, Trees/Foliage, Vehicles, Props, Architecture, Environment):
 - Every <Subject N> (including non-human objects and <Subject 4> environment) must completely supplant its 3D placeholder proxy volume (e.g. #EF4444, #06B6D4, #F59E0B, #334155) in <Video 1>.
-- Explicitly instruct the model to use <Video 1> ONLY for 3D spatial placement, approximate scale volume, and camera perspective, and to instantiate the true, living real-world entity from <picture N> in its place with its own authentic silhouette and organic secondary physics—NEVER merely texture-wrapping or painting <picture N> onto the simplified 3D proxy geometry.
-- Define <Video 1> as the 3D previz spatial and camera blueprint only.
+- Explicitly instruct the model to strictly follow the camera framing, screen placement, scale proportions, orientation, and choreographed motion timing in <Video 1>, while instantiating the true, living real-world entity from <Picture N> in its place with its own authentic silhouette and fluid, natural physical motion—smoothing out any mechanical 3D keyframe stiffness and NEVER merely texture-wrapping or painting <Picture N> onto the simplified 3D proxy geometry.
+- Define <Video 1> as the 3D previz composition, camera trajectory, and motion choreography guide.
 
 summary: [reference generation] One-sentence summary of the shot duration, aspect ratio, and reference guidance.
 
 retention_analysis:
-- List EVERY defined <Subject N> (1..4, whether human, object, tree, vehicle, or environment) with its exact presence tag — (present throughout) if visible across all beats, or (appears in [Shot 1]) if entering/exiting mid-shot — followed by: "fully_preserved - matches <picture N>; instantiate the authentic real-world entity from <picture N> at the spatial coordinates and scale volume indicated in <Video 1> with natural real-world physics rather than rigid proxy geometry." (NEVER use "attribute_transfer" to paint textures onto 3D proxy shapes).
-- List "<Video 1> (camera/motion reference): weak_reference - only structural/camera characteristics, spatial coordinates, and coarse scale volumes are retained; no visible 3D proxy content, simplified geometry, or rigid mechanical motion is reused."
+- List EVERY defined <Subject N> (1..4, whether human, object, tree, vehicle, or environment) with its exact presence tag — (present throughout) if visible across all beats, or (appears in [Shot 1]) if entering/exiting mid-shot — followed by: "fully_preserved - matches <Picture N>; instantiate the authentic real-world entity from <Picture N> following the exact screen trajectory, scale volume, and action timing in <Video 1> with fluid real-world biomechanics and natural secondary physics rather than rigid proxy geometry." (NEVER use "attribute_transfer" to paint textures onto 3D proxy shapes).
+- List "<Video 1> (camera/motion reference): partially_preserved - preserve the exact camera trajectory, framing, subject screen placement, scale proportions, and choreographed motion timing from <Video 1>, while upgrading synthetic 3D previz geometry and mechanical keyframe interpolation into photorealistic appearance and fluid, natural real-world motion."
 
 detailed_description:
 Continuous photorealistic lens, aperture, and [Shot 1] time-coded choreography (From 0.0–Xs... From X–Ys... From Y–Zs...) describing exact camera movement and ONLY the POV-visible entities' trajectories, organic secondary motion, and lighting.

@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import * as THREE from 'three';
 export type CharacterCardSubTab = 'motion' | 'timing' | 'look' | 'rig' | 'all';
 import { Actor, Point2D, Point3D } from '../types/shotspec';
 import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
@@ -195,6 +196,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const [activeSubTab, setActiveSubTab] = useState<CharacterCardSubTab>('motion');
   const [showGlbResources, setShowGlbResources] = useState<boolean>(false);
   const [showRigLandmarksDrawer, setShowRigLandmarksDrawer] = useState<boolean>(false);
+  const [selectedInspectorBone, setSelectedInspectorBone] = useState<HumanoidBone>('RightArm');
   const [lastDirectedSignature, setLastDirectedSignature] = useState<string | null>(null);
   const [draggingCueId, setDraggingCueId] = useState<string | null>(null);
   const [draggingCueGrabOffsetSec, setDraggingCueGrabOffsetSec] = useState<number>(0);
@@ -1868,10 +1870,18 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                             >
                               {actor.showBones ? '🦴 Bones ON' : '🦴 Show Bones'}
                             </button>
-                            {actor.rigType !== 'rigid_prop' && (
+                             {actor.rigType !== 'rigid_prop' && (
                               <button
                                 type="button"
-                                onClick={() => setShowRigLandmarksDrawer((v) => !v)}
+                                onClick={() => {
+                                  setShowRigLandmarksDrawer((v) => {
+                                    const next = !v;
+                                    if (next && !actor.showBones) {
+                                      onUpdateActor(actor.id, { showBones: true });
+                                    }
+                                    return next;
+                                  });
+                                }}
                                 className={`px-2 py-0.5 rounded text-[9.5px] font-mono font-semibold border transition-all cursor-pointer ${showRigLandmarksDrawer
                                     ? 'bg-amber-500/25 border-amber-400 text-amber-200'
                                     : 'bg-black/50 border-white/15 text-slate-300 hover:text-white'
@@ -1900,7 +1910,12 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                               <button
                                 key={opt.id}
                                 type="button"
-                                onClick={() => onUpdateActor(actor.id, { rigType: opt.id })}
+                                onClick={() =>
+                                  onUpdateActor(actor.id, {
+                                    rigType: opt.id,
+                                    showBones: opt.id !== 'rigid_prop' ? true : false,
+                                  })
+                                }
                                 className={`py-1 px-1 rounded text-[9.5px] font-semibold border text-center transition-all cursor-pointer ${activeRig === opt.id
                                     ? 'bg-cyan-500/25 border-cyan-400 text-cyan-100'
                                     : 'bg-black/40 border-white/10 text-slate-400 hover:text-white'
@@ -2059,6 +2074,188 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                             })()}
                           </div>
                         )}
+                      </div>
+                    )}
+
+                    {/* Direct Bone Pose & Joint Rotation Inspector (FK + Stage Gizmo Link) */}
+                    {(isHumanoid ||
+                      actor.rigType === 'humanoid' ||
+                      actor.rigType === 'quadruped' ||
+                      actor.rigType === 'spine_flex' ||
+                      (Boolean(actor.modelUrl) && actor.rigType !== 'rigid_prop')) && (
+                      <div className="inspector-subcard space-y-2 border border-cyan-500/30 bg-[#0d1320] font-mono">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-1.5 text-[11px] font-semibold text-cyan-200">
+                            <span>🦴</span>
+                            <span>Bone Pose &amp; Joint Control</span>
+                          </span>
+                          <div className="flex items-center gap-1">
+                            {actor.pose?.rotations && Object.keys(actor.pose.rotations).length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onUpdateActor(actor.id, {
+                                    pose: undefined,
+                                    posePreset: 'neutral-stand',
+                                    gait: 'none',
+                                  })
+                                }
+                                className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-cyan-200 border border-cyan-500/30 text-[9.5px] cursor-pointer"
+                                title="Reset all custom bone rotations back to neutral bind pose"
+                              >
+                                ↺ Reset Pose
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Clickable Bone Pills */}
+                        <div className="flex flex-wrap gap-1">
+                          {(
+                            [
+                              'Head',
+                              'Neck',
+                              'Chest',
+                              'Spine',
+                              'Hips',
+                              'LeftArm',
+                              'LeftForeArm',
+                              'LeftHand',
+                              'RightArm',
+                              'RightForeArm',
+                              'RightHand',
+                              'LeftUpLeg',
+                              'LeftLeg',
+                              'LeftFoot',
+                              'RightUpLeg',
+                              'RightLeg',
+                              'RightFoot',
+                            ] as HumanoidBone[]
+                          ).map((bName) => {
+                            const bQuat = actor.pose?.rotations?.[bName];
+                            const hasRot = Boolean(
+                              bQuat &&
+                                (Math.abs(bQuat[0]) > 0.005 ||
+                                  Math.abs(bQuat[1]) > 0.005 ||
+                                  Math.abs(bQuat[2]) > 0.005)
+                            );
+                            const isSel = selectedInspectorBone === bName;
+                            return (
+                              <button
+                                key={bName}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedInspectorBone(bName);
+                                  if (typeof window !== 'undefined') {
+                                    window.dispatchEvent(
+                                      new CustomEvent('cmpvs:select-actor-bone', {
+                                        detail: { actorId: actor.id, bone: bName },
+                                      })
+                                    );
+                                  }
+                                }}
+                                className={`px-1.5 py-0.5 rounded border text-[9px] font-semibold transition-all cursor-pointer ${
+                                  isSel
+                                    ? 'bg-cyan-500/30 border-cyan-400 text-cyan-100'
+                                    : hasRot
+                                      ? 'bg-indigo-500/25 border-indigo-400/40 text-indigo-200'
+                                      : 'bg-black/40 border-white/10 text-slate-400 hover:text-white'
+                                }`}
+                              >
+                                {bName}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Pitch (X) / Twist (Y) / Roll (Z) Sliders for Selected Bone */}
+                        {(() => {
+                          const curQuatTuple = actor.pose?.rotations?.[selectedInspectorBone] || [0, 0, 0, 1];
+                          const curEuler = new THREE.Euler().setFromQuaternion(
+                            new THREE.Quaternion(
+                              curQuatTuple[0],
+                              curQuatTuple[1],
+                              curQuatTuple[2],
+                              curQuatTuple[3]
+                            ),
+                            'XYZ'
+                          );
+                          const degX = Math.round((curEuler.x * 180) / Math.PI);
+                          const degY = Math.round((curEuler.y * 180) / Math.PI);
+                          const degZ = Math.round((curEuler.z * 180) / Math.PI);
+
+                          const handleBoneAxisChange = (axisIdx: 0 | 1 | 2, degVal: number) => {
+                            const radVal = Number(((degVal * Math.PI) / 180).toFixed(4));
+                            const nextEulerTuple: [number, number, number] = [
+                              curEuler.x,
+                              curEuler.y,
+                              curEuler.z,
+                            ];
+                            nextEulerTuple[axisIdx] = radVal;
+                            const nextQ = new THREE.Quaternion().setFromEuler(
+                              new THREE.Euler(
+                                nextEulerTuple[0],
+                                nextEulerTuple[1],
+                                nextEulerTuple[2],
+                                'XYZ'
+                              )
+                            );
+                            const nextRotations: Record<string, [number, number, number, number]> = {
+                              ...(actor.pose?.rotations || {}),
+                              [selectedInspectorBone]: [nextQ.x, nextQ.y, nextQ.z, nextQ.w],
+                            };
+
+                            onUpdateActor(actor.id, {
+                              pose: {
+                                ...(actor.pose || {}),
+                                rotations: nextRotations,
+                              },
+                              posePreset: undefined,
+                              gait: 'none',
+                            });
+                          };
+
+                          return (
+                            <div className="grid grid-cols-3 gap-1.5 pt-1 text-[9.5px]">
+                              <label className="flex flex-col gap-0.5 text-slate-300">
+                                <span>Pitch X: {degX}°</span>
+                                <input
+                                  type="range"
+                                  min={-120}
+                                  max={120}
+                                  step={1}
+                                  value={degX}
+                                  onChange={(e) => handleBoneAxisChange(0, Number(e.target.value))}
+                                  className="accent-cyan-400"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-0.5 text-slate-300">
+                                <span>Twist Y: {degY}°</span>
+                                <input
+                                  type="range"
+                                  min={-120}
+                                  max={120}
+                                  step={1}
+                                  value={degY}
+                                  onChange={(e) => handleBoneAxisChange(1, Number(e.target.value))}
+                                  className="accent-cyan-400"
+                                />
+                              </label>
+                              <label className="flex flex-col gap-0.5 text-slate-300">
+                                <span>Roll Z: {degZ}°</span>
+                                <input
+                                  type="range"
+                                  min={-120}
+                                  max={120}
+                                  step={1}
+                                  value={degZ}
+                                  onChange={(e) => handleBoneAxisChange(2, Number(e.target.value))}
+                                  className="accent-cyan-400"
+                                />
+                              </label>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
 

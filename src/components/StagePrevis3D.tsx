@@ -1000,10 +1000,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
       const actorMesh = actorMeshesRef.current.get(selId);
       const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
-      const isAutoGlb = Boolean(actorMesh?.userData?.isAutoRiggedGlb);
-      const allowGizmosForActor = isAutoGlb
-        ? Boolean(actorMesh?.userData?.showBones || selectedBoneRef.current)
-        : showPosingHandlesRef.current;
+      const allowGizmosForActor = Boolean(
+        showPosingHandlesRef.current || actorMesh?.userData?.showBones || selectedBoneRef.current
+      );
       if (!rig || !allowGizmosForActor) {
         if (handlesGroup) handlesGroup.visible = false;
         if (discsGroup) discsGroup.visible = false;
@@ -1077,12 +1076,17 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         if (!discsGroup || !gizmoGroup) return;
         discsGroup.visible = true;
 
-        // Rebuild joint discs if actor changed or empty
-        if (discsGroup.userData.actorId !== selId || discsGroup.children.length === 0) {
+        // Rebuild joint discs if actor changed, rig bone set changed, or empty
+        if (
+          discsGroup.userData.actorId !== selId ||
+          discsGroup.userData.boneCount !== rig.bones.size ||
+          discsGroup.children.length === 0
+        ) {
           discsGroup.clear();
           discsGroup.userData.actorId = selId;
+          discsGroup.userData.boneCount = rig.bones.size;
 
-          JOINT_DISC_DEFINITIONS.forEach((def) => {
+          JOINT_DISC_DEFINITIONS.filter((def) => rig.bones.has(def.bone)).forEach((def) => {
             const disc = createJointDiscMesh(def.bone, def.label, def.color, def.radius, selId);
             discsGroup.add(disc);
           });
@@ -1187,17 +1191,27 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       // 3. Continuous Kinematic Updates for 3D Actors & Props (flame wavers, rotations, & paused-timeline gait loops)
       const liveShotNow = useShotStore.getState().shot;
       actorMeshesRef.current.forEach((mesh, actorId) => {
-        if (typeof mesh.userData.update === 'function') {
+        const act = liveShotNow.actors.find((a) => a.id === actorId);
+        const startP = act?.trajectory.startPosition;
+        const endP = act?.trajectory.endPosition;
+        const hasTrajectoryMove =
+          Boolean(act?.trajectory.keyframes && act.trajectory.keyframes.length > 1) ||
+          (startP && endP ? Math.hypot(endP.x - startP.x, endP.y - startP.y) > 1.0 : false);
+        const hasExplicitActorMotion =
+          hasTrajectoryMove ||
+          Boolean(act?.motionClip) ||
+          Boolean(act?.gait && act.gait !== 'none' && act.gait !== 'auto');
+
+        if (typeof mesh.userData.update === 'function' && isPlayingRef.current && hasExplicitActorMotion) {
           mesh.userData.update(dt);
         }
         if (!isPlayingRef.current && mesh.userData?.rig) {
-          const act = liveShotNow.actors.find((a) => a.id === actorId);
           const isActivelyPosing =
             activeGizmoDragRef.current?.actorId === actorId ||
             activeIKHandleRef.current?.actorId === actorId;
-          // When timeline playhead is paused, ONLY subtle idle breathing may gently animate;
-          // locomotion (walk/run/sneak) and action clips ONLY animate when playhead is playing!
-          if (act && !isActivelyPosing && (act.gait === 'idle' || act.motionClip === 'human-idle-breathe')) {
+          // When timeline playhead is paused, ONLY subtle idle breathing may gently animate if explicitly requested;
+          // newly added or 'none' gait actors stay 100% still.
+          if (act && !isActivelyPosing && act.motionClip === 'human-idle-breathe') {
             evaluateGait(mesh.userData.rig, now / 1000, {
               gait: 'idle',
               speed: 0,
@@ -2023,16 +2037,26 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         const actorPos = getActorPositionAtTime(actor, t);
         const isHuman =
           actor.rigType === 'humanoid' ||
+          mesh.userData.autoRigType === 'humanoid' ||
           (!actor.rigType || actor.rigType === 'auto'
             ? detectObjectPoseCategory(actor) === 'humanoid'
             : false);
-        const isActorMode = liveShot.vfxReference?.enabled && liveShot.vfxReference?.referenceMode === 'actor-motion';
-        const cadenceY = isHuman && isActorMode ? Math.sin(t * 8 + idx * 1.5) * 0.35 : 0;
-        mesh.position.set(actorPos.x, actorPos.y + cadenceY, actorPos.z);
-        if (typeof mesh.userData.update === 'function') {
+        const startPos0 = actor.trajectory.startPosition;
+        const endPos0 = actor.trajectory.endPosition;
+        const hasPathDisplacement =
+          Boolean(actor.trajectory.keyframes && actor.trajectory.keyframes.length > 1) ||
+          Math.hypot(endPos0.x - startPos0.x, endPos0.y - startPos0.y) > 1.0;
+        const hasActiveMotion =
+          hasPathDisplacement ||
+          Boolean(actor.motionClip) ||
+          Boolean(actor.gait && actor.gait !== 'none' && actor.gait !== 'auto');
+
+        // Keep characters firmly planted on the floor (y >= 0) without synthetic vertical sine-wave jumping
+        mesh.position.set(actorPos.x, Math.max(0, actorPos.y), actorPos.z);
+        if (typeof mesh.userData.update === 'function' && hasActiveMotion && t > 0) {
           mesh.userData.update(0.016);
         }
-        if (typeof mesh.userData.setAnimationTime === 'function') {
+        if (typeof mesh.userData.setAnimationTime === 'function' && hasActiveMotion) {
           mesh.userData.setAnimationTime(t, actor.motionCycles ?? 1);
         }
         const actorScale = actor.scale ?? 1.0;
@@ -3545,13 +3569,16 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       const actorMesh = actorMeshesRef.current.get(actorId);
       const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
       if (rig) {
+        const liveState = useShotStore.getState();
+        const liveTime = currentTimeRef.current;
+        const liveDur = liveState.shot.durationSeconds || duration || 4.0;
         const newPose = exportBonePose(rig);
-        const targetActor = shot.actors.find((a) => a.id === actorId);
+        const targetActor = liveState.shot.actors.find((a) => a.id === actorId);
         const existingKfs = targetActor?.trajectory?.keyframes || [];
-        const isNearKf = existingKfs.some((kf) => Math.abs(kf.time - currentTime) <= 0.25);
-        if (stagingMoveMode === 'keyframe' || isNearKf) {
-          recordActorPoseAtTime(actorId, currentTime, newPose, undefined, 'none', duration);
-          logger.action(`Keyframed "${actorMesh?.name || 'Actor'}" pose cue @ ${currentTime.toFixed(1)}s on bone "${boneName}"`);
+        const isNearKf = existingKfs.some((kf) => Math.abs(kf.time - liveTime) <= 0.25);
+        if (liveState.stagingMoveMode === 'keyframe' || isNearKf) {
+          recordActorPoseAtTime(actorId, liveTime, newPose, undefined, 'none', liveDur);
+          logger.action(`Keyframed "${actorMesh?.name || 'Actor'}" pose cue @ ${liveTime.toFixed(1)}s on bone "${boneName}"`);
         } else {
           updateActor(actorId, { pose: newPose, posePreset: undefined, gait: 'none' });
           logger.action(`Updated "${actorMesh?.name || 'Actor'}" pose on bone "${boneName}"`);
@@ -3569,13 +3596,16 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       const actorMesh = actorMeshesRef.current.get(activeIK.actorId);
       const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
       if (rig) {
+        const liveState = useShotStore.getState();
+        const liveTime = currentTimeRef.current;
+        const liveDur = liveState.shot.durationSeconds || duration || 4.0;
         const newPose = exportBonePose(rig);
-        const targetActor = shot.actors.find((a) => a.id === activeIK.actorId);
+        const targetActor = liveState.shot.actors.find((a) => a.id === activeIK.actorId);
         const existingKfs = targetActor?.trajectory?.keyframes || [];
-        const isNearKf = existingKfs.some((kf) => Math.abs(kf.time - currentTime) <= 0.25);
-        if (stagingMoveMode === 'keyframe' || isNearKf) {
-          recordActorPoseAtTime(activeIK.actorId, currentTime, newPose, undefined, 'none', duration);
-          logger.action(`Keyframed "${actorMesh?.name || 'Actor'}" pose cue @ ${currentTime.toFixed(1)}s via IK`);
+        const isNearKf = existingKfs.some((kf) => Math.abs(kf.time - liveTime) <= 0.25);
+        if (liveState.stagingMoveMode === 'keyframe' || isNearKf) {
+          recordActorPoseAtTime(activeIK.actorId, liveTime, newPose, undefined, 'none', liveDur);
+          logger.action(`Keyframed "${actorMesh?.name || 'Actor'}" pose cue @ ${liveTime.toFixed(1)}s via IK`);
         } else {
           updateActor(activeIK.actorId, { pose: newPose, posePreset: undefined, gait: 'none' });
         }
@@ -3883,15 +3913,35 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       const detail = (e as CustomEvent<{ presetId: string; actorId?: string }>).detail;
       if (detail?.presetId) handleApplyPresetToSelectedActor(detail.presetId, detail.actorId);
     };
+    const onSelectActorBone = (e: Event) => {
+      const detail = (e as CustomEvent<{ actorId?: string; boneName: HumanoidBone | null; mode?: 'fk' | 'ik' }>).detail;
+      if (!detail) return;
+      if (detail.actorId && detail.actorId !== selectedActorId) {
+        setSelectedActorId(detail.actorId);
+      }
+      setShowPosingHandles(true);
+      showPosingHandlesRef.current = true;
+      if (detail.mode) {
+        setPosingMode(detail.mode);
+        posingModeRef.current = detail.mode;
+      } else if (detail.boneName) {
+        setPosingMode('fk');
+        posingModeRef.current = 'fk';
+      }
+      setSelectedBone(detail.boneName);
+      selectedBoneRef.current = detail.boneName;
+    };
     window.addEventListener('cmpvs:ground-actor-feet', onGroundFeet);
     window.addEventListener('cmpvs:reset-actor-pose', onResetPose);
     window.addEventListener('cmpvs:record-pose-cue', onRecordPoseCue);
     window.addEventListener('cmpvs:apply-pose-preset', onApplyPosePreset);
+    window.addEventListener('cmpvs:select-actor-bone', onSelectActorBone);
     return () => {
       window.removeEventListener('cmpvs:ground-actor-feet', onGroundFeet);
       window.removeEventListener('cmpvs:reset-actor-pose', onResetPose);
       window.removeEventListener('cmpvs:record-pose-cue', onRecordPoseCue);
       window.removeEventListener('cmpvs:apply-pose-preset', onApplyPosePreset);
+      window.removeEventListener('cmpvs:select-actor-bone', onSelectActorBone);
     };
   });
 
