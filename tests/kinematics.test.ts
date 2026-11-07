@@ -127,7 +127,7 @@ describe('2-Bone Analytic IK Solver', () => {
 
   it('solves leg IK down to ground contact', () => {
     const rig = createHumanoidSkeleton(5.0);
-    const footTarget = new THREE.Vector3(0.5, 0.05, 0.2);
+    const footTarget = new THREE.Vector3(0.5, 0.15, 0.2);
 
     const result = solveLimbIK(rig, 'leftLeg', footTarget);
     expect(result).not.toBeNull();

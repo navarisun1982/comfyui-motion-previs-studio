@@ -568,7 +568,11 @@ export class ComfyClient {
     };
     const serializedPayload = JSON.stringify(payload)
       .replace(/9:16 \(Vertical\)/g, '9:16 (Portrait Widescreen)')
-      .replace(/4:3 \(Classic TV\)/g, '4:3 (Standard)');
+      .replace(/4:3 \(Classic TV\)/g, '4:3 (Standard)')
+      .replace(
+        /minimax_h3_turbo_v4_step600_ema\.safetensors|MiniMax-H3-Ref2VA-Acc-8Step\.safetensors/g,
+        'minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors'
+      );
 
     logger.api(`Submitting prompt to ComfyUI POST /prompt...`, { client_id: this.clientId });
     const res = await this.requestComfy<any>('/prompt', {
@@ -616,6 +620,38 @@ export class ComfyClient {
       timeoutMs: 5000,
     });
     return res.ok;
+  }
+
+  async clearQueue(): Promise<boolean> {
+    logger.action('Clearing pending ComfyUI queue...');
+    const res = await this.requestComfy('/queue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clear: true }),
+      timeoutMs: 5000,
+    });
+    return res.ok;
+  }
+
+  async getQueueStatus(): Promise<{
+    ok: boolean;
+    runningPromptIds: string[];
+    pendingPromptIds: string[];
+  }> {
+    const res = await this.requestComfy<{
+      queue_running?: Array<[number, string, ...unknown[]]>;
+      queue_pending?: Array<[number, string, ...unknown[]]>;
+    }>('/queue', { timeoutMs: 5000 });
+    if (!res.ok || !res.data) {
+      return { ok: false, runningPromptIds: [], pendingPromptIds: [] };
+    }
+    const runningPromptIds = Array.isArray(res.data.queue_running)
+      ? res.data.queue_running.map((item) => (Array.isArray(item) ? String(item[1] || '') : '')).filter(Boolean)
+      : [];
+    const pendingPromptIds = Array.isArray(res.data.queue_pending)
+      ? res.data.queue_pending.map((item) => (Array.isArray(item) ? String(item[1] || '') : '')).filter(Boolean)
+      : [];
+    return { ok: true, runningPromptIds, pendingPromptIds };
   }
 
   ensureWebSocket(): void {
@@ -671,10 +707,12 @@ export class ComfyClient {
     }
 
     const promptId = (msg.data?.prompt_id as string) || '';
-    if (!promptId) return;
-
-    const listener = this.jobListeners.get(promptId);
+    let listener = promptId ? this.jobListeners.get(promptId) : undefined;
+    if (!listener && (msg.type === 'execution_error' || msg.type === 'execution_interrupted') && this.jobListeners.size === 1) {
+      listener = Array.from(this.jobListeners.values())[0];
+    }
     if (!listener) return;
+    const resolvedPromptId = listener.promptId;
 
     switch (msg.type) {
       case 'execution_start':
@@ -704,20 +742,20 @@ export class ComfyClient {
 
       case 'execution_success':
         listener.onSuccess?.();
-        this.jobListeners.delete(promptId);
+        this.jobListeners.delete(resolvedPromptId);
         break;
 
       case 'execution_interrupted': {
         const nodeId = (msg.data.node_id as string) || undefined;
         listener.onInterrupted?.(nodeId);
-        this.jobListeners.delete(promptId);
+        this.jobListeners.delete(resolvedPromptId);
         break;
       }
 
       case 'execution_error': {
         const message = (msg.data.exception_message as string) || 'Execution error in ComfyUI';
         listener.onError?.(message, msg.data);
-        this.jobListeners.delete(promptId);
+        this.jobListeners.delete(resolvedPromptId);
         break;
       }
     }

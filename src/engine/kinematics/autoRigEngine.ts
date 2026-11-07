@@ -108,6 +108,99 @@ export const DEFAULT_HUMANOID_LANDMARKS: RigLandmarks = {
   detectedStance: 'a-pose',
 };
 
+const RIGID_PROP_KEYWORDS_REGEX =
+  /\b(cap|baseball\s*cap|hat|beanie|beret|fedora|helmet|crown|tiara|mask|glasses|sunglasses|goggles|shoe|shoes|boot|boots|sneaker|sneakers|sandal|slipper|bag|backpack|handbag|briefcase|suitcase|luggage|wallet|purse|watch|clock|wristwatch|hourglass|ring|necklace|bracelet|earring|shirt|t-shirt|jacket|coat|hoodie|sweater|vest|pants|trousers|jeans|shorts|skirt|dress|glove|gloves|scarf|tie|belt|car|sedan|coupe|suv|truck|pickup|lorry|bus|van|ambulance|police\s*car|taxi|limousine|jeep|rover|buggy|tractor|forklift|bulldozer|excavator|crane|train|locomotive|tram|subway|bike|bicycle|tricycle|motorcycle|motorbike|scooter|skateboard|hoverboard|segway|carriage|chariot|cart|wagon|sled|sleigh|tank|apc|mech\s*turret|boat|ship|yacht|sailboat|canoe|kayak|raft|ferry|galleon|frigate|battleship|submarine|jet\s*ski|plane|airplane|airliner|biplane|seaplane|glider|jet|fighter\s*jet|bomber|helicopter|chopper|gunship|drone|quadcopter|uav|blimp|airship|zeppelin|balloon|spaceship|starship|shuttle|lander|probe|satellite|station|ufo|saucer|rocket|missile|torpedo|sword|katana|scimitar|rapier|broadsword|claymore|lightsaber|blade|dagger|knife|machete|axe|hatchet|halberd|scythe|sickle|hammer|warhammer|mallet|mace|flail|club|baton|bat|staff|wand|scepter|spear|lance|javelin|trident|harpoon|bow|crossbow|quiver|arrow|bolt|shield|buckler|aegis|armor|chestplate|gauntlet|greaves|gun|pistol|revolver|handgun|rifle|sniper|shotgun|smg|carbine|musket|blunderbuss|machine\s*gun|minigun|bazooka|rpg|launcher|cannon|mortar|turret|grenade|bomb|mine|dynamite|chair|armchair|recliner|throne|stool|bench|pew|bleacher|sofa|couch|loveseat|divan|futon|hammock|bed|bunk|crib|cradle|mattress|pillow|cushion|table|desk|workbench|counter|island|altar|podium|lectern|stand|pedestal|plinth|cabinet|cupboard|wardrobe|closet|armoire|dresser|chest\s*of\s*drawers|nightstand|bookcase|bookshelf|shelf|rack|locker|safe|vault|chest|treasure\s*chest|coffer|trunk|box|carton|crate|pallet|container|bin|basket|hamper|barrel|keg|cask|drum|bucket|pail|tub|vat|cauldron|pot|pan|skillet|kettle|teapot|coffee\s*maker|espresso|toaster|microwave|blender|mixer|oven|stove|range|grill|bbq|fridge|refrigerator|freezer|dishwasher|washer|dryer|sink|faucet|tap|bathtub|shower|toilet|mirror|vanity|lamp|lantern|flashlight|torch|sconce|chandelier|candelabra|candle|lightbulb|neon\s*sign|streetlamp|streetlight|traffic\s*light|lighthouse|beacon|spotlight|searchlight|door|gate|portal|arch|archway|window|shutter|wall|fence|railing|barricade|barrier|stairs|staircase|steps|ladder|escalator|elevator|lift|bridge|viaduct|aqueduct|pier|dock|jetty|house|home|cottage|cabin|shack|hut|chalet|villa|mansion|palace|castle|fortress|citadel|keep|bastion|bunker|tower|skyscraper|highrise|building|apartment|office|warehouse|factory|mill|windmill|watermill|barn|silo|stable|greenhouse|shed|garage|hangar|station|terminal|depot|airport|hospital|school|church|cathedral|chapel|temple|shrine|mosque|synagogue|pagoda|monastery|pyramid|obelisk|monument|memorial|statue|sculpture|bust|gargoyle|totem|fountain|well|gazebo|pavilion|pergola|tent|tipi|yurt|igloo|ruins|column|pillar|arch|dome|spire|bell\s*tower|clock\s*tower|watchtower|rock|boulder|stone|pebble|cliff|crag|ledge|outcrop|mountain|hill|mound|dune|volcano|crater|geyser|crystal|gem|gemstone|diamond|ruby|emerald|sapphire|quartz|geode|ore|ingot|bar|coin|medal|medallion|token|badge|trophy|award|chalice|goblet|grail|cup|mug|teacup|glass|tumbler|wineglass|stein|tankard|bottle|flask|vial|potion|elixir|decanter|carafe|pitcher|jug|jar|can|canister|tin|thermos|canteen|plate|platter|dish|bowl|saucer|tray|spoon|fork|knife|chopsticks|ladle|spatula|whisk|rolling\s*pin|cutting\s*board|apple|banana|orange|lemon|lime|grape|strawberry|watermelon|pineapple|peach|pear|cherry|mango|coconut|avocado|tomato|potato|carrot|onion|garlic|corn|mushroom|broccoli|pumpkin|bread|loaf|baguette|croissant|bagel|donut|muffin|cupcake|cake|pie|tart|cookie|biscuit|chocolate|candy|ice\s*cream|popsicle|cheese|meat|steak|chicken|fish|sushi|pizza|burger|hamburger|sandwich|hotdog|taco|burrito|noodles|ramen|soup|salad|egg|book|tome|grimoire|journal|notebook|diary|magazine|newspaper|scroll|parchment|letter|envelope|map|blueprint|chart|globe|atlas|pen|pencil|quill|feather|inkwell|paintbrush|palette|easel|canvas|painting|picture|frame|poster|sign|billboard|placard|clipboard|folder|binder|paper|card|ticket|camera|camcorder|projector|lens|tripod|gimbal|microphone|mic|speaker|subwoofer|amplifier|amp|radio|boombox|turntable|record\s*player|vinyl|cassette|cd|headphones|earbuds|headset|phone|smartphone|iphone|android\s*phone|telephone|payphone|walkie-talkie|tablet|ipad|laptop|notebook\s*pc|computer|pc|desktop|monitor|screen|display|tv|television|keyboard|mouse|gamepad|controller|joystick|console|arcade|vr\s*headset|server|router|modem|hard\s*drive|usb|battery|generator|reactor|turbine|solar\s*panel|engine|motor|gear|cog|piston|valve|pipe|tube|hose|cable|wire|plug|switch|lever|button|dial|gauge|meter|sensor|antenna|satellite\s*dish|radar|laser|hologram|drone|piano|grand\s*piano|keyboard\s*instrument|organ|accordion|guitar|acoustic\s*guitar|electric\s*guitar|bass|ukulele|banjo|mandolin|lute|harp|lyre|violin|fiddle|viola|cello|double\s*bass|flute|piccolo|clarinet|oboe|bassoon|saxophone|sax|trumpet|trombone|tuba|french\s*horn|bugle|harmonica|bagpipes|drum|drums|snare|bongo|conga|timpani|xylophone|marimba|gong|cymbal|bell|tambourine|triangle|metronome|ball|football|soccer\s*ball|basketball|baseball|tennis\s*ball|golf\s*ball|volleyball|rugby\s*ball|bowling\s*ball|bowling\s*pin|billiard|pool\s*table|cue\s*stick|chess|chessboard|pawn|dice|domino|cards|puzzle|rubik|toy|dollhouse|teddy\s*bear|blocks|lego|kite|yo-yo|frisbee|boomerang|hula\s*hoop|jump\s*rope|dumbbell|barbell|kettlebell|treadmill|punching\s*bag|boxing\s*glove|racket|tennis\s*racket|golf\s*club|hockey\s*stick|baseball\s*bat|cricket\s*bat|surfboard|snowboard|skis|ice\s*skates|roller\s*skates|fishing\s*rod|net|oar|paddle|anchor|life\s*preserver|buoy|compass| sextant|spyglass|binoculars|telescope|microscope|magnifying\s*glass|stetho|syringe|pill|medicine|first\s*aid|bandage|crutch|wheelchair|stretcher|umbrella|parasol|cane|walking\s*stick|broom|mop|vacuum|iron|ironing\s*board|hanger|clothespin|scissors|shears|needle|thread|spool|thimble|yarn|knitting|sewing\s*machine|shovel|spade|rake|hoe|pitchfork|trowel|watering\s*can|wheelbarrow|lawnmower|chainsaw|drill|saw|wrench|spanner|screwdriver|pliers|clamp|vise|anvil|forge|bellows|horseshoe|nail|screw|bolt|nut|washer|hinge|lock|padlock|key|keychain|chain|shackle|handcuffs|rope|knot|hook|pulley|winch|jack|crowbar|pickaxe|sledgehammer|chisel|file|rasp|sandpaper|level|tape\s*measure|ruler|caliper|protractor|abacus|calculator|scale|balance|weights|thermometer|barometer|hydrometer|beaker|erlenmeyer|test\s*tube|petri\s*dish|bunsen\s*burner|retort|mortar\s*and\s*pestle|funnel|pipette|dropper|magnet|prism|mirror|lens|pendulum|gyroscope|newton|metronome|fireplace|hearth|chimney|mantel|brazier|campfire|bonfire|fire\s*pit|firewood|log|stump|branch|twig|leaf|flower|rose|tulip|sunflower|lily|orchid|daisy|lotus|cactus|succulent|bonsai|bush|shrub|hedge|grass|reed|bamboo|mushroom|toadstool|coral|seashell|conch|starfish|pearl|feather|bone|skull|horn|antler|tusk|tooth|claw|egg|nest|hive|honeycomb|web|cocoon)\b/i;
+
+const RIGID_PROP_ARABIC_REGEX =
+  /(قبعة|كاب|خوذة|طربوش|تاج|قناع|نظارة|حذاء|جزمة|حقيبة|شنطة|ساعة|خاتم|قلادة|قميص|معطف|جاكيت|بنطلون|فستان|قفاز|سيارة|شاحنة|حافلة|أتوبيس|دراجة|موتوسيكل|قطار|دبابة|قارب|سفينة|يخت|غواصة|طائرة|مروحية|هليكوبتر|درون|مركبة|فضائية|صاروخ|سيف|خنجر|سكين|فأس|مطرقة|رمح|قوس|درع|مسدس|بندقية|مدفع|قنبلة|كرسي|مقعد|عرش|أريكة|كنبة|سرير|طاولة|ترابيزة|مكتب|خزانة|دولاب|رف|مكتبة|صندوق|كرتونة|برميل|دلو|قدر|حلة|مقلاة|إبريق|غلاية|فرن|موقد|بوتاجاز|ثلاجة|غسالة|حوض|صنبور|حنفية|مرآة|مصباح|لمبة|فانوس|شمعة|نجفة|ثريا|باب|بوابة|نافذة|شباك|جدار|حائط|سور|سلم|درج|جسر|كوبري|منزل|بيت|كوخ|فيلا|قصر|قلعة|حصن|برج|مبنى|عمارة|مصنع|طاحونة|مسجد|كنيسة|معبد|هرم|تمثال|نافورة|بئر|خيمة|عمود|قبة|صخرة|حجر|جبل|تل|بركان|بلورة|كريستال|جوهرة|ألماس|ذهب|فضة|عملة|ميدالية|كأس|كوب|فنجان|زجاجة|قارورة|طبق|صحن|وعاء|ملعقة|شوكة|تفاحة|موز|برتقال|فاكهة|خبز|كعكة|تورتة|جبن|لحم|سمك|بيتزا|برجر|ساندويتش|طعام|كتاب|مجلد|دفتر|كراسة|صحيفة|جريدة|مخطوطة|رسالة|خريطة|كرة\s*أرضية|قلم|ريشة|فرشاة|لوحة|إطار|برواز|لافتة|كاميرا|عدسة|ميكروفون|سماعة|راديو|مذياع|هاتف|موبايل|جوال|تليفون|حاسوب|كمبيوتر|لابتوب|شاشة|تلفاز|تلفزيون|لوحة\s*مفاتيح|فأرة|بطارية|محرك|موتور|ترس|أنبوب|ماسورة|سلك|كابل|مفتاح|قفل|بيانو|جيتار|عود|كمان|ناي|مزمار|بوق|طبلة|دف|جرس|كرة|طاولة\s*بلياردو|شطرنج|نرد|دمية|لعبة|مظلة|شمسية|عصا|مكنسة|مقص|إبرة|مجرفة|منشار|مفك|كماشة|سندان|مسمار|برغي|سلسلة|حبل|خطاف|بوصلة|تلسكوب|منظار|مجهر|ميكروسكوب|محقنة|دواء|مدفأة|موقد\s*حطب|حطب|جذع|غصن|ورقة|زهرة|وردة|صبار|فطر|صدفة|لؤلؤة|جمجمة|قرن|عش)/;
+
+/**
+ * Checks whether a string is a raw UUID, hex hash, or generic camera/clipboard noise filename.
+ */
+export function isUuidOrNoiseName(raw?: string | null): boolean {
+  const s = (raw || '').trim();
+  if (!s) return true;
+  // Matches UUID patterns anywhere in the string (with hyphens, underscores, or spaces)
+  if (/[0-9a-f]{8}[\s_-]+[0-9a-f]{4}[\s_-]+[0-9a-f]{4}[\s_-]+[0-9a-f]{4}[\s_-]+[0-9a-f]{12}/i.test(s)) {
+    return true;
+  }
+  // Matches 3+ space/hyphen-separated hex blocks like "9d6c75de 3d44 4100..."
+  if (/\b[0-9a-f]{6,12}[\s_-]+[0-9a-f]{4,12}[\s_-]+[0-9a-f]{4,12}/i.test(s)) {
+    return true;
+  }
+  // Matches contiguous 16+ hex hash strings
+  if (/^[0-9a-f]{16,}$/i.test(s.replace(/[\s_-]/g, ''))) {
+    return true;
+  }
+  // Matches camera / clipboard / temp filenames
+  if (
+    /^(cmpvs|img|dsc|dcim|screenshot|screen\s*shot|whatsapp\s*image|image|photo|picture|pic|untitled|download|file|capture|clipboard|paste|comfyui|pixal3d|trellis|temp|output|asset)[\s_()-]*\d*/i.test(
+      s
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Infers the stage category (`'human' | 'creature' | 'prop'`) and a clean human-readable display name
+ * from any prompt or filename.
+ */
+export function inferSubjectCategoryAndCleanName(
+  rawInput?: string | null,
+  fallbackCategory: 'human' | 'creature' | 'prop' = 'prop'
+): {
+  category: 'human' | 'creature' | 'prop';
+  cleanName: string;
+  isNoiseOrUuid: boolean;
+} {
+  const raw = (rawInput || '')
+    .replace(/\.[^.]+$/, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const isNoise = isUuidOrNoiseName(raw);
+  const text = isNoise ? '' : raw.toLowerCase();
+
+  let category: 'human' | 'creature' | 'prop' = fallbackCategory;
+  if (text) {
+    if (RIGID_PROP_KEYWORDS_REGEX.test(text) || RIGID_PROP_ARABIC_REGEX.test(text)) {
+      category = 'prop';
+    } else if (
+      /\b(dog|hound|wolf|canine|cat|feline|lion|tiger|panther|leopard|cheetah|horse|stallion|pony|stag|deer|elk|bear|boar|bull|cow|sheep|goat|fox|rabbit|camel|elephant|rhino|hippo|dinosaur|raptor|rex|dragon|wyvern|griffin|beast|quadruped|snake|serpent|creature|animal)\b/i.test(
+        text
+      ) ||
+      /(كلب|ذئب|قط|حصان|فرس|أسد|نمر|غزال|وعل|دب|جمل|فيل|تنين|وحش|حيوان|ثعبان|أفعى|مخلوق)/.test(text)
+    ) {
+      category = 'creature';
+    } else if (
+      /\b(character|person|man|woman|boy|girl|child|human|actor|actress|hero|heroine|villain|knight|warrior|archer|scout|detective|soldier|doctor|pilot|wizard|mage|king|queen|prince|princess|pirate|cowboy|astronaut|ninja|samurai|guard|robot|android|cyborg|mech|biped|goblin|orc|elf|dwarf|zombie|skeleton|alien)\b/i.test(
+        text
+      ) ||
+      /(شخصية|رجل|امرأة|ولد|بنت|طفل|إنسان|بطل|فارس|محارب|نينجا|طبيب|محقق|شرطي|جندي|ممثل|ساحر|ملك|ملكة|روبوت|آلي)/.test(
+        text
+      )
+    ) {
+      category = 'human';
+    }
+  }
+
+  const fallbackLabel =
+    category === 'prop'
+      ? '3D Object'
+      : category === 'creature'
+      ? '3D Creature'
+      : 'Hero Character';
+
+  const cleanName = !isNoise && raw.length > 0 ? raw.slice(0, 42) : fallbackLabel;
+  return {
+    category,
+    cleanName,
+    isNoiseOrUuid: isNoise,
+  };
+}
+
 /**
  * Resolves `'auto'` rig type into a concrete `ResolvedRigType` based on semantic hints
  * and 3D bounding-box / silhouette proportions.
@@ -121,9 +214,39 @@ export function resolveAutoRigType(
   }
 
   const cat = (options.categoryHint || '').toLowerCase();
-  const text = `${options.nameHint || ''} ${options.promptHint || ''} ${cat}`.toLowerCase();
+  const cleanHintName = isUuidOrNoiseName(options.nameHint) ? '' : options.nameHint || '';
+  const text = `${cleanHintName} ${options.promptHint || ''} ${cat}`.toLowerCase();
 
-  // 1. Explicit Quadruped / Animal keywords
+  // 1. Flexible Spine props / nature / serpentine entities
+  // Checked first so flexible props (e.g., categoryHint: 'prop', nameHint: 'Weeping Willow Tree')
+  // get a multi-bone spine_flex chain before falling through to generic rigid_prop.
+  if (
+    /\b(snake|serpent|worm|tentacle|eel|cobra|viper|python|tree|palm|pine|oak|willow|plant|fern|vine|rope|cable|chain|flag|banner|cape|cloak|curtain|tail)\b/i.test(
+      text
+    ) ||
+    /(شجرة|نخلة|نبات|علم|راية|حبل|ثعبان|أفعى|مجس)/.test(text)
+  ) {
+    return 'spine_flex';
+  }
+
+  // 2. Explicit Rigid Prop / Headwear / Clothing / Vehicle / Architecture / Weapon / Furniture keywords
+  // Checked BEFORE generic categoryHint so items like a "baseball cap", "helmet", "chair", or "car"
+  // are never misclassified as a 19-bone humanoid even if the category button was left on default.
+  if (
+    cat === 'vehicle' ||
+    cat === 'architecture' ||
+    cat === 'furniture' ||
+    cat === 'weapons' ||
+    cat === 'props' ||
+    cat === 'prop' ||
+    cat === 'building' ||
+    RIGID_PROP_KEYWORDS_REGEX.test(text) ||
+    RIGID_PROP_ARABIC_REGEX.test(text)
+  ) {
+    return 'rigid_prop';
+  }
+
+  // 3. Explicit Quadruped / Animal keywords
   if (
     cat === 'creature' ||
     cat === 'animal' ||
@@ -133,24 +256,33 @@ export function resolveAutoRigType(
     ) ||
     /(كلب|ذئب|قط|حصان|فرس|أسد|نمر|غزال|وعل|دب|جمل|فيل|تنين|وحش|حيوان)/.test(text)
   ) {
-    // Check if it's a serpentine/flexible creature
-    if (/\b(snake|serpent|worm|tentacle|eel|cobra|viper|python)\b/i.test(text) || /(ثعبان|أفعى|مجس)/.test(text)) {
-      return 'spine_flex';
-    }
     return 'quadruped';
   }
 
-  // 2. Flexible Spine props / nature
-  if (
-    /\b(snake|serpent|tentacle|tree|palm|pine|oak|willow|plant|fern|vine|rope|cable|chain|flag|banner|cape|cloak|curtain|tail)\b/i.test(
-      text
-    ) ||
-    /(شجرة|نخلة|نبات|علم|راية|حبل|ثعبان)/.test(text)
-  ) {
-    return 'spine_flex';
+  // 4. Measure 3D Geometry Bounding-Box Aspect Proportions BEFORE trusting a default 'human' categoryHint!
+  // A standing humanoid biped is vertically oriented (height Y significantly exceeds depth/width).
+  // Squat/flat/dome/horizontal meshes (such as a baseball cap, shoe, car, crate, or table) have
+  // low vertical aspect ratios and must NOT be stuffed with a 19-bone humanoid skeleton.
+  sceneRoot.updateMatrixWorld(true);
+  const bbox = new THREE.Box3().setFromObject(sceneRoot);
+  if (!bbox.isEmpty()) {
+    const size = bbox.getSize(new THREE.Vector3());
+    const maxHoriz = Math.max(size.x, size.z);
+    const minHoriz = Math.min(size.x, size.z);
+
+    if (size.y > 1e-4 && maxHoriz > 1e-4) {
+      // Squat / dome / flat / wide object (e.g. baseball cap, helmet, car, table, box):
+      // Height is less than 88% of max horizontal span, OR height is less than 130% of the narrower horizontal axis
+      const isSquatOrCompactObject =
+        size.y < maxHoriz * 0.88 || (size.y < maxHoriz * 1.12 && size.y < minHoriz * 1.32);
+
+      if (isSquatOrCompactObject) {
+        return 'rigid_prop';
+      }
+    }
   }
 
-  // 3. Explicit Humanoid / Biped Character
+  // 5. Explicit Humanoid / Biped Character keywords or category
   if (
     cat === 'character' ||
     cat === 'human' ||
@@ -162,25 +294,7 @@ export function resolveAutoRigType(
     return 'humanoid';
   }
 
-  // 4. Explicit Rigid Prop / Vehicle / Architecture / Weapon / Furniture
-  if (
-    cat === 'vehicle' ||
-    cat === 'architecture' ||
-    cat === 'furniture' ||
-    cat === 'weapons' ||
-    cat === 'props' ||
-    cat === 'prop' ||
-    cat === 'building' ||
-    /\b(car|truck|bus|van|suv|sedan|bike|motorcycle|tank|boat|ship|plane|jet|drone|helicopter|spaceship|sword|blade|dagger|axe|hammer|spear|bow|shield|gun|pistol|rifle|chair|table|desk|bed|sofa|couch|cabinet|shelf|chest|box|crate|barrel|lamp|door|window|wall|house|tower|castle|bridge|rock|stone|statue|bottle|cup|mug|ring|crown|book|camera|phone|laptop)\b/i.test(
-      text
-    )
-  ) {
-    return 'rigid_prop';
-  }
-
-  // 5. Fallback Geometry Proportions Check
-  sceneRoot.updateMatrixWorld(true);
-  const bbox = new THREE.Box3().setFromObject(sceneRoot);
+  // 6. Fallback Geometry Proportions Check
   if (!bbox.isEmpty()) {
     const size = bbox.getSize(new THREE.Vector3());
     const maxHoriz = Math.max(size.x, size.z);
@@ -190,6 +304,7 @@ export function resolveAutoRigType(
     if (maxHoriz > size.y * 1.15 && Math.min(size.x, size.z) < maxHoriz * 0.65) {
       return 'quadruped';
     }
+    return 'rigid_prop';
   }
 
   return 'humanoid';

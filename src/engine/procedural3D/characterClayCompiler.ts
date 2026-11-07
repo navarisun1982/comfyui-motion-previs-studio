@@ -29,11 +29,27 @@ export interface CharacterVisualFeatures {
   };
   costume: {
     hasHat?: boolean;
-    hatStyle?: 'fedora' | 'cap' | 'tophat' | 'cowboy' | 'beanie';
+    hatStyle?:
+      | 'fedora'
+      | 'cap'
+      | 'tophat'
+      | 'cowboy'
+      | 'beanie'
+      | 'wizard'
+      | 'toque'
+      | 'hardhat'
+      | 'captain'
+      | 'scrubcap';
     hatColor?: string;
     hasHelmet?: boolean;
+    helmetStyle?: 'knight' | 'astronaut' | 'ballistic' | 'kabuto' | 'default';
     hasCrown?: boolean;
     hasGlasses?: boolean;
+    hasFaceMask?: boolean;
+    hasTie?: boolean;
+    hasApron?: boolean;
+    hasPauldrons?: boolean;
+    hasStethoscope?: boolean;
     hasBackpack?: boolean;
     hasHair?: boolean;
     hasCuirass?: boolean;
@@ -54,6 +70,9 @@ export interface CharacterVisualFeatures {
     hasSword?: boolean;
     hasShield?: boolean;
     hasGun?: boolean;
+    hasBriefcase?: boolean;
+    hasHammer?: boolean;
+    hasBackKatanas?: boolean;
   };
   proportions?: {
     shoulderWidthRatio?: number; // 0.8..1.2
@@ -71,17 +90,29 @@ export function hasRequestedCharacterAccessories(features?: CharacterVisualFeatu
     c.hasHelmet ||
     c.hasCrown ||
     c.hasGlasses ||
+    c.hasFaceMask ||
+    c.hasTie ||
+    c.hasApron ||
+    c.hasPauldrons ||
+    c.hasStethoscope ||
     c.hasHood ||
     c.hasCape ||
     c.hasBackpack ||
     c.hasHair ||
     c.hasCuirass ||
+    c.hasBelt ||
+    c.hasBoots ||
+    c.lowerGarment === 'robe' ||
+    c.lowerGarment === 'skirt' ||
     e.hasBow ||
     e.hasQuiver ||
     e.hasStaff ||
     e.hasSword ||
     e.hasShield ||
-    e.hasGun
+    e.hasGun ||
+    e.hasBriefcase ||
+    e.hasHammer ||
+    e.hasBackKatanas
   );
 }
 
@@ -145,30 +176,92 @@ export function extractCharacterFeaturesFromModelOutput(
 ): CharacterVisualFeatures {
   const textContext = `${prompt} ${typeof raw === 'string' ? raw : JSON.stringify(raw || '')}`.toLowerCase();
 
-  const isFullFantasyArchetype =
-    /\b(elf|elven|archer|scout|huntress|knight|warrior|wizard|mage|paladin|cleric|druid|assassin)\b/i.test(textContext);
+  const isElvenArchetype =
+    /\b(elf|elven|archer|huntress|druid)\b/i.test(textContext);
+  const isKnight = /\b(knight|paladin|crusader|bascinet|plate armor)\b/i.test(textContext);
+  const isSamurai = /\b(samurai|kabuto|lamellar|shogun)\b/i.test(textContext);
+  const isNinja = /\b(ninja|shinobi|shozoku)\b/i.test(textContext) || (/\b(assassin|stealth)\b/i.test(textContext) && !isElvenArchetype);
+  const isAstronaut = /\b(astronaut|spacesuit|eva\b|cosmonaut)\b/i.test(textContext);
+  const isWizard = /\b(wizard|mage|sorcerer|warlock|runic)\b/i.test(textContext);
+  const isDetective = /\b(detective|noir|trenchcoat|investigator|sleuth)\b/i.test(textContext);
+  const isSurgeon = /\b(surgeon|doctor|physician|scrubs|surgical|medic)\b/i.test(textContext);
+  const isChef = /\b(chef|toque|cook|culinary|kitchen)\b/i.test(textContext);
+  const isSoldier = /\b(soldier|special forces|camouflage|ballistic|tactical plate|commando)\b/i.test(textContext);
+  const isMiner = /\b(miner|hardrock|hard hat|cap lamp|underground)\b/i.test(textContext);
+  const isPilot = /\b(pilot|airline|captain|epaulet|peaked cap)\b/i.test(textContext);
+  const isBlacksmith = /\b(blacksmith|forge|tongs|cross-peen|anvil)\b/i.test(textContext);
+  const isExecutive = /\b(executive|corporate|business suit|briefcase|businessman)\b/i.test(textContext);
+  const isSteampunk = /\b(steampunk|inventor|clockwork|victorian)\b/i.test(textContext);
+  const isCyberpunk = /\b(cyberpunk|cyberware|operative|neon)\b/i.test(textContext);
 
-  // Detect gender
+  const isFullCostumeArchetype =
+    isElvenArchetype ||
+    isKnight ||
+    isSamurai ||
+    isNinja ||
+    isAstronaut ||
+    isWizard ||
+    isDetective ||
+    isSurgeon ||
+    isChef ||
+    isSoldier ||
+    isMiner ||
+    isPilot ||
+    isBlacksmith ||
+    isExecutive ||
+    isSteampunk ||
+    isCyberpunk;
+
+  // Detect gender: only default to female for elven/archer or explicit female terms
   const isFemale =
     raw?.gender === 'female' ||
-    /\b(female|woman|girl|huntress|maiden|elf\b|elven\b)/i.test(prompt) ||
-    !/\b(male|man|boy|guy|gentleman)\b/i.test(prompt);
+    /\b(female|woman|girl|huntress|maiden|queen|lady|actress|elf\b|elven\b)\b/i.test(prompt) ||
+    (isElvenArchetype && !/\b(male|man|boy|guy|gentleman)\b/i.test(prompt));
 
   // Detect headwear & accessories
   const hasHat =
     raw?.costume?.hasHat ??
-    (/\b(hat|fedora|cowboy|cap|beret|beanie|tophat|top hat|sombrero|sunhat|brim)\b/i.test(textContext) ||
+    (isWizard ||
+      isDetective ||
+      isChef ||
+      isMiner ||
+      isPilot ||
+      isSurgeon ||
+      isSteampunk ||
+      /\b(hat|fedora|cowboy|cap|beret|beanie|tophat|top hat|sombrero|sunhat|brim|toque|peaked cap|scrub cap)\b/i.test(textContext) ||
       /(قبعة|طاقية)/.test(textContext));
 
-  let hatStyle: 'fedora' | 'cap' | 'tophat' | 'cowboy' | 'beanie' = 'fedora';
-  if (/\b(cap|baseball)\b/i.test(textContext)) hatStyle = 'cap';
-  else if (/\b(tophat|top hat|cylinder hat)\b/i.test(textContext)) hatStyle = 'tophat';
+  let hatStyle:
+    | 'fedora'
+    | 'cap'
+    | 'tophat'
+    | 'cowboy'
+    | 'beanie'
+    | 'wizard'
+    | 'toque'
+    | 'hardhat'
+    | 'captain'
+    | 'scrubcap' = 'fedora';
+  if (isWizard || /\b(wizard|witch|pointed hat)\b/i.test(textContext)) hatStyle = 'wizard';
+  else if (isChef || /\b(toque|chef)\b/i.test(textContext)) hatStyle = 'toque';
+  else if (isMiner || /\b(hard hat|hardhat|miner)\b/i.test(textContext)) hatStyle = 'hardhat';
+  else if (isPilot || /\b(peaked cap|airline|captain)\b/i.test(textContext)) hatStyle = 'captain';
+  else if (isSurgeon || /\b(scrub|surgical)\b/i.test(textContext)) hatStyle = 'scrubcap';
+  else if (isSteampunk || /\b(tophat|top hat|cylinder hat)\b/i.test(textContext)) hatStyle = 'tophat';
+  else if (/\b(cap|baseball)\b/i.test(textContext)) hatStyle = 'cap';
   else if (/\b(cowboy|western|sombrero)\b/i.test(textContext)) hatStyle = 'cowboy';
   else if (/\b(beanie|beret)\b/i.test(textContext)) hatStyle = 'beanie';
 
   let hatColor = raw?.costume?.hatColor;
   if (!hatColor) {
-    if (/\b(red|crimson|scarlet)\b/i.test(textContext)) hatColor = '#dc2626';
+    if (isChef) hatColor = '#f8fafc';
+    else if (isMiner) hatColor = '#eab308';
+    else if (isPilot) hatColor = '#1e3a8a';
+    else if (isSurgeon) hatColor = '#0284c7';
+    else if (isWizard) hatColor = '#312e81';
+    else if (isDetective) hatColor = '#785233';
+    else if (isSteampunk) hatColor = '#451a03';
+    else if (/\b(red|crimson|scarlet)\b/i.test(textContext)) hatColor = '#dc2626';
     else if (/\b(blue|navy|azure)\b/i.test(textContext)) hatColor = '#2563eb';
     else if (/\b(green|emerald|olive)\b/i.test(textContext)) hatColor = '#16a34a';
     else if (/\b(white|cream|ivory)\b/i.test(textContext)) hatColor = '#f8fafc';
@@ -180,7 +273,18 @@ export function extractCharacterFeaturesFromModelOutput(
 
   const hasHelmet =
     raw?.costume?.hasHelmet ??
-    (/\b(helmet|helm|visor|spartan|astronaut)\b/i.test(textContext) || /خوذة/.test(textContext));
+    (isKnight ||
+      isSamurai ||
+      isAstronaut ||
+      isSoldier ||
+      /\b(helmet|helm|visor|spartan|astronaut|kabuto|bascinet|ballistic)\b/i.test(textContext) ||
+      /خوذة/.test(textContext));
+
+  let helmetStyle: 'knight' | 'astronaut' | 'ballistic' | 'kabuto' | 'default' = 'default';
+  if (isAstronaut || /\b(astronaut|spacesuit|eva)\b/i.test(textContext)) helmetStyle = 'astronaut';
+  else if (isSamurai || /\b(samurai|kabuto)\b/i.test(textContext)) helmetStyle = 'kabuto';
+  else if (isKnight || /\b(knight|bascinet|great helm|plate)\b/i.test(textContext)) helmetStyle = 'knight';
+  else if (isSoldier || /\b(ballistic|tactical|special forces|soldier)\b/i.test(textContext)) helmetStyle = 'ballistic';
 
   const hasCrown =
     raw?.costume?.hasCrown ??
@@ -188,69 +292,192 @@ export function extractCharacterFeaturesFromModelOutput(
 
   const hasGlasses =
     raw?.costume?.hasGlasses ??
-    (/\b(glasses|sunglasses|spectacles|goggles|eyewear|shades)\b/i.test(textContext) || /(نظارة|نظارات)/.test(textContext));
+    (isSteampunk ||
+      isCyberpunk ||
+      /\b(glasses|sunglasses|spectacles|goggles|eyewear|shades|optic|cyberware)\b/i.test(textContext) ||
+      /(نظارة|نظارات)/.test(textContext));
+
+  const hasFaceMask =
+    raw?.costume?.hasFaceMask ??
+    (isNinja || isSurgeon || /\b(mask|face wrap|surgical mask|shinobi)\b/i.test(textContext));
+
+  const hasTie =
+    raw?.costume?.hasTie ??
+    (isDetective || isExecutive || isPilot || /\b(tie|necktie|suit|executive|captain)\b/i.test(textContext));
+
+  const hasApron =
+    raw?.costume?.hasApron ??
+    (isBlacksmith || isChef || isSteampunk || /\b(apron|blacksmith)\b/i.test(textContext));
+
+  const hasPauldrons =
+    raw?.costume?.hasPauldrons ??
+    (isKnight || isSamurai || isAstronaut || isSoldier);
+
+  const hasStethoscope =
+    raw?.costume?.hasStethoscope ??
+    (isSurgeon || /\b(stethoscope|surgeon|doctor)\b/i.test(textContext));
 
   const hasBackpack =
     raw?.costume?.hasBackpack ??
-    (/\b(backpack|rucksack|knapsack|schoolbag|satchel)\b/i.test(textContext) || /حقيبة/.test(textContext));
+    (isAstronaut || /\b(backpack|rucksack|knapsack|schoolbag|satchel|spacesuit|eva)\b/i.test(textContext) || /حقيبة/.test(textContext));
 
   const hasCape =
     raw?.costume?.hasCape ??
-    (/\b(cape|cloak|mantle|poncho)\b/i.test(textContext) || /(عباءة|رداء)/.test(textContext));
+    (isWizard || /\b(cape|cloak|mantle|poncho)\b/i.test(textContext) || /(عباءة|رداء)/.test(textContext));
 
   // Detect equipment
   const hasBow =
     raw?.equipment?.hasBow ??
     raw?.equipment?.bow ??
-    /\b(bow|archer|scout|hunt|arrow|quiver)\b/i.test(textContext);
+    /\b(bow|archer|huntress|arrow|quiver)\b/i.test(textContext);
   const hasQuiver =
     raw?.equipment?.hasQuiver ??
     raw?.equipment?.quiver ??
     (hasBow || /\b(quiver|arrows)\b/i.test(textContext));
   const hasStaff =
     raw?.equipment?.hasStaff ??
-    (/\b(staff|wand|wizard|mage|cleric|cane|spear|scepter)\b/i.test(textContext) || /(عصا|رمح)/.test(textContext));
+    (isWizard || /\b(staff|wand|wizard|mage|cleric|cane|spear|scepter)\b/i.test(textContext) || /(عصا|رمح)/.test(textContext));
   const hasSword =
     raw?.equipment?.hasSword ??
-    (/\b(sword|blade|knight|warrior|katana|dagger|saber|rapier)\b/i.test(textContext) || /(سيف|خنجر)/.test(textContext));
+    (isKnight ||
+      isSamurai ||
+      /\b(sword|blade|knight|warrior|katana|dagger|saber|rapier|samurai)\b/i.test(textContext) ||
+      /(سيف|خنجر)/.test(textContext));
   const hasShield =
     raw?.equipment?.hasShield ??
-    (/\b(shield|buckler|knight)\b/i.test(textContext) || /ترس/.test(textContext));
+    (isKnight || /\b(shield|buckler|knight)\b/i.test(textContext) || /ترس/.test(textContext));
   const hasGun =
     raw?.equipment?.hasGun ??
-    (/\b(gun|pistol|revolver|rifle|blaster|shotgun)\b/i.test(textContext) || /(مسدس|بندقية)/.test(textContext));
+    (isSoldier || /\b(gun|pistol|revolver|rifle|blaster|shotgun|special forces)\b/i.test(textContext) || /(مسدس|بندقية)/.test(textContext));
+  const hasBriefcase =
+    raw?.equipment?.hasBriefcase ??
+    (isExecutive || /\b(briefcase|suitcase|portfolio)\b/i.test(textContext));
+  const hasHammer =
+    raw?.equipment?.hasHammer ??
+    (isBlacksmith || isMiner || /\b(hammer|pickaxe|tongs|blacksmith)\b/i.test(textContext));
+  const hasBackKatanas =
+    raw?.equipment?.hasBackKatanas ??
+    (isNinja || /\b(twin back sheaths|back sheaths|ninja|shinobi)\b/i.test(textContext));
 
   // Detect costume
   const hasHood =
     raw?.costume?.hasHood ??
-    /\b(hood|hooded|cowl|cloak|mantle|scout|assassin|stealth)\b/i.test(textContext);
-  const hasCowl = raw?.costume?.hasCowl ?? (isFullFantasyArchetype ? hasHood : /\b(scarf|cowl|bandana)\b/i.test(textContext));
+    (isNinja || /\b(hood|hooded|cowl|cloak|mantle|scout|assassin|stealth|ninja|shinobi)\b/i.test(textContext));
+  const hasCowl =
+    raw?.costume?.hasCowl ??
+    (isElvenArchetype ? hasHood : /\b(scarf|cowl|bandana)\b/i.test(textContext));
   const hasAntlersOrPins =
     raw?.costume?.hasAntlersOrPins ??
     /\b(elf|elven|antler|pin|circlet|nature|druid)\b/i.test(textContext);
   const hasHair =
     raw?.costume?.hasHair ??
-    (isFullFantasyArchetype || /\b(hair|braid|ponytail|bun|afro|wig)\b/i.test(textContext) || /شعر/.test(textContext));
+    (isElvenArchetype ||
+      (/\b(hair|braid|ponytail|bun|afro|wig)\b/i.test(textContext) || /شعر/.test(textContext)));
   const hasCuirass =
     raw?.costume?.hasCuirass ??
-    (isFullFantasyArchetype || /\b(armor|cuirass|vest|chestplate|tunic|jacket|coat|trenchcoat|suit|shirt|sweater)\b/i.test(textContext) || /(درع|معطف|جاكيت|بدلة)/.test(textContext));
+    (isFullCostumeArchetype ||
+      /\b(armor|cuirass|vest|chestplate|tunic|jacket|coat|trenchcoat|suit|shirt|sweater|scrubs|overalls|uniform)\b/i.test(textContext) ||
+      /(درع|معطف|جاكيت|بدلة)/.test(textContext));
   const hasBelt =
     raw?.costume?.hasBelt ??
-    (isFullFantasyArchetype || /\b(belt|harness|strap|sash|holster)\b/i.test(textContext));
+    (isFullCostumeArchetype || /\b(belt|harness|strap|sash|holster)\b/i.test(textContext));
   const hasBracers =
     raw?.costume?.hasBracers ??
-    (isFullFantasyArchetype || /\b(bracer|gauntlet|wristband|gloves)\b/i.test(textContext));
+    (isElvenArchetype || isKnight || isSamurai || isNinja || isAstronaut || isSurgeon || /\b(bracer|gauntlet|wristband|gloves)\b/i.test(textContext));
   const hasBoots =
     raw?.costume?.hasBoots ??
-    (isFullFantasyArchetype || /\b(boot|boots|shoes|sneakers|greaves)\b/i.test(textContext));
+    (isFullCostumeArchetype || /\b(boot|boots|shoes|sneakers|greaves)\b/i.test(textContext));
 
-  let lowerGarment: 'skirt' | 'robe' | 'trousers' | 'none' = isFullFantasyArchetype ? 'skirt' : 'none';
-  if (/\b(robe|gown|dress|wizard)\b/i.test(textContext)) {
+  let lowerGarment: 'skirt' | 'robe' | 'trousers' | 'none' = isElvenArchetype ? 'skirt' : 'none';
+  if (isWizard || isDetective || /\b(robe|gown|dress|wizard|trenchcoat|surcoat)\b/i.test(textContext)) {
     lowerGarment = 'robe';
-  } else if (/\b(pants|trousers|breeches|armor|knight|jeans)\b/i.test(textContext)) {
-    lowerGarment = 'trousers';
-  } else if (/\b(skirt|kilt|tunic)\b/i.test(textContext)) {
+  } else if (isSamurai || /\b(skirt|kilt|tunic|hakama)\b/i.test(textContext)) {
     lowerGarment = 'skirt';
+  } else if (isKnight || isFullCostumeArchetype || /\b(pants|trousers|breeches|armor|knight|jeans|suit|scrubs|overalls)\b/i.test(textContext)) {
+    lowerGarment = 'trousers';
+  }
+
+  // Archetype-tuned color palettes so each character looks unmistakable
+  let defaultPrimary = '#2e4e3f';
+  let defaultSecondary = '#3d6350';
+  let defaultLeather = '#4a3321';
+  let defaultMetal = '#c2a649';
+
+  if (isKnight) {
+    defaultPrimary = '#94a3b8';
+    defaultSecondary = '#991b1b';
+    defaultLeather = '#451a03';
+    defaultMetal = '#cbd5e1';
+  } else if (isSamurai) {
+    defaultPrimary = '#7f1d1d';
+    defaultSecondary = '#18181b';
+    defaultLeather = '#27272a';
+    defaultMetal = '#eab308';
+  } else if (isNinja) {
+    defaultPrimary = '#18181b';
+    defaultSecondary = '#09090b';
+    defaultLeather = '#991b1b';
+    defaultMetal = '#94a3b8';
+  } else if (isAstronaut) {
+    defaultPrimary = '#f8fafc';
+    defaultSecondary = '#cbd5e1';
+    defaultLeather = '#475569';
+    defaultMetal = '#f59e0b';
+  } else if (isWizard) {
+    defaultPrimary = '#312e81';
+    defaultSecondary = '#4338ca';
+    defaultLeather = '#581c87';
+    defaultMetal = '#38bdf8';
+  } else if (isDetective) {
+    defaultPrimary = '#b08968';
+    defaultSecondary = '#334155';
+    defaultLeather = '#451a03';
+    defaultMetal = '#d97706';
+  } else if (isSurgeon) {
+    defaultPrimary = '#0284c7';
+    defaultSecondary = '#e0f2fe';
+    defaultLeather = '#2dd4bf';
+    defaultMetal = '#cbd5e1';
+  } else if (isChef) {
+    defaultPrimary = '#f8fafc';
+    defaultSecondary = '#e2e8f0';
+    defaultLeather = '#1e293b';
+    defaultMetal = '#94a3b8';
+  } else if (isSoldier) {
+    defaultPrimary = '#3f4f3a';
+    defaultSecondary = '#293325';
+    defaultLeather = '#4a3b2c';
+    defaultMetal = '#52525b';
+  } else if (isMiner) {
+    defaultPrimary = '#ca8a04';
+    defaultSecondary = '#1e3a8a';
+    defaultLeather = '#451a03';
+    defaultMetal = '#facc15';
+  } else if (isPilot) {
+    defaultPrimary = '#1e3a8a';
+    defaultSecondary = '#f8fafc';
+    defaultLeather = '#18181b';
+    defaultMetal = '#eab308';
+  } else if (isBlacksmith) {
+    defaultPrimary = '#451a03';
+    defaultSecondary = '#292524';
+    defaultLeather = '#78350f';
+    defaultMetal = '#52525b';
+  } else if (isExecutive) {
+    defaultPrimary = '#1e293b';
+    defaultSecondary = '#f8fafc';
+    defaultLeather = '#451a03';
+    defaultMetal = '#dc2626';
+  } else if (isSteampunk) {
+    defaultPrimary = '#78350f';
+    defaultSecondary = '#451a03';
+    defaultLeather = '#92400e';
+    defaultMetal = '#d97706';
+  } else if (isCyberpunk) {
+    defaultPrimary = '#0f172a';
+    defaultSecondary = '#06b6d4';
+    defaultLeather = '#1e293b';
+    defaultMetal = '#22d3ee';
   }
 
   // Detect or sample palette
@@ -258,10 +485,10 @@ export function extractCharacterFeaturesFromModelOutput(
   const palette: CharacterVisualFeatures['palette'] = {
     skin: rawPal.skin || fallbackPalette?.skin || '#f3ceb2',
     hair: rawPal.hair || fallbackPalette?.hair || '#ad8748',
-    primaryClothing: rawPal.primaryClothing || rawPal.tunic || rawPal.clothing || fallbackPalette?.primaryClothing || '#2e4e3f',
-    secondaryClothing: rawPal.secondaryClothing || fallbackPalette?.secondaryClothing || '#3d6350',
-    leather: rawPal.leather || rawPal.straps || fallbackPalette?.leather || '#4a3321',
-    metal: rawPal.metal || rawPal.armor || fallbackPalette?.metal || '#c2a649',
+    primaryClothing: rawPal.primaryClothing || rawPal.tunic || rawPal.clothing || fallbackPalette?.primaryClothing || defaultPrimary,
+    secondaryClothing: rawPal.secondaryClothing || fallbackPalette?.secondaryClothing || defaultSecondary,
+    leather: rawPal.leather || rawPal.straps || fallbackPalette?.leather || defaultLeather,
+    metal: rawPal.metal || rawPal.armor || fallbackPalette?.metal || defaultMetal,
     weaponWood: rawPal.weaponWood || rawPal.wood || fallbackPalette?.weaponWood || '#4a2810',
     weaponAccent: rawPal.weaponAccent || fallbackPalette?.weaponAccent || '#e5e7eb',
   };
@@ -270,7 +497,45 @@ export function extractCharacterFeaturesFromModelOutput(
 
   return {
     name,
-    archetype: raw?.archetype || (hasBow ? 'archer' : hasStaff ? 'mage' : hasSword ? 'warrior' : 'scout'),
+    archetype:
+      raw?.archetype ||
+      (isKnight
+        ? 'knight'
+        : isSamurai
+        ? 'samurai'
+        : isNinja
+        ? 'ninja'
+        : isAstronaut
+        ? 'astronaut'
+        : isWizard
+        ? 'mage'
+        : isDetective
+        ? 'detective'
+        : isSurgeon
+        ? 'surgeon'
+        : isChef
+        ? 'chef'
+        : isSoldier
+        ? 'soldier'
+        : isMiner
+        ? 'miner'
+        : isPilot
+        ? 'pilot'
+        : isBlacksmith
+        ? 'blacksmith'
+        : isExecutive
+        ? 'executive'
+        : isSteampunk
+        ? 'steampunk'
+        : isCyberpunk
+        ? 'cyberpunk'
+        : hasBow
+        ? 'archer'
+        : hasStaff
+        ? 'mage'
+        : hasSword
+        ? 'warrior'
+        : 'scout'),
     gender: isFemale ? 'female' : 'male',
     heightMeters: typeof raw?.heightMeters === 'number' ? raw.heightMeters : 1.75,
     palette,
@@ -279,13 +544,19 @@ export function extractCharacterFeaturesFromModelOutput(
       hatStyle,
       hatColor,
       hasHelmet: Boolean(hasHelmet),
+      helmetStyle,
       hasCrown: Boolean(hasCrown),
       hasGlasses: Boolean(hasGlasses),
+      hasFaceMask: Boolean(hasFaceMask),
+      hasTie: Boolean(hasTie),
+      hasApron: Boolean(hasApron),
+      hasPauldrons: Boolean(hasPauldrons),
+      hasStethoscope: Boolean(hasStethoscope),
       hasBackpack: Boolean(hasBackpack),
       hasHair: Boolean(hasHair),
       hasCuirass: Boolean(hasCuirass),
       hasBoots: Boolean(hasBoots),
-      selectiveMode: !isFullFantasyArchetype,
+      selectiveMode: !isFullCostumeArchetype,
       hasHood: Boolean(hasHood),
       hasCowl: Boolean(hasCowl),
       hasBelt: Boolean(hasBelt),
@@ -301,6 +572,9 @@ export function extractCharacterFeaturesFromModelOutput(
       hasSword: Boolean(hasSword),
       hasShield: Boolean(hasShield),
       hasGun: Boolean(hasGun),
+      hasBriefcase: Boolean(hasBriefcase),
+      hasHammer: Boolean(hasHammer),
+      hasBackKatanas: Boolean(hasBackKatanas),
     },
     proportions: raw?.proportions,
   };

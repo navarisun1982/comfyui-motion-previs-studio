@@ -11,7 +11,9 @@ import {
   findReadyMadeMotionById,
   createHumanoidSkeleton,
   createStylizedHumanoidStandin,
+  dressAndTextureHumanoidRig,
 } from '../src/engine/kinematics';
+import { extractCharacterFeaturesFromModelOutput } from '../src/engine/procedural3D/characterClayCompiler';
 import { useShotStore } from '../src/stores/useShotStore';
 
 const mockActor: Actor = {
@@ -493,9 +495,12 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
   });
 
   it('strictly isolates reference images per actor and per shot when switching between scenes/shots', () => {
+    expect(DEFAULT_SCENES.length).toBe(2);
+    expect(DEFAULT_SCENES.reduce((acc, sc) => acc + sc.shots.length, 0)).toBe(12);
+
     const shot01aItem = DEFAULT_SCENES[0].shots[0]; // Shot 01A (Agent Kael, Interceptor Coupe, Street Planter Tree)
-    const shot02aItem = DEFAULT_SCENES[1].shots[0]; // Shot 02A (Explorer Aria, Dune Buggy, Sandstone Arch)
-    const shot03aItem = DEFAULT_SCENES[2].shots[0]; // Shot 03A (Julian, Elena)
+    const shot02aItem = DEFAULT_SCENES[1].shots[0]; // Shot 02A (Explorer Aria, Nomad Dune Buggy, Ancient Solar Obelisk)
+    const shot02bItem = DEFAULT_SCENES[1].shots[1]; // Shot 02B (Explorer Aria, Chronos Shrine)
 
     const store = useShotStore.getState();
     store.loadShot(buildDefaultShotSpec(shot01aItem));
@@ -532,28 +537,28 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     expect(queryByDisplayValue('agent_kael_ref.png')).toBeNull();
     expect(container.querySelector(`img[src="${kaelImg}"]`)).toBeNull();
 
-    // Switch to Scene 03 (Shot 03A - Julian & Elena) and assign a separate reference image to Julian
+    // Switch to Shot 02B and assign a separate reference image to Explorer Aria in Shot 02B only
     act(() => {
-      useShotStore.getState().switchShot(shot03aItem.id, () => buildDefaultShotSpec(shot03aItem));
+      useShotStore.getState().switchShot(shot02bItem.id, () => buildDefaultShotSpec(shot02bItem));
     });
-    const julianImg = 'data:image/png;base64,JULIAN_UNIQUE_REF_03A';
+    const ariaImg = 'data:image/png;base64,ARIA_UNIQUE_REF_02B';
     act(() => {
-      useShotStore.getState().updateActor('actor-julian', {
-        conceptImageUrl: julianImg,
-        conceptImageName: 'julian_portrait.png',
+      useShotStore.getState().updateActor('actor-aria', {
+        conceptImageUrl: ariaImg,
+        conceptImageName: 'aria_portrait.png',
       });
     });
-    expect(queryByDisplayValue('julian_portrait.png')).toBeTruthy();
-    expect(container.querySelector(`img[src="${julianImg}"]`)).toBeTruthy();
-    expect(useShotStore.getState().shot.actors.find((a) => a.id === 'actor-elena')?.conceptImageUrl).toBeUndefined();
+    expect(queryByDisplayValue('aria_portrait.png')).toBeTruthy();
+    expect(container.querySelector(`img[src="${ariaImg}"]`)).toBeTruthy();
+    expect(useShotStore.getState().shot.actors.find((a) => a.id === 'env-forest-shrine')?.conceptImageUrl).toBeUndefined();
 
-    // Switch back to Shot 01A -> Agent Kael's reference image is preserved independently, and Julian's image is not shown
+    // Switch back to Shot 01A -> Agent Kael's reference image is preserved independently, and Aria's image is not shown
     act(() => {
       useShotStore.getState().switchShot(shot01aItem.id, () => buildDefaultShotSpec(shot01aItem));
     });
     expect(queryByDisplayValue('agent_kael_ref.png')).toBeTruthy();
     expect(container.querySelector(`img[src="${kaelImg}"]`)).toBeTruthy();
-    expect(container.querySelector(`img[src="${julianImg}"]`)).toBeNull();
+    expect(container.querySelector(`img[src="${ariaImg}"]`)).toBeNull();
   });
 
   it('spawns newly added characters completely stationary (gait: none, z: 0) and grounded above y = 0 without sinking', () => {
@@ -583,6 +588,89 @@ describe('CharacterControlCard — 2026 UI/UX Inspector Verification', () => {
     fireEvent.click(getByText('Rig/XYZ'));
     expect(getByText('Bone Pose & Joint Control')).toBeTruthy();
     fireEvent.click(getByText('LeftArm'));
+  });
+
+  it('stages Shot 01A (Rooftop Drone Stand-Off) with rigged katana inside RightHand palm and head-on drone dive collision', () => {
+    const shot01aItem = DEFAULT_SCENES[0].shots[0];
+    const spec = buildDefaultShotSpec(shot01aItem);
+
+    const kael = spec.actors.find((a) => a.id === 'actor-kael');
+    const drone = spec.actors.find((a) => a.id === 'actor-hunter-drone');
+    const gunship = spec.actors.find((a) => a.id === 'actor-gunship-overwatch');
+    expect(kael).toBeDefined();
+    expect(drone).toBeDefined();
+    expect(gunship).toBeDefined();
+
+    // Kael charges from stage left (x=38) to center (x=47) facing right (+90 deg) with 2 katana slash cycles
+    expect(kael!.trajectory.startPosition.x).toBe(38);
+    expect(kael!.trajectory.endPosition.x).toBe(47);
+    expect(kael!.motionClip).toBe('human-sword-slash');
+    expect(kael!.motionCycles).toBe(2);
+    expect(kael!.partGraph?.dressRig).toBe(true);
+
+    // Drone dives steeply from upper-right (x=64, z=15) down to clash height (x=51, z=4.5) facing left (-90 deg)
+    expect(drone!.trajectory.startPosition.x).toBe(64);
+    expect(drone!.trajectory.startPosition.z).toBe(15);
+    expect(drone!.trajectory.endPosition.x).toBe(51);
+    expect(drone!.trajectory.endPosition.z).toBe(4.5);
+    expect(drone!.motionClip).toBe('air-dive-attack');
+  });
+
+  it('stages Shot 01B (Alley Turret & Cruiser Firefight) and Shot 01C (Neon Street Drift & Mid-Air Leap) with bone-mounted weapons and grounded physics', () => {
+    const shot01bItem = DEFAULT_SCENES[0].shots[1];
+    const spec01b = buildDefaultShotSpec(shot01bItem);
+
+    const kael01b = spec01b.actors.find((a) => a.id === 'actor-kael')!;
+    const enforcer01b = spec01b.actors.find((a) => a.id === 'actor-syndicate-enforcer')!;
+    const cruiser01b = spec01b.actors.find((a) => a.id === 'veh-patrol-cruiser')!;
+    const turret01b = spec01b.actors.find((a) => a.id === 'prop-defense-turret')!;
+
+    expect(kael01b.motionClip).toBe('human-aim-fire');
+    expect(kael01b.motionCycles).toBe(3);
+    expect(kael01b.partGraph?.dressRig).toBe(true);
+
+    // Verify dressAndTextureHumanoidRig attaches Equipment_Gun directly inside RightHand palm for Shot 01B Kael
+    const rig01b = createHumanoidSkeleton(5.06);
+    const features01b = extractCharacterFeaturesFromModelOutput({}, kael01b.token);
+    dressAndTextureHumanoidRig(rig01b, features01b);
+    const gunInHand = rig01b.bones.get('RightHand')?.getObjectByName('Equipment_Gun');
+    expect(gunInHand).toBeDefined();
+
+    // Enforcer staggers backward from x=56 to x=63 under fire
+    expect(enforcer01b.motionClip).toBe('human-hit-stagger');
+    expect(enforcer01b.trajectory.startPosition.x).toBe(56);
+    expect(enforcer01b.trajectory.endPosition.x).toBe(63);
+    expect(enforcer01b.partGraph?.dressRig).toBe(true);
+
+    // Cruiser hard-brakes and grounded turret recoils without lifting off z=0
+    expect(cruiser01b.motionClip).toBe('veh-hard-brake');
+    expect(turret01b.motionClip).toBe('prop-recoil-kick');
+    expect(turret01b.trajectory.keyframes?.every((kf) => (kf.position.z ?? 0) === 0)).toBe(true);
+
+    // Shot 01C: Neon Street Drift & Mid-Air Leap
+    const shot01cItem = DEFAULT_SCENES[0].shots[2];
+    const spec01c = buildDefaultShotSpec(shot01cItem);
+
+    const kael01c = spec01c.actors.find((a) => a.id === 'actor-kael')!;
+    const driftCruiser01c = spec01c.actors.find((a) => a.id === 'veh-drift-cruiser')!;
+    const cyberBike01c = spec01c.actors.find((a) => a.id === 'veh-cyber-bike')!;
+
+    expect(kael01c.motionClip).toBe('human-jump-leap');
+    expect(kael01c.trajectory.startPosition.x).toBe(36);
+    expect(kael01c.trajectory.endPosition.x).toBe(58);
+    expect(kael01c.partGraph?.dressRig).toBe(true);
+    // Verify parabolic airborne peak during mid-air leap over the drifting cruiser
+    expect(kael01c.trajectory.keyframes?.some((kf) => (kf.position.z ?? 0) > 10)).toBe(true);
+
+    // Verify dressAndTextureHumanoidRig attaches Equipment_Sword inside RightHand palm for Shot 01C Kael
+    const rig01c = createHumanoidSkeleton(5.06);
+    const features01c = extractCharacterFeaturesFromModelOutput({}, kael01c.token);
+    dressAndTextureHumanoidRig(rig01c, features01c);
+    const swordInHand = rig01c.bones.get('RightHand')?.getObjectByName('Equipment_Sword');
+    expect(swordInHand).toBeDefined();
+
+    expect(driftCruiser01c.motionClip).toBe('veh-drift-turn');
+    expect(cyberBike01c.motionClip).toBe('veh-accel-launch');
   });
 });
 

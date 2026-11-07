@@ -32,6 +32,7 @@ import {
   createBoneTransformGizmo,
   setGizmoHoveredAxis,
   setJointDiscHovered,
+  setJointDiscSelected,
   GizmoAxisType,
   applyBoneRotationDelta,
   applyBoneTrackballDelta,
@@ -50,8 +51,14 @@ import {
 } from '../engine/kinematics';
 import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
 
-import { setLayerRecursively, applyGroundSurface, buildPerimeterEnvironment } from '../engine/staging/environmentBuilder';
-import { createSubjectMesh, applyObjectTargetColor } from '../engine/staging/subjectMeshFactory';
+import {
+  setLayerRecursively,
+  applyGroundSurface,
+  buildPerimeterEnvironment,
+  shouldHideStageBackdropInPrevis,
+  inferSemanticEnvironmentBiome,
+} from '../engine/staging/environmentBuilder';
+import { createSubjectMesh, applyObjectTargetColor, SUBJECT_MESH_SCHEMA_VERSION } from '../engine/staging/subjectMeshFactory';
 import { StageViewfinderOverlays, updateFrustumGeometry } from './stage/StageViewfinderOverlays';
 import { StageTopViewRadar } from './stage/StageTopViewRadar';
 import {
@@ -210,6 +217,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     setPrevisVideo,
     setPrevisOpenPose,
     setPrevisDepth,
+    setPrevisIdMask,
     setPrevisRendering,
     beginGesture,
     endGesture,
@@ -319,6 +327,11 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     }
   }, [initialViewMode]);
 
+  useEffect(() => {
+    setSelectedBone(null);
+    selectedBoneRef.current = null;
+  }, [selectedActorId]);
+
   // Containers
   const stageMountRef = useRef<HTMLDivElement | null>(null);
   const viewfinderMountRef = useRef<HTMLDivElement | null>(null);
@@ -342,6 +355,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
   const lightsGroupRef = useRef<THREE.Group | null>(null);
   const gridHelperRef = useRef<THREE.GridHelper | null>(null);
   const stageBackdropMeshRef = useRef<THREE.Mesh | null>(null);
+  const stageBackdropFrameMeshRef = useRef<THREE.Mesh | null>(null);
   const floorMeshRef = useRef<THREE.Mesh | null>(null);
   const environmentGroupRef = useRef<THREE.Group | null>(null);
   const hearthLightRef = useRef<THREE.PointLight | null>(null);
@@ -427,37 +441,36 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     }
   }, [shot.referenceImage?.previewUrl]);
 
-  // Update Soundstage Cyclorama Backdrop with 2D Canvas Drawing / Shot Reference Plate
+  // Update Soundstage Cyclorama Backdrop with Environment Reference Image (<Picture 4>) or 2D Canvas Drawing / Shot Reference Plate
   useEffect(() => {
     const backdrop = stageBackdropMeshRef.current;
+    const frame = stageBackdropFrameMeshRef.current;
     if (!backdrop) return;
 
-    if (shot.referenceImage?.previewUrl) {
+    const cycloramaUrl = shot.environment?.conceptImageUrl || shot.referenceImage?.previewUrl;
+    if (cycloramaUrl) {
       const loader = new THREE.TextureLoader();
       loader.load(
-        shot.referenceImage.previewUrl,
+        cycloramaUrl,
         (tex) => {
           tex.colorSpace = THREE.SRGBColorSpace;
           backdrop.material = new THREE.MeshBasicMaterial({
             map: tex,
             side: THREE.DoubleSide,
             transparent: true,
-            opacity: 0.95,
+            opacity: 0.92,
           });
           backdrop.visible = true;
+          if (frame) frame.visible = false;
         },
         undefined,
         (err) => console.warn('Could not load soundstage cyclorama texture', err)
       );
     } else {
-      backdrop.material = new THREE.MeshBasicMaterial({
-        color: 0x1e293b,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.15,
-      });
+      backdrop.visible = false;
+      if (frame) frame.visible = false;
     }
-  }, [shot.referenceImage?.previewUrl]);
+  }, [shot.referenceImage?.previewUrl, shot.environment?.conceptImageUrl]);
 
   // Keyboard Shortcut for Object Deletion (Delete / Backspace)
   useEffect(() => {
@@ -552,25 +565,28 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     setLayerRecursively(borderLine, 1);
     stageScene.add(borderLine);
 
-    // 3D Studio Soundstage Rear Cyclorama Projection Screen (2D Canvas Drawing / Reference Plate)
-    const screenGeo = new THREE.PlaneGeometry(64, 36);
+    // 3D Studio Soundstage Rear Cyclorama Projection Screen (Environment Reference / 2D Canvas Plate)
+    const screenGeo = new THREE.PlaneGeometry(88, 46);
     const screenMat = new THREE.MeshBasicMaterial({
       color: 0x1e293b,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.15,
+      opacity: 0.0,
     });
     const screenMesh = new THREE.Mesh(screenGeo, screenMat);
-    screenMesh.position.set(0, 18, -48);
+    screenMesh.position.set(0, 22, -48);
+    screenMesh.visible = false;
     stageScene.add(screenMesh);
     stageBackdropMeshRef.current = screenMesh;
 
-    // Outer framing bezel for cyclorama
-    const frameGeo = new THREE.BoxGeometry(64.8, 36.8, 0.4);
+    // Outer framing bezel for cyclorama (hidden by default so no black box frame appears in outdoor scenes)
+    const frameGeo = new THREE.BoxGeometry(88.8, 46.8, 0.4);
     const frameMat = new THREE.MeshStandardMaterial({ color: 0x090d16, roughness: 0.7, metalness: 0.5 });
     const frameMesh = new THREE.Mesh(frameGeo, frameMat);
-    frameMesh.position.set(0, 18, -48.25);
+    frameMesh.position.set(0, 22, -48.25);
+    frameMesh.visible = false;
     stageScene.add(frameMesh);
+    stageBackdropFrameMeshRef.current = frameMesh;
 
     // Multi-angle Studio Lighting for Crystal-Clear Visibility
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0x64748b, 2.2);
@@ -999,6 +1015,32 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       }
 
       const actorMesh = actorMeshesRef.current.get(selId);
+      if (!actorMesh) {
+        if (handlesGroup) handlesGroup.visible = false;
+        if (discsGroup) discsGroup.visible = false;
+        if (gizmoGroup) gizmoGroup.visible = false;
+        return;
+      }
+
+      const showActorRootTransformGizmo = (mesh: THREE.Group, hasVisibleJointDiscs: boolean) => {
+        if (!gizmoGroup) return;
+        const modelSize = mesh.userData?.modelSize as THREE.Vector3 | undefined;
+        const actorScaleY = mesh.scale?.y || 1;
+        const rawHeight = (modelSize?.y && Number.isFinite(modelSize.y) ? modelSize.y : 2.4) * actorScaleY;
+        const yOffset = hasVisibleJointDiscs
+          ? 0.18
+          : THREE.MathUtils.clamp(rawHeight * 0.32, 0.35, 1.85);
+        gizmoGroup.position.set(mesh.position.x, mesh.position.y + yOffset, mesh.position.z);
+        gizmoGroup.visible = true;
+        if (stageCameraRef.current) {
+          const camDist = stageCameraRef.current.position.distanceTo(gizmoGroup.position);
+          const gizmoScale = hasVisibleJointDiscs
+            ? THREE.MathUtils.clamp(camDist * 0.075, 1.45, 3.6)
+            : THREE.MathUtils.clamp(camDist * 0.095, 1.85, 4.6);
+          gizmoGroup.scale.setScalar(gizmoScale);
+        }
+      };
+
       const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
       const allowGizmosForActor = Boolean(
         showPosingHandlesRef.current || actorMesh?.userData?.showBones || selectedBoneRef.current
@@ -1006,7 +1048,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       if (!rig || !allowGizmosForActor) {
         if (handlesGroup) handlesGroup.visible = false;
         if (discsGroup) discsGroup.visible = false;
-        if (gizmoGroup) gizmoGroup.visible = false;
+        showActorRootTransformGizmo(actorMesh, false);
         return;
       }
 
@@ -1022,7 +1064,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       if (posingModeRef.current === 'ik') {
         // --- IK TARGET MODE ---
         if (discsGroup) discsGroup.visible = false;
-        if (gizmoGroup) gizmoGroup.visible = false;
+        showActorRootTransformGizmo(actorMesh, true);
         if (!handlesGroup) return;
         handlesGroup.visible = true;
 
@@ -1074,6 +1116,14 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         // --- FK JOINT GIZMO MODE ---
         if (handlesGroup) handlesGroup.visible = false;
         if (!discsGroup || !gizmoGroup) return;
+
+        const matchingDiscDefs = JOINT_DISC_DEFINITIONS.filter((def) => rig.bones.has(def.bone));
+        if (matchingDiscDefs.length === 0) {
+          discsGroup.visible = false;
+          showActorRootTransformGizmo(actorMesh, false);
+          return;
+        }
+
         discsGroup.visible = true;
 
         // Rebuild joint discs if actor changed, rig bone set changed, or empty
@@ -1086,36 +1136,34 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           discsGroup.userData.actorId = selId;
           discsGroup.userData.boneCount = rig.bones.size;
 
-          JOINT_DISC_DEFINITIONS.filter((def) => rig.bones.has(def.bone)).forEach((def) => {
+          matchingDiscDefs.forEach((def) => {
             const disc = createJointDiscMesh(def.bone, def.label, def.color, def.radius, selId);
             discsGroup.add(disc);
           });
           setLayerRecursively(discsGroup, 1);
         }
 
-        // Update disc positions and face camera with camera-adaptive scale
+        // Update disc positions and face camera with compact camera-adaptive scale + hover/selection prominence
         discsGroup.children.forEach((child) => {
           const boneName = child.userData?.boneName as HumanoidBone | undefined;
           if (boneName) {
             const pos = getBoneWorldPos(boneName);
             child.position.copy(pos);
+            const isSelBone = boneName === selectedBoneRef.current;
+            setJointDiscSelected(child, isSelBone);
             if (stageCameraRef.current) {
               child.quaternion.copy(stageCameraRef.current.quaternion);
-              // Scale joint disc dynamically so joints are always effortlessly clickable at any zoom distance
               const camDist = stageCameraRef.current.position.distanceTo(pos);
-              const discScale = THREE.MathUtils.clamp(camDist * 0.038, 0.60, 1.35);
-              child.scale.setScalar(discScale);
-            }
-            const activeHighlight = child.getObjectByName('ActiveHighlightRing');
-            if (activeHighlight) {
-              activeHighlight.visible = boneName === selectedBoneRef.current;
+              const baseScale = THREE.MathUtils.clamp(camDist * 0.026, 0.52, 0.95);
+              const prominenceBoost = isSelBone || child.userData?.isHovered ? 1.22 : 1.0;
+              child.scale.setScalar(baseScale * prominenceBoost);
             }
           }
         });
 
-        // Position and scale 3D Transform Gizmo ONLY at the actively selected bone for humanoids
-        // (prevents a giant root gizmo from intercepting clicks when clicking away from the character)
-        if (selectedBoneRef.current) {
+        // Position and scale 3D Transform Gizmo at the actively selected bone for humanoids,
+        // or at the Actor Root base when no individual bone joint disc is selected!
+        if (selectedBoneRef.current && rig.bones.has(selectedBoneRef.current)) {
           const targetBonePos = getBoneWorldPos(selectedBoneRef.current);
           gizmoGroup.position.copy(targetBonePos);
           gizmoGroup.visible = true;
@@ -1126,7 +1174,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
             gizmoGroup.scale.setScalar(gizmoScale);
           }
         } else {
-          gizmoGroup.visible = false;
+          showActorRootTransformGizmo(actorMesh, true);
         }
       }
     };
@@ -1516,25 +1564,50 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     if (!scene || !envGroup || !floorMesh) return;
 
     const env = shot.environment;
-    const skyHex = env?.skyColor || '#08090c';
-    const fogHex = env?.fogColor || '#08090c';
+    const inferredBiome = inferSemanticEnvironmentBiome(env, {
+      sceneDescription: shot.sceneDescription,
+      actors: shot.actors,
+    });
+    const skyHex = inferredBiome.skyColor;
+    const fogHex = inferredBiome.fogColor;
     const fogDensity = Math.max(0, Math.min(1, env?.fogDensity ?? 0.01));
     const fogNear = Math.max(15, Math.round(100 - fogDensity * 80));
     const fogFar = Math.max(120, Math.round(600 - fogDensity * 440));
 
     // 1. Sky & Atmospheric Fog (linear falloff modulated by fogDensity so the stage orbit camera never gets blacked out)
-    scene.background = new THREE.Color(skyHex);
+    const backdropDecision = shouldHideStageBackdropInPrevis(shot);
+    const isPitchBlackStudioSky = /^#0[789]0[89ab][01][0-9a-f]$/i.test(skyHex.trim());
+    const effectiveSkyHex =
+      backdropDecision.hide && isPitchBlackStudioSky && (env?.timeOfDay === 'day' || env?.timeOfDay === 'dawn')
+        ? '#121b2a'
+        : skyHex;
+    scene.background = new THREE.Color(effectiveSkyHex);
     scene.fog = new THREE.Fog(new THREE.Color(fogHex), fogNear, fogFar);
 
     // 2. Ground Material & Surface Texturing
-    applyGroundSurface(floorMesh, env?.groundSurface);
+    applyGroundSurface(floorMesh, inferredBiome.groundSurface);
 
     // 3. Clear and Rebuild Perimeter Environmental Architecture
     buildPerimeterEnvironment(envGroup, env, {
       sceneDescription: shot.sceneDescription,
       actors: shot.actors,
     });
-  }, [shot.environment, shot.sceneDescription, envActorsSignature]);
+
+    // 4. Smart Stage Backdrop Isolation for Viewfinder & <Video 1> Previs Render:
+    // Layer 0 = visible in both 3D Stage & Viewfinder (<Video 1>).
+    // Layer 1 = visible on the 3D Orbit Stage for blocking, hidden from Viewfinder & <Video 1> V2V plate.
+    const stageTargetLayer = backdropDecision.hide ? 1 : 0;
+    setLayerRecursively(floorMesh, stageTargetLayer);
+    setLayerRecursively(envGroup, stageTargetLayer);
+    const hasCycloramaImage = Boolean(shot.environment?.conceptImageUrl || shot.referenceImage?.previewUrl);
+    const cycloramaLayer = backdropDecision.hide && !hasCycloramaImage ? 1 : 0;
+    if (stageBackdropMeshRef.current) {
+      setLayerRecursively(stageBackdropMeshRef.current, cycloramaLayer);
+    }
+    if (stageBackdropFrameMeshRef.current) {
+      setLayerRecursively(stageBackdropFrameMeshRef.current, cycloramaLayer);
+    }
+  }, [shot.environment, shot.sceneDescription, shot.referenceImage?.previewUrl, envActorsSignature]);
 
   // 6. Update Actor Meshes in 3D Scene
   useEffect(() => {
@@ -1581,6 +1654,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
       const needsFullRebuild =
         !mesh ||
+        mesh.userData.meshSchemaVersion !== SUBJECT_MESH_SCHEMA_VERSION ||
         mesh.userData.kind !== actorKind ||
         mesh.userData.name !== actorName ||
         mesh.userData.token !== actorToken ||
@@ -1614,8 +1688,25 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           rigType: actor.rigType,
           rigLandmarks: actor.rigLandmarks,
           showBones: actor.showBones,
+          actionDescription: actor.actionDescription,
+          onAsyncLoadComplete: () => {
+            syncPositions(currentTimeRef.current);
+            if (stageRendererRef.current && stageSceneRef.current && stageCameraRef.current) {
+              stageRendererRef.current.render(stageSceneRef.current, stageCameraRef.current);
+            }
+            if (
+              vfRendererRef.current &&
+              stageSceneRef.current &&
+              vfCameraRef.current &&
+              !useShotStore.getState().isRenderingPrevis
+            ) {
+              vfRendererRef.current.render(stageSceneRef.current, vfCameraRef.current);
+            }
+          },
         });
+        mesh.userData.meshSchemaVersion = SUBJECT_MESH_SCHEMA_VERSION;
         mesh.userData.actorId = actor.id;
+        mesh.userData.actorIndex = index;
         mesh.userData.kind = actorKind;
         mesh.userData.name = actorName;
         mesh.userData.token = actorToken;
@@ -1677,6 +1768,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         }
         actorMeshesRef.current.set(actor.id, mesh);
       } else if (mesh) {
+        mesh.userData.actorIndex = index;
         // Update selection state & floor ring visibility in-place without rebuilding or resetting transform!
         if (mesh.userData.isSelected !== isSelected) {
           mesh.userData.isSelected = isSelected;
@@ -1870,6 +1962,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     // Smart Subject Tracking & Follow Lock (when trackTargetActorId is active)
     let effectiveCamX = camPos.x;
     let effectiveCamZ = camPos.z;
+    let effectiveCamY = camPos.y;
     if (liveShot.camera.trackTargetActorId) {
       const trackedActor = liveShot.actors.find((a) => a.id === liveShot.camera.trackTargetActorId);
       if (trackedActor) {
@@ -1892,12 +1985,12 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           const trackedStart = getActorPositionAtTime(trackedActor, 0);
           effectiveCamX += trackedNow.x - trackedStart.x;
           effectiveCamZ += trackedNow.z - trackedStart.z;
+          effectiveCamY += trackedNow.y - trackedStart.y;
         }
       }
     }
 
     const angle = liveShot.camera.angle;
-    let effectiveCamY = camPos.y;
     let effectiveTargetY = targetY + (liveShot.camera.lookAtHeightOffset ?? 0);
 
     if (angle === 'low-angle') {
@@ -2052,7 +2145,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           Boolean(actor.gait && actor.gait !== 'none' && actor.gait !== 'auto');
 
         // Keep characters firmly planted on the floor (y >= 0) without synthetic vertical sine-wave jumping
-        mesh.position.set(actorPos.x, Math.max(0, actorPos.y), actorPos.z);
+        const groundedY = Math.max(0, actorPos.y);
+        mesh.position.set(actorPos.x, groundedY, actorPos.z);
+        // Hide floor contact shadow disc when airborne (drones/aircraft/leaps) or bone-socketed so a black circle never floats in mid-air
+        const contactShadow = mesh.getObjectByName('__contact_shadow__');
+        if (contactShadow) {
+          contactShadow.visible = !actor.socketToBone?.targetActorId && groundedY < 0.25;
+        }
         if (typeof mesh.userData.update === 'function' && hasActiveMotion && t > 0) {
           mesh.userData.update(0.016);
         }
@@ -2226,6 +2325,19 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
       const baseRingGroup = mesh.getObjectByName('__base_ring_group__');
       if (baseRingGroup) baseRingGroup.visible = false;
+      const contactShadow = mesh.getObjectByName('__contact_shadow__');
+      if (contactShadow) contactShadow.visible = false;
+      mesh.traverse((child) => {
+        if ((child as THREE.Sprite).isSprite) {
+          child.visible = false;
+        }
+      });
+
+      const isHandSocket =
+        actor.socketToBone.boneName === 'RightHand' || actor.socketToBone.boneName === 'LeftHand';
+      const socketScale = (actor.scale ?? 1.0) * (isHandSocket ? 0.36 : 1.0);
+      mesh.scale.set(socketScale, socketScale, socketScale);
+
       const parentMesh = actorMeshesRef.current.get(actor.socketToBone.targetActorId);
       if (parentMesh && parentMesh.userData.rig) {
         const bone = parentMesh.userData.rig.bones.get(actor.socketToBone.boneName as HumanoidBone);
@@ -2269,9 +2381,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
   // In-App 3D Previs Video Renderer (Deterministic offline fixed-timestep MP4 capture)
   const handleRenderInAppPrevis = async (
-    requestedPassMode?: 'rgb' | 'depth' | 'openpose' | 'all',
+    requestedPassMode?: 'rgb' | 'depth' | 'openpose' | 'id-mask' | 'all',
     requestedResolution: '720p' | '1080p' = '720p'
-  ): Promise<{ url: string; blob: Blob; openposeUrl?: string; depthUrl?: string } | null> => {
+  ): Promise<{ url: string; blob: Blob; openposeUrl?: string; depthUrl?: string; idMaskUrl?: string } | null> => {
     if (!vfRendererRef.current) {
       initVfRendererRef.current?.();
     }
@@ -2306,6 +2418,20 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       if (ikHandlesGroupRef.current) ikHandlesGroupRef.current.visible = false;
       if (jointDiscsGroupRef.current) jointDiscsGroupRef.current.visible = false;
       if (boneGizmoGroupRef.current) boneGizmoGroupRef.current.visible = false;
+
+      // Smart Stage Floor & Perimeter Suppression for <Video 1> V2V & Depth Passes
+      const liveShotForBackdrop = useShotStore.getState().shot || shot;
+      const backdropDecision = shouldHideStageBackdropInPrevis(liveShotForBackdrop);
+      if (backdropDecision.hide) {
+        if (floorMeshRef.current) floorMeshRef.current.visible = false;
+        if (environmentGroupRef.current) environmentGroupRef.current.visible = false;
+        if (stageBackdropMeshRef.current && !liveShotForBackdrop.referenceImage?.previewUrl) {
+          stageBackdropMeshRef.current.visible = false;
+        }
+        if (stageBackdropFrameMeshRef.current && !liveShotForBackdrop.referenceImage?.previewUrl) {
+          stageBackdropFrameMeshRef.current.visible = false;
+        }
+      }
 
       // Deterministic render (8n+1 frame snapping if target model is LTX-2.5)
       const isLtx = shot.targetModel === 'ltx-2.5';
@@ -2379,13 +2505,17 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         onProgress: (pct) => setPrevisRendering(true, pct),
       });
 
-      // Restore gizmos
+      // Restore gizmos & stage backdrop visibility
       if (cameraGizmoGroupRef.current) cameraGizmoGroupRef.current.visible = true;
       if (trajectoryLineRef.current) trajectoryLineRef.current.visible = true;
       if (gridHelperRef.current) gridHelperRef.current.visible = showGrid;
       if (ikHandlesGroupRef.current) ikHandlesGroupRef.current.visible = true;
       if (jointDiscsGroupRef.current) jointDiscsGroupRef.current.visible = true;
       if (boneGizmoGroupRef.current) boneGizmoGroupRef.current.visible = false;
+      if (floorMeshRef.current) floorMeshRef.current.visible = true;
+      if (environmentGroupRef.current) environmentGroupRef.current.visible = true;
+      if (stageBackdropMeshRef.current) stageBackdropMeshRef.current.visible = true;
+      if (stageBackdropFrameMeshRef.current) stageBackdropFrameMeshRef.current.visible = true;
 
       // Restore positions to current time
       syncPositions(currentTime);
@@ -2399,6 +2529,10 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         setPrevisDepth(result.depthUrl, result.depthBlob);
       }
 
+      if (result.idMaskBlob && result.idMaskUrl) {
+        setPrevisIdMask(result.idMaskUrl, result.idMaskBlob);
+      }
+
       if (result.rgbBlob && result.rgbUrl) {
         setPrevisVideo(result.rgbUrl, result.rgbBlob);
         setPrevisRendering(false, 100);
@@ -2407,11 +2541,12 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           blob: result.rgbBlob,
           openposeUrl: result.openposeUrl,
           depthUrl: result.depthUrl,
+          idMaskUrl: result.idMaskUrl,
         };
       }
 
-      const fallbackUrl = result.openposeUrl || result.depthUrl;
-      const fallbackBlob = result.openposeBlob || result.depthBlob;
+      const fallbackUrl = result.openposeUrl || result.depthUrl || result.idMaskUrl;
+      const fallbackBlob = result.openposeBlob || result.depthBlob || result.idMaskBlob;
       if (fallbackUrl && fallbackBlob) {
         setPrevisRendering(false, 100);
         return {
@@ -2419,6 +2554,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           blob: fallbackBlob,
           openposeUrl: result.openposeUrl,
           depthUrl: result.depthUrl,
+          idMaskUrl: result.idMaskUrl,
         };
       }
 
@@ -2433,6 +2569,10 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       if (ikHandlesGroupRef.current) ikHandlesGroupRef.current.visible = true;
       if (jointDiscsGroupRef.current) jointDiscsGroupRef.current.visible = true;
       if (boneGizmoGroupRef.current) boneGizmoGroupRef.current.visible = false;
+      if (floorMeshRef.current) floorMeshRef.current.visible = true;
+      if (environmentGroupRef.current) environmentGroupRef.current.visible = true;
+      if (stageBackdropMeshRef.current) stageBackdropMeshRef.current.visible = true;
+      if (stageBackdropFrameMeshRef.current) stageBackdropFrameMeshRef.current.visible = true;
       syncPositions(currentTime);
       updateSizesRef.current?.();
       setPrevisRendering(false, 0);
@@ -3011,6 +3151,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       const targetId = clickedActorId || '__camera__';
       pendingClickedActorIdRef.current = clickedActorId;
       pendingClickedCameraRef.current = clickedCamera;
+      if (targetId !== useShotStore.getState().selectedActorId) {
+        setSelectedActorId(targetId);
+      }
 
       // Direct dragging: Always drag actor/camera on direct click-drag, disable OrbitControls while dragging
       draggedActorIdRef.current = targetId;
@@ -3318,7 +3461,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
     const dx = Math.abs(e.clientX - dragStartPosRef.current.x);
     const dy = Math.abs(e.clientY - dragStartPosRef.current.y);
-    if (dx > 8 || dy > 8) {
+    if (dx > 8 || dy > 8 || (activeObjectAxisDragRef.current && (dx > 1 || dy > 1))) {
       hasDraggedRef.current = true;
     }
 
@@ -3781,7 +3924,14 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       beginGesture();
       applyBoneRotationDelta(rig, selectedBone, axis, angleDelta);
       const newPose = exportBonePose(rig);
-      updateActor(selectedActorId, { pose: newPose, posePreset: undefined, gait: 'none' });
+      const targetActor = shot.actors.find((a) => a.id === selectedActorId);
+      const existingKfs = targetActor?.trajectory?.keyframes || [];
+      const isNearKf = existingKfs.some((kf) => Math.abs(kf.time - currentTime) <= 0.25);
+      if (stagingMoveMode === 'keyframe' || isNearKf) {
+        recordActorPoseAtTime(selectedActorId, currentTime, newPose, undefined, 'none', duration);
+      } else {
+        updateActor(selectedActorId, { pose: newPose, posePreset: undefined, gait: 'none' });
+      }
       endGesture();
     }
   };

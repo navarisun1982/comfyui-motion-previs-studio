@@ -498,7 +498,7 @@ describe('bundled production templates', () => {
     expect(bound.workflow['142'].inputs.seed).toBe(532752046112665);
     expect(bound.workflow['132'].inputs.value).toBe(6);
     expect(bound.workflow['115'].inputs.aspect_ratio).toBe('16:9 (Widescreen)');
-    expect(bound.workflow['115'].inputs.megapixels).toBe(1.2);
+    expect(bound.workflow['115'].inputs.megapixels).toBe(0.8);
     expect(bound.workflow['638'].inputs.video).toBe('alley_pursuit_rgb_previs.mp4');
     expect(bound.workflow['137'].inputs.image).toBe('char1.png');
     expect(bound.workflow['139'].inputs.image).toBe('char2.png');
@@ -531,6 +531,38 @@ describe('bundled production templates', () => {
     expect(partialBound.workflow['136'].inputs['ref_images.ref_image_0']).toEqual(['137', 0]);
     expect(partialBound.workflow['136'].inputs['ref_images.ref_image_1']).toEqual(['139', 0]);
     expect(partialBound.workflow['136'].inputs['ref_images.ref_image_2']).toBeUndefined();
+
+    // Verify single composite keyframe mode (only refImage1File provided):
+    // both <Subject 1> (from <Picture 1>) and <Subject 4> ([Scene Environment] from <Picture 4>) map to <Picture 1>
+    const singleKeyframeBound = bindTemplate(apiRaw, parsed.binding!, {
+      mode: 'control',
+      profile: 'final',
+      prompt: [
+        'subject_definitions:',
+        '<Subject 1> is Astronaut defined by <Picture 1>: a human figure wearing a sleek white spacesuit.',
+        '<Subject 4> is the [Scene Environment] visually defined by <Picture 4>: an enclosed honeycomb hive chamber.',
+        '<Picture 4> is the finished visual reference for the target rendering.',
+      ].join('\n'),
+      negative: '',
+      seed: 99999,
+      durationSeconds: 5,
+      frameRate: 24,
+      aspectRatio: '16:9',
+      width: 1280,
+      height: 720,
+      filenamePrefix: 'mmh3_single_keyframe',
+      controlVideoFile: 'hive_previs.mp4',
+      refImage1File: 'hive_keyframe.png',
+    });
+    expect(singleKeyframeBound.workflow['137']?.inputs.image).toBe('hive_keyframe.png');
+    expect(singleKeyframeBound.workflow['139']).toBeUndefined();
+    expect(singleKeyframeBound.workflow['144']).toBeUndefined();
+    expect(singleKeyframeBound.workflow['151']).toBeUndefined();
+    const normalizedPrompt = String(singleKeyframeBound.workflow['138'].inputs.value);
+    expect(normalizedPrompt).toContain('<Subject 1> is Astronaut defined by <Picture 1>');
+    expect(normalizedPrompt).toContain('<Subject 4> is the [Scene Environment] visually defined by <Picture 1>');
+    expect(normalizedPrompt).toContain('<Picture 1> is the finished visual reference for the target rendering.');
+    expect(normalizedPrompt).not.toContain('<Picture 4>');
   });
 });
 

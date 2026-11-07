@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { getModelBuffer, getModelIdFromUrl } from '../services/modelStorage';
+import { getModelBuffer, getModelIdFromUrl, storeModelBuffer } from '../services/modelStorage';
 
 const dracoLoader = new DRACOLoader();
 const gltfLoader = new GLTFLoader();
@@ -194,7 +194,35 @@ export async function loadGltfModel(
         });
       }
 
-      // Step B: Fallback to standard URL loader for remote HTTP assets
+      // Step B: For remote HTTP/HTTPS GLB URLs, fetch ArrayBuffer and persist in IndexedDB (modelStorage)
+      // so subsequent loads and offline sessions load instantaneously from local storage!
+      if (typeof fetch === 'function' && /^https?:\/\//i.test(modelUrl)) {
+        try {
+          const resp = await fetch(modelUrl);
+          if (resp.ok) {
+            const remoteBuf = await resp.arrayBuffer();
+            if (remoteBuf && remoteBuf.byteLength > 0) {
+              await storeModelBuffer(modelUrl, remoteBuf, modelUrl).catch(() => {});
+              return await new Promise<THREE.Group>((resolve, reject) => {
+                gltfLoader.parse(
+                  remoteBuf,
+                  '',
+                  (gltf) => {
+                    const normalized = normalizeGltfScene(gltf.scene, targetHeightMeters);
+                    normalized.userData.gltfAnimations = gltf.animations || [];
+                    resolve(normalized);
+                  },
+                  (err) => reject(err)
+                );
+              });
+            }
+          }
+        } catch (fetchErr) {
+          console.warn(`Direct fetch+cache fallback to gltfLoader.load for [${modelUrl}]:`, fetchErr);
+        }
+      }
+
+      // Step C: Fallback to standard URL loader
       return new Promise<THREE.Group>((resolve, reject) => {
         gltfLoader.load(
           modelUrl,

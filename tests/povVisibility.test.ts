@@ -88,14 +88,14 @@ describe('Camera-POV Frustum Visibility & Official Model Prompting (povVisibilit
 
     // 2. MiniMax H3 6-section Ref2VA schema
     const minimax = compileMiniMaxPrompt(shot);
-    expect(minimax.positivePrompt).toContain('<Subject 1> is Detective Vance');
-    expect(minimax.positivePrompt).toContain('<Subject 1> (present throughout): fully_preserved');
+    expect(minimax.positivePrompt).toContain('<Subject 1> is Detective Vance (from <Picture 1>)');
+    expect(minimax.positivePrompt).toContain('<Subject 1> (present throughout): attribute_transfer');
     expect(minimax.positivePrompt).not.toContain('<Subject 2>');
     expect(minimax.positivePrompt).not.toContain('<Subject 3>');
     expect(minimax.positivePrompt).not.toContain('Offscreen Sniper');
     expect(minimax.positivePrompt).not.toContain('Offscreen Bystander');
-    expect(minimax.positivePrompt).toContain('<Subject 4> is the [Scene Environment]');
-    expect(minimax.positivePrompt).toContain('<Video 1>');
+    expect(minimax.positivePrompt).toContain('<Subject 4> is the [Scene Environment] (from <Picture 4>)');
+    expect(minimax.positivePrompt).toContain('<Video 1> (entire temporal structure): fully_preserved');
 
     // 3. Seedance 2.0 6-axis motion matrix
     const seedance = compileSeedancePrompt(shot);
@@ -344,22 +344,24 @@ describe('Camera-POV Frustum Visibility & Official Model Prompting (povVisibilit
     };
 
     const minimax = compileMiniMaxPrompt(shot);
-    // Both the non-human tree (<Subject 1>) and human (<Subject 2>) + environment (<Subject 4>) use fully_preserved and capital <Picture N>
+    // Official ComfyUI Rotating Hive Chamber schema:
+    // Subjects 1..3 use attribute_transfer (transferring finished appearance from <Picture N> onto animated <Video 1> trajectory),
+    // Environment (<Subject 4>) uses fully_preserved, and <Video 1> (entire temporal structure) uses fully_preserved.
     expect(minimax.positivePrompt).toContain('<Subject 1> is Ancient Blossom Tree (from <Picture 1>)');
-    expect(minimax.positivePrompt).toContain('<Subject 1> (present throughout): fully_preserved');
+    expect(minimax.positivePrompt).toContain('<Subject 1> (present throughout): attribute_transfer');
     expect(minimax.positivePrompt).toContain('<Subject 2> is Wanderer (from <Picture 2>)');
-    expect(minimax.positivePrompt).toContain('<Subject 2> (present throughout): fully_preserved');
+    expect(minimax.positivePrompt).toContain('<Subject 2> (present throughout): attribute_transfer');
     expect(minimax.positivePrompt).toContain('<Subject 4> (present throughout): fully_preserved');
-    expect(minimax.positivePrompt).not.toContain('attribute_transfer');
-    // <Video 1> uses partially_preserved (golden middle ground: preserves framing, placement & choreography while rendering natural fluid motion)
     expect(minimax.positivePrompt).toContain(
-      '<Video 1> (camera/motion reference): partially_preserved - preserve the exact camera trajectory, framing, subject screen placement, scale proportions, and choreographed motion timing from <Video 1>'
+      '<Video 1> (entire temporal structure): fully_preserved - preserve its complete animation, timing, camera transform, camera angle, framing, subject screen placement, scale proportions, altitude changes, orientation transitions, shot duration, and frame progression without alteration.'
     );
-    expect(minimax.positivePrompt).toContain('do NOT merely texture-wrap');
+    expect(minimax.positivePrompt).toContain('<Video 1> takes absolute priority');
+    expect(minimax.positivePrompt).not.toContain('#10B981');
+    expect(minimax.positivePrompt).not.toContain('#EF4444');
 
     const ltx = compileLtxPrompt(shot);
-    expect(ltx.positivePrompt).toContain('living real-world entity');
-    expect(ltx.positivePrompt).toContain('without preserving synthetic proxy geometry');
+    expect(ltx.positivePrompt).toContain('living real-world environment and entities');
+    expect(ltx.positivePrompt).toContain('without any synthetic 3D previz geometry');
 
     const seedance = compileSeedancePrompt(shot);
     expect(seedance.positivePrompt).toContain('[Previs-to-Reality Spatial Instantiation]');

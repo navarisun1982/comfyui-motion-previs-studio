@@ -1,0 +1,3958 @@
+/**
+ * Curated 200 Open .GLB Assets & Full External Catalogs Registry (Polyfork & Sandflow Sand3D)
+ *
+ * Legal & Competition Compliance:
+ * - Polyfork Catalog Index (`lucas-martinic/polyfork-catalog`): MIT Index License.
+ *   Models are loaded on-demand via official `https://polyfork.dev/cdn/<id>.glb` URLs and cached locally
+ *   in the user's browser IndexedDB without redistributing raw model binaries in the Git repository.
+ * - Sandflow AI Sand3D (`Sandflow-ai/sand3d` & `huggingface.co/Sandflow`): Apache-2.0 Code & CC BY 4.0 Datasets.
+ */
+
+import type { Asset3DItem, AssetCategory } from '../stores/useAssetLibraryStore';
+import type { SubjectKind } from '../types/shotspec';
+
+export interface PolyforkKitEntry {
+  id: string;
+  title: string;
+  complete: boolean;
+  parts: number;
+  page: string;
+  coverUrl: string;
+}
+
+export interface SandflowDatasetSubset {
+  id: string;
+  hfRepo: string;
+  title: string;
+  titleAr: string;
+  count: number;
+  license: string;
+  description: string;
+  descriptionAr: string;
+  hfUrl: string;
+  githubUrl: string;
+  cliCommand: string;
+}
+
+export interface SandflowPreviewRow {
+  id: string;
+  name: string;
+  category: string;
+  code: string;
+  usdaPath?: string;
+  imageUrl?: string;
+  datasetRepo: string;
+}
+
+export const SANDFLOW_DATASETS_CATALOG: SandflowDatasetSubset[] = [
+  {
+    id: 'sand3d-simready',
+    hfRepo: 'Sandflow/sand3d-simready',
+    title: 'Sand3D SimReady (NVIDIA SimReady Physics Assets)',
+    titleAr: 'مجموعة Sand3D SimReady (عناصر محاكاة فيزيائية دقيقة)',
+    count: 2334,
+    license: 'CC BY 4.0 / Apache-2.0',
+    description: '2,334 simulation-ready 3D objects reconstructed as parametric Sand3D Python/OpenUSD programs.',
+    descriptionAr: '2,334 مجسماً جاهزاً للمحاكاة الفيزيائية بصيغة كود Sand3D وملفات OpenUSD.',
+    hfUrl: 'https://huggingface.co/datasets/Sandflow/sand3d-simready',
+    githubUrl: 'https://github.com/Sandflow-ai/sand3d',
+    cliCommand: 'hf download Sandflow/sand3d-simready --repo-type dataset --local-dir ./sand3d-simready',
+  },
+  {
+    id: 'sand3d-articraft',
+    hfRepo: 'Sandflow/sand3d-articraft',
+    title: 'Sand3D Articraft (Articulated Jointed Objects)',
+    titleAr: 'مجموعة Sand3D Articraft (مجسمات مفصلية متحركة)',
+    count: 9209,
+    license: 'CC BY 4.0 / Apache-2.0',
+    description: '9,209 articulated mechanical and everyday 3D objects with declared movable joints (doors, rotors, hinges, wheels).',
+    descriptionAr: '9,209 مجسمات تحتوي على مفاصل حركية قابلة للتحريك (أبواب، مراوح، عجلات، مفاصل).',
+    hfUrl: 'https://huggingface.co/datasets/Sandflow/sand3d-articraft',
+    githubUrl: 'https://github.com/Sandflow-ai/sand3d',
+    cliCommand: 'hf download Sandflow/sand3d-articraft --repo-type dataset --local-dir ./sand3d-articraft',
+  },
+  {
+    id: 'sand3d-objaverse',
+    hfRepo: 'Sandflow/sand3d-objaverse',
+    title: 'Sand3D Objaverse (Everyday Props, Vehicles & Architecture)',
+    titleAr: 'مجموعة Sand3D Objaverse (مركبات وأثاث وعناصر يومية)',
+    count: 66887,
+    license: 'CC BY 4.0 / Apache-2.0',
+    description: '66,887 diverse 3D objects across vehicles, props, furniture, and architecture represented as clean Sand3D programs.',
+    descriptionAr: '66,887 مجسماً متنوعاً تشمل المركبات والأثاث والمباني والأدوات اليومية.',
+    hfUrl: 'https://huggingface.co/datasets/Sandflow/sand3d-objaverse',
+    githubUrl: 'https://github.com/Sandflow-ai/sand3d',
+    cliCommand: 'hf download Sandflow/sand3d-objaverse --repo-type dataset --local-dir ./sand3d-objaverse',
+  },
+  {
+    id: 'sand3d-cad',
+    hfRepo: 'Sandflow/sand3d-cad',
+    title: 'Sand3D CAD (Precision Mechanical & Industrial Parts)',
+    titleAr: 'مجموعة Sand3D CAD (قطع هندسية وميكانيكية صناعية)',
+    count: 24495,
+    license: 'CC BY 4.0 / Apache-2.0',
+    description: '24,495 CAD mechanical parts and assemblies from public CAD repositories.',
+    descriptionAr: '24,495 قطعة هندسية وميكانيكية دقيقة مصممة بمعايير CAD.',
+    hfUrl: 'https://huggingface.co/datasets/Sandflow/sand3d-cad',
+    githubUrl: 'https://github.com/Sandflow-ai/sand3d',
+    cliCommand: 'hf download Sandflow/sand3d-cad --repo-type dataset --local-dir ./sand3d-cad',
+  },
+  {
+    id: 'sand3d-automate',
+    hfRepo: 'Sandflow/sand3d-automate',
+    title: 'Sand3D AutoMate (Multi-Part Mechanical Assemblies)',
+    titleAr: 'مجموعة Sand3D AutoMate (تجميعات ميكانيكية متكاملة)',
+    count: 3169,
+    license: 'CC BY 4.0 / Apache-2.0',
+    description: '3,169 multi-part mechanical assemblies and interlocking structures.',
+    descriptionAr: '3,169 تجميعة ميكانيكية متعددة الأجزاء.',
+    hfUrl: 'https://huggingface.co/datasets/Sandflow/sand3d-automate',
+    githubUrl: 'https://github.com/Sandflow-ai/sand3d',
+    cliCommand: 'hf download Sandflow/sand3d-automate --repo-type dataset --local-dir ./sand3d-automate',
+  },
+];
+
+export const POLYFORK_KITS_CATALOG: PolyforkKitEntry[] = [
+  {
+    "id": "3d-ui-kit-5635f7",
+    "title": "3D UI kit",
+    "complete": true,
+    "parts": 61,
+    "page": "https://polyfork.dev/kit/3d-ui-kit-5635f7",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/3d-ui-kit-5635f7.jpg"
+  },
+  {
+    "id": "campground-lake-ad32b0",
+    "title": "Campground & Lake",
+    "complete": true,
+    "parts": 62,
+    "page": "https://polyfork.dev/kit/campground-lake-ad32b0",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/campground-lake-ad32b0.jpg"
+  },
+  {
+    "id": "chrome-arcology-transit-kit-87a0e1",
+    "title": "Chrome Arcology Transit kit",
+    "complete": true,
+    "parts": 60,
+    "page": "https://polyfork.dev/kit/chrome-arcology-transit-kit-87a0e1",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/chrome-arcology-transit-kit-87a0e1.jpg"
+  },
+  {
+    "id": "clockwork-hand-adornments-kit-3aeccc",
+    "title": "Clockwork Hand Adornments kit",
+    "complete": true,
+    "parts": 50,
+    "page": "https://polyfork.dev/kit/clockwork-hand-adornments-kit-3aeccc",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/clockwork-hand-adornments-kit-3aeccc.jpg"
+  },
+  {
+    "id": "construction-site-9e40b0",
+    "title": "Construction Site",
+    "complete": true,
+    "parts": 62,
+    "page": "https://polyfork.dev/kit/construction-site-9e40b0",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/construction-site-9e40b0.jpg"
+  },
+  {
+    "id": "coral-reef-a7128a",
+    "title": "Coral Reef",
+    "complete": true,
+    "parts": 54,
+    "page": "https://polyfork.dev/kit/coral-reef-a7128a",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/coral-reef-a7128a.jpg"
+  },
+  {
+    "id": "countryside-railway-9b4c57",
+    "title": "Countryside Railway",
+    "complete": true,
+    "parts": 103,
+    "page": "https://polyfork.dev/kit/countryside-railway-9b4c57",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/countryside-railway-9b4c57.jpg"
+  },
+  {
+    "id": "cozy-farm-cc979f",
+    "title": "Cozy Farm",
+    "complete": true,
+    "parts": 60,
+    "page": "https://polyfork.dev/kit/cozy-farm-cc979f",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/cozy-farm-cc979f.jpg"
+  },
+  {
+    "id": "emerald-gilded-runes-kit-abfc30",
+    "title": "Emerald Gilded Runes kit",
+    "complete": true,
+    "parts": 60,
+    "page": "https://polyfork.dev/kit/emerald-gilded-runes-kit-abfc30",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/emerald-gilded-runes-kit-abfc30.jpg"
+  },
+  {
+    "id": "frontier-town-a0085b",
+    "title": "Frontier Town",
+    "complete": true,
+    "parts": 61,
+    "page": "https://polyfork.dev/kit/frontier-town-a0085b",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/frontier-town-a0085b.jpg"
+  },
+  {
+    "id": "halloween-night-46ade4",
+    "title": "Halloween Night",
+    "complete": true,
+    "parts": 61,
+    "page": "https://polyfork.dev/kit/halloween-night-46ade4",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/halloween-night-46ade4.jpg"
+  },
+  {
+    "id": "hospital-kit-2ebfcb",
+    "title": "Hospital kit",
+    "complete": true,
+    "parts": 57,
+    "page": "https://polyfork.dev/kit/hospital-kit-2ebfcb",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/hospital-kit-2ebfcb.jpg"
+  },
+  {
+    "id": "japanese-suburban-city-street-baa482",
+    "title": "Little Tokyo kit",
+    "complete": true,
+    "parts": 57,
+    "page": "https://polyfork.dev/kit/japanese-suburban-city-street-baa482",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/japanese-suburban-city-street-baa482.jpg"
+  },
+  {
+    "id": "medieval-village-kit-ca0b43",
+    "title": "Medieval Village Kit",
+    "complete": true,
+    "parts": 60,
+    "page": "https://polyfork.dev/kit/medieval-village-kit-ca0b43",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/medieval-village-kit-ca0b43.jpg"
+  },
+  {
+    "id": "modern-restaurant-cafe-01ea4c",
+    "title": "Modern Restaurant Cafe kit",
+    "complete": true,
+    "parts": 60,
+    "page": "https://polyfork.dev/kit/modern-restaurant-cafe-01ea4c",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/modern-restaurant-cafe-01ea4c.jpg"
+  },
+  {
+    "id": "neighborhood-pathways-kit-a992cf",
+    "title": "Neighborhood Pathways kit",
+    "complete": true,
+    "parts": 61,
+    "page": "https://polyfork.dev/kit/neighborhood-pathways-kit-a992cf",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/neighborhood-pathways-kit-a992cf.jpg"
+  },
+  {
+    "id": "nyc-city-kit-fbca88",
+    "title": "New York City Kit",
+    "complete": true,
+    "parts": 73,
+    "page": "https://polyfork.dev/kit/nyc-city-kit-fbca88",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/nyc-city-kit-fbca88.jpg"
+  },
+  {
+    "id": "office-794453",
+    "title": "Office",
+    "complete": true,
+    "parts": 60,
+    "page": "https://polyfork.dev/kit/office-794453",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/office-794453.jpg"
+  },
+  {
+    "id": "office-reefscape-kit-1afd7c",
+    "title": "Office Reefscape kit",
+    "complete": true,
+    "parts": 60,
+    "page": "https://polyfork.dev/kit/office-reefscape-kit-1afd7c",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/office-reefscape-kit-1afd7c.jpg"
+  },
+  {
+    "id": "pirate-cove-2ebea4",
+    "title": "Pirate Cove kit",
+    "complete": true,
+    "parts": 61,
+    "page": "https://polyfork.dev/kit/pirate-cove-2ebea4",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/pirate-cove-2ebea4.jpg"
+  },
+  {
+    "id": "racing-cars-kit-660d53",
+    "title": "Retro Cars Kit",
+    "complete": true,
+    "parts": 29,
+    "page": "https://polyfork.dev/kit/racing-cars-kit-660d53",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/racing-cars-kit-660d53.jpg"
+  },
+  {
+    "id": "skatepark-0922a9",
+    "title": "Skatepark kit",
+    "complete": true,
+    "parts": 60,
+    "page": "https://polyfork.dev/kit/skatepark-0922a9",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/skatepark-0922a9.jpg"
+  },
+  {
+    "id": "salvage-commons-d0be9f",
+    "title": "Sky Town",
+    "complete": true,
+    "parts": 62,
+    "page": "https://polyfork.dev/kit/salvage-commons-d0be9f",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/salvage-commons-d0be9f.jpg"
+  },
+  {
+    "id": "space-base-kit-cf65de",
+    "title": "Space Base Kit",
+    "complete": true,
+    "parts": 61,
+    "page": "https://polyfork.dev/kit/space-base-kit-cf65de",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/space-base-kit-cf65de.jpg"
+  },
+  {
+    "id": "spaceship-wars-kit-234642",
+    "title": "Spaceship Wars Kit",
+    "complete": true,
+    "parts": 29,
+    "page": "https://polyfork.dev/kit/spaceship-wars-kit-234642",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/spaceship-wars-kit-234642.jpg"
+  },
+  {
+    "id": "stadium-5db167",
+    "title": "Stadium",
+    "complete": true,
+    "parts": 71,
+    "page": "https://polyfork.dev/kit/stadium-5db167",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/stadium-5db167.jpg"
+  },
+  {
+    "id": "airport-43b137",
+    "title": "Airport",
+    "complete": false,
+    "parts": 1,
+    "page": "https://polyfork.dev/kit/airport-43b137",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/airport-43b137.jpg"
+  },
+  {
+    "id": "alpine-and-snow-092f66",
+    "title": "Alpine and Snow",
+    "complete": false,
+    "parts": 59,
+    "page": "https://polyfork.dev/kit/alpine-and-snow-092f66",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/alpine-and-snow-092f66.jpg"
+  },
+  {
+    "id": "chile-fiestas-patrias-87e847",
+    "title": "Chile: Fiestas Patrias",
+    "complete": false,
+    "parts": 58,
+    "page": "https://polyfork.dev/kit/chile-fiestas-patrias-87e847",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/chile-fiestas-patrias-87e847.jpg"
+  },
+  {
+    "id": "coast-and-boardwalk-d883fd",
+    "title": "Coast and Boardwalk",
+    "complete": false,
+    "parts": 59,
+    "page": "https://polyfork.dev/kit/coast-and-boardwalk-d883fd",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/coast-and-boardwalk-d883fd.jpg"
+  },
+  {
+    "id": "dragons-lair-dark-dragon-782570",
+    "title": "Dragons Lair",
+    "complete": false,
+    "parts": 9,
+    "page": "https://polyfork.dev/kit/dragons-lair-dark-dragon-782570",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/dragons-lair-dark-dragon-782570.jpg"
+  },
+  {
+    "id": "dungeon-crypt-c27d93",
+    "title": "Dungeon & Crypt",
+    "complete": false,
+    "parts": 67,
+    "page": "https://polyfork.dev/kit/dungeon-crypt-c27d93",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/dungeon-crypt-c27d93.jpg"
+  },
+  {
+    "id": "dia-de-muertos-f2f8f8",
+    "title": "Día de Muertos kit",
+    "complete": false,
+    "parts": 60,
+    "page": "https://polyfork.dev/kit/dia-de-muertos-f2f8f8",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/dia-de-muertos-f2f8f8.jpg"
+  },
+  {
+    "id": "easter-island-rapa-nui-368e86",
+    "title": "Easter Island (Rapa Nui)",
+    "complete": false,
+    "parts": 58,
+    "page": "https://polyfork.dev/kit/easter-island-rapa-nui-368e86",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/easter-island-rapa-nui-368e86.jpg"
+  },
+  {
+    "id": "casino-3dd029",
+    "title": "Hotel Casino kit",
+    "complete": false,
+    "parts": 122,
+    "page": "https://polyfork.dev/kit/casino-3dd029",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/null"
+  },
+  {
+    "id": "insect-world-e44b9f",
+    "title": "Insect World kit",
+    "complete": false,
+    "parts": 55,
+    "page": "https://polyfork.dev/kit/insect-world-e44b9f",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/insect-world-e44b9f.jpg"
+  },
+  {
+    "id": "medieval-japan-cb01ad",
+    "title": "Medieval Japan",
+    "complete": false,
+    "parts": 60,
+    "page": "https://polyfork.dev/kit/medieval-japan-cb01ad",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/medieval-japan-cb01ad.jpg"
+  },
+  {
+    "id": "nature-forest-kit-f29d6a",
+    "title": "Nature & Forest Kit",
+    "complete": false,
+    "parts": 59,
+    "page": "https://polyfork.dev/kit/nature-forest-kit-f29d6a",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/null"
+  },
+  {
+    "id": "open-plan-b2ebd3",
+    "title": "Open Plan",
+    "complete": false,
+    "parts": 63,
+    "page": "https://polyfork.dev/kit/open-plan-b2ebd3",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/open-plan-b2ebd3.jpg"
+  },
+  {
+    "id": "prehistoric-valley-8638dc",
+    "title": "Prehistoric Valley",
+    "complete": false,
+    "parts": 58,
+    "page": "https://polyfork.dev/kit/prehistoric-valley-8638dc",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/prehistoric-valley-8638dc.jpg"
+  },
+  {
+    "id": "research-lab-9b9b5d",
+    "title": "Research Lab",
+    "complete": false,
+    "parts": 61,
+    "page": "https://polyfork.dev/kit/research-lab-9b9b5d",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/research-lab-9b9b5d.jpg"
+  },
+  {
+    "id": "roadside-americana-50d40c",
+    "title": "Roadside Americana",
+    "complete": false,
+    "parts": 60,
+    "page": "https://polyfork.dev/kit/roadside-americana-50d40c",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/roadside-americana-50d40c.jpg"
+  },
+  {
+    "id": "university-959b66",
+    "title": "University",
+    "complete": false,
+    "parts": 61,
+    "page": "https://polyfork.dev/kit/university-959b66",
+    "coverUrl": "https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/covers/university-959b66.jpg"
+  }
+];
+
+export const CURATED_200_GLB_ASSETS: Asset3DItem[] = [
+  {
+    "id": "char-director-rig-male",
+    "name": "Posable Actor Rig (IK/FK Male)",
+    "nameAr": "ممثل سينمائي بمفاصل متحركة (IK/FK)",
+    "category": "character",
+    "kind": "human",
+    "icon": "🧍‍♂️",
+    "conceptImageUrl": "/images/library/posable-actor-male.jpg",
+    "tokenPrompt": "a cinematic lead male actor in dramatic film lighting",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "19-Bone IK/FK • GLB",
+    "description": "Articulated 19-bone humanoid rig with full IK/FK posing, walk/run gaits, and acting cues"
+  },
+  {
+    "id": "char-director-rig-female",
+    "name": "Posable Actress Rig (IK/FK Female)",
+    "nameAr": "ممثلة سينمائية بمفاصل متحركة (IK/FK)",
+    "category": "character",
+    "kind": "human",
+    "icon": "🧍‍♀️",
+    "conceptImageUrl": "/images/library/posable-actress-female.jpg",
+    "tokenPrompt": "a cinematic lead female actress in dramatic film lighting",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "19-Bone IK/FK • GLB",
+    "description": "Articulated 19-bone humanoid rig with full IK/FK posing, walk/run gaits, and acting cues"
+  },
+  {
+    "id": "pf-groundworker-083f5c",
+    "name": "Groundworker",
+    "nameAr": "Groundworker (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic groundworker in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/groundworker-083f5c.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/groundworker-083f5c/renders/hero.png?v=1793019123",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4969 tris • GLB",
+    "description": "Polyfork Open GLB (groundworker-083f5c) • Kit: construction-site-9e40b0"
+  },
+  {
+    "id": "pf-roller-skater-841ec1",
+    "name": "Roller Skater",
+    "nameAr": "Roller Skater (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic roller skater in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/roller-skater-841ec1.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/roller-skater-841ec1/renders/hero.png?v=1792419376",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4960 tris • GLB",
+    "description": "Polyfork Open GLB (roller-skater-841ec1) • Kit: skatepark-0922a9"
+  },
+  {
+    "id": "pf-doctor-d49de0",
+    "name": "Doctor",
+    "nameAr": "Doctor (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic doctor in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/doctor-d49de0.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/doctor-d49de0/renders/hero.png?v=1792989724",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4707 tris • GLB",
+    "description": "Polyfork Open GLB (doctor-d49de0) • Kit: hospital-kit-2ebfcb"
+  },
+  {
+    "id": "pf-civic-security-officer-30b6fb",
+    "name": "Civic Security Officer",
+    "nameAr": "Civic Security Officer (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic civic security officer in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/civic-security-officer-30b6fb.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/civic-security-officer-30b6fb/renders/hero.png?v=1792991854",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4415 tris • GLB",
+    "description": "Polyfork Open GLB (civic-security-officer-30b6fb) • Kit: chrome-arcology-transit-kit-87a0e1"
+  },
+  {
+    "id": "pf-guard-bfa819",
+    "name": "Guard",
+    "nameAr": "Guard (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic guard in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/guard-bfa819.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/guard-bfa819/renders/hero.png?v=1792566299",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4381 tris • GLB",
+    "description": "Polyfork Open GLB (guard-bfa819) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-village-guard-5f0f6f",
+    "name": "Village Guard",
+    "nameAr": "Village Guard (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic village guard in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/village-guard-5f0f6f.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/village-guard-5f0f6f/renders/hero.png?v=1792470686",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4355 tris • GLB",
+    "description": "Polyfork Open GLB (village-guard-5f0f6f) • Kit: medieval-village-kit-ca0b43"
+  },
+  {
+    "id": "pf-highway-patrol-officer-e81282",
+    "name": "Highway Patrol Officer",
+    "nameAr": "Highway Patrol Officer (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic highway patrol officer in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/highway-patrol-officer-e81282.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/highway-patrol-officer-e81282/renders/hero.png?v=1792878800",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4327 tris • GLB",
+    "description": "Polyfork Open GLB (highway-patrol-officer-e81282) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-ashigaru-foot-soldier-806707",
+    "name": "Ashigaru Foot Soldier",
+    "nameAr": "Ashigaru Foot Soldier (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic ashigaru foot soldier in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/ashigaru-foot-soldier-806707.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/ashigaru-foot-soldier-806707/renders/hero.png?v=1792984951",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4323 tris • GLB",
+    "description": "Polyfork Open GLB (ashigaru-foot-soldier-806707) • Kit: medieval-japan-cb01ad"
+  },
+  {
+    "id": "pf-armoured-knight-hero-07121f",
+    "name": "Armoured Knight Hero",
+    "nameAr": "Armoured Knight Hero (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic armoured knight hero in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/armoured-knight-hero-07121f.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/armoured-knight-hero-07121f/renders/hero.png?v=1792967188",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4237 tris • GLB",
+    "description": "Polyfork Open GLB (armoured-knight-hero-07121f) • Kit: dungeon-crypt-c27d93"
+  },
+  {
+    "id": "pf-pirate-captain-91f545",
+    "name": "Pirate Captain",
+    "nameAr": "Pirate Captain (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic pirate captain in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/pirate-captain-91f545.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/pirate-captain-91f545/renders/hero.png?v=1793028536",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4205 tris • GLB",
+    "description": "Polyfork Open GLB (pirate-captain-91f545) • Kit: pirate-cove-2ebea4"
+  },
+  {
+    "id": "pf-carving-chef-102bf5",
+    "name": "Carving Chef",
+    "nameAr": "Carving Chef (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic carving chef in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/carving-chef-102bf5.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/carving-chef-102bf5/renders/hero.png?v=1792477105",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4117 tris • GLB",
+    "description": "Polyfork Open GLB (carving-chef-102bf5) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-beginner-kid-skater-1ad8ab",
+    "name": "Beginner Kid Skater",
+    "nameAr": "Beginner Kid Skater (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic beginner kid skater in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/beginner-kid-skater-1ad8ab.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/beginner-kid-skater-1ad8ab/renders/hero.png?v=1792418473",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4083 tris • GLB",
+    "description": "Polyfork Open GLB (beginner-kid-skater-1ad8ab) • Kit: skatepark-0922a9"
+  },
+  {
+    "id": "pf-buddhist-monk-39f498",
+    "name": "Buddhist Monk",
+    "nameAr": "Buddhist Monk (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic buddhist monk in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/buddhist-monk-39f498.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/buddhist-monk-39f498/renders/hero.png?v=1792988281",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "4017 tris • GLB",
+    "description": "Polyfork Open GLB (buddhist-monk-39f498) • Kit: medieval-japan-cb01ad"
+  },
+  {
+    "id": "pf-veteran-pool-skater-2c63ab",
+    "name": "Veteran Pool Skater",
+    "nameAr": "Veteran Pool Skater (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic veteran pool skater in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/veteran-pool-skater-2c63ab.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/veteran-pool-skater-2c63ab/renders/hero.png?v=1792419943",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "3965 tris • GLB",
+    "description": "Polyfork Open GLB (veteran-pool-skater-2c63ab) • Kit: skatepark-0922a9"
+  },
+  {
+    "id": "pf-senior-scientist-631736",
+    "name": "Senior Scientist",
+    "nameAr": "Senior Scientist (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic senior scientist in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/senior-scientist-631736.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/senior-scientist-631736/renders/hero.png?v=1792434883",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "3945 tris • GLB",
+    "description": "Polyfork Open GLB (senior-scientist-631736) • Kit: research-lab-9b9b5d"
+  },
+  {
+    "id": "pf-construction-worker-c1ad8c",
+    "name": "Construction Worker",
+    "nameAr": "Construction Worker (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic construction worker in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/construction-worker-c1ad8c.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/construction-worker-c1ad8c/renders/hero.png?v=1792963441",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "3861 tris • GLB",
+    "description": "Polyfork Open GLB (construction-worker-c1ad8c) • Kit: nyc-city-kit-fbca88"
+  },
+  {
+    "id": "pf-naval-officer-93027f",
+    "name": "Naval Officer",
+    "nameAr": "Naval Officer (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic naval officer in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/naval-officer-93027f.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/naval-officer-93027f/renders/hero.png?v=1792978724",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "3801 tris • GLB",
+    "description": "Polyfork Open GLB (naval-officer-93027f) • Kit: pirate-cove-2ebea4"
+  },
+  {
+    "id": "pf-pirate-deckhand-98a6e7",
+    "name": "Pirate Deckhand",
+    "nameAr": "Pirate Deckhand (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic pirate deckhand in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/pirate-deckhand-98a6e7.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/pirate-deckhand-98a6e7/renders/hero.png?v=1793027737",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "3801 tris • GLB",
+    "description": "Polyfork Open GLB (pirate-deckhand-98a6e7) • Kit: pirate-cove-2ebea4"
+  },
+  {
+    "id": "pf-samurai-warrior-f2ebbe",
+    "name": "Samurai Warrior",
+    "nameAr": "Samurai Warrior (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic samurai warrior in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/samurai-warrior-f2ebbe.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/samurai-warrior-f2ebbe/renders/hero.png?v=1793034188",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "3769 tris • GLB",
+    "description": "Polyfork Open GLB (samurai-warrior-f2ebbe) • Kit: medieval-japan-cb01ad"
+  },
+  {
+    "id": "pf-casino-security-officer-adca27",
+    "name": "Casino Security Officer",
+    "nameAr": "Casino Security Officer (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic casino security officer in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/casino-security-officer-adca27.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/casino-security-officer-adca27/renders/hero.png?v=1792478897",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "3733 tris • GLB",
+    "description": "Polyfork Open GLB (casino-security-officer-adca27) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-backpacker-f56207",
+    "name": "Backpacker",
+    "nameAr": "Backpacker (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic backpacker in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/backpacker-f56207.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/backpacker-f56207/renders/hero.png?v=1792415519",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "3681 tris • GLB",
+    "description": "Polyfork Open GLB (backpacker-f56207) • Kit: campground-lake-ad32b0"
+  },
+  {
+    "id": "pf-shuttle-pilot-067166",
+    "name": "Shuttle Pilot",
+    "nameAr": "Shuttle Pilot (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic shuttle pilot in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/shuttle-pilot-067166.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/shuttle-pilot-067166/renders/hero.png?v=1793039380",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "3655 tris • GLB",
+    "description": "Polyfork Open GLB (shuttle-pilot-067166) • Kit: space-base-kit-cf65de"
+  },
+  {
+    "id": "pf-bmx-rider-91f1b0",
+    "name": "BMX Rider",
+    "nameAr": "BMX Rider (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic bmx rider in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/bmx-rider-91f1b0.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/bmx-rider-91f1b0/renders/hero.png?v=1792418537",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "3647 tris • GLB",
+    "description": "Polyfork Open GLB (bmx-rider-91f1b0) • Kit: skatepark-0922a9"
+  },
+  {
+    "id": "pf-vert-skater-972639",
+    "name": "Vert Skater",
+    "nameAr": "Vert Skater (GLB)",
+    "category": "character",
+    "kind": "human",
+    "icon": "👤",
+    "tokenPrompt": "a photorealistic vert skater in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/vert-skater-972639.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/vert-skater-972639/renders/hero.png?v=1792419925",
+    "rigType": "humanoid",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "3581 tris • GLB",
+    "description": "Polyfork Open GLB (vert-skater-972639) • Kit: skatepark-0922a9"
+  },
+  {
+    "id": "pf-ranger-pickup-truck-97057d",
+    "name": "Ranger Pickup Truck",
+    "nameAr": "Ranger Pickup Truck (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic ranger pickup truck in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/ranger-pickup-truck-97057d.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/ranger-pickup-truck-97057d/renders/hero.png?v=1792623630",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "4580 tris • GLB",
+    "description": "Polyfork Open GLB (ranger-pickup-truck-97057d) • Kit: nature-forest-kit-f29d6a"
+  },
+  {
+    "id": "pf-tender-steam-locomotive-8e2a82",
+    "name": "Tender Steam Locomotive",
+    "nameAr": "Tender Steam Locomotive (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic tender steam locomotive in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/tender-steam-locomotive-8e2a82.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/tender-steam-locomotive-8e2a82/renders/hero.png?v=1792626483",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "4531 tris • GLB",
+    "description": "Polyfork Open GLB (tender-steam-locomotive-8e2a82) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-capital-cruiser-482162",
+    "name": "Capital Cruiser",
+    "nameAr": "Capital Cruiser (GLB)",
+    "category": "vehicle",
+    "kind": "spaceship",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic capital cruiser in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/capital-cruiser-482162.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/capital-cruiser-482162/renders/hero.png?v=1793064934",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "4320 tris • GLB",
+    "description": "Polyfork Open GLB (capital-cruiser-482162) • Kit: spaceship-wars-kit-234642"
+  },
+  {
+    "id": "pf-camper-van-8d10e2",
+    "name": "Camper-van",
+    "nameAr": "Camper-van (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic camper-van in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/camper-van-8d10e2.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/camper-van-8d10e2/renders/hero.png?v=1792494554",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3971 tris • GLB",
+    "description": "Polyfork Open GLB (camper-van-8d10e2) • Kit: racing-cars-kit-660d53"
+  },
+  {
+    "id": "pf-pickup-truck-70s-8c0080",
+    "name": "Pickup-truck-70s",
+    "nameAr": "Pickup-truck-70s (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic pickup-truck-70s in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/pickup-truck-70s-8c0080.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/pickup-truck-70s-8c0080/renders/hero.png?v=1792494534",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3750 tris • GLB",
+    "description": "Polyfork Open GLB (pickup-truck-70s-8c0080) • Kit: racing-cars-kit-660d53"
+  },
+  {
+    "id": "pf-semi-tractor-e9455c",
+    "name": "Semi Tractor",
+    "nameAr": "Semi Tractor (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic semi tractor in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/semi-tractor-e9455c.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/semi-tractor-e9455c/renders/hero.png?v=1792713702",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3719 tris • GLB",
+    "description": "Polyfork Open GLB (semi-tractor-e9455c) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-tank-steam-locomotive-314bb1",
+    "name": "Tank Steam Locomotive",
+    "nameAr": "Tank Steam Locomotive (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic tank steam locomotive in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/tank-steam-locomotive-314bb1.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/tank-steam-locomotive-314bb1/renders/hero.png?v=1793365814",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3713 tris • GLB",
+    "description": "Polyfork Open GLB (tank-steam-locomotive-314bb1) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-agile-starfighter-89805f",
+    "name": "Agile Starfighter",
+    "nameAr": "Agile Starfighter (GLB)",
+    "category": "vehicle",
+    "kind": "spaceship",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic agile starfighter in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/agile-starfighter-89805f.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/agile-starfighter-89805f/renders/hero.png?v=1792624265",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3707 tris • GLB",
+    "description": "Polyfork Open GLB (agile-starfighter-89805f) • Kit: spaceship-wars-kit-234642"
+  },
+  {
+    "id": "pf-gunship-d2c5a9",
+    "name": "Gunship",
+    "nameAr": "Gunship (GLB)",
+    "category": "vehicle",
+    "kind": "aircraft",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic gunship in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/gunship-d2c5a9.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/gunship-d2c5a9/renders/hero.png?v=1792466526",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3638 tris • GLB",
+    "description": "Polyfork Open GLB (gunship-d2c5a9) • Kit: spaceship-wars-kit-234642"
+  },
+  {
+    "id": "pf-breakdown-crane-6a67d9",
+    "name": "Breakdown Crane",
+    "nameAr": "Breakdown Crane (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic breakdown crane in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/breakdown-crane-6a67d9.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/breakdown-crane-6a67d9/renders/hero.png?v=1793364735",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3628 tris • GLB",
+    "description": "Polyfork Open GLB (breakdown-crane-6a67d9) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-ship-s-longboat-f159fd",
+    "name": "Ship's Longboat",
+    "nameAr": "Ship's Longboat (GLB)",
+    "category": "vehicle",
+    "kind": "boat",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic ship's longboat in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/ship-s-longboat-f159fd.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/ship-s-longboat-f159fd/renders/hero.png?v=1792465393",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3626 tris • GLB",
+    "description": "Polyfork Open GLB (ship-s-longboat-f159fd) • Kit: pirate-cove-2ebea4"
+  },
+  {
+    "id": "pf-mainline-diesel-locomotive-33ef97",
+    "name": "Mainline Diesel Locomotive",
+    "nameAr": "Mainline Diesel Locomotive (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic mainline diesel locomotive in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/mainline-diesel-locomotive-33ef97.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/mainline-diesel-locomotive-33ef97/renders/hero.png?v=1792567006",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3570 tris • GLB",
+    "description": "Polyfork Open GLB (mainline-diesel-locomotive-33ef97) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-boxy-sedan-70s-7d55f7",
+    "name": "Boxy-sedan-70s",
+    "nameAr": "Boxy-sedan-70s (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic boxy-sedan-70s in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/boxy-sedan-70s-7d55f7.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/boxy-sedan-70s-7d55f7/renders/hero.png?v=1792465551",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3507 tris • GLB",
+    "description": "Polyfork Open GLB (boxy-sedan-70s-7d55f7) • Kit: racing-cars-kit-660d53"
+  },
+  {
+    "id": "pf-tank-wagon-d860fa",
+    "name": "Tank Wagon",
+    "nameAr": "Tank Wagon (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic tank wagon in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/tank-wagon-d860fa.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/tank-wagon-d860fa/renders/hero.png?v=1792569131",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3416 tris • GLB",
+    "description": "Polyfork Open GLB (tank-wagon-d860fa) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-pickup-truck-a34bf2",
+    "name": "Pickup Truck",
+    "nameAr": "Pickup Truck (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic pickup truck in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/pickup-truck-a34bf2.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/pickup-truck-a34bf2/renders/hero.png?v=1792794711",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3383 tris • GLB",
+    "description": "Polyfork Open GLB (pickup-truck-a34bf2) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-touring-motorcycle-3b1ad3",
+    "name": "Touring Motorcycle",
+    "nameAr": "Touring Motorcycle (GLB)",
+    "category": "vehicle",
+    "kind": "bicycle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic touring motorcycle in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/touring-motorcycle-3b1ad3.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/touring-motorcycle-3b1ad3/renders/hero.png?v=1792683509",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3340 tris • GLB",
+    "description": "Polyfork Open GLB (touring-motorcycle-3b1ad3) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-patrol-cruiser-bed309",
+    "name": "Patrol Cruiser",
+    "nameAr": "Patrol Cruiser (GLB)",
+    "category": "vehicle",
+    "kind": "spaceship",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic patrol cruiser in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/patrol-cruiser-bed309.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/patrol-cruiser-bed309/renders/hero.png?v=1792787357",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3278 tris • GLB",
+    "description": "Polyfork Open GLB (patrol-cruiser-bed309) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-covered-goods-van-34fce3",
+    "name": "Covered Goods Van",
+    "nameAr": "Covered Goods Van (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic covered goods van in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/covered-goods-van-34fce3.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/covered-goods-van-34fce3/renders/hero.png?v=1792566073",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3192 tris • GLB",
+    "description": "Polyfork Open GLB (covered-goods-van-34fce3) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-railbus-e972f3",
+    "name": "Railbus",
+    "nameAr": "Railbus (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic railbus in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/railbus-e972f3.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/railbus-e972f3/renders/hero.png?v=1792567758",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3166 tris • GLB",
+    "description": "Polyfork Open GLB (railbus-e972f3) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-tow-truck-7d04f8",
+    "name": "Tow Truck",
+    "nameAr": "Tow Truck (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic tow truck in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/tow-truck-7d04f8.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/tow-truck-7d04f8/renders/hero.png?v=1792697746",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3115 tris • GLB",
+    "description": "Polyfork Open GLB (tow-truck-7d04f8) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-mobile-crane-671d3f",
+    "name": "Mobile Crane",
+    "nameAr": "Mobile Crane (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic mobile crane in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/mobile-crane-671d3f.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/mobile-crane-671d3f/renders/hero.png?v=1792479921",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3091 tris • GLB",
+    "description": "Polyfork Open GLB (mobile-crane-671d3f) • Kit: construction-site-9e40b0"
+  },
+  {
+    "id": "pf-concrete-mixer-truck-4a8d94",
+    "name": "Concrete Mixer Truck",
+    "nameAr": "Concrete Mixer Truck (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic concrete mixer truck in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/concrete-mixer-truck-4a8d94.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/concrete-mixer-truck-4a8d94/renders/hero.png?v=1792481563",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3090 tris • GLB",
+    "description": "Polyfork Open GLB (concrete-mixer-truck-4a8d94) • Kit: construction-site-9e40b0"
+  },
+  {
+    "id": "pf-articulated-dump-truck-ee50f3",
+    "name": "Articulated Dump Truck",
+    "nameAr": "Articulated Dump Truck (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic articulated dump truck in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/articulated-dump-truck-ee50f3.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/articulated-dump-truck-ee50f3/renders/hero.png?v=1792481468",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3078 tris • GLB",
+    "description": "Polyfork Open GLB (articulated-dump-truck-ee50f3) • Kit: construction-site-9e40b0"
+  },
+  {
+    "id": "pf-compact-tractor-35b84b",
+    "name": "Compact Tractor",
+    "nameAr": "Compact Tractor (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic compact tractor in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/compact-tractor-35b84b.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/compact-tractor-35b84b/renders/hero.png?v=1792971514",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3034 tris • GLB",
+    "description": "Polyfork Open GLB (compact-tractor-35b84b) • Kit: cozy-farm-cc979f"
+  },
+  {
+    "id": "pf-guard-s-van-6231d0",
+    "name": "Guard's Van",
+    "nameAr": "Guard's Van (GLB)",
+    "category": "vehicle",
+    "kind": "vehicle",
+    "icon": "🚁",
+    "tokenPrompt": "a photorealistic guard's van in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/guard-s-van-6231d0.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/guard-s-van-6231d0/renders/hero.png?v=1792566315",
+    "rigType": "rigid_prop",
+    "scale": 1.6,
+    "source": "curated",
+    "fileSize": "3024 tris • GLB",
+    "description": "Polyfork Open GLB (guard-s-van-6231d0) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-castle-gatehouse-4ed5c6",
+    "name": "Castle Gatehouse",
+    "nameAr": "Castle Gatehouse (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic castle gatehouse in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/castle-gatehouse-4ed5c6.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/castle-gatehouse-4ed5c6/renders/hero.png?v=1792621268",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "4036 tris • GLB",
+    "description": "Polyfork Open GLB (castle-gatehouse-4ed5c6) • Kit: medieval-japan-cb01ad"
+  },
+  {
+    "id": "pf-art-deco-setback-tower-b3a788",
+    "name": "Art Deco Setback Tower",
+    "nameAr": "Art Deco Setback Tower (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic art deco setback tower in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/art-deco-setback-tower-b3a788.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/art-deco-setback-tower-b3a788/renders/hero.png?v=1793451010",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "3712 tris • GLB",
+    "description": "Polyfork Open GLB (art-deco-setback-tower-b3a788) • Kit: nyc-city-kit-fbca88"
+  },
+  {
+    "id": "pf-brownstone-row-house-1b84fd",
+    "name": "Brownstone Row House",
+    "nameAr": "Brownstone Row House (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic brownstone row house in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/brownstone-row-house-1b84fd.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/brownstone-row-house-1b84fd/renders/hero.png?v=1793453742",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "3050 tris • GLB",
+    "description": "Polyfork Open GLB (brownstone-row-house-1b84fd) • Kit: nyc-city-kit-fbca88"
+  },
+  {
+    "id": "pf-brick-church-322885",
+    "name": "Brick Church",
+    "nameAr": "Brick Church (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic brick church in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/brick-church-322885.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/brick-church-322885/renders/hero.png?v=1793452954",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2952 tris • GLB",
+    "description": "Polyfork Open GLB (brick-church-322885) • Kit: nyc-city-kit-fbca88"
+  },
+  {
+    "id": "pf-classical-bank-04954e",
+    "name": "Classical Bank",
+    "nameAr": "Classical Bank (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic classical bank in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/classical-bank-04954e.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/classical-bank-04954e/renders/hero.png?v=1793456782",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2890 tris • GLB",
+    "description": "Polyfork Open GLB (classical-bank-04954e) • Kit: nyc-city-kit-fbca88"
+  },
+  {
+    "id": "pf-corner-shop-5aec8c",
+    "name": "Corner Shop",
+    "nameAr": "Corner Shop (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic corner shop in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/corner-shop-5aec8c.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/corner-shop-5aec8c/renders/hero.png?v=1793538319",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2887 tris • GLB",
+    "description": "Polyfork Open GLB (corner-shop-5aec8c) • Kit: nyc-city-kit-fbca88"
+  },
+  {
+    "id": "pf-auto-repair-garage-b91464",
+    "name": "Auto Repair Garage",
+    "nameAr": "Auto Repair Garage (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic auto repair garage in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/auto-repair-garage-b91464.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/auto-repair-garage-b91464/renders/hero.png?v=1793538633",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2782 tris • GLB",
+    "description": "Polyfork Open GLB (auto-repair-garage-b91464) • Kit: nyc-city-kit-fbca88"
+  },
+  {
+    "id": "pf-office-tower-1538cc",
+    "name": "Office Tower",
+    "nameAr": "Office Tower (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic office tower in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/office-tower-1538cc.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/office-tower-1538cc/renders/hero.png?v=1793450687",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2676 tris • GLB",
+    "description": "Polyfork Open GLB (office-tower-1538cc) • Kit: nyc-city-kit-fbca88"
+  },
+  {
+    "id": "pf-skate-shop-bce146",
+    "name": "Skate Shop",
+    "nameAr": "Skate Shop (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic skate shop in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/skate-shop-bce146.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/skate-shop-bce146/renders/hero.png?v=1792419434",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2415 tris • GLB",
+    "description": "Polyfork Open GLB (skate-shop-bce146) • Kit: skatepark-0922a9"
+  },
+  {
+    "id": "pf-one-storey-shop-row-83c958",
+    "name": "One-Storey Shop Row",
+    "nameAr": "One-Storey Shop Row (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic one-storey shop row in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/one-storey-shop-row-83c958.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/one-storey-shop-row-83c958/renders/hero.png?v=1793580647",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2410 tris • GLB",
+    "description": "Polyfork Open GLB (one-storey-shop-row-83c958) • Kit: nyc-city-kit-fbca88"
+  },
+  {
+    "id": "pf-haunted-victorian-house-886931",
+    "name": "Haunted Victorian House",
+    "nameAr": "Haunted Victorian House (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic haunted victorian house in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/haunted-victorian-house-886931.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/haunted-victorian-house-886931/renders/hero.png?v=1793142448",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2322 tris • GLB",
+    "description": "Polyfork Open GLB (haunted-victorian-house-886931) • Kit: halloween-night-46ade4"
+  },
+  {
+    "id": "pf-fire-station-e2b756",
+    "name": "Fire Station",
+    "nameAr": "Fire Station (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic fire station in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/fire-station-e2b756.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/fire-station-e2b756/renders/hero.png?v=1793450392",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2282 tris • GLB",
+    "description": "Polyfork Open GLB (fire-station-e2b756) • Kit: nyc-city-kit-fbca88"
+  },
+  {
+    "id": "pf-orongo-house-run-e35d16",
+    "name": "Orongo House Run",
+    "nameAr": "Orongo House Run (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic orongo house run in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/orongo-house-run-e35d16.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/orongo-house-run-e35d16/renders/hero.png?v=1793145649",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2226 tris • GLB",
+    "description": "Polyfork Open GLB (orongo-house-run-e35d16) • Kit: easter-island-rapa-nui-368e86"
+  },
+  {
+    "id": "pf-water-pump-house-121270",
+    "name": "Water Pump House",
+    "nameAr": "Water Pump House (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic water pump house in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/water-pump-house-121270.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/water-pump-house-121270/renders/hero.png?v=1792570381",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2217 tris • GLB",
+    "description": "Polyfork Open GLB (water-pump-house-121270) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-bathhouse-4ac41a",
+    "name": "Bathhouse",
+    "nameAr": "Bathhouse (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic bathhouse in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/bathhouse-4ac41a.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/bathhouse-4ac41a/renders/hero.png?v=1792463443",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2213 tris • GLB",
+    "description": "Polyfork Open GLB (bathhouse-4ac41a) • Kit: japanese-suburban-city-street-baa482"
+  },
+  {
+    "id": "pf-alpine-hay-barn-3965e5",
+    "name": "Alpine Hay Barn",
+    "nameAr": "Alpine Hay Barn (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic alpine hay barn in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/alpine-hay-barn-3965e5.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/alpine-hay-barn-3965e5/renders/hero.png?v=1792423294",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2074 tris • GLB",
+    "description": "Polyfork Open GLB (alpine-hay-barn-3965e5) • Kit: alpine-and-snow-092f66"
+  },
+  {
+    "id": "pf-porch-log-cabin-d2f3ef",
+    "name": "Porch Log Cabin",
+    "nameAr": "Porch Log Cabin (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic porch log cabin in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/porch-log-cabin-d2f3ef.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/porch-log-cabin-d2f3ef/renders/hero.png?v=1793258372",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2060 tris • GLB",
+    "description": "Polyfork Open GLB (porch-log-cabin-d2f3ef) • Kit: campground-lake-ad32b0"
+  },
+  {
+    "id": "pf-water-tower-dd6200",
+    "name": "Water Tower",
+    "nameAr": "Water Tower (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic water tower in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/water-tower-dd6200.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/water-tower-dd6200/renders/hero.png?v=1792570425",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "2024 tris • GLB",
+    "description": "Polyfork Open GLB (water-tower-dd6200) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-skatepark-clubhouse-c7b8b4",
+    "name": "Skatepark Clubhouse",
+    "nameAr": "Skatepark Clubhouse (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic skatepark clubhouse in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/skatepark-clubhouse-c7b8b4.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/skatepark-clubhouse-c7b8b4/renders/hero.png?v=1792419602",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "1998 tris • GLB",
+    "description": "Polyfork Open GLB (skatepark-clubhouse-c7b8b4) • Kit: skatepark-0922a9"
+  },
+  {
+    "id": "pf-parish-church-543cf8",
+    "name": "Parish Church",
+    "nameAr": "Parish Church (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic parish church in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/parish-church-543cf8.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/parish-church-543cf8/renders/hero.png?v=1792437212",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "1973 tris • GLB",
+    "description": "Polyfork Open GLB (parish-church-543cf8) • Kit: dia-de-muertos-f2f8f8"
+  },
+  {
+    "id": "pf-adobe-colonial-farmhouse-cf13d8",
+    "name": "Adobe Colonial Farmhouse",
+    "nameAr": "Adobe Colonial Farmhouse (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic adobe colonial farmhouse in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/adobe-colonial-farmhouse-cf13d8.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/adobe-colonial-farmhouse-cf13d8/renders/hero.png?v=1792415877",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "1967 tris • GLB",
+    "description": "Polyfork Open GLB (adobe-colonial-farmhouse-cf13d8) • Kit: chile-fiestas-patrias-87e847"
+  },
+  {
+    "id": "pf-water-tower-7eb7ec",
+    "name": "Water Tower",
+    "nameAr": "Water Tower (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic water tower in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/water-tower-7eb7ec.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/water-tower-7eb7ec/renders/hero.png?v=1792706080",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "1927 tris • GLB",
+    "description": "Polyfork Open GLB (water-tower-7eb7ec) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-ski-lift-base-station-924491",
+    "name": "Ski Lift Base Station",
+    "nameAr": "Ski Lift Base Station (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic ski lift base station in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/ski-lift-base-station-924491.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/ski-lift-base-station-924491/renders/hero.png?v=1792554061",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "1926 tris • GLB",
+    "description": "Polyfork Open GLB (ski-lift-base-station-924491) • Kit: alpine-and-snow-092f66"
+  },
+  {
+    "id": "pf-splay-leg-lookout-tower-6fae7e",
+    "name": "Splay-Leg Lookout Tower",
+    "nameAr": "Splay-Leg Lookout Tower (GLB)",
+    "category": "architecture",
+    "kind": "building",
+    "icon": "🏛️",
+    "tokenPrompt": "a photorealistic splay-leg lookout tower in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/splay-leg-lookout-tower-6fae7e.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/splay-leg-lookout-tower-6fae7e/renders/hero.png?v=1793454295",
+    "rigType": "rigid_prop",
+    "scale": 2.2,
+    "source": "curated",
+    "fileSize": "1910 tris • GLB",
+    "description": "Polyfork Open GLB (splay-leg-lookout-tower-6fae7e) • Kit: campground-lake-ad32b0"
+  },
+  {
+    "id": "pf-coral-reef-terrain-282969",
+    "name": "Coral Reef Terrain",
+    "nameAr": "Coral Reef Terrain (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic coral reef terrain in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/coral-reef-terrain-282969.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/coral-reef-terrain-282969/renders/hero.png?v=1792489140",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "25328 tris • GLB",
+    "description": "Polyfork Open GLB (coral-reef-terrain-282969) • Kit: coral-reef-a7128a"
+  },
+  {
+    "id": "pf-riveted-grip-pad-1c0abc",
+    "name": "Clockwork Palm",
+    "nameAr": "Clockwork Palm (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic clockwork palm in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/riveted-grip-pad-1c0abc.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/riveted-grip-pad-1c0abc/renders/hero.png?v=1792438122",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "2302 tris • GLB",
+    "description": "Polyfork Open GLB (riveted-grip-pad-1c0abc) • Kit: clockwork-hand-adornments-kit-3aeccc"
+  },
+  {
+    "id": "pf-palm-gear-disc-99663a",
+    "name": "Wooden Palm",
+    "nameAr": "Wooden Palm (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic wooden palm in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/palm-gear-disc-99663a.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/palm-gear-disc-99663a/renders/hero.png?v=1792438146",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "2024 tris • GLB",
+    "description": "Polyfork Open GLB (palm-gear-disc-99663a) • Kit: clockwork-hand-adornments-kit-3aeccc"
+  },
+  {
+    "id": "pf-rock-armour-revetment-aea1ca",
+    "name": "Rock Armour Revetment",
+    "nameAr": "Rock Armour Revetment (GLB)",
+    "category": "nature",
+    "kind": "rock",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic rock armour revetment in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/rock-armour-revetment-aea1ca.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/rock-armour-revetment-aea1ca/renders/hero.png?v=1792617081",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "1931 tris • GLB",
+    "description": "Polyfork Open GLB (rock-armour-revetment-aea1ca) • Kit: coast-and-boardwalk-d883fd"
+  },
+  {
+    "id": "pf-scorched-tree-e927a3",
+    "name": "Scorched Tree",
+    "nameAr": "Scorched Tree (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic scorched tree in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/scorched-tree-e927a3.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/scorched-tree-e927a3/renders/hero.png?v=1792473663",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "1810 tris • GLB",
+    "description": "Polyfork Open GLB (scorched-tree-e927a3) • Kit: prehistoric-valley-8638dc"
+  },
+  {
+    "id": "pf-creosote-bush-5b17d5",
+    "name": "Creosote Bush",
+    "nameAr": "Creosote Bush (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic creosote bush in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/creosote-bush-5b17d5.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/creosote-bush-5b17d5/renders/hero.png?v=1792430035",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "1543 tris • GLB",
+    "description": "Polyfork Open GLB (creosote-bush-5b17d5) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-cherry-tree-a710a9",
+    "name": "Cherry Tree",
+    "nameAr": "Cherry Tree (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic cherry tree in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/cherry-tree-a710a9.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/cherry-tree-a710a9/renders/hero.png?v=1792440582",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "1448 tris • GLB",
+    "description": "Polyfork Open GLB (cherry-tree-a710a9) • Kit: medieval-japan-cb01ad"
+  },
+  {
+    "id": "pf-bracket-fungus-log-2deef4",
+    "name": "Bracket Fungus Log",
+    "nameAr": "Bracket Fungus Log (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic bracket fungus log in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/bracket-fungus-log-2deef4.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/bracket-fungus-log-2deef4/renders/hero.png?v=1792473540",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "1348 tris • GLB",
+    "description": "Polyfork Open GLB (bracket-fungus-log-2deef4) • Kit: prehistoric-valley-8638dc"
+  },
+  {
+    "id": "pf-log-cabin-4fac3b",
+    "name": "Log Cabin",
+    "nameAr": "Log Cabin (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic log cabin in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/log-cabin-4fac3b.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/log-cabin-4fac3b/renders/hero.png?v=1792464725",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "1326 tris • GLB",
+    "description": "Polyfork Open GLB (log-cabin-4fac3b) • Kit: nature-forest-kit-f29d6a"
+  },
+  {
+    "id": "pf-fern-clump-90ff4b",
+    "name": "Fern Clump",
+    "nameAr": "Fern Clump (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic fern clump in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/fern-clump-90ff4b.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/fern-clump-90ff4b/renders/hero.png?v=1792473507",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "1086 tris • GLB",
+    "description": "Polyfork Open GLB (fern-clump-90ff4b) • Kit: prehistoric-valley-8638dc"
+  },
+  {
+    "id": "pf-ginkgo-tree-baa895",
+    "name": "Ginkgo Tree",
+    "nameAr": "Ginkgo Tree (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic ginkgo tree in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/ginkgo-tree-baa895.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/ginkgo-tree-baa895/renders/hero.png?v=1792624428",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "1080 tris • GLB",
+    "description": "Polyfork Open GLB (ginkgo-tree-baa895) • Kit: prehistoric-valley-8638dc"
+  },
+  {
+    "id": "pf-azalea-bush-7bb14d",
+    "name": "Azalea Bush",
+    "nameAr": "Azalea Bush (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic azalea bush in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/azalea-bush-7bb14d.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/azalea-bush-7bb14d/renders/hero.png?v=1792440484",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "1011 tris • GLB",
+    "description": "Polyfork Open GLB (azalea-bush-7bb14d) • Kit: medieval-japan-cb01ad"
+  },
+  {
+    "id": "pf-coral-frag-rack-a0e7f9",
+    "name": "Coral Frag Rack",
+    "nameAr": "Coral Frag Rack (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic coral frag rack in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/coral-frag-rack-a0e7f9.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/coral-frag-rack-a0e7f9/renders/hero.png?v=1792869323",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "972 tris • GLB",
+    "description": "Polyfork Open GLB (coral-frag-rack-a0e7f9) • Kit: office-reefscape-kit-1afd7c"
+  },
+  {
+    "id": "pf-coral-frag-plug-700f7d",
+    "name": "Coral Frag Plug",
+    "nameAr": "Coral Frag Plug (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic coral frag plug in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/coral-frag-plug-700f7d.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/coral-frag-plug-700f7d/renders/hero.png?v=1792871452",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "936 tris • GLB",
+    "description": "Polyfork Open GLB (coral-frag-plug-700f7d) • Kit: office-reefscape-kit-1afd7c"
+  },
+  {
+    "id": "pf-chilean-palm-45fef5",
+    "name": "Chilean Palm",
+    "nameAr": "Chilean Palm (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic chilean palm in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/chilean-palm-45fef5.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/chilean-palm-45fef5/renders/hero.png?v=1792471075",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "910 tris • GLB",
+    "description": "Polyfork Open GLB (chilean-palm-45fef5) • Kit: chile-fiestas-patrias-87e847"
+  },
+  {
+    "id": "pf-toromiro-tree-a50794",
+    "name": "Toromiro Tree",
+    "nameAr": "Toromiro Tree (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic toromiro tree in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/toromiro-tree-a50794.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/toromiro-tree-a50794/renders/hero.png?v=1792667161",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "906 tris • GLB",
+    "description": "Polyfork Open GLB (toromiro-tree-a50794) • Kit: easter-island-rapa-nui-368e86"
+  },
+  {
+    "id": "pf-lava-rock-pile-d56d19",
+    "name": "Lava Rock Pile",
+    "nameAr": "Lava Rock Pile (GLB)",
+    "category": "nature",
+    "kind": "rock",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic lava rock pile in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/lava-rock-pile-d56d19.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/lava-rock-pile-d56d19/renders/hero.png?v=1792473755",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "866 tris • GLB",
+    "description": "Polyfork Open GLB (lava-rock-pile-d56d19) • Kit: prehistoric-valley-8638dc"
+  },
+  {
+    "id": "pf-twisted-dead-oak-49457b",
+    "name": "Twisted Dead Oak",
+    "nameAr": "Twisted Dead Oak (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic twisted dead oak in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/twisted-dead-oak-49457b.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/twisted-dead-oak-49457b/renders/hero.png?v=1793296223",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "861 tris • GLB",
+    "description": "Polyfork Open GLB (twisted-dead-oak-49457b) • Kit: halloween-night-46ade4"
+  },
+  {
+    "id": "pf-rock-pool-937f01",
+    "name": "Rock Pool",
+    "nameAr": "Rock Pool (GLB)",
+    "category": "nature",
+    "kind": "rock",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic rock pool in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/rock-pool-937f01.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/rock-pool-937f01/renders/hero.png?v=1792421457",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "860 tris • GLB",
+    "description": "Polyfork Open GLB (rock-pool-937f01) • Kit: coast-and-boardwalk-d883fd"
+  },
+  {
+    "id": "pf-pine-cone-e36f37",
+    "name": "Pine Cone",
+    "nameAr": "Pine Cone (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic pine cone in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/pine-cone-e36f37.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/pine-cone-e36f37/renders/hero.png?v=1792416928",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "823 tris • GLB",
+    "description": "Polyfork Open GLB (pine-cone-e36f37) • Kit: insect-world-e44b9f"
+  },
+  {
+    "id": "pf-gilded-urn-palm-435c00",
+    "name": "Gilded Urn Palm",
+    "nameAr": "Gilded Urn Palm (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic gilded urn palm in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/gilded-urn-palm-435c00.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/gilded-urn-palm-435c00/renders/hero.png?v=1792478746",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "819 tris • GLB",
+    "description": "Polyfork Open GLB (gilded-urn-palm-435c00) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-joshua-tree-867a2c",
+    "name": "Joshua Tree",
+    "nameAr": "Joshua Tree (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic joshua tree in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/joshua-tree-867a2c.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/joshua-tree-867a2c/renders/hero.png?v=1792557863",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "819 tris • GLB",
+    "description": "Polyfork Open GLB (joshua-tree-867a2c) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-moss-covered-stump-7253ab",
+    "name": "Moss-Covered Stump",
+    "nameAr": "Moss-Covered Stump (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic moss-covered stump in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/moss-covered-stump-7253ab.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/moss-covered-stump-7253ab/renders/hero.png?v=1792473652",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "815 tris • GLB",
+    "description": "Polyfork Open GLB (moss-covered-stump-7253ab) • Kit: prehistoric-valley-8638dc"
+  },
+  {
+    "id": "pf-bare-thorn-bush-91a238",
+    "name": "Bare Thorn Bush",
+    "nameAr": "Bare Thorn Bush (GLB)",
+    "category": "nature",
+    "kind": "tree",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic bare thorn bush in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/bare-thorn-bush-91a238.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/bare-thorn-bush-91a238/renders/hero.png?v=1793130094",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "813 tris • GLB",
+    "description": "Polyfork Open GLB (bare-thorn-bush-91a238) • Kit: halloween-night-46ade4"
+  },
+  {
+    "id": "pf-fern-covered-boulder-2e0375",
+    "name": "Fern-Covered Boulder",
+    "nameAr": "Fern-Covered Boulder (GLB)",
+    "category": "nature",
+    "kind": "rock",
+    "icon": "🌲",
+    "tokenPrompt": "a photorealistic fern-covered boulder in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/fern-covered-boulder-2e0375.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/fern-covered-boulder-2e0375/renders/hero.png?v=1792474270",
+    "rigType": "rigid_prop",
+    "scale": 1.8,
+    "source": "curated",
+    "fileSize": "807 tris • GLB",
+    "description": "Polyfork Open GLB (fern-covered-boulder-2e0375) • Kit: prehistoric-valley-8638dc"
+  },
+  {
+    "id": "pf-dragons-lair-terrain-26fac6",
+    "name": "Dragons Lair Terrain",
+    "nameAr": "Dragons Lair Terrain (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic dragons lair terrain in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/dragons-lair-terrain-26fac6.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/dragons-lair-terrain-26fac6/renders/hero.png?v=1793579050",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "28126 tris • GLB",
+    "description": "Polyfork Open GLB (dragons-lair-terrain-26fac6) • Kit: dragons-lair-dark-dragon-782570"
+  },
+  {
+    "id": "pf-lion-base",
+    "name": "Lion",
+    "nameAr": "Lion (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic lion in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/lion-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/lion-base/renders/hero.png?v=1792471547",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "3982 tris • GLB",
+    "description": "Polyfork Open GLB (lion-base)"
+  },
+  {
+    "id": "pf-ankylosaurus-base",
+    "name": "Ankylosaurus",
+    "nameAr": "Ankylosaurus (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic ankylosaurus in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/ankylosaurus-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/ankylosaurus-base/renders/hero.png?v=1792473134",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "3947 tris • GLB",
+    "description": "Polyfork Open GLB (ankylosaurus-base)"
+  },
+  {
+    "id": "pf-mandarin-dragonet-base",
+    "name": "Mandarin dragonet",
+    "nameAr": "Mandarin dragonet (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic mandarin dragonet in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/mandarin-dragonet-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/mandarin-dragonet-base/renders/hero.png?v=1792479481",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "3892 tris • GLB",
+    "description": "Polyfork Open GLB (mandarin-dragonet-base)"
+  },
+  {
+    "id": "pf-crocodile-base",
+    "name": "Crocodile",
+    "nameAr": "Crocodile (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic crocodile in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/crocodile-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/crocodile-base/renders/hero.png?v=1792471930",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "3670 tris • GLB",
+    "description": "Polyfork Open GLB (crocodile-base)"
+  },
+  {
+    "id": "pf-owl-base",
+    "name": "Owl",
+    "nameAr": "Owl (GLB)",
+    "category": "creature",
+    "kind": "bird",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic owl in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/owl-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/owl-base/renders/hero.png?v=1792471946",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "3502 tris • GLB",
+    "description": "Polyfork Open GLB (owl-base)"
+  },
+  {
+    "id": "pf-camel-base",
+    "name": "Camel",
+    "nameAr": "Camel (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic camel in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/camel-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/camel-base/renders/hero.png?v=1792472540",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "3364 tris • GLB",
+    "description": "Polyfork Open GLB (camel-base)"
+  },
+  {
+    "id": "pf-crow-base",
+    "name": "Crow",
+    "nameAr": "Crow (GLB)",
+    "category": "creature",
+    "kind": "bird",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic crow in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/crow-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/crow-base/renders/hero.png?v=1793373298",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2996 tris • GLB",
+    "description": "Polyfork Open GLB (crow-base)"
+  },
+  {
+    "id": "pf-cove-parrot-17850c",
+    "name": "Cove Parrot",
+    "nameAr": "Cove Parrot (GLB)",
+    "category": "creature",
+    "kind": "bird",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic cove parrot in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/cove-parrot-17850c.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/cove-parrot-17850c/renders/hero.png?v=1792489617",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2964 tris • GLB",
+    "description": "Polyfork Open GLB (cove-parrot-17850c) • Kit: pirate-cove-2ebea4"
+  },
+  {
+    "id": "pf-parrot-base",
+    "name": "Parrot",
+    "nameAr": "Parrot (GLB)",
+    "category": "creature",
+    "kind": "bird",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic parrot in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/parrot-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/parrot-base/renders/hero.png?v=1792479123",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2964 tris • GLB",
+    "description": "Polyfork Open GLB (parrot-base)"
+  },
+  {
+    "id": "pf-saddled-horse-da86d3",
+    "name": "Saddled Horse",
+    "nameAr": "Saddled Horse (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic saddled horse in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/saddled-horse-da86d3.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/saddled-horse-da86d3/renders/hero.png?v=1792429196",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2942 tris • GLB",
+    "description": "Polyfork Open GLB (saddled-horse-da86d3) • Kit: frontier-town-a0085b"
+  },
+  {
+    "id": "pf-brachiosaurus-base",
+    "name": "Brachiosaurus",
+    "nameAr": "Brachiosaurus (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic brachiosaurus in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/brachiosaurus-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/brachiosaurus-base/renders/hero.png?v=1792472557",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2910 tris • GLB",
+    "description": "Polyfork Open GLB (brachiosaurus-base)"
+  },
+  {
+    "id": "pf-dolphin-base",
+    "name": "Dolphin",
+    "nameAr": "Dolphin (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic dolphin in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/dolphin-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/dolphin-base/renders/hero.png?v=1792472378",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2904 tris • GLB",
+    "description": "Polyfork Open GLB (dolphin-base)"
+  },
+  {
+    "id": "pf-wolf-base",
+    "name": "Wolf",
+    "nameAr": "Wolf (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic wolf in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/wolf-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/wolf-base/renders/hero.png?v=1792472414",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2874 tris • GLB",
+    "description": "Polyfork Open GLB (wolf-base)"
+  },
+  {
+    "id": "pf-alpine-ibex-base",
+    "name": "Alpine ibex",
+    "nameAr": "Alpine ibex (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic alpine ibex in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/alpine-ibex-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/alpine-ibex-base/renders/hero.png?v=1792471142",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2844 tris • GLB",
+    "description": "Polyfork Open GLB (alpine-ibex-base)"
+  },
+  {
+    "id": "pf-swallowtail-caterpillar-base",
+    "name": "Swallowtail caterpillar",
+    "nameAr": "Swallowtail caterpillar (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic swallowtail caterpillar in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/swallowtail-caterpillar-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/swallowtail-caterpillar-base/renders/hero.png?v=1792471218",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2702 tris • GLB",
+    "description": "Polyfork Open GLB (swallowtail-caterpillar-base)"
+  },
+  {
+    "id": "pf-bear-base",
+    "name": "Bear",
+    "nameAr": "Bear (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic bear in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/bear-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/bear-base/renders/hero.png?v=1792482087",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2542 tris • GLB",
+    "description": "Polyfork Open GLB (bear-base)"
+  },
+  {
+    "id": "pf-black-bear-adbdc7",
+    "name": "Black Bear",
+    "nameAr": "Black Bear (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic black bear in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/black-bear-adbdc7.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/black-bear-adbdc7/renders/hero.png?v=1792490027",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2542 tris • GLB",
+    "description": "Polyfork Open GLB (black-bear-adbdc7) • Kit: nature-forest-kit-f29d6a"
+  },
+  {
+    "id": "pf-cow-base",
+    "name": "Cow",
+    "nameAr": "Cow (GLB)",
+    "category": "creature",
+    "kind": "animal",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic cow in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/cow-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/cow-base/renders/hero.png?v=1792481818",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2538 tris • GLB",
+    "description": "Polyfork Open GLB (cow-base)"
+  },
+  {
+    "id": "pf-reef-shark-base",
+    "name": "Reef shark",
+    "nameAr": "Reef shark (GLB)",
+    "category": "creature",
+    "kind": "fish",
+    "icon": "🦌",
+    "tokenPrompt": "a photorealistic reef shark in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/reef-shark-base.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/reef-shark-base/renders/hero.png?v=1792472467",
+    "rigType": "quadruped",
+    "scale": 1.2,
+    "source": "curated",
+    "fileSize": "2462 tris • GLB",
+    "description": "Polyfork Open GLB (reef-shark-base)"
+  },
+  {
+    "id": "pf-front-desk-clerk-99f0c2",
+    "name": "Front Desk Clerk",
+    "nameAr": "Front Desk Clerk (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic front desk clerk in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/front-desk-clerk-99f0c2.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/front-desk-clerk-99f0c2/renders/hero.png?v=1792476978",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "4411 tris • GLB",
+    "description": "Polyfork Open GLB (front-desk-clerk-99f0c2) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-bench-researcher-d0f1b9",
+    "name": "Bench Researcher",
+    "nameAr": "Bench Researcher (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic bench researcher in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/bench-researcher-d0f1b9.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/bench-researcher-d0f1b9/renders/hero.png?v=1792985232",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "3811 tris • GLB",
+    "description": "Polyfork Open GLB (bench-researcher-d0f1b9) • Kit: research-lab-9b9b5d"
+  },
+  {
+    "id": "pf-mobile-bench-cart-4b3ff5",
+    "name": "Mobile Bench Cart",
+    "nameAr": "Mobile Bench Cart (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic mobile bench cart in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/mobile-bench-cart-4b3ff5.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/mobile-bench-cart-4b3ff5/renders/hero.png?v=1792433954",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "2182 tris • GLB",
+    "description": "Polyfork Open GLB (mobile-bench-cart-4b3ff5) • Kit: research-lab-9b9b5d"
+  },
+  {
+    "id": "pf-grand-front-desk-run-84d70a",
+    "name": "Grand Front Desk Run",
+    "nameAr": "Grand Front Desk Run (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic grand front desk run in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/grand-front-desk-run-84d70a.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/grand-front-desk-run-84d70a/renders/hero.png?v=1792475279",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "1398 tris • GLB",
+    "description": "Polyfork Open GLB (grand-front-desk-run-84d70a) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-gas-cylinder-cabinet-cea23b",
+    "name": "Gas Cylinder Cabinet",
+    "nameAr": "Gas Cylinder Cabinet (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic gas cylinder cabinet in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/gas-cylinder-cabinet-cea23b.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/gas-cylinder-cabinet-cea23b/renders/hero.png?v=1792433328",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "1262 tris • GLB",
+    "description": "Polyfork Open GLB (gas-cylinder-cabinet-cea23b) • Kit: research-lab-9b9b5d"
+  },
+  {
+    "id": "pf-vented-chemical-storage-cabinet-91b061",
+    "name": "Vented Chemical Storage Cabinet",
+    "nameAr": "Vented Chemical Storage Cabinet (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic vented chemical storage cabinet in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/vented-chemical-storage-cabinet-91b061.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/vented-chemical-storage-cabinet-91b061/renders/hero.png?v=1792626909",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "1143 tris • GLB",
+    "description": "Polyfork Open GLB (vented-chemical-storage-cabinet-91b061) • Kit: research-lab-9b9b5d"
+  },
+  {
+    "id": "pf-roulette-table-75c9b1",
+    "name": "Roulette Table",
+    "nameAr": "Roulette Table (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic roulette table in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/roulette-table-75c9b1.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/roulette-table-75c9b1/renders/hero.png?v=1792583874",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "964 tris • GLB",
+    "description": "Polyfork Open GLB (roulette-table-75c9b1) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-station-garden-bed-d369e3",
+    "name": "Station Garden Bed",
+    "nameAr": "Station Garden Bed (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic station garden bed in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/station-garden-bed-d369e3.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/station-garden-bed-d369e3/renders/hero.png?v=1792568693",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "924 tris • GLB",
+    "description": "Polyfork Open GLB (station-garden-bed-d369e3) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-totora-reed-bed-36d78f",
+    "name": "Totora Reed Bed",
+    "nameAr": "Totora Reed Bed (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic totora reed bed in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/totora-reed-bed-36d78f.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/totora-reed-bed-36d78f/renders/hero.png?v=1792672521",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "917 tris • GLB",
+    "description": "Polyfork Open GLB (totora-reed-bed-36d78f) • Kit: easter-island-rapa-nui-368e86"
+  },
+  {
+    "id": "pf-island-bench-spine-d046b2",
+    "name": "Island Bench Spine",
+    "nameAr": "Island Bench Spine (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic island bench spine in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/island-bench-spine-d046b2.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/island-bench-spine-d046b2/renders/hero.png?v=1792622736",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "900 tris • GLB",
+    "description": "Polyfork Open GLB (island-bench-spine-d046b2) • Kit: research-lab-9b9b5d"
+  },
+  {
+    "id": "pf-station-bench-5f56b4",
+    "name": "Station Bench",
+    "nameAr": "Station Bench (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic station bench in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/station-bench-5f56b4.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/station-bench-5f56b4/renders/hero.png?v=1792568631",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "866 tris • GLB",
+    "description": "Polyfork Open GLB (station-bench-5f56b4) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-slot-machine-stool-c8af24",
+    "name": "Slot Machine Stool",
+    "nameAr": "Slot Machine Stool (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic slot machine stool in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/slot-machine-stool-c8af24.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/slot-machine-stool-c8af24/renders/hero.png?v=1792413095",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "864 tris • GLB",
+    "description": "Polyfork Open GLB (slot-machine-stool-c8af24) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-craps-table-5439ee",
+    "name": "Craps Table",
+    "nameAr": "Craps Table (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic craps table in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/craps-table-5439ee.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/craps-table-5439ee/renders/hero.png?v=1792477697",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "848 tris • GLB",
+    "description": "Polyfork Open GLB (craps-table-5439ee) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-table-game-chair-ffa6c1",
+    "name": "Table Game Chair",
+    "nameAr": "Table Game Chair (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic table game chair in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/table-game-chair-ffa6c1.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/table-game-chair-ffa6c1/renders/hero.png?v=1792413299",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "848 tris • GLB",
+    "description": "Polyfork Open GLB (table-game-chair-ffa6c1) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-baccarat-table-8b4183",
+    "name": "Baccarat Table",
+    "nameAr": "Baccarat Table (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic baccarat table in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/baccarat-table-8b4183.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/baccarat-table-8b4183/renders/hero.png?v=1792578432",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "846 tris • GLB",
+    "description": "Polyfork Open GLB (baccarat-table-8b4183) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-desk-keyboard-6cd4d9",
+    "name": "Desk Keyboard",
+    "nameAr": "Desk Keyboard (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic desk keyboard in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/desk-keyboard-6cd4d9.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/desk-keyboard-6cd4d9/renders/hero.png?v=1792446959",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "818 tris • GLB",
+    "description": "Polyfork Open GLB (desk-keyboard-6cd4d9) • Kit: office-794453"
+  },
+  {
+    "id": "pf-camp-kitchen-table-dfa2ab",
+    "name": "Camp Kitchen Table",
+    "nameAr": "Camp Kitchen Table (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic camp kitchen table in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/camp-kitchen-table-dfa2ab.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/camp-kitchen-table-dfa2ab/renders/hero.png?v=1792415612",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "810 tris • GLB",
+    "description": "Polyfork Open GLB (camp-kitchen-table-dfa2ab) • Kit: campground-lake-ad32b0"
+  },
+  {
+    "id": "pf-counter-stool-73553a",
+    "name": "Counter Stool",
+    "nameAr": "Counter Stool (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic counter stool in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/counter-stool-73553a.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/counter-stool-73553a/renders/hero.png?v=1792415424",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "802 tris • GLB",
+    "description": "Polyfork Open GLB (counter-stool-73553a) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-piano-bench-93e2b4",
+    "name": "Piano Bench",
+    "nameAr": "Piano Bench (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic piano bench in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/piano-bench-93e2b4.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/piano-bench-93e2b4/renders/hero.png?v=1792473152",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "800 tris • GLB",
+    "description": "Polyfork Open GLB (piano-bench-93e2b4) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-tournament-poker-table-a75b66",
+    "name": "Tournament Poker Table",
+    "nameAr": "Tournament Poker Table (GLB)",
+    "category": "furniture",
+    "kind": "furniture",
+    "icon": "🪑",
+    "tokenPrompt": "a photorealistic tournament poker table in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/tournament-poker-table-a75b66.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/tournament-poker-table-a75b66/renders/hero.png?v=1792413428",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "796 tris • GLB",
+    "description": "Polyfork Open GLB (tournament-poker-table-a75b66) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-snow-cannon-cc3ea5",
+    "name": "Snow Cannon",
+    "nameAr": "Snow Cannon (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic snow cannon in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/snow-cannon-cc3ea5.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/snow-cannon-cc3ea5/renders/hero.png?v=1792436159",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "2023 tris • GLB",
+    "description": "Polyfork Open GLB (snow-cannon-cc3ea5) • Kit: alpine-and-snow-092f66"
+  },
+  {
+    "id": "pf-corner-yagura-turret-950468",
+    "name": "Corner Yagura Turret",
+    "nameAr": "Corner Yagura Turret (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic corner yagura turret in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/corner-yagura-turret-950468.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/corner-yagura-turret-950468/renders/hero.png?v=1792440568",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "1938 tris • GLB",
+    "description": "Polyfork Open GLB (corner-yagura-turret-950468) • Kit: medieval-japan-cb01ad"
+  },
+  {
+    "id": "pf-ice-axe-and-crampon-e4c7c1",
+    "name": "Ice Axe and Crampon Set",
+    "nameAr": "Ice Axe and Crampon Set (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic ice axe and crampon set in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/ice-axe-and-crampon-e4c7c1.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/ice-axe-and-crampon-e4c7c1/renders/hero.png?v=1792423423",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "888 tris • GLB",
+    "description": "Polyfork Open GLB (ice-axe-and-crampon-e4c7c1) • Kit: alpine-and-snow-092f66"
+  },
+  {
+    "id": "pf-route-shield-sign-462947",
+    "name": "Route Shield Sign",
+    "nameAr": "Route Shield Sign (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic route shield sign in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/route-shield-sign-462947.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/route-shield-sign-462947/renders/hero.png?v=1792692904",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "838 tris • GLB",
+    "description": "Polyfork Open GLB (route-shield-sign-462947) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-pistol-42de05",
+    "name": "Pistol",
+    "nameAr": "Pistol (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic pistol in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/pistol-42de05.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/pistol-42de05/renders/hero.png?v=1793336051",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "760 tris • GLB",
+    "description": "Polyfork Open GLB (pistol-42de05)"
+  },
+  {
+    "id": "pf-kyudo-longbow-a7f88f",
+    "name": "Kyudo Longbow",
+    "nameAr": "Kyudo Longbow (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic kyudo longbow in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/kyudo-longbow-a7f88f.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/kyudo-longbow-a7f88f/renders/hero.png?v=1792882887",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "704 tris • GLB",
+    "description": "Polyfork Open GLB (kyudo-longbow-a7f88f)"
+  },
+  {
+    "id": "pf-deck-cannon-17849e",
+    "name": "Deck Cannon",
+    "nameAr": "Deck Cannon (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic deck cannon in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/deck-cannon-17849e.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/deck-cannon-17849e/renders/hero.png?v=1792493385",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "692 tris • GLB",
+    "description": "Polyfork Open GLB (deck-cannon-17849e) • Kit: pirate-cove-2ebea4"
+  },
+  {
+    "id": "pf-bolt-action-rifle-2f1793",
+    "name": "Bolt-Action Rifle",
+    "nameAr": "Bolt-Action Rifle (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic bolt-action rifle in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/bolt-action-rifle-2f1793.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/bolt-action-rifle-2f1793/renders/hero.png?v=1792488255",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "658 tris • GLB",
+    "description": "Polyfork Open GLB (bolt-action-rifle-2f1793)"
+  },
+  {
+    "id": "pf-defense-turret-12ba8d",
+    "name": "Defense Turret",
+    "nameAr": "Defense Turret (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic defense turret in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/defense-turret-12ba8d.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/defense-turret-12ba8d/renders/hero.png?v=1792466159",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "636 tris • GLB",
+    "description": "Polyfork Open GLB (defense-turret-12ba8d) • Kit: spaceship-wars-kit-234642"
+  },
+  {
+    "id": "pf-heater-shield-c51b76",
+    "name": "Heater Shield",
+    "nameAr": "Heater Shield (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic heater shield in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/heater-shield-c51b76.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/heater-shield-c51b76/renders/hero.png?v=1792485584",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "632 tris • GLB",
+    "description": "Polyfork Open GLB (heater-shield-c51b76) • Kit: dungeon-crypt-c27d93"
+  },
+  {
+    "id": "pf-yumi-bow-and-quiver-e30b4a",
+    "name": "Yumi Bow And Quiver",
+    "nameAr": "Yumi Bow And Quiver (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic yumi bow and quiver in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/yumi-bow-and-quiver-e30b4a.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/yumi-bow-and-quiver-e30b4a/renders/hero.png?v=1792441787",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "632 tris • GLB",
+    "description": "Polyfork Open GLB (yumi-bow-and-quiver-e30b4a) • Kit: medieval-japan-cb01ad"
+  },
+  {
+    "id": "pf-jewelled-dagger-38f556",
+    "name": "Jewelled Dagger",
+    "nameAr": "Jewelled Dagger (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic jewelled dagger in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/jewelled-dagger-38f556.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/jewelled-dagger-38f556/renders/hero.png?v=1792485543",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "624 tris • GLB",
+    "description": "Polyfork Open GLB (jewelled-dagger-38f556) • Kit: dungeon-crypt-c27d93"
+  },
+  {
+    "id": "pf-arming-sword-401972",
+    "name": "Arming Sword",
+    "nameAr": "Arming Sword (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic arming sword in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/arming-sword-401972.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/arming-sword-401972/renders/hero.png?v=1792483509",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "574 tris • GLB",
+    "description": "Polyfork Open GLB (arming-sword-401972) • Kit: dungeon-crypt-c27d93"
+  },
+  {
+    "id": "pf-hand-axe-cee9e7",
+    "name": "Hand Axe",
+    "nameAr": "Hand Axe (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic hand axe in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/hand-axe-cee9e7.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/hand-axe-cee9e7/renders/hero.png?v=1792485688",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "532 tris • GLB",
+    "description": "Polyfork Open GLB (hand-axe-cee9e7) • Kit: dungeon-crypt-c27d93"
+  },
+  {
+    "id": "pf-splitting-axe-in-a-afd1d5",
+    "name": "Splitting Axe in a Block",
+    "nameAr": "Splitting Axe in a Block (GLB)",
+    "category": "weapons",
+    "kind": "weapon",
+    "icon": "⚔️",
+    "tokenPrompt": "a photorealistic splitting axe in a block in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/splitting-axe-in-a-afd1d5.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/splitting-axe-in-a-afd1d5/renders/hero.png?v=1793269807",
+    "rigType": "rigid_prop",
+    "scale": 1,
+    "source": "curated",
+    "fileSize": "506 tris • GLB",
+    "description": "Polyfork Open GLB (splitting-axe-in-a-afd1d5) • Kit: campground-lake-ad32b0"
+  },
+  {
+    "id": "pf-survey-drone-7c71f9",
+    "name": "Survey Drone",
+    "nameAr": "Survey Drone (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic survey drone in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/survey-drone-7c71f9.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/survey-drone-7c71f9/renders/hero.png?v=1792495476",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "1242 tris • GLB",
+    "description": "Polyfork Open GLB (survey-drone-7c71f9) • Kit: space-base-kit-cf65de"
+  },
+  {
+    "id": "pf-arcade-console-ec27c2",
+    "name": "Arcade Console",
+    "nameAr": "Arcade Console (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic arcade console in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/arcade-console-ec27c2.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/arcade-console-ec27c2/renders/hero.png?v=1793375195",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "1220 tris • GLB",
+    "description": "Polyfork Open GLB (arcade-console-ec27c2)"
+  },
+  {
+    "id": "pf-capsule-residential-tower-80300b",
+    "name": "Capsule Residential Tower",
+    "nameAr": "Capsule Residential Tower (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic capsule residential tower in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/capsule-residential-tower-80300b.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/capsule-residential-tower-80300b/renders/hero.png?v=1792448552",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "1198 tris • GLB",
+    "description": "Polyfork Open GLB (capsule-residential-tower-80300b) • Kit: chrome-arcology-transit-kit-87a0e1"
+  },
+  {
+    "id": "pf-reactor-block-13fe72",
+    "name": "Reactor Block",
+    "nameAr": "Reactor Block (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic reactor block in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/reactor-block-13fe72.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/reactor-block-13fe72/renders/hero.png?v=1792467007",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "1058 tris • GLB",
+    "description": "Polyfork Open GLB (reactor-block-13fe72) • Kit: space-base-kit-cf65de"
+  },
+  {
+    "id": "pf-air-shower-airlock-cabin-ed83ae",
+    "name": "Air Shower Airlock Cabin",
+    "nameAr": "Air Shower Airlock Cabin (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic air shower airlock cabin in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/air-shower-airlock-cabin-ed83ae.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/air-shower-airlock-cabin-ed83ae/renders/hero.png?v=1792432436",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "890 tris • GLB",
+    "description": "Polyfork Open GLB (air-shower-airlock-cabin-ed83ae) • Kit: research-lab-9b9b5d"
+  },
+  {
+    "id": "pf-centrifuge-benchtop-b76ef2",
+    "name": "Centrifuge",
+    "nameAr": "Centrifuge (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic centrifuge in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/centrifuge-benchtop-b76ef2.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/centrifuge-benchtop-b76ef2/renders/hero.png?v=1792432727",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "673 tris • GLB",
+    "description": "Polyfork Open GLB (centrifuge-benchtop-b76ef2) • Kit: research-lab-9b9b5d"
+  },
+  {
+    "id": "pf-antenna-mast-0954b0",
+    "name": "Antenna Mast",
+    "nameAr": "Antenna Mast (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic antenna mast in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/antenna-mast-0954b0.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/antenna-mast-0954b0/renders/hero.png?v=1792617226",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "652 tris • GLB",
+    "description": "Polyfork Open GLB (antenna-mast-0954b0) • Kit: space-base-kit-cf65de"
+  },
+  {
+    "id": "pf-battery-bank-b4d362",
+    "name": "Battery Bank",
+    "nameAr": "Battery Bank (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic battery bank in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/battery-bank-b4d362.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/battery-bank-b4d362/renders/hero.png?v=1792495488",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "606 tris • GLB",
+    "description": "Polyfork Open GLB (battery-bank-b4d362) • Kit: space-base-kit-cf65de"
+  },
+  {
+    "id": "pf-recycling-capsule-bin-348f5b",
+    "name": "Recycling Capsule Bin",
+    "nameAr": "Recycling Capsule Bin (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic recycling capsule bin in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/recycling-capsule-bin-348f5b.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/recycling-capsule-bin-348f5b/renders/hero.png?v=1792486183",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "602 tris • GLB",
+    "description": "Polyfork Open GLB (recycling-capsule-bin-348f5b) • Kit: chrome-arcology-transit-kit-87a0e1"
+  },
+  {
+    "id": "pf-service-drone-bot-3817e5",
+    "name": "Service Drone Bot",
+    "nameAr": "Service Drone Bot (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic service drone bot in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/service-drone-bot-3817e5.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/service-drone-bot-3817e5/renders/hero.png?v=1792449485",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "602 tris • GLB",
+    "description": "Polyfork Open GLB (service-drone-bot-3817e5) • Kit: chrome-arcology-transit-kit-87a0e1"
+  },
+  {
+    "id": "pf-rooftop-antenna-mast-6e4944",
+    "name": "Rooftop Antenna Mast",
+    "nameAr": "Rooftop Antenna Mast (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic rooftop antenna mast in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/rooftop-antenna-mast-6e4944.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/rooftop-antenna-mast-6e4944/renders/hero.png?v=1792486231",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "594 tris • GLB",
+    "description": "Polyfork Open GLB (rooftop-antenna-mast-6e4944) • Kit: chrome-arcology-transit-kit-87a0e1"
+  },
+  {
+    "id": "pf-airlock-end-cap-acee1d",
+    "name": "Airlock End Cap",
+    "nameAr": "Airlock End Cap (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic airlock end cap in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/airlock-end-cap-acee1d.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/airlock-end-cap-acee1d/renders/hero.png?v=1792466877",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "568 tris • GLB",
+    "description": "Polyfork Open GLB (airlock-end-cap-acee1d) • Kit: space-base-kit-cf65de"
+  },
+  {
+    "id": "pf-biosafety-cabinet-a46204",
+    "name": "Biosafety Cabinet",
+    "nameAr": "Biosafety Cabinet (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic biosafety cabinet in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/biosafety-cabinet-a46204.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/biosafety-cabinet-a46204/renders/hero.png?v=1792432847",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "498 tris • GLB",
+    "description": "Polyfork Open GLB (biosafety-cabinet-a46204) • Kit: research-lab-9b9b5d"
+  },
+  {
+    "id": "pf-field-console-a92adc",
+    "name": "Field Console",
+    "nameAr": "Field Console (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic field console in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/field-console-a92adc.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/field-console-a92adc/renders/hero.png?v=1792467637",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "396 tris • GLB",
+    "description": "Polyfork Open GLB (field-console-a92adc) • Kit: space-base-kit-cf65de"
+  },
+  {
+    "id": "pf-holo-billboard-frame-96e583",
+    "name": "Holo Billboard Frame",
+    "nameAr": "Holo Billboard Frame (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic holo billboard frame in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/holo-billboard-frame-96e583.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/holo-billboard-frame-96e583/renders/hero.png?v=1792448956",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "370 tris • GLB",
+    "description": "Polyfork Open GLB (holo-billboard-frame-96e583) • Kit: chrome-arcology-transit-kit-87a0e1"
+  },
+  {
+    "id": "pf-floating-capsule-bench-f6eb72",
+    "name": "Floating Capsule Bench",
+    "nameAr": "Floating Capsule Bench (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic floating capsule bench in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/floating-capsule-bench-f6eb72.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/floating-capsule-bench-f6eb72/renders/hero.png?v=1792448774",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "340 tris • GLB",
+    "description": "Polyfork Open GLB (floating-capsule-bench-f6eb72) • Kit: chrome-arcology-transit-kit-87a0e1"
+  },
+  {
+    "id": "pf-chrome-arcology-transit-terrain-6425be",
+    "name": "Chrome Arcology Transit Terrain",
+    "nameAr": "Chrome Arcology Transit Terrain (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic chrome arcology transit terrain in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/chrome-arcology-transit-terrain-6425be.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/chrome-arcology-transit-terrain-6425be/renders/hero.png?v=1792449579",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "25328 tris • GLB",
+    "description": "Polyfork Open GLB (chrome-arcology-transit-terrain-6425be) • Kit: chrome-arcology-transit-kit-87a0e1"
+  },
+  {
+    "id": "pf-space-base-terrain-9fab7d",
+    "name": "Space Base Terrain",
+    "nameAr": "Space Base Terrain (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic space base terrain in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/space-base-terrain-9fab7d.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/space-base-terrain-9fab7d/renders/hero.png?v=1792468286",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "25328 tris • GLB",
+    "description": "Polyfork Open GLB (space-base-terrain-9fab7d) • Kit: space-base-kit-cf65de"
+  },
+  {
+    "id": "pf-cargo-freighter-d89fdc",
+    "name": "Cargo Freighter",
+    "nameAr": "Cargo Freighter (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic cargo freighter in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/cargo-freighter-d89fdc.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/cargo-freighter-d89fdc/renders/hero.png?v=1792466089",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "4310 tris • GLB",
+    "description": "Polyfork Open GLB (cargo-freighter-d89fdc) • Kit: spaceship-wars-kit-234642"
+  },
+  {
+    "id": "pf-maintenance-technician-4bcfb8",
+    "name": "Maintenance Technician",
+    "nameAr": "Maintenance Technician (GLB)",
+    "category": "scifi",
+    "kind": "prop",
+    "icon": "⚛️",
+    "tokenPrompt": "a photorealistic maintenance technician in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/maintenance-technician-4bcfb8.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/maintenance-technician-4bcfb8/renders/hero.png?v=1793026026",
+    "rigType": "rigid_prop",
+    "scale": 1.4,
+    "source": "curated",
+    "fileSize": "3979 tris • GLB",
+    "description": "Polyfork Open GLB (maintenance-technician-4bcfb8) • Kit: chrome-arcology-transit-kit-87a0e1"
+  },
+  {
+    "id": "pf-luggage-trolley-0bb740",
+    "name": "Luggage Trolley",
+    "nameAr": "Luggage Trolley (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic luggage trolley in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/luggage-trolley-0bb740.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/luggage-trolley-0bb740/renders/hero.png?v=1793365444",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "996 tris • GLB",
+    "description": "Polyfork Open GLB (luggage-trolley-0bb740) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-jack-o-lantern-0b1ddb",
+    "name": "Jack-o'-Lantern",
+    "nameAr": "Jack-o'-Lantern (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic jack-o'-lantern in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/jack-o-lantern-0b1ddb.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/jack-o-lantern-0b1ddb/renders/hero.png?v=1793240935",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "994 tris • GLB",
+    "description": "Polyfork Open GLB (jack-o-lantern-0b1ddb) • Kit: halloween-night-46ade4"
+  },
+  {
+    "id": "pf-groomer-fuel-drum-9d56e6",
+    "name": "Groomer Fuel Drum",
+    "nameAr": "Groomer Fuel Drum (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic groomer fuel drum in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/groomer-fuel-drum-9d56e6.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/groomer-fuel-drum-9d56e6/renders/hero.png?v=1792627693",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "962 tris • GLB",
+    "description": "Polyfork Open GLB (groomer-fuel-drum-9d56e6) • Kit: alpine-and-snow-092f66"
+  },
+  {
+    "id": "pf-pay-phone-booth-b8a1db",
+    "name": "Pay Phone Booth",
+    "nameAr": "Pay Phone Booth (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic pay phone booth in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/pay-phone-booth-b8a1db.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/pay-phone-booth-b8a1db/renders/hero.png?v=1792607078",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "952 tris • GLB",
+    "description": "Polyfork Open GLB (pay-phone-booth-b8a1db) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-camping-lantern-21d14b",
+    "name": "Camping Lantern",
+    "nameAr": "Camping Lantern (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic camping lantern in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/camping-lantern-21d14b.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/camping-lantern-21d14b/renders/hero.png?v=1792415657",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "942 tris • GLB",
+    "description": "Polyfork Open GLB (camping-lantern-21d14b) • Kit: campground-lake-ad32b0"
+  },
+  {
+    "id": "pf-barrel-organ-cart-30799d",
+    "name": "Barrel Organ Cart",
+    "nameAr": "Barrel Organ Cart (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic barrel organ cart in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/barrel-organ-cart-30799d.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/barrel-organ-cart-30799d/renders/hero.png?v=1792471084",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "938 tris • GLB",
+    "description": "Polyfork Open GLB (barrel-organ-cart-30799d) • Kit: chile-fiestas-patrias-87e847"
+  },
+  {
+    "id": "pf-camera-gizmo-2d038e",
+    "name": "Camera Gizmo",
+    "nameAr": "Camera Gizmo (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic camera gizmo in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/camera-gizmo-2d038e.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/camera-gizmo-2d038e/renders/hero.png?v=1792475261",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "936 tris • GLB",
+    "description": "Polyfork Open GLB (camera-gizmo-2d038e) • Kit: 3d-ui-kit-5635f7"
+  },
+  {
+    "id": "pf-soda-vending-machine-4a5347",
+    "name": "Soda Vending Machine",
+    "nameAr": "Soda Vending Machine (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic soda vending machine in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/soda-vending-machine-4a5347.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/soda-vending-machine-4a5347/renders/hero.png?v=1792692925",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "934 tris • GLB",
+    "description": "Polyfork Open GLB (soda-vending-machine-4a5347) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-motel-neon-sign-bde547",
+    "name": "Motel Neon Sign",
+    "nameAr": "Motel Neon Sign (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic motel neon sign in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/motel-neon-sign-bde547.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/motel-neon-sign-bde547/renders/hero.png?v=1792619364",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "914 tris • GLB",
+    "description": "Polyfork Open GLB (motel-neon-sign-bde547) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-groomer-winch-anchor-8f2495",
+    "name": "Groomer Winch Anchor",
+    "nameAr": "Groomer Winch Anchor (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic groomer winch anchor in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/groomer-winch-anchor-8f2495.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/groomer-winch-anchor-8f2495/renders/hero.png?v=1792423446",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "890 tris • GLB",
+    "description": "Polyfork Open GLB (groomer-winch-anchor-8f2495) • Kit: alpine-and-snow-092f66"
+  },
+  {
+    "id": "pf-lobby-tiered-fountain-354424",
+    "name": "Lobby Tiered Fountain",
+    "nameAr": "Lobby Tiered Fountain (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic lobby tiered fountain in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/lobby-tiered-fountain-354424.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/lobby-tiered-fountain-354424/renders/hero.png?v=1792475440",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "890 tris • GLB",
+    "description": "Polyfork Open GLB (lobby-tiered-fountain-354424) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-abandoned-shopping-trolley-3de6cb",
+    "name": "Abandoned Shopping Trolley",
+    "nameAr": "Abandoned Shopping Trolley (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic abandoned shopping trolley in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/abandoned-shopping-trolley-3de6cb.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/abandoned-shopping-trolley-3de6cb/renders/hero.png?v=1792418440",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "889 tris • GLB",
+    "description": "Polyfork Open GLB (abandoned-shopping-trolley-3de6cb) • Kit: skatepark-0922a9"
+  },
+  {
+    "id": "pf-chocolate-fountain-5d6fa7",
+    "name": "Chocolate Fountain",
+    "nameAr": "Chocolate Fountain (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic chocolate fountain in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/chocolate-fountain-5d6fa7.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/chocolate-fountain-5d6fa7/renders/hero.png?v=1792476493",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "886 tris • GLB",
+    "description": "Polyfork Open GLB (chocolate-fountain-5d6fa7) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-guitar-b013ee",
+    "name": "Guitar",
+    "nameAr": "Guitar (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic guitar in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/guitar-b013ee.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/guitar-b013ee/renders/hero.png?v=1792780540",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "883 tris • GLB",
+    "description": "Polyfork Open GLB (guitar-b013ee) • Kit: chile-fiestas-patrias-87e847"
+  },
+  {
+    "id": "pf-chicha-barrel-77037f",
+    "name": "Chicha Barrel",
+    "nameAr": "Chicha Barrel (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic chicha barrel in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/chicha-barrel-77037f.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/chicha-barrel-77037f/renders/hero.png?v=1792415964",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "880 tris • GLB",
+    "description": "Polyfork Open GLB (chicha-barrel-77037f) • Kit: chile-fiestas-patrias-87e847"
+  },
+  {
+    "id": "pf-station-clock-post-eaaf63",
+    "name": "Station Clock Post",
+    "nameAr": "Station Clock Post (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic station clock post in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/station-clock-post-eaaf63.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/station-clock-post-eaaf63/renders/hero.png?v=1792568649",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "880 tris • GLB",
+    "description": "Polyfork Open GLB (station-clock-post-eaaf63) • Kit: countryside-railway-9b4c57"
+  },
+  {
+    "id": "pf-trailhead-sign-aa29e1",
+    "name": "Trailhead Sign",
+    "nameAr": "Trailhead Sign (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic trailhead sign in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/trailhead-sign-aa29e1.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/trailhead-sign-aa29e1/renders/hero.png?v=1793449402",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "876 tris • GLB",
+    "description": "Polyfork Open GLB (trailhead-sign-aa29e1) • Kit: campground-lake-ad32b0"
+  },
+  {
+    "id": "pf-temporary-traffic-light-04c866",
+    "name": "Temporary Traffic Light",
+    "nameAr": "Temporary Traffic Light (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic temporary traffic light in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/temporary-traffic-light-04c866.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/temporary-traffic-light-04c866/renders/hero.png?v=1792481168",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "872 tris • GLB",
+    "description": "Polyfork Open GLB (temporary-traffic-light-04c866) • Kit: construction-site-9e40b0"
+  },
+  {
+    "id": "pf-guardian-lion-statue-5bde18",
+    "name": "Guardian Lion Statue",
+    "nameAr": "Guardian Lion Statue (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic guardian lion statue in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/guardian-lion-statue-5bde18.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/guardian-lion-statue-5bde18/renders/hero.png?v=1792462879",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "864 tris • GLB",
+    "description": "Polyfork Open GLB (guardian-lion-statue-5bde18) • Kit: japanese-suburban-city-street-baa482"
+  },
+  {
+    "id": "pf-reed-fire-torch-f7453e",
+    "name": "Reed Fire Torch",
+    "nameAr": "Reed Fire Torch (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic reed fire torch in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/reed-fire-torch-f7453e.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/reed-fire-torch-f7453e/renders/hero.png?v=1792616769",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "844 tris • GLB",
+    "description": "Polyfork Open GLB (reed-fire-torch-f7453e) • Kit: easter-island-rapa-nui-368e86"
+  },
+  {
+    "id": "pf-sideline-medical-tent-ce1649",
+    "name": "Sideline Medical Tent",
+    "nameAr": "Sideline Medical Tent (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic sideline medical tent in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/sideline-medical-tent-ce1649.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/sideline-medical-tent-ce1649/renders/hero.png?v=1792426817",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "838 tris • GLB",
+    "description": "Polyfork Open GLB (sideline-medical-tent-ce1649) • Kit: stadium-5db167"
+  },
+  {
+    "id": "pf-speed-limit-sign-1c55a2",
+    "name": "Speed Limit Sign",
+    "nameAr": "Speed Limit Sign (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic speed limit sign in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/speed-limit-sign-1c55a2.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/speed-limit-sign-1c55a2/renders/hero.png?v=1792684252",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "823 tris • GLB",
+    "description": "Polyfork Open GLB (speed-limit-sign-1c55a2) • Kit: roadside-americana-50d40c"
+  },
+  {
+    "id": "pf-hanging-pit-sign-64c316",
+    "name": "Hanging Pit Sign",
+    "nameAr": "Hanging Pit Sign (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic hanging pit sign in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/hanging-pit-sign-64c316.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/hanging-pit-sign-64c316/renders/hero.png?v=1792478559",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "820 tris • GLB",
+    "description": "Polyfork Open GLB (hanging-pit-sign-64c316) • Kit: casino-3dd029"
+  },
+  {
+    "id": "pf-picker-drum-wheel-059a3e",
+    "name": "Picker Drum Wheel",
+    "nameAr": "Picker Drum Wheel (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic picker drum wheel in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/picker-drum-wheel-059a3e.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/picker-drum-wheel-059a3e/renders/hero.png?v=1792474955",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "820 tris • GLB",
+    "description": "Polyfork Open GLB (picker-drum-wheel-059a3e) • Kit: 3d-ui-kit-5635f7"
+  },
+  {
+    "id": "pf-cemetery-lantern-post-fed352",
+    "name": "Cemetery Lantern Post",
+    "nameAr": "Cemetery Lantern Post (GLB)",
+    "category": "props",
+    "kind": "prop",
+    "icon": "📦",
+    "tokenPrompt": "a photorealistic cemetery lantern post in cinematic lighting",
+    "modelUrl": "https://polyfork.dev/cdn/cemetery-lantern-post-fed352.glb",
+    "conceptImageUrl": "https://polyfork.dev/files/cemetery-lantern-post-fed352/renders/hero.png?v=1793130354",
+    "rigType": "rigid_prop",
+    "scale": 1.1,
+    "source": "curated",
+    "fileSize": "814 tris • GLB",
+    "description": "Polyfork Open GLB (cemetery-lantern-post-fed352) • Kit: halloween-night-46ade4"
+  }
+];
+
+let fullPolyforkCache: Array<Asset3DItem & { kitId?: string | null; triangles?: number }> | null = null;
+
+export function mapPolyforkRawEntryToAssetItem(raw: {
+  id: string;
+  title: string;
+  type: string;
+  kit?: string | null;
+  triangles?: number;
+  thumbnail?: string;
+  glb: string;
+}): Asset3DItem & { kitId?: string | null; triangles?: number } {
+  const text = `${raw.title} ${raw.id} ${raw.kit || ''}`.toLowerCase();
+  let category: AssetCategory = 'props';
+  let kind: SubjectKind = 'prop';
+  let icon = '📦';
+  let rigType: Asset3DItem['rigType'] = 'rigid_prop';
+  let scale = 1.1;
+
+  if (raw.type === 'character' || raw.type === 'hand') {
+    category = 'character';
+    kind = 'human';
+    icon = '👤';
+    rigType = 'humanoid';
+    scale = 1.0;
+  } else if (raw.type === 'animal' || /dragon|dinosaur|rex|raptor/.test(text)) {
+    category = 'creature';
+    kind = /bird|crow|parrot|eagle|hawk|owl|butterfly/.test(text)
+      ? 'bird'
+      : /fish|shark|whale|wrasse|tang|crab|shrimp/.test(text)
+      ? 'fish'
+      : 'animal';
+    icon = '🦌';
+    rigType = 'quadruped';
+    scale = 1.2;
+  } else if (raw.type === 'vehicle') {
+    category = 'vehicle';
+    if (/helicopter|chopper|gunship|aeroplane|plane|jet|drone/.test(text)) kind = 'aircraft';
+    else if (/starfighter|shuttle|cruiser|freighter|raider/.test(text)) kind = 'spaceship';
+    else if (/boat|canoe|ship|ferry|yacht/.test(text)) kind = 'boat';
+    else if (/bicycle|bike|motorcycle/.test(text)) kind = 'bicycle';
+    else kind = 'vehicle';
+    icon = kind === 'aircraft' ? '🚁' : kind === 'spaceship' ? '🚀' : '🚗';
+    scale = 1.6;
+  } else if (raw.type === 'building') {
+    category = 'architecture';
+    kind = 'building';
+    icon = '🏛️';
+    scale = 2.2;
+  } else if (
+    raw.type === 'terrain' ||
+    raw.kit === 'nature-forest-kit-f29d6a' ||
+    /\b(tree|pine|oak|birch|willow|palm|fern|bush|shrub|rock|boulder|cliff|outcrop|stump|log|mushroom|cactus|coral|kelp)\b/.test(text)
+  ) {
+    category = 'nature';
+    kind = /rock|boulder|cliff|outcrop|stone/.test(text) ? 'rock' : 'tree';
+    icon = kind === 'rock' ? '🪨' : '🌲';
+    scale = 1.8;
+  } else if (/\b(sword|katana|blade|dagger|axe|spear|yari|bow|longbow|shield|cannon|turret|rifle|pistol|gun|hammer)\b/.test(text)) {
+    category = 'weapons';
+    kind = 'weapon';
+    icon = '⚔️';
+    scale = 1.0;
+  } else if (
+    raw.kit === 'space-base-kit-cf65de' ||
+    raw.kit === 'spaceship-wars-kit-234642' ||
+    raw.kit === 'chrome-arcology-transit-kit-87a0e1' ||
+    raw.kit === 'research-lab-9b9b5d' ||
+    /\b(space|airlock|cryo|reactor|hologram|console|antenna|drone|robot|mech|laser|plasma|centrifuge|biosafety)\b/.test(text)
+  ) {
+    category = 'scifi';
+    kind = 'prop';
+    icon = '⚛️';
+    scale = 1.4;
+  } else if (/\b(chair|armchair|sofa|couch|bench|stool|table|desk|bed|bookcase|bookshelf|cabinet|wardrobe|locker|shelf|lamp)\b/.test(text)) {
+    category = 'furniture';
+    kind = 'furniture';
+    icon = '🪑';
+    scale = 1.1;
+  }
+
+  return {
+    id: `pf-${raw.id}`,
+    name: raw.title,
+    nameAr: `${raw.title} (GLB)`,
+    category,
+    kind,
+    icon,
+    tokenPrompt: `a photorealistic ${raw.title.toLowerCase()} in cinematic lighting`,
+    modelUrl: raw.glb,
+    conceptImageUrl: raw.thumbnail,
+    rigType,
+    scale,
+    source: 'curated',
+    fileSize: `${raw.triangles || 500} tris • GLB`,
+    description: `Polyfork Open GLB (${raw.id})${raw.kit ? ` • Kit: ${raw.kit}` : ''}`,
+    kitId: raw.kit || null,
+    triangles: raw.triangles || 500,
+  };
+}
+
+/**
+ * Fetches and caches the full 2,791-model Polyfork catalog index from GitHub.
+ */
+export async function fetchFullPolyforkCatalog(): Promise<
+  Array<Asset3DItem & { kitId?: string | null; triangles?: number }>
+> {
+  if (fullPolyforkCache && fullPolyforkCache.length > 0) {
+    return fullPolyforkCache;
+  }
+  try {
+    const resp = await fetch(
+      'https://raw.githubusercontent.com/lucas-martinic/polyfork-catalog/main/catalog.json'
+    );
+    if (resp.ok) {
+      const json = await resp.json();
+      if (json && Array.isArray(json.assets)) {
+        const mapped = json.assets.map(mapPolyforkRawEntryToAssetItem);
+        fullPolyforkCache = mapped;
+        return mapped;
+      }
+    }
+  } catch (err) {
+    console.warn('Could not fetch live Polyfork catalog.json, falling back to built-in 200 curated assets:', err);
+  }
+  return CURATED_200_GLB_ASSETS;
+}
+
+/**
+ * Fetches live preview rows from Sandflow's Hugging Face datasets via the official Hugging Face Datasets Server API.
+ */
+export async function fetchSandflowDatasetPreview(
+  hfRepo: string = 'Sandflow/sand3d-simready',
+  offset: number = 0,
+  length: number = 24
+): Promise<{ rows: SandflowPreviewRow[]; totalRows: number }> {
+  const url = `https://datasets-server.huggingface.co/rows?dataset=${encodeURIComponent(
+    hfRepo
+  )}&config=default&split=train&offset=${offset}&length=${length}`;
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    throw new Error(`Hugging Face Datasets API returned HTTP ${resp.status}`);
+  }
+  const data = await resp.json();
+  const rawRows: any[] = Array.isArray(data?.rows) ? data.rows : [];
+  const rows: SandflowPreviewRow[] = rawRows.map((entry, idx) => {
+    const r = entry?.row || {};
+    const id = String(r.id || r.uid || r.name || `sand3d_${offset + idx}`);
+    const name = String(r.title || r.name || r.category || r.label || id).replace(/[_-]+/g, ' ');
+    const category = String(r.category || r.source || hfRepo.replace('Sandflow/', ''));
+    const code = String(r.code || r.program || r.script || '# Sand3D Python Program');
+    const usdaPath = typeof r.usda_path === 'string' ? r.usda_path : typeof r.usda === 'string' ? r.usda : undefined;
+    const imgObj = r.image || r.render || r.thumbnail;
+    const imageUrl = typeof imgObj === 'string' ? imgObj : typeof imgObj?.src === 'string' ? imgObj.src : undefined;
+    return {
+      id,
+      name,
+      category,
+      code,
+      usdaPath,
+      imageUrl,
+      datasetRepo: hfRepo,
+    };
+  });
+  return {
+    rows,
+    totalRows: typeof data?.num_rows_total === 'number' ? data.num_rows_total : rows.length,
+  };
+}
+
+const ARABIC_TO_ENGLISH_KEYWORDS: Array<[RegExp, string]> = [
+  [/هليكوبتر|مروحية|طائرة عمودية/, 'helicopter'],
+  [/طائرة|مقاتلة|طيارة/, 'aeroplane'],
+  [/مركبة فضائية|سفينة فضاء|صاروخ/, 'starfighter shuttle'],
+  [/سيارة شرطة|دورية/, 'police cruiser'],
+  [/سيارة اسعاف|إسعاف/, 'ambulance'],
+  [/سيارة|عربية|مركبة/, 'sedan car'],
+  [/شاحنة|نقل/, 'truck'],
+  [/حافلة|اتوبيس|أتوبيس/, 'bus'],
+  [/قطار/, 'train'],
+  [/قارب|سفينة|مركب/, 'boat canoe'],
+  [/دراجة/, 'bicycle'],
+  [/شجرة|أشجار|نخلة|غابة/, 'tree pine birch'],
+  [/صخرة|صخور|حجر|جبل/, 'boulder rock'],
+  [/منزل|بيت|كوخ|مبنى|عمارة/, 'cabin house apartment'],
+  [/برج|قلعة|حصن/, 'tower gatehouse'],
+  [/كرسي|مقعد|أريكة|كنبة/, 'armchair chair bench'],
+  [/طاولة|مكتب|ترابيزة/, 'table desk'],
+  [/سرير/, 'bed'],
+  [/سيف|كاتانا|خنجر/, 'sword katana'],
+  [/بندقية|مسدس|سلاح|مدفع/, 'rifle pistol cannon'],
+  [/درع/, 'shield'],
+  [/حصان|ذئب|دب|غزال|كلب|قطة|أسد|تنين|حيوان/, 'bear deer dog cat'],
+];
+
+/**
+ * Matches an actor's name, tokenPrompt, or kind to the best real .GLB model URL
+ * from the Curated 200 (or full cached 2,791 Polyfork catalog).
+ */
+export function resolvePolyforkGlbUrl(
+  name?: string,
+  tokenPrompt?: string,
+  kind?: string
+): string | undefined {
+  let rawText = `${name || ''} ${tokenPrompt || ''} ${kind || ''}`.toLowerCase().trim();
+  if (!rawText) return undefined;
+
+  for (const [arRegex, enTerms] of ARABIC_TO_ENGLISH_KEYWORDS) {
+    if (arRegex.test(rawText)) {
+      rawText += ' ' + enTerms;
+    }
+  }
+
+  // Fast direct keyword map for the most common cinematic subjects
+  if (/\b(helicopter|chopper|gunship)\b/.test(rawText)) {
+    return 'https://polyfork.dev/cdn/air-ambulance-helicopter-ed9acc.glb';
+  }
+  if (/\b(aeroplane|airplane|plane|biplane|jet|fighter)\b/.test(rawText)) {
+    return 'https://polyfork.dev/cdn/scrap-built-aeroplane-65ac95.glb';
+  }
+  if (/\b(spaceship|starfighter|starship|ufo)\b/.test(rawText)) {
+    return 'https://polyfork.dev/cdn/agile-starfighter-89805f.glb';
+  }
+  if (/\b(police|cop\s*car|patrol)\b/.test(rawText)) {
+    return 'https://polyfork.dev/cdn/police-cruiser-a2d25e.glb';
+  }
+  if (/\b(taxi|cab)\b/.test(rawText)) {
+    return 'https://polyfork.dev/cdn/city-taxi-eefa91.glb';
+  }
+  if (/\b(ambulance)\b/.test(rawText)) {
+    return 'https://polyfork.dev/cdn/ambulance-van-29919a.glb';
+  }
+  if (/\b(bus|coach)\b/.test(rawText)) {
+    return 'https://polyfork.dev/cdn/city-bus-49fd97.glb';
+  }
+  if (/\b(truck|lorry|dump\s*truck)\b/.test(rawText)) {
+    return 'https://polyfork.dev/cdn/articulated-dump-truck-ee50f3.glb';
+  }
+  if (/\b(car|sedan|automobile|vehicle|suv|sports\s*car)\b/.test(rawText)) {
+    return 'https://polyfork.dev/cdn/boxy-sedan-70s-7d55f7.glb';
+  }
+
+  const pool = fullPolyforkCache && fullPolyforkCache.length > 0 ? fullPolyforkCache : CURATED_200_GLB_ASSETS;
+  const nonFbxPool = pool.filter((item) => item.modelUrl && item.modelUrl.endsWith('.glb'));
+
+  const words = rawText
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !['the', 'and', 'for', 'with', 'from', 'actor', 'subject', 'prop'].includes(w));
+
+  let bestItem: Asset3DItem | undefined;
+  let bestScore = 0;
+
+  for (const item of nonFbxPool) {
+    const itemNameLower = item.name.toLowerCase();
+    const itemIdLower = item.id.toLowerCase();
+    let score = 0;
+
+    if (name && itemNameLower === name.toLowerCase().trim()) {
+      return item.modelUrl;
+    }
+
+    for (const w of words) {
+      const wordRegex = new RegExp(`\\b${w}\\b`, 'i');
+      if (wordRegex.test(itemNameLower)) score += 10;
+      else if (itemNameLower.includes(w) || itemIdLower.includes(w)) score += 4;
+    }
+
+    if (kind && item.kind === kind) {
+      score += 3;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestItem = item;
+    }
+  }
+
+  if (bestItem && bestScore >= 6) {
+    return bestItem.modelUrl;
+  }
+
+  // Fallback by SubjectKind if no specific word matched
+  if (kind === 'aircraft') return 'https://polyfork.dev/cdn/air-ambulance-helicopter-ed9acc.glb';
+  if (kind === 'spaceship') return 'https://polyfork.dev/cdn/agile-starfighter-89805f.glb';
+  if (kind === 'vehicle') return 'https://polyfork.dev/cdn/boxy-sedan-70s-7d55f7.glb';
+  if (kind === 'boat') return 'https://polyfork.dev/cdn/camp-canoe-c65d2a.glb';
+  if (kind === 'bicycle') return 'https://polyfork.dev/cdn/city-bicycle-5b67d1.glb';
+  if (kind === 'tree') return 'https://polyfork.dev/cdn/birch-tree-181b33.glb';
+  if (kind === 'rock') return 'https://polyfork.dev/cdn/basalt-boulder-a1929c.glb';
+  if (kind === 'building') return 'https://polyfork.dev/cdn/a-frame-cabin-6cb550.glb';
+  if (kind === 'furniture') return 'https://polyfork.dev/cdn/armchair-980c7c.glb';
+  if (kind === 'weapon') return 'https://polyfork.dev/cdn/arming-sword-401972.glb';
+  if (kind === 'animal') return 'https://polyfork.dev/cdn/deer-base.glb';
+
+  return undefined;
+}

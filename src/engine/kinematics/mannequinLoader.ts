@@ -86,8 +86,14 @@ export async function loadFbxTemplate(url: string = DEFAULT_MANNEQUIN_URL): Prom
     try {
       let arrayBuffer: ArrayBuffer;
 
-      if (typeof window === 'undefined') {
-        // Node.js test environment
+      const isNodeTestEnv =
+        typeof window === 'undefined' ||
+        (typeof process !== 'undefined' &&
+          Boolean((process as any).versions?.node) &&
+          typeof (window as any)?.electronAPI === 'undefined');
+
+      if (isNodeTestEnv && url.startsWith('/')) {
+        // Node.js or Vitest JSDOM test environment (where relative fetch('/models/...') fails in undici)
         const fsMod = 'fs';
         const pathMod = 'path';
         const fs = await import(/* @vite-ignore */ fsMod);

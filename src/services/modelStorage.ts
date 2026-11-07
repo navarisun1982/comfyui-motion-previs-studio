@@ -9,6 +9,11 @@
  * 4. Graceful in-memory fallback for test runners / headless environments lacking IndexedDB.
  */
 
+import {
+  saveModelBufferToStudioStorage,
+  fetchModelBufferFromStudioStorage,
+} from './studioStorageClient';
+
 const DB_NAME = 'comfy_director_3d_models_v1';
 const STORE_NAME = 'models';
 const DB_VERSION = 1;
@@ -157,6 +162,11 @@ export async function storeModelBuffer(
     }
   }
 
+  // 4. Mirror to configured Studio Storage disk directory (<storageDir>/models/)
+  if (!id.startsWith('refimg_')) {
+    saveModelBufferToStudioStorage(id, buffer, name, mimeType).catch(() => {});
+  }
+
   return { blobUrl: blobUrl || `model://${id}`, modelId: id };
 }
 
@@ -225,6 +235,9 @@ export async function getModelBuffer(idOrUrl: string): Promise<ArrayBuffer | nul
       if (resp.ok) {
         const buf = await resp.arrayBuffer();
         bufferMemoryCache.set(idOrUrl, buf);
+        if (idOrUrl.startsWith('http://') || idOrUrl.startsWith('https://')) {
+          storeModelBuffer(idOrUrl, buf, idOrUrl).catch(() => {});
+        }
         return buf;
       }
     } catch (e) {
@@ -256,6 +269,19 @@ export async function getModelBuffer(idOrUrl: string): Promise<ArrayBuffer | nul
       }
     } catch {
       // Ignore if running in static build without local middleware
+    }
+  }
+
+  // 6. Configured Studio Storage disk folder fallback (<storageDir>/models/<id>.glb)
+  if (!id.startsWith('refimg_')) {
+    const diskBuf = await fetchModelBufferFromStudioStorage(id);
+    if (diskBuf && diskBuf.byteLength > 0) {
+      bufferMemoryCache.set(id, diskBuf);
+      bufferMemoryCache.set(`model://${id}`, diskBuf);
+      bufferMemoryCache.set(idOrUrl, diskBuf);
+      blobUrlToModelIdCache.set(id, id);
+      blobUrlToModelIdCache.set(`model://${id}`, id);
+      return diskBuf;
     }
   }
 
@@ -486,6 +512,37 @@ export async function resolveOffloadedImage(uriOrUrl?: string): Promise<string |
     console.warn('Failed to resolve offloaded concept image from IndexedDB:', err);
   }
   return undefined;
+}
+
+/**
+ * Syncs all 3D models currently stored in IndexedDB into the configured Studio Storage disk directory.
+ */
+export async function syncAllIndexedDBModelsToDisk(): Promise<number> {
+  const db = await openDB();
+  if (!db) return 0;
+  try {
+    const records = await new Promise<StoredModelRecord[]>((resolve) => {
+      const tx = db.transaction(STORE_NAME, 'readonly');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.getAll();
+      req.onsuccess = () => resolve((req.result as StoredModelRecord[]) || []);
+      req.onerror = () => resolve([]);
+    });
+    let synced = 0;
+    for (const rec of records) {
+      if (!rec.id || rec.id.startsWith('refimg_') || !rec.buffer) continue;
+      const ok = await saveModelBufferToStudioStorage(
+        rec.id,
+        rec.buffer,
+        rec.name || rec.id,
+        rec.mimeType || 'model/gltf-binary'
+      );
+      if (ok) synced += 1;
+    }
+    return synced;
+  } catch {
+    return 0;
+  }
 }
 
 /**

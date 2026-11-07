@@ -32,40 +32,42 @@ export interface JointDiscDefinition {
  * - Right Leg: Vivid Magenta (#e44dff)
  */
 export const JOINT_DISC_DEFINITIONS: JointDiscDefinition[] = [
-  // Head & Neck
-  { bone: 'Head', label: 'Head', color: 0xa37bff, radius: 0.18, group: 'head' },
-  { bone: 'Neck', label: 'Neck', color: 0x2fd66b, radius: 0.14, group: 'head' },
+  // Head & Neck (compact ~35% smaller radii to prevent midline stacking)
+  { bone: 'Head', label: 'Head', color: 0xa37bff, radius: 0.12, group: 'head' },
+  { bone: 'Neck', label: 'Neck', color: 0x2fd66b, radius: 0.09, group: 'head' },
 
   // Torso / Core
-  { bone: 'Chest', label: 'Chest', color: 0x2fd66b, radius: 0.22, group: 'torso' },
-  { bone: 'Spine', label: 'Spine / Abdomen', color: 0x2fd66b, radius: 0.19, group: 'torso' },
-  { bone: 'Hips', label: 'Hips / Pelvis', color: 0xffb21e, radius: 0.22, group: 'torso' },
+  { bone: 'Chest', label: 'Chest', color: 0x2fd66b, radius: 0.14, group: 'torso' },
+  { bone: 'Spine', label: 'Spine / Abdomen', color: 0x2fd66b, radius: 0.12, group: 'torso' },
+  { bone: 'Hips', label: 'Hips / Pelvis', color: 0xffb21e, radius: 0.14, group: 'torso' },
 
   // Left Arm (Cool palette: Sky Blue)
-  { bone: 'LeftShoulder', label: 'Left Shoulder', color: 0x3d8bff, radius: 0.14, group: 'arm' },
-  { bone: 'LeftArm', label: 'Left Upper Arm', color: 0x3d8bff, radius: 0.14, group: 'arm' },
-  { bone: 'LeftForeArm', label: 'Left Forearm (Elbow)', color: 0x3d8bff, radius: 0.14, group: 'arm' },
-  { bone: 'LeftHand', label: 'Left Hand (Wrist)', color: 0x3d8bff, radius: 0.13, group: 'arm' },
+  { bone: 'LeftShoulder', label: 'Left Shoulder', color: 0x3d8bff, radius: 0.09, group: 'arm' },
+  { bone: 'LeftArm', label: 'Left Upper Arm', color: 0x3d8bff, radius: 0.095, group: 'arm' },
+  { bone: 'LeftForeArm', label: 'Left Forearm (Elbow)', color: 0x3d8bff, radius: 0.09, group: 'arm' },
+  { bone: 'LeftHand', label: 'Left Hand (Wrist)', color: 0x3d8bff, radius: 0.085, group: 'arm' },
 
   // Right Arm (Warm palette: Coral Red)
-  { bone: 'RightShoulder', label: 'Right Shoulder', color: 0xff4d6a, radius: 0.14, group: 'arm' },
-  { bone: 'RightArm', label: 'Right Upper Arm', color: 0xff4d6a, radius: 0.14, group: 'arm' },
-  { bone: 'RightForeArm', label: 'Right Forearm (Elbow)', color: 0xff4d6a, radius: 0.14, group: 'arm' },
-  { bone: 'RightHand', label: 'Right Hand (Wrist)', color: 0xff4d6a, radius: 0.13, group: 'arm' },
+  { bone: 'RightShoulder', label: 'Right Shoulder', color: 0xff4d6a, radius: 0.09, group: 'arm' },
+  { bone: 'RightArm', label: 'Right Upper Arm', color: 0xff4d6a, radius: 0.095, group: 'arm' },
+  { bone: 'RightForeArm', label: 'Right Forearm (Elbow)', color: 0xff4d6a, radius: 0.09, group: 'arm' },
+  { bone: 'RightHand', label: 'Right Hand (Wrist)', color: 0xff4d6a, radius: 0.085, group: 'arm' },
 
   // Left Leg (Cool palette: Electric Teal / Cyan)
-  { bone: 'LeftUpLeg', label: 'Left Thigh (Hip)', color: 0x14c8e6, radius: 0.17, group: 'leg' },
-  { bone: 'LeftLeg', label: 'Left Shin (Knee)', color: 0x14c8e6, radius: 0.15, group: 'leg' },
-  { bone: 'LeftFoot', label: 'Left Foot (Ankle)', color: 0x14c8e6, radius: 0.15, group: 'leg' },
+  { bone: 'LeftUpLeg', label: 'Left Thigh (Hip)', color: 0x14c8e6, radius: 0.11, group: 'leg' },
+  { bone: 'LeftLeg', label: 'Left Shin (Knee)', color: 0x14c8e6, radius: 0.10, group: 'leg' },
+  { bone: 'LeftFoot', label: 'Left Foot (Ankle)', color: 0x14c8e6, radius: 0.10, group: 'leg' },
 
   // Right Leg (Warm palette: Vivid Magenta)
-  { bone: 'RightUpLeg', label: 'Right Thigh (Hip)', color: 0xe44dff, radius: 0.17, group: 'leg' },
-  { bone: 'RightLeg', label: 'Right Shin (Knee)', color: 0xe44dff, radius: 0.15, group: 'leg' },
-  { bone: 'RightFoot', label: 'Right Foot (Ankle)', color: 0xe44dff, radius: 0.15, group: 'leg' },
+  { bone: 'RightUpLeg', label: 'Right Thigh (Hip)', color: 0xe44dff, radius: 0.11, group: 'leg' },
+  { bone: 'RightLeg', label: 'Right Shin (Knee)', color: 0xe44dff, radius: 0.10, group: 'leg' },
+  { bone: 'RightFoot', label: 'Right Foot (Ankle)', color: 0xe44dff, radius: 0.10, group: 'leg' },
 ];
 
 /**
  * Creates a floating translucent holographic joint disc & 3D sphere for picking bones in 3D.
+ * Idle discs render with subtle low opacity so the 3D character remains uncluttered,
+ * and dynamically boost opacity/prominence when hovered or selected.
  */
 export function createJointDiscMesh(
   boneName: HumanoidBone,
@@ -76,10 +78,9 @@ export function createJointDiscMesh(
 ): THREE.Group {
   const group = new THREE.Group();
   group.name = `JointDisc_${boneName}_${actorId}`;
-  group.userData = { isJointDisc: true, boneName, label, colorHex, actorId };
 
-  // 0. Compact, non-overlapping pick volume sphere for effortless raycast grabbing in 3D
-  const hitGeo = new THREE.SphereGeometry(Math.max(radius * 1.35, 0.28), 14, 10);
+  // 0. Localized, non-overlapping pick volume sphere so adjacent torso/shoulder joints never steal hits
+  const hitGeo = new THREE.SphereGeometry(Math.max(radius * 1.4, 0.14), 14, 10);
   const hitMat = new THREE.MeshBasicMaterial({
     colorWrite: false,
     depthTest: false,
@@ -92,44 +93,47 @@ export function createJointDiscMesh(
   hitMesh.userData = { isJointDisc: true, boneName, label, colorHex, actorId };
   group.add(hitMesh);
 
-  // 1. Inner soft 3D spherical core (visible from all camera angles inside the mesh)
+  // 1. Inner soft 3D spherical core (subtle 0.24 opacity at rest, 0.82 when hovered/selected)
   const sphereGeo = new THREE.SphereGeometry(radius * 0.55, 16, 12);
   const sphereMat = new THREE.MeshBasicMaterial({
     color: colorHex,
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.24,
     depthTest: false,
     toneMapped: false,
   });
   const sphereMesh = new THREE.Mesh(sphereGeo, sphereMat);
+  sphereMesh.name = 'JointSphereCore';
   sphereMesh.renderOrder = 998;
   sphereMesh.userData = { isJointDisc: true, boneName, label, colorHex, actorId };
   group.add(sphereMesh);
 
-  // 2. Camera-facing planar fill disc
+  // 2. Camera-facing planar fill disc (subtle 0.14 opacity at rest, 0.48 when hovered/selected)
   const fillMat = new THREE.MeshBasicMaterial({
     color: colorHex,
     transparent: true,
-    opacity: 0.35,
+    opacity: 0.14,
     side: THREE.DoubleSide,
     depthTest: false,
     toneMapped: false,
   });
   const fillMesh = new THREE.Mesh(new THREE.CircleGeometry(radius * 0.75, 24), fillMat);
+  fillMesh.name = 'JointFillDisc';
   fillMesh.renderOrder = 998;
   fillMesh.userData = { isJointDisc: true, boneName, label, colorHex, actorId };
   group.add(fillMesh);
 
-  // 3. Outer glowing ring rim
+  // 3. Outer glowing ring rim (subtle 0.45 opacity at rest, 1.0 when hovered/selected)
   const ringMat = new THREE.MeshBasicMaterial({
     color: colorHex,
     transparent: true,
-    opacity: 0.9,
+    opacity: 0.45,
     side: THREE.DoubleSide,
     depthTest: false,
     toneMapped: false,
   });
   const ringMesh = new THREE.Mesh(new THREE.RingGeometry(radius * 0.82, radius, 32), ringMat);
+  ringMesh.name = 'JointOuterRing';
   ringMesh.renderOrder = 999;
   ringMesh.userData = { isJointDisc: true, boneName, label, colorHex, actorId };
   group.add(ringMesh);
@@ -143,7 +147,7 @@ export function createJointDiscMesh(
     depthTest: false,
     toneMapped: false,
   });
-  const activeRingMesh = new THREE.Mesh(new THREE.RingGeometry(radius * 1.05, radius * 1.25, 32), activeRingMat);
+  const activeRingMesh = new THREE.Mesh(new THREE.RingGeometry(radius * 1.05, radius * 1.28, 32), activeRingMat);
   activeRingMesh.name = 'ActiveHighlightRing';
   activeRingMesh.renderOrder = 1000;
   activeRingMesh.visible = false;
@@ -166,26 +170,57 @@ export function createJointDiscMesh(
   hoverRingMesh.userData = { isJointDisc: true, boneName, label, colorHex, actorId };
   group.add(hoverRingMesh);
 
+  group.userData = {
+    isJointDisc: true,
+    boneName,
+    label,
+    colorHex,
+    actorId,
+    isHovered: false,
+    isSelected: false,
+    materials: {
+      sphere: sphereMat,
+      fill: fillMat,
+      ring: ringMat,
+    },
+  };
+
   return group;
 }
 
+function syncJointDiscProminence(discGroup: THREE.Object3D): void {
+  const ud = discGroup.userData;
+  if (!ud?.materials) return;
+  const prominent = Boolean(ud.isHovered || ud.isSelected);
+  ud.materials.sphere.opacity = prominent ? 0.82 : 0.24;
+  ud.materials.fill.opacity = prominent ? 0.48 : 0.14;
+  ud.materials.ring.opacity = prominent ? 1.0 : 0.45;
+}
+
 /**
- * Builds the 3D 3-Axis Transform / Rotation Gizmo centered on an active bone.
- * Features:
- * - Red X Axis (#ff6b5e, Shaft + Conical Arrowhead + Wireframe Cuff)
- * - Green Y Axis (#7ee07a, Shaft + Conical Arrowhead + Wireframe Cuff)
- * - Blue Z Axis (#5c9dff, Shaft + Conical Arrowhead + Wireframe Cuff)
- * - Translucent Cyan Center Sphere with wireframe halo for free trackball rotation
- */
-/**
- * Toggles hover state visual highlighting on a joint disc.
+ * Toggles hover state visual highlighting and opacity prominence on a joint disc.
  */
 export function setJointDiscHovered(discGroup: THREE.Object3D | null | undefined, isHovered: boolean): void {
   if (!discGroup) return;
+  discGroup.userData.isHovered = isHovered;
   const hoverRing = discGroup.getObjectByName('HoverHighlightRing');
   if (hoverRing) {
     hoverRing.visible = isHovered;
   }
+  syncJointDiscProminence(discGroup);
+}
+
+/**
+ * Toggles active selection state visual highlighting and opacity prominence on a joint disc.
+ */
+export function setJointDiscSelected(discGroup: THREE.Object3D | null | undefined, isSelected: boolean): void {
+  if (!discGroup) return;
+  discGroup.userData.isSelected = isSelected;
+  const activeRing = discGroup.getObjectByName('ActiveHighlightRing');
+  if (activeRing) {
+    activeRing.visible = isSelected;
+  }
+  syncJointDiscProminence(discGroup);
 }
 
 export type GizmoAxisType = 'x' | 'y' | 'z' | 'center';

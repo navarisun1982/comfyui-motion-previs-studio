@@ -12,7 +12,12 @@ import type { ProceduralKitResult, QuadrupedMorphology } from './proceduralKits'
 import { createQuadrupedWalker, createBipedWalker } from './proceduralKits';
 import { createStandardPalette } from './craftForms';
 import { safeGetItem, safeSetItem } from '../../services/storage';
-import { lookupSculptSpec, registerSculptSpec } from './sculptSpec';
+import {
+  lookupSculptSpec,
+  registerSculptSpec,
+  repairAttachments as repairSculptAttachments,
+  STAGE_UNITS_PER_METER as SCULPT_STAGE_UNITS_PER_METER,
+} from './sculptSpec';
 
 export type Vec3 = [number, number, number];
 
@@ -365,60 +370,15 @@ function buildAuthored(graph: PartGraph): { group: THREE.Group; animators: Anima
 }
 
 /**
- * 3Dviz "every part touches what it attaches to": a part whose bounds overlap no other part is
- * translated along the shortest gap until it touches its nearest neighbour. Connected parts are
- * never moved, so a correct model is left exactly as reasoned.
+ * 3Dviz "every part touches what it attaches to": delegates to the canonical connected-component
+ * repair solver in `sculptSpec.ts` (including parent-scale matrix compensation).
  */
 export function repairAttachments(root: THREE.Object3D, tolerance = 0.005): number {
-  root.updateMatrixWorld(true);
-  const meshes: THREE.Mesh[] = [];
-  root.traverse((o) => {
-    if ((o as THREE.Mesh).isMesh) meshes.push(o as THREE.Mesh);
-  });
-  if (meshes.length < 2) return 0;
-  const boxes = meshes.map((m) => new THREE.Box3().setFromObject(m));
-  const touches = (a: THREE.Box3, b: THREE.Box3) => a.clone().expandByScalar(tolerance).intersectsBox(b);
-  let moved = 0;
-
-  for (let i = 0; i < meshes.length; i++) {
-    const a = boxes[i];
-    if (boxes.some((b, j) => j !== i && touches(a, b))) continue;
-    // Nearest neighbour by box-to-box gap.
-    let best = -1;
-    let bestGap = Infinity;
-    let delta = new THREE.Vector3();
-    for (let j = 0; j < meshes.length; j++) {
-      if (j === i) continue;
-      const b = boxes[j];
-      const d = new THREE.Vector3(
-        a.max.x < b.min.x ? b.min.x - a.max.x : a.min.x > b.max.x ? b.max.x - a.min.x : 0,
-        a.max.y < b.min.y ? b.min.y - a.max.y : a.min.y > b.max.y ? b.max.y - a.min.y : 0,
-        a.max.z < b.min.z ? b.min.z - a.max.z : a.min.z > b.max.z ? b.max.z - a.min.z : 0
-      );
-      const gap = d.length();
-      if (gap < bestGap) {
-        bestGap = gap;
-        best = j;
-        delta = d;
-      }
-    }
-    if (best < 0 || !Number.isFinite(bestGap)) continue;
-    // Close the gap slightly past contact so the seam overlaps instead of kissing.
-    const overlap = delta.clone().normalize().multiplyScalar(Math.min(0.01, bestGap * 0.1));
-    const worldShift = delta.add(overlap);
-    const pivot = meshes[i].parent ?? meshes[i];
-    const parentInv = new THREE.Matrix4().copy((pivot.parent ?? root).matrixWorld).invert();
-    const localShift = worldShift.clone().transformDirection(parentInv).multiplyScalar(worldShift.length());
-    pivot.position.add(localShift);
-    pivot.updateMatrixWorld(true);
-    boxes[i] = new THREE.Box3().setFromObject(meshes[i]);
-    moved++;
-  }
-  return moved;
+  return repairSculptAttachments(root, tolerance);
 }
 
 /** Stage units per real-world metre: the stage's human actor (1.75 m) measures 5.06 units. */
-export const STAGE_UNITS_PER_METER = 2.9;
+export const STAGE_UNITS_PER_METER = SCULPT_STAGE_UNITS_PER_METER;
 const MIN_STAGE_HEIGHT = 0.45;
 const MAX_STAGE_HEIGHT = 45;
 

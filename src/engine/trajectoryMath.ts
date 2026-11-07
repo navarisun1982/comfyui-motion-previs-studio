@@ -29,12 +29,12 @@ export function interpolateTrajectoryPosition(
 ): Point2D {
   const safeDuration = duration > 0 ? duration : 4.0;
   const clampedTime = Math.max(0, Math.min(safeDuration, time));
-  const rawKeyframes = (trajectory.keyframes || []).filter(
-    (k) => k.time > 0 && k.time < safeDuration
-  );
+  const sortedKfs = [...(trajectory.keyframes || [])]
+    .filter((k) => k.time >= 0 && k.time <= safeDuration)
+    .sort((a, b) => a.time - b.time);
 
-  // If no intermediate keyframes, direct linear interpolation between start and end
-  if (rawKeyframes.length === 0) {
+  // If no keyframes, direct linear interpolation between start and end
+  if (sortedKfs.length === 0) {
     const ratio = clampedTime / safeDuration;
     return {
       x: trajectory.startPosition.x + (trajectory.endPosition.x - trajectory.startPosition.x) * ratio,
@@ -45,12 +45,22 @@ export function interpolateTrajectoryPosition(
     };
   }
 
-  // Build sorted timeline waypoints: [Start at 0, ...keyframes, End at duration]
-  const waypoints = [
-    { time: 0, position: trajectory.startPosition },
-    ...rawKeyframes.sort((a, b) => a.time - b.time),
-    { time: safeDuration, position: trajectory.endPosition },
-  ];
+  // Build sorted timeline waypoints: [Start at 0 (unless keyframed at 0), ...keyframes, End at duration (unless keyframed at duration)]
+  const waypoints: Array<{ time: number; position: Point2D }> = [];
+  if (sortedKfs[0].time > 0.001) {
+    waypoints.push({ time: 0, position: trajectory.startPosition });
+  }
+  waypoints.push(...sortedKfs);
+  if (sortedKfs[sortedKfs.length - 1].time < safeDuration - 0.001) {
+    waypoints.push({ time: safeDuration, position: trajectory.endPosition });
+  }
+
+  if (clampedTime <= waypoints[0].time) {
+    return waypoints[0].position;
+  }
+  if (clampedTime >= waypoints[waypoints.length - 1].time) {
+    return waypoints[waypoints.length - 1].position;
+  }
 
   // Find surrounding segment
   for (let i = 0; i < waypoints.length - 1; i++) {
@@ -115,9 +125,9 @@ export function interpolateCameraPosition(
 ): { x: number; y: number; z: number } {
   const safeDuration = duration > 0 ? duration : 4.0;
   const clampedTime = Math.max(0, Math.min(safeDuration, time));
-  const rawKeyframes = (cameraMovement.keyframes || []).filter(
-    (k) => k.time > 0 && k.time < safeDuration
-  );
+  const rawKeyframes = [...(cameraMovement.keyframes || [])]
+    .filter((k) => k.time >= 0 && k.time <= safeDuration)
+    .sort((a, b) => a.time - b.time);
 
   let stagePos: { x: number; y: number; z: number };
 
@@ -142,11 +152,14 @@ export function interpolateCameraPosition(
   } else if (useSpline && rawKeyframes.length >= 2) {
     stagePos = interpolateCameraSplinePosition(cameraMovement, clampedTime, safeDuration);
   } else {
-    const waypoints = [
-      { time: 0, position: cameraMovement.startPosition },
-      ...rawKeyframes.sort((a, b) => a.time - b.time),
-      { time: safeDuration, position: cameraMovement.endPosition },
-    ];
+    const waypoints: Array<{ time: number; position: Point3D }> = [];
+    if (rawKeyframes[0].time > 0.001) {
+      waypoints.push({ time: 0, position: cameraMovement.startPosition });
+    }
+    waypoints.push(...rawKeyframes);
+    if (rawKeyframes[rawKeyframes.length - 1].time < safeDuration - 0.001) {
+      waypoints.push({ time: safeDuration, position: cameraMovement.endPosition });
+    }
     let found = false;
     stagePos = { x: 50, y: 85, z: 20 };
     for (let i = 0; i < waypoints.length - 1; i++) {
@@ -265,7 +278,7 @@ export function evaluateLiveCameraStageState(
     const pos3D = interpolateCameraPosition(camera.movement, tau, safeDuration);
     let stageX = pos3D.x + 50;
     let stageY = pos3D.z + 50;
-    const stageZ = pos3D.y / 0.3;
+    let stageZ = pos3D.y / 0.3;
 
     if (
       camera.trackTargetActorId &&
@@ -277,6 +290,7 @@ export function evaluateLiveCameraStageState(
         const trackedNow = interpolateTrajectoryPosition(trackedActor.trajectory, tau, safeDuration);
         stageX += trackedNow.x - trackedStart.x;
         stageY += trackedNow.y - trackedStart.y;
+        stageZ += (trackedNow.z ?? 0) - (trackedStart.z ?? 0);
       }
     }
 
@@ -381,15 +395,18 @@ export function interpolateCameraSplinePosition(
 ): { x: number; y: number; z: number } {
   const safeDuration = duration > 0 ? duration : 4.0;
   const clampedTime = Math.max(0, Math.min(safeDuration, time));
-  const rawKeyframes = (cameraMovement.keyframes || []).filter(
-    (k) => k.time > 0 && k.time < safeDuration
-  );
+  const rawKeyframes = [...(cameraMovement.keyframes || [])]
+    .filter((k) => k.time >= 0 && k.time <= safeDuration)
+    .sort((a, b) => a.time - b.time);
 
-  const waypoints = [
-    { time: 0, position: cameraMovement.startPosition },
-    ...rawKeyframes.sort((a, b) => a.time - b.time),
-    { time: safeDuration, position: cameraMovement.endPosition },
-  ];
+  const waypoints: Array<{ time: number; position: Point3D }> = [];
+  if (rawKeyframes.length === 0 || rawKeyframes[0].time > 0.001) {
+    waypoints.push({ time: 0, position: cameraMovement.startPosition });
+  }
+  waypoints.push(...rawKeyframes);
+  if (rawKeyframes.length === 0 || rawKeyframes[rawKeyframes.length - 1].time < safeDuration - 0.001) {
+    waypoints.push({ time: safeDuration, position: cameraMovement.endPosition });
+  }
 
   const n = waypoints.length;
   if (n <= 1) {

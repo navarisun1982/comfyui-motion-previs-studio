@@ -2,7 +2,7 @@
   "115": {
     "inputs": {
       "aspect_ratio": "16:9 (Widescreen)",
-      "megapixels": 1.2,
+      "megapixels": 0.8,
       "multiple": 32
     },
     "class_type": "ResolutionSelector",
@@ -191,7 +191,7 @@
         "131",
         1
       ],
-      "ref_image_size": "max",
+      "ref_image_size": "match",
       "clip": [
         "128",
         0
@@ -545,18 +545,32 @@
       },
       "lora_1": {
         "on": true,
-        "lora": "MiniMax H3\\minimax_h3_turbo_v4_step600_ema.safetensors",
+        "lora": "MiniMax H3\\minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
         "strength": 0.7
       },
       "➕ Add Lora": "",
       "model": [
-        "636",
+        "686",
         0
       ]
     },
     "class_type": "Power Lora Loader (rgthree)",
     "_meta": {
-      "title": "Power Lora Loader (Turbo 8-Step)"
+      "title": "Power Lora Loader (Turbo Ref2V)"
+    }
+  },
+  "686": {
+    "inputs": {
+      "shift_video": 12,
+      "shift_audio": 3,
+      "model": [
+        "636",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3SigmaShift",
+    "_meta": {
+      "title": "MiniMax H3 Sigma Shift"
     }
   },
   "682": {

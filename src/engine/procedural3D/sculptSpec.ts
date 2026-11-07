@@ -955,6 +955,47 @@ export function lookupSculptSpec(prompt?: string): SculptSpec | undefined {
   return registry.get(key) || lookupCuratedSculptSpec(key) || lookupCuratedSculptSpec(prompt);
 }
 
+/**
+ * Priority Sculpt lookup for proceduralMeshFactory:
+ * Returns ONLY user-registered / LLM-reasoned sculpts from the registry,
+ * or flagship bespoke sculpts (Rustic Stone Fireplace, Tribal Archer Female, Nerd Turtle, Snorlax, Yatai Stall, Coiled Snake Ring, Perfume Bottle, Espresso Bag).
+ * This prevents legacy CURATED_SCULPT_SPECS box-blob approximations from hijacking the 207 parametric 3D blueprints in archetypeResolver.
+ */
+export function lookupPrioritySculptSpec(prompt?: string): SculptSpec | undefined {
+  if (!prompt || !prompt.trim()) return undefined;
+  hydrate();
+  const key = sculptKey(prompt);
+  const userRegistered = registry.get(key);
+  if (userRegistered) return userRegistered;
+
+  const lower = prompt.toLowerCase().trim();
+  if (/(fireplace|hearth|fire\s*box|chimney\s*piece|mantelpiece|مدفأة|موقد)/i.test(lower)) {
+    return getCachedCurated('rustic stone fireplace');
+  }
+  if (/(tribal\s*archer|archer\s*female|tribal_archer_female)/i.test(lower)) {
+    return getCachedCurated('tribal archer female');
+  }
+  if (/(nerd\s*turtle|nerdturtle)/i.test(lower)) {
+    return getCachedCurated('nerd turtle');
+  }
+  if (/(snorlax|sleeping\s*monster)/i.test(lower)) {
+    return getCachedCurated('snorlax');
+  }
+  if (/(yatai|yatai\s*stall|japanese\s*food\s*cart)/i.test(lower)) {
+    return getCachedCurated('yatai stall');
+  }
+  if (/(coiled\s*snake\s*ring|snake\s*ring|serpent\s*ring|خاتم\s*ذهبي\s*مفرغ|خاتم\s*أفعى)/i.test(lower)) {
+    return getCachedCurated('coiled snake ring');
+  }
+  if (/(perfume\s*bottle|قارورة\s*عطر)/i.test(lower)) {
+    return getCachedCurated('perfume bottle');
+  }
+  if (/(espresso\s*bag|roasted\s*coffee\s*beans\s*pouch)/i.test(lower)) {
+    return getCachedCurated('espresso bag');
+  }
+  return undefined;
+}
+
 const curatedCache = new Map<string, SculptSpec>();
 
 function getCachedCurated(key: string): SculptSpec | undefined {
@@ -1019,7 +1060,10 @@ export function lookupCuratedSculptSpec(idOrPrompt?: string): SculptSpec | undef
     matchedKey = 'attack helicopter gunship';
   } else if (/(steampunk\s*airship\s*zeppelin|flying\s*dirigible)/i.test(lower)) {
     matchedKey = 'steampunk airship zeppelin';
-  } else if (/(camera|dslr|nikon|canon|sony\s*camera|digital\s*camera|vintage\s*camera|كاميرا|آلة\s*تصوير)/i.test(lower)) {
+  } else if (
+    !/(dolly|gimbal|hexacopter|drone|cinema\s*camera|matte\s*box|rover|satellite|probe)/i.test(lower) &&
+    /(dslr|nikon|canon|sony\s*camera|digital\s*camera|vintage\s*camera|كاميرا|آلة\s*تصوير|^camera$)/i.test(lower)
+  ) {
     matchedKey = 'professional dslr camera';
   }
 

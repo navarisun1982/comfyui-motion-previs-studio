@@ -503,8 +503,8 @@ describe('3Dviz Pro Max Procedural 3D Engine', () => {
 
     const novelMesh = createProceduralActorMesh({
       category: 'prop',
-      name: 'Quantum Reactor Core',
-      tokenPrompt: 'experimental plasma battery apparatus',
+      name: 'Chronos Tachyon Calibrator',
+      tokenPrompt: 'experimental spectrometer module',
     });
 
     expect(novelMesh.userData.reasoningTrace).toBeDefined();

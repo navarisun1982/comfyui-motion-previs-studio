@@ -3,9 +3,11 @@ import { useShotStore } from '../stores/useShotStore';
 import { useComfyStore } from '../stores/useComfyStore';
 import { getAdapter } from '../adapters';
 import { getReasonerConfig } from '../services/objectReasoner';
-import { directPromptWithAI } from '../services/aiPromptDirector';
+import { directPromptWithAI, refinePromptWithAIChat } from '../services/aiPromptDirector';
 import { analyzeShotPovVisibility } from '../engine/povVisibilityEngine';
 import { exportCameraPoseBundle, exportCameraExtrinsicsJson } from '../engine/cameraMatrixExport';
+import { shouldHideStageBackdropInPrevis } from '../engine/staging/environmentBuilder';
+import { CINEMATIC_ENVIRONMENT_PRESETS } from '../types/environment';
 import { defaultComfyClient } from '../services/comfyClient';
 import { defaultJobRunner } from '../pipeline/jobRunner';
 import { loadBundledTemplates } from '../pipeline/templateLoader';
@@ -44,6 +46,11 @@ import {
   Upload,
   CheckCircle2,
   AlertCircle,
+  Square,
+  MessageSquare,
+  Send,
+  Undo2,
+  Trash2,
 } from 'lucide-react';
 
 interface PrevisExportDeckProps {
@@ -56,22 +63,45 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     compiledPrompt,
     setCompiledPrompt,
     setNegativePrompt,
+    setCustomPositivePrompt,
+    undoCustomPositivePrompt,
+    appendPromptChatMessage,
+    clearPromptChatMessages,
     previsVideoUrl,
     previsOpenPoseUrl,
     previsDepthUrl,
+    previsIdMaskUrl,
     isRenderingPrevis,
     previsProgress,
     renderPrevisVideo,
+    setPrevisVideo,
     updateTargetModel,
     updateActor,
     setEnvironment,
   } = useShotStore();
 
+  const backdropDecision = React.useMemo(() => shouldHideStageBackdropInPrevis(shot), [shot]);
+  const lastRenderedBackdropHideRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (previsVideoUrl && lastRenderedBackdropHideRef.current === null) {
+      lastRenderedBackdropHideRef.current = backdropDecision.hide;
+    }
+  }, [previsVideoUrl, backdropDecision.hide]);
+
+  const [promptChatInput, setPromptChatInput] = useState('');
+  const [isSendingPromptChat, setIsSendingPromptChat] = useState(false);
+  const [isPromptChatOpen, setIsPromptChatOpen] = useState(true);
+  const promptChatEndRef = useRef<HTMLDivElement | null>(null);
+
   const [activeEngineTab, setActiveEngineTab] = useState<'ltx-2.5' | 'minimax-h3' | 'seedance'>(
     shot.targetModel === 'minimax-h3' ? 'minimax-h3' : shot.targetModel === 'seedance' ? 'seedance' : 'ltx-2.5'
   );
-  const [activePassTab, setActivePassTab] = useState<'rgb' | 'openpose' | 'depth' | 'comfy-final' | 'side-by-side'>('rgb');
-  const [renderPassMode, setRenderPassMode] = useState<'all' | 'rgb' | 'openpose' | 'depth'>('all');
+  const [activePassTab, setActivePassTab] = useState<'rgb' | 'openpose' | 'depth' | 'id-mask' | 'comfy-final' | 'side-by-side'>('rgb');
+  const [renderPassMode, setRenderPassMode] = useState<'all' | 'rgb' | 'openpose' | 'depth' | 'id-mask'>('all');
+  const [compareViewMode, setCompareViewMode] = useState<'wipe' | 'split'>('wipe');
+  const [wipePercent, setWipePercent] = useState<number>(50);
+  const isDraggingWipeRef = useRef<boolean>(false);
+  const wipeViewportRef = useRef<HTMLDivElement | null>(null);
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [copiedNegative, setCopiedNegative] = useState(false);
   const [copiedJson, setCopiedJson] = useState(false);
@@ -106,11 +136,15 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
   const [refImageNames, setRefImageNames] = useState<[string, string, string, string]>(() => {
     const vis = povReport.visibleActors;
+    const slot0HasImg = Boolean(vis[0]?.conceptImageUrl || shot.actors[0]?.conceptImageUrl);
+    const slot1HasImg = Boolean(vis[1]?.conceptImageUrl || shot.actors[1]?.conceptImageUrl);
+    const slot2HasImg = Boolean(vis[2]?.conceptImageUrl || shot.actors[2]?.conceptImageUrl);
+    const slot3HasImg = Boolean(shot.environment?.conceptImageUrl);
     return [
-      vis[0]?.conceptImageName || shot.actors[0]?.conceptImageName || 'char1.png',
-      vis[1]?.conceptImageName || shot.actors[1]?.conceptImageName || 'char2.png',
-      vis[2]?.conceptImageName || shot.actors[2]?.conceptImageName || 'char3.png',
-      shot.environment?.conceptImageName || 'char4.png',
+      slot0HasImg ? vis[0]?.conceptImageName || shot.actors[0]?.conceptImageName || 'ref_slot_1.png' : '',
+      slot1HasImg ? vis[1]?.conceptImageName || shot.actors[1]?.conceptImageName || 'ref_slot_2.png' : '',
+      slot2HasImg ? vis[2]?.conceptImageName || shot.actors[2]?.conceptImageName || 'ref_slot_3.png' : '',
+      slot3HasImg ? shot.environment?.conceptImageName || 'ref_slot_4.png' : '',
     ];
   });
   const [refSlotTargets, setRefSlotTargets] = useState<[string, string, string, string]>(() => {
@@ -176,9 +210,32 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       setComfyOnline(false);
       setStoreConnectionStatus('error');
       setComfyGpuLabel('Offline (127.0.0.1:8188) • Click to Reconnect');
+      const currentJob = useComfyStore.getState().activeJob;
+      if (currentJob && (currentJob.status === 'executing' || currentJob.status === 'queued')) {
+        defaultJobRunner.cancelActiveJob().catch(() => {});
+        useComfyStore.getState().setJobFailed(
+          'ComfyUI server disconnected during execution. Once ComfyUI is running again, click Render in ComfyUI to retry.'
+        );
+        setIsSubmittingComfy(false);
+        setComfyStatusText(null);
+        setComfyErrorText(
+          'ComfyUI server disconnected during execution. Once ComfyUI is running again, click Render in ComfyUI to retry.'
+        );
+      }
       return false;
     }
   };
+
+  // Automatically re-enable the Render button if activeJob finishes, fails, or is cleared
+  useEffect(() => {
+    if (activeJob && (activeJob.status === 'failed' || activeJob.status === 'completed')) {
+      setIsSubmittingComfy(false);
+      if (activeJob.status === 'failed' && activeJob.error) {
+        setComfyStatusText(null);
+        setComfyErrorText(activeJob.error);
+      }
+    }
+  }, [activeJob?.status, activeJob?.error]);
 
   // Sync when Settings modal updates useComfyStore
   useEffect(() => {
@@ -271,26 +328,35 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
   useEffect(() => {
     const nextThumbs: [string | null, string | null, string | null, string | null] = [null, null, null, null];
-    const nextNames: [string, string, string, string] = ['char1.png', 'char2.png', 'char3.png', 'char4.png'];
+    const nextNames: [string, string, string, string] = ['', '', '', ''];
     const nextFiles: [File | null, File | null, File | null, File | null] = [null, null, null, null];
     const shotCustomSlots = customSlotsByShotRef.current[shot.id] || {};
 
     for (let idx = 0; idx < 4; idx++) {
       const targetId = refSlotTargets[idx];
-      const defaultPlaceholder = `char${idx + 1}.png`;
+      const defaultPlaceholder = `ref_slot_${idx + 1}.png`;
       if (targetId === 'environment') {
-        nextThumbs[idx] = shot.environment?.conceptImageUrl || null;
-        nextNames[idx] = shot.environment?.conceptImageName || defaultPlaceholder;
+        const envThumb = shot.environment?.conceptImageUrl || null;
+        nextThumbs[idx] = envThumb;
+        nextNames[idx] = envThumb ? shot.environment?.conceptImageName || defaultPlaceholder : '';
         nextFiles[idx] = null;
       } else if (targetId && targetId !== 'custom') {
         const actor = shot.actors.find((a) => a.id === targetId);
-        nextThumbs[idx] = actor?.conceptImageUrl || null;
-        nextNames[idx] = actor?.conceptImageName || defaultPlaceholder;
+        const actorThumb =
+          actor?.conceptImageUrl &&
+          !/raw\.githubusercontent\.com\/lucas-martinic\/polyfork-catalog|images\.unsplash\.com/i.test(
+            actor.conceptImageUrl
+          )
+            ? actor.conceptImageUrl
+            : null;
+        nextThumbs[idx] = actorThumb;
+        nextNames[idx] = actorThumb ? actor?.conceptImageName || defaultPlaceholder : '';
         nextFiles[idx] = null;
       } else {
         const customEntry = shotCustomSlots[idx];
+        const hasCustom = Boolean(customEntry?.thumb || customEntry?.file);
         nextThumbs[idx] = customEntry?.thumb || null;
-        nextNames[idx] = customEntry?.name || defaultPlaceholder;
+        nextNames[idx] = hasCustom ? customEntry?.name || defaultPlaceholder : '';
         nextFiles[idx] = customEntry?.file || null;
       }
     }
@@ -341,11 +407,15 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
     setIsSubmittingComfy(true);
     try {
-      // 1. Ensure 3D RGB Previs MP4 exists (auto-render at selectedResolution if needed)
+      // 1. Ensure 3D RGB Previs MP4 exists (auto-render at selectedResolution if needed or if Stage Backdrop mode changed)
       let rgbUrl = useShotStore.getState().previsVideoUrl;
-      if (!rgbUrl) {
-        setComfyStatusText(`Step 1/3: Rendering 24fps 3D RGB Previs MP4 (${selectedResolution}) for <Video 1> reference...`);
+      const backdropChangedSinceRender =
+        lastRenderedBackdropHideRef.current !== null &&
+        lastRenderedBackdropHideRef.current !== backdropDecision.hide;
+      if (!rgbUrl || backdropChangedSinceRender) {
+        setComfyStatusText(`Step 1/3: Rendering 24fps 3D RGB Previs MP4 (${selectedResolution}, ${backdropDecision.hide ? 'Clean BG' : '3D Stage'}) for <Video 1> reference...`);
         await renderPrevisVideo('rgb', selectedResolution);
+        lastRenderedBackdropHideRef.current = backdropDecision.hide;
         rgbUrl = useShotStore.getState().previsVideoUrl;
       }
       if (!rgbUrl) {
@@ -357,6 +427,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       const previsBlob = await (await fetch(rgbUrl)).blob();
 
       const resolvedRefBlobs: [Blob | null, Blob | null, Blob | null, Blob | null] = [null, null, null, null];
+      const resolvedSlotUrls: [string | null, string | null, string | null, string | null] = [null, null, null, null];
       const refImageDescriptions: [string, string, string, string] = ['', '', '', ''];
       for (let i = 0; i < 4; i++) {
         const slotTarget = refSlotTargets[i];
@@ -364,32 +435,53 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
           slotTarget && slotTarget !== 'environment' && slotTarget !== 'custom'
             ? shot.actors.find((a) => a.id === slotTarget)
             : undefined;
+        const rawActorImageUrl =
+          matchedActor?.conceptImageUrl &&
+          !/raw\.githubusercontent\.com\/lucas-martinic\/polyfork-catalog|images\.unsplash\.com/i.test(
+            matchedActor.conceptImageUrl
+          )
+            ? matchedActor.conceptImageUrl
+            : null;
         const slotImageUrl =
           slotTarget === 'environment'
             ? shot.environment?.conceptImageUrl || null
             : matchedActor
-            ? matchedActor.conceptImageUrl || null
+            ? rawActorImageUrl
             : refImageThumbs[i] || null;
+        resolvedSlotUrls[i] = slotImageUrl;
 
         if (slotTarget === 'custom' && refImageFiles[i]) {
           resolvedRefBlobs[i] = refImageFiles[i];
         } else if (slotImageUrl) {
-          try {
-            const res = await fetch(slotImageUrl);
-            resolvedRefBlobs[i] = await res.blob();
-          } catch {
-            resolvedRefBlobs[i] = null;
+          // If the environment slot (slot 3) shares the exact same composite reference image URL as an earlier subject slot,
+          // do not upload a duplicate copy of the same image unless the workflow explicitly requires 4 separate slots.
+          const isDuplicateCompositeEnv =
+            i === 3 &&
+            !currentWorkflow.requiresFourRefs &&
+            (slotImageUrl === resolvedSlotUrls[0] ||
+              slotImageUrl === resolvedSlotUrls[1] ||
+              slotImageUrl === resolvedSlotUrls[2]);
+          if (!isDuplicateCompositeEnv) {
+            try {
+              const res = await fetch(slotImageUrl);
+              resolvedRefBlobs[i] = await res.blob();
+            } catch {
+              resolvedRefBlobs[i] = null;
+            }
           }
         }
 
         if (slotTarget === 'environment') {
-          refImageDescriptions[i] = shot.environment?.promptDescription || shot.environment?.name || 'Active studio environment';
+          refImageDescriptions[i] =
+            resolvedRefBlobs[i]
+              ? shot.environment?.promptDescription || shot.environment?.name || 'Active studio environment'
+              : '';
         } else if (slotTarget && slotTarget !== 'custom') {
           const isActorInPov = povReport.byActorId[slotTarget]?.everVisible ?? true;
-          if (matchedActor && isActorInPov) {
+          if (matchedActor && isActorInPov && resolvedRefBlobs[i]) {
             refImageDescriptions[i] = matchedActor.token || matchedActor.name || '';
-          } else if (matchedActor && !isActorInPov) {
-            // Do not inject off-screen actor descriptions or reference images into the generation job
+          } else {
+            // Do not inject off-screen or unpopulated actor descriptions into the generation job
             resolvedRefBlobs[i] = null;
             refImageDescriptions[i] = '';
           }
@@ -402,16 +494,8 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       } catch {
         objInfo = null;
       }
-      const existingComfyInputImages: string[] = Array.isArray(
-        (objInfo as Record<string, any>)?.LoadImage?.input?.required?.image?.[0]
-      )
-        ? ((objInfo as Record<string, any>).LoadImage.input.required.image[0] as string[])
-        : [];
       const verifiedRefFilenames: [string, string, string, string] = [0, 1, 2, 3].map((idx) => {
-        if (resolvedRefBlobs[idx]) return trimmedRefs[idx] || `char${idx + 1}.png`;
-        if (trimmedRefs[idx] && existingComfyInputImages.includes(trimmedRefs[idx])) {
-          return trimmedRefs[idx];
-        }
+        if (resolvedRefBlobs[idx]) return trimmedRefs[idx] || `ref_slot_${idx + 1}.png`;
         return '';
       }) as [string, string, string, string];
 
@@ -421,8 +505,24 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
       // 2. Queue job via JobRunner using active engine template (LTX-2.5 or MiniMax H3)
       const engineCompiled = getAdapter(targetEngine).compilePrompt(shot);
+      const rawLockedCustomForEngine = shot.customPositivePrompts?.[targetEngine]?.trim();
+      const isLockedStale =
+        typeof rawLockedCustomForEngine === 'string' &&
+        (rawLockedCustomForEngine.includes('#334155 3D previz stage blocks') ||
+          rawLockedCustomForEngine.includes('settling into the final composition and locking focus') ||
+          rawLockedCustomForEngine.includes('Procedural 3D stage subject for') ||
+          rawLockedCustomForEngine.includes('placed on stage from 3D Asset Library') ||
+          rawLockedCustomForEngine.includes("ignoring <Picture 1>'s original background") ||
+          rawLockedCustomForEngine.includes('<Video 1> (camera/motion reference): partially_preserved') ||
+          rawLockedCustomForEngine.includes('Strictly follows the screen position, 3D orientation') ||
+          rawLockedCustomForEngine.includes('placeholder volume in the') ||
+          rawLockedCustomForEngine.includes('[Choreography Reference:') ||
+          rawLockedCustomForEngine.includes('Camera smoothly decelerates'));
+      const lockedCustomForEngine = !isLockedStale ? rawLockedCustomForEngine : undefined;
       const effectivePrompt =
-        targetEngine === 'minimax-h3'
+        lockedCustomForEngine && lockedCustomForEngine.length > 0
+          ? lockedCustomForEngine
+          : targetEngine === 'minimax-h3'
           ? displayPositivePrompt.includes('subject_definitions:') && !displayPositivePrompt.includes('from mark (')
             ? displayPositivePrompt
             : engineCompiled.positivePrompt
@@ -468,7 +568,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
           setIsSubmittingComfy(false);
         },
         onInterrupted: () => {
-          setComfyErrorText('ComfyUI execution interrupted.');
+          setComfyErrorText('ComfyUI execution stopped.');
           setComfyStatusText(null);
           setIsSubmittingComfy(false);
         },
@@ -479,6 +579,18 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       setComfyStatusText(null);
       setIsSubmittingComfy(false);
     }
+  };
+
+  const handleStopComfyRender = async () => {
+    try {
+      await defaultJobRunner.cancelActiveJob();
+    } catch {
+      // ignore network error if ComfyUI is already offline
+    }
+    useComfyStore.getState().clearActiveJob();
+    setIsSubmittingComfy(false);
+    setComfyStatusText(null);
+    setComfyErrorText('Render stopped by user. You can edit your shot or workflow and click Render in ComfyUI again.');
   };
 
   const handleSyncRestartBoth = () => {
@@ -506,12 +618,26 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   // Compile deterministic fallback for active tab
   const activeAdapter = getAdapter(activeEngineTab);
   const deterministicPrompt = activeAdapter.compilePrompt(shot);
-  const isCompiledMatchingEngine =
-    compiledPrompt?.positivePrompt &&
-    !compiledPrompt.positivePrompt.includes('from mark (') &&
-    (activeEngineTab !== 'minimax-h3' || compiledPrompt.positivePrompt.includes('subject_definitions:'));
-  const displayPositivePrompt = isCompiledMatchingEngine
-    ? compiledPrompt.positivePrompt
+  const customLockedPrompt = shot.customPositivePrompts?.[activeEngineTab];
+  const isStaleLegacyPrompt =
+    typeof customLockedPrompt === 'string' &&
+    (customLockedPrompt.includes('#334155 3D previz stage blocks') ||
+      customLockedPrompt.includes('settling into the final composition and locking focus') ||
+      customLockedPrompt.includes('Procedural 3D stage subject for') ||
+      customLockedPrompt.includes('placed on stage from 3D Asset Library') ||
+      customLockedPrompt.includes("ignoring <Picture 1>'s original background") ||
+      customLockedPrompt.includes('<Video 1> (camera/motion reference): partially_preserved') ||
+      customLockedPrompt.includes('Strictly follows the screen position, 3D orientation') ||
+      customLockedPrompt.includes('placeholder volume in the') ||
+      customLockedPrompt.includes('[Choreography Reference:') ||
+      customLockedPrompt.includes('Camera smoothly decelerates'));
+  const isCustomPromptLocked =
+    typeof customLockedPrompt === 'string' &&
+    customLockedPrompt.trim().length > 0 &&
+    !isStaleLegacyPrompt;
+  const engineUndoCount = (shot.promptHistory?.[activeEngineTab] || []).length;
+  const displayPositivePrompt = isCustomPromptLocked
+    ? customLockedPrompt
     : deterministicPrompt.positivePrompt;
   const displayNegativePrompt = shot.negativePrompt ?? compiledPrompt?.negativePrompt ?? deterministicPrompt.negativePrompt ?? '';
   const temporalBeats = deterministicPrompt.temporalBeats || compiledPrompt?.temporalBeats || [];
@@ -524,7 +650,13 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       setActiveWorkflowChoice(getActiveWorkflowForEngine(engineId));
     }
     const adapter = getAdapter(engineId);
-    setCompiledPrompt(adapter.compilePrompt({ ...shot, targetModel: engineId }));
+    const baseCompiled = adapter.compilePrompt({ ...shot, targetModel: engineId });
+    const locked = shot.customPositivePrompts?.[engineId];
+    setCompiledPrompt(
+      locked && locked.trim().length > 0
+        ? { ...baseCompiled, positivePrompt: locked }
+        : baseCompiled
+    );
     setAiDirectorFeedback(null);
   };
 
@@ -533,6 +665,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     setAiDirectorFeedback(null);
     try {
       const res = await directPromptWithAI(shot, activeEngineTab);
+      setCustomPositivePrompt(activeEngineTab, res.positivePrompt, true);
       setCompiledPrompt({
         ...compiledPrompt,
         positivePrompt: res.positivePrompt,
@@ -550,12 +683,68 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     }
   };
 
-  const handleResetToDeterministicPrompt = () => {
-    const adapter = getAdapter(activeEngineTab);
-    const standard = adapter.compilePrompt(shot);
-    setCompiledPrompt(standard);
-    setAiDirectorFeedback('Reset to deterministic model-compiled prompt.');
-    setTimeout(() => setAiDirectorFeedback(null), 3000);
+  const handleSendAiPromptChat = async (overrideText?: string) => {
+    const instruction = (overrideText ?? promptChatInput).trim();
+    if (!instruction || isSendingPromptChat) return;
+    if (!overrideText) setPromptChatInput('');
+    setIsSendingPromptChat(true);
+    setAiDirectorFeedback(null);
+
+    const userMsgId = `pchat_u_${Date.now()}`;
+    appendPromptChatMessage({
+      id: userMsgId,
+      role: 'user',
+      text: instruction,
+      engine: activeEngineTab,
+      timestamp: Date.now(),
+    });
+
+    try {
+      const historyForEngine = (shot.promptChatMessages || []).map((m) => ({
+        role: m.role,
+        text: m.text,
+      }));
+      const res = await refinePromptWithAIChat({
+        shot,
+        targetModelId: activeEngineTab,
+        currentPositivePrompt: displayPositivePrompt,
+        currentNegativePrompt: displayNegativePrompt,
+        userInstruction: instruction,
+        chatHistory: historyForEngine,
+      });
+
+      setCustomPositivePrompt(activeEngineTab, res.positivePrompt, true);
+      setCompiledPrompt({
+        ...(compiledPrompt || deterministicPrompt),
+        positivePrompt: res.positivePrompt,
+        negativePrompt: res.negativePrompt,
+      });
+      if (res.negativePrompt && res.negativePrompt !== displayNegativePrompt) {
+        setNegativePrompt(res.negativePrompt);
+      }
+
+      appendPromptChatMessage({
+        id: `pchat_a_${Date.now()}`,
+        role: 'assistant',
+        text: res.assistantReply,
+        engine: activeEngineTab,
+        timestamp: Date.now(),
+      });
+      setTimeout(() => {
+        promptChatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }, 60);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      appendPromptChatMessage({
+        id: `pchat_err_${Date.now()}`,
+        role: 'assistant',
+        text: `⚠️ تعذر الاتصال بالـ AI Reasoner: ${msg}`,
+        engine: activeEngineTab,
+        timestamp: Date.now(),
+      });
+    } finally {
+      setIsSendingPromptChat(false);
+    }
   };
 
   const handleCopyPrompt = (text: string, isNeg = false) => {
@@ -576,6 +765,8 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       ? previsOpenPoseUrl
       : activePassTab === 'depth'
       ? previsDepthUrl
+      : activePassTab === 'id-mask'
+      ? previsIdMaskUrl
       : activePassTab === 'comfy-final'
       ? finalComfyVideoUrl
       : finalComfyVideoUrl || previsVideoUrl;
@@ -587,8 +778,12 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       ? 'OpenPose Rig'
       : activePassTab === 'depth'
       ? 'Volumetric Depth'
+      : activePassTab === 'id-mask'
+      ? 'Object ID Segmentation Mask'
       : activePassTab === 'comfy-final'
       ? 'Final ComfyUI Render (MP4 + Audio)'
+      : compareViewMode === 'wipe'
+      ? 'Interactive A/B Wipe (3D Previs vs Final Render)'
       : 'Side-by-Side Sync (Previs vs Final)';
 
   const downloadFile = (url: string, filename: string) => {
@@ -614,7 +809,14 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       return;
     }
     const sanitized = shot.name.replace(/[^a-z0-9_-]/gi, '_') || 'previs_shot';
-    const tag = activePassTab === 'rgb' ? 'RGB' : activePassTab === 'openpose' ? 'OpenPose' : 'Depth';
+    const tag =
+      activePassTab === 'rgb'
+        ? 'RGB'
+        : activePassTab === 'openpose'
+        ? 'OpenPose'
+        : activePassTab === 'id-mask'
+        ? 'IDMask'
+        : 'Depth';
     downloadFile(currentPassUrl, `${sanitized}_${tag}_${selectedResolution}.mp4`);
   };
 
@@ -632,6 +834,11 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       setTimeout(() => {
         downloadFile(previsDepthUrl, `${sanitized}_Depth_${selectedResolution}.mp4`);
       }, 600);
+    }
+    if (previsIdMaskUrl) {
+      setTimeout(() => {
+        downloadFile(previsIdMaskUrl, `${sanitized}_IDMask_${selectedResolution}.mp4`);
+      }, 900);
     }
   };
 
@@ -657,7 +864,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     downloadTextFile(JSON.stringify(fullBundle, null, 2), `${sanitized}_${activeEngineTab}_production_pack.json`);
   };
 
-  const availablePassCount = [previsVideoUrl, previsOpenPoseUrl, previsDepthUrl].filter(Boolean).length;
+  const availablePassCount = [previsVideoUrl, previsOpenPoseUrl, previsDepthUrl, previsIdMaskUrl].filter(Boolean).length;
 
   return (
     <div className="flex flex-col h-full bg-[#0a0c12] text-slate-200 overflow-y-auto custom-scrollbar font-sans">
@@ -801,6 +1008,19 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   {previsDepthUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
                 </button>
                 <button
+                  onClick={() => setActivePassTab('id-mask')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
+                    activePassTab === 'id-mask'
+                      ? 'bg-rose-500 text-white font-bold shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Cryptomatte-style per-subject Object ID Segmentation Mask (#EF4444, #22C55E, #3B82F6 on #000000)"
+                >
+                  <Layers className="h-3 w-3" />
+                  <span>ID Mask</span>
+                  {previsIdMaskUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
+                </button>
+                <button
                   onClick={() => setActivePassTab('comfy-final')}
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
                     activePassTab === 'comfy-final'
@@ -830,62 +1050,217 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
             {/* Video Viewport / Player */}
             <div className="relative rounded-xl overflow-hidden bg-black/80 border border-white/10 aspect-video flex items-center justify-center group">
               {activePassTab === 'side-by-side' ? (
-                <div className="w-full h-full grid grid-cols-2 gap-1 bg-black p-1">
-                  {/* Left: 3D RGB Previs */}
-                  <div className="relative rounded-lg overflow-hidden bg-[#080a0f] border border-amber-500/30 flex items-center justify-center">
-                    {previsVideoUrl ? (
-                      <video
-                        ref={syncLeftVideoRef}
-                        key={previsVideoUrl}
-                        src={previsVideoUrl}
-                        controls
-                        loop
-                        autoPlay
-                        muted
-                        className="w-full h-full object-contain"
-                      />
-                    ) : (
-                      <div className="text-center p-4 text-[11px] font-mono text-slate-400">
-                        Click <strong>&quot;Render Previs Video&quot;</strong> below to populate left 3D Previs plate.
-                      </div>
-                    )}
-                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-amber-500/40 text-[9px] font-mono text-amber-300 font-bold">
-                      1. 3D RGB PREVIS (&lt;Video 1&gt;)
+                compareViewMode === 'wipe' ? (
+                  <div
+                    ref={wipeViewportRef}
+                    className="relative w-full h-full bg-[#080a0f] select-none overflow-hidden"
+                    onPointerDown={(e) => {
+                      if ((e.target as HTMLElement).closest('button, input')) return;
+                      isDraggingWipeRef.current = true;
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      if (rect.width > 0) {
+                        const pct = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+                        setWipePercent(Math.round(pct));
+                      }
+                    }}
+                    onPointerMove={(e) => {
+                      if (!isDraggingWipeRef.current) return;
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      if (rect.width > 0) {
+                        const pct = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
+                        setWipePercent(Math.round(pct));
+                      }
+                    }}
+                    onPointerUp={() => {
+                      isDraggingWipeRef.current = false;
+                    }}
+                    onPointerLeave={() => {
+                      isDraggingWipeRef.current = false;
+                    }}
+                  >
+                    {/* Base Layer (Right side of curtain): Final ComfyUI Render */}
+                    <div className="absolute inset-0 flex items-center justify-center bg-[#080a0f]">
+                      {finalComfyVideoUrl ? (
+                        <video
+                          ref={syncRightVideoRef}
+                          key={`wipe-right-${finalComfyVideoUrl}`}
+                          src={finalComfyVideoUrl}
+                          loop
+                          autoPlay
+                          muted
+                          playsInline
+                          onPlay={() => syncLeftVideoRef.current?.play().catch(() => {})}
+                          onPause={() => syncLeftVideoRef.current?.pause()}
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <div className="text-center p-6 text-[11px] font-mono text-slate-400">
+                          Click <strong>&quot;Render in ComfyUI&quot;</strong> or <strong>&quot;Load Latest ComfyUI Render&quot;</strong> below to compare on the right side of the curtain.
+                        </div>
+                      )}
                     </div>
-                  </div>
-                  {/* Right: Final ComfyUI Render */}
-                  <div className="relative rounded-lg overflow-hidden bg-[#080a0f] border border-indigo-500/40 flex items-center justify-center">
-                    {finalComfyVideoUrl ? (
-                      <video
-                        ref={syncRightVideoRef}
-                        key={finalComfyVideoUrl}
-                        src={finalComfyVideoUrl}
-                        controls
-                        loop
-                        autoPlay
-                        muted
-                        playsInline
-                        className="w-full h-full object-contain"
-                      />
-                    ) : (
-                      <div className="text-center p-4 text-[11px] font-mono text-slate-400">
-                        Click <strong>&quot;Render in ComfyUI&quot;</strong> or <strong>&quot;Load Latest ComfyUI Render&quot;</strong> below.
-                      </div>
-                    )}
-                    <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-indigo-500/40 text-[9px] font-mono text-indigo-300 font-bold">
-                      2. {activeEngineTab === 'ltx-2.5' ? 'LTX-2.5' : 'MINIMAX H3'} FINAL RENDER ({finalComfyFilename || 'ComfyUI'})
-                    </div>
-                  </div>
-                  {previsVideoUrl && finalComfyVideoUrl && (
-                    <button
-                      onClick={handleSyncRestartBoth}
-                      className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-indigo-600/90 hover:bg-indigo-500 text-white font-mono text-[10px] font-bold shadow-lg border border-white/20 flex items-center gap-1.5 cursor-pointer"
+
+                    {/* Top Clipped Layer (Left side of curtain): 3D RGB Previs (<Video 1>) */}
+                    <div
+                      className="absolute inset-0 flex items-center justify-center bg-[#080a0f]"
+                      style={{ clipPath: `inset(0 ${100 - wipePercent}% 0 0)` }}
                     >
-                      <RotateCcw className="h-3 w-3" />
-                      <span>Sync Play</span>
-                    </button>
-                  )}
-                </div>
+                      {previsVideoUrl ? (
+                        <video
+                          ref={syncLeftVideoRef}
+                          key={`wipe-left-${previsVideoUrl}`}
+                          src={previsVideoUrl}
+                          loop
+                          autoPlay
+                          muted
+                          playsInline
+                          onPlay={() => syncRightVideoRef.current?.play().catch(() => {})}
+                          onPause={() => syncRightVideoRef.current?.pause()}
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <div className="text-center p-6 text-[11px] font-mono text-slate-400">
+                          Click <strong>&quot;Render Previs&quot;</strong> below to populate the left 3D Previs layer.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Vertical Wipe Divider Line & Handle */}
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5 bg-gradient-to-b from-amber-400 via-white to-indigo-400 shadow-[0_0_12px_rgba(251,191,36,0.85)] pointer-events-none"
+                      style={{ left: `${wipePercent}%` }}
+                    >
+                      <div className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-black/90 border-2 border-amber-400 text-amber-300 shadow-lg flex items-center justify-center text-[10px] font-mono font-bold">
+                        ◄►
+                      </div>
+                    </div>
+
+                    {/* Left & Right Corner Badges */}
+                    <div className="absolute bottom-11 left-3 px-2 py-0.5 rounded bg-black/80 border border-amber-500/40 text-[9px] font-mono text-amber-300 font-bold pointer-events-none">
+                      ◄ 1. 3D RGB PREVIS (&lt;Video 1&gt;) • {wipePercent}%
+                    </div>
+                    <div className="absolute bottom-11 right-3 px-2 py-0.5 rounded bg-black/80 border border-indigo-500/40 text-[9px] font-mono text-indigo-300 font-bold pointer-events-none">
+                      2. {activeEngineTab === 'ltx-2.5' ? 'LTX-2.5' : 'MINIMAX H3'} FINAL ({100 - wipePercent}%) ►
+                    </div>
+
+                    {/* Top-Right Mode Switcher (A/B Wipe vs Split 2-Up) */}
+                    <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-black/80 backdrop-blur-md p-1 rounded-lg border border-white/15 text-[10px] font-mono">
+                      <button
+                        type="button"
+                        onClick={() => setCompareViewMode('wipe')}
+                        className="px-2 py-0.5 rounded bg-amber-500 text-black font-bold cursor-pointer"
+                      >
+                        A/B Wipe
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCompareViewMode('split')}
+                        className="px-2 py-0.5 rounded text-slate-300 hover:text-white cursor-pointer"
+                      >
+                        Split 2-Up
+                      </button>
+                    </div>
+
+                    {/* Bottom Scrubber Bar + Sync Play */}
+                    <div className="absolute bottom-2 left-3 right-3 z-10 flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-black/80 backdrop-blur-md border border-white/15">
+                      <span className="text-[9px] font-mono text-amber-300 font-bold shrink-0">PREVIS</span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        value={wipePercent}
+                        onChange={(e) => setWipePercent(Number(e.target.value))}
+                        aria-label="A/B Wipe Curtain Position"
+                        className="flex-1 accent-amber-400 h-1.5 bg-white/15 rounded-lg cursor-ew-resize"
+                      />
+                      <span className="text-[9px] font-mono text-indigo-300 font-bold shrink-0">FINAL</span>
+                      {previsVideoUrl && finalComfyVideoUrl && (
+                        <button
+                          type="button"
+                          onClick={handleSyncRestartBoth}
+                          className="px-2.5 py-0.5 rounded-full bg-indigo-600/90 hover:bg-indigo-500 text-white font-mono text-[10px] font-bold border border-white/20 flex items-center gap-1 cursor-pointer shrink-0"
+                        >
+                          <RotateCcw className="h-2.5 w-2.5" />
+                          <span>Sync Play</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative w-full h-full grid grid-cols-2 gap-1 bg-black p-1">
+                    {/* Top-Right Mode Switcher (A/B Wipe vs Split 2-Up) */}
+                    <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-black/80 backdrop-blur-md p-1 rounded-lg border border-white/15 text-[10px] font-mono">
+                      <button
+                        type="button"
+                        onClick={() => setCompareViewMode('wipe')}
+                        className="px-2 py-0.5 rounded text-slate-300 hover:text-white cursor-pointer"
+                      >
+                        A/B Wipe
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCompareViewMode('split')}
+                        className="px-2 py-0.5 rounded bg-indigo-500 text-white font-bold cursor-pointer"
+                      >
+                        Split 2-Up
+                      </button>
+                    </div>
+                    {/* Left: 3D RGB Previs */}
+                    <div className="relative rounded-lg overflow-hidden bg-[#080a0f] border border-amber-500/30 flex items-center justify-center">
+                      {previsVideoUrl ? (
+                        <video
+                          ref={syncLeftVideoRef}
+                          key={previsVideoUrl}
+                          src={previsVideoUrl}
+                          controls
+                          loop
+                          autoPlay
+                          muted
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <div className="text-center p-4 text-[11px] font-mono text-slate-400">
+                          Click <strong>&quot;Render Previs Video&quot;</strong> below to populate left 3D Previs plate.
+                        </div>
+                      )}
+                      <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-amber-500/40 text-[9px] font-mono text-amber-300 font-bold">
+                        1. 3D RGB PREVIS (&lt;Video 1&gt;)
+                      </div>
+                    </div>
+                    {/* Right: Final ComfyUI Render */}
+                    <div className="relative rounded-lg overflow-hidden bg-[#080a0f] border border-indigo-500/40 flex items-center justify-center">
+                      {finalComfyVideoUrl ? (
+                        <video
+                          ref={syncRightVideoRef}
+                          key={finalComfyVideoUrl}
+                          src={finalComfyVideoUrl}
+                          controls
+                          loop
+                          autoPlay
+                          muted
+                          playsInline
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <div className="text-center p-4 text-[11px] font-mono text-slate-400">
+                          Click <strong>&quot;Render in ComfyUI&quot;</strong> or <strong>&quot;Load Latest ComfyUI Render&quot;</strong> below.
+                        </div>
+                      )}
+                      <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-indigo-500/40 text-[9px] font-mono text-indigo-300 font-bold">
+                        2. {activeEngineTab === 'ltx-2.5' ? 'LTX-2.5' : 'MINIMAX H3'} FINAL RENDER ({finalComfyFilename || 'ComfyUI'})
+                      </div>
+                    </div>
+                    {previsVideoUrl && finalComfyVideoUrl && (
+                      <button
+                        onClick={handleSyncRestartBoth}
+                        className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-indigo-600/90 hover:bg-indigo-500 text-white font-mono text-[10px] font-bold shadow-lg border border-white/20 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        <span>Sync Play</span>
+                      </button>
+                    )}
+                  </div>
+                )
               ) : currentPassUrl ? (
                 <video
                   key={currentPassUrl}
@@ -937,13 +1312,17 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 <span>{selectedResolution}</span>
                 <span>•</span>
                 <span>{shot.aspectRatio}</span>
+                <span>•</span>
+                <span className={backdropDecision.hide ? 'text-emerald-400 font-semibold' : 'text-slate-300'}>
+                  {backdropDecision.reason}
+                </span>
               </div>
             </div>
 
             {/* Render & Download Controls */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
-              {/* Pass Mode & Resolution Controls */}
-              <div className="flex items-center gap-3">
+              {/* Pass Mode, Stage Backdrop Mode & Resolution Controls */}
+              <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center gap-1">
                   <span className="text-[10px] font-mono text-slate-400">Pass:</span>
                   <select
@@ -951,10 +1330,39 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                     onChange={(e) => setRenderPassMode(e.target.value as any)}
                     className="bg-black/60 border border-white/15 rounded-lg px-2 py-1 text-[11px] font-mono text-slate-200 focus:outline-none focus:border-amber-400"
                   >
-                    <option value="all">All Passes (RGB + Pose + Depth)</option>
+                    <option value="all">All Passes (RGB + Pose + Depth + ID Mask)</option>
                     <option value="rgb">RGB Viewfinder Only</option>
                     <option value="openpose">OpenPose Rig Only</option>
                     <option value="depth">Volumetric Depth Only</option>
+                    <option value="id-mask">Object ID Mask Only</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] font-mono text-slate-400">Stage BG:</span>
+                  <select
+                    value={backdropDecision.mode}
+                    onChange={(e) => {
+                      const nextMode = e.target.value as 'auto' | 'hide-stage' | 'show-stage';
+                      setEnvironment({
+                        ...(shot.environment || CINEMATIC_ENVIRONMENT_PRESETS[0].spec),
+                        previsStageMode: nextMode,
+                        visibleInPrevis: nextMode !== 'hide-stage',
+                      });
+                      setPrevisVideo(undefined, undefined);
+                    }}
+                    title="Control whether the #334155 3D studio floor & walls appear in <Video 1> (Auto hides them when <Picture 4> or an outdoor/aerial environment is active)"
+                    className={`bg-black/60 border rounded-lg px-2 py-1 text-[11px] font-mono focus:outline-none ${
+                      backdropDecision.hide
+                        ? 'border-emerald-500/40 text-emerald-300 focus:border-emerald-400'
+                        : 'border-white/15 text-slate-200 focus:border-amber-400'
+                    }`}
+                  >
+                    <option value="auto">
+                      Auto ({backdropDecision.hide ? 'Clean BG — Hide Studio Floor' : 'Show 3D Stage'})
+                    </option>
+                    <option value="hide-stage">Clean BG (Actors &amp; Camera Only)</option>
+                    <option value="show-stage">Show 3D Studio Floor &amp; Walls</option>
                   </select>
                 </div>
 
@@ -1022,6 +1430,8 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                         ? 'Pose'
                         : activePassTab === 'depth'
                         ? 'Depth'
+                        : activePassTab === 'id-mask'
+                        ? 'ID Mask'
                         : 'Final Render'}{' '}
                       MP4
                     </span>
@@ -1113,11 +1523,17 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 <button
                   type="button"
                   onClick={handleRenderInComfyUI}
-                  disabled={isSubmittingComfy || activeJob?.status === 'executing'}
+                  disabled={
+                    isSubmittingComfy ||
+                    activeJob?.status === 'executing' ||
+                    activeJob?.status === 'queued'
+                  }
                   className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-indigo-500/25 disabled:opacity-50 transition-all cursor-pointer"
                   title="Auto-upload 3D RGB Previs MP4 + Reference Images and execute the selected workflow in ComfyUI"
                 >
-                  {isSubmittingComfy || activeJob?.status === 'executing' ? (
+                  {isSubmittingComfy ||
+                  activeJob?.status === 'executing' ||
+                  activeJob?.status === 'queued' ? (
                     <>
                       <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                       <span>Executing in ComfyUI...</span>
@@ -1129,6 +1545,19 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                     </>
                   )}
                 </button>
+                {(isSubmittingComfy ||
+                  activeJob?.status === 'executing' ||
+                  activeJob?.status === 'queued') && (
+                  <button
+                    type="button"
+                    onClick={handleStopComfyRender}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 text-rose-200 border border-rose-500/40 font-mono text-[11px] font-bold shadow-lg shadow-rose-500/15 transition-all cursor-pointer"
+                    title="Immediately interrupt and stop the current render in ComfyUI (/interrupt)"
+                  >
+                    <Square className="h-3 w-3 fill-current text-rose-400" />
+                    <span>Stop Render</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1467,6 +1896,10 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 <div className="flex items-center gap-2">
                   {comfyErrorText ? (
                     <AlertCircle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+                  ) : isSubmittingComfy ||
+                    activeJob?.status === 'executing' ||
+                    activeJob?.status === 'queued' ? (
+                    <RefreshCw className="h-3.5 w-3.5 text-indigo-400 animate-spin shrink-0" />
                   ) : (
                     <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
                   )}
@@ -1476,27 +1909,42 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                       `Latest ComfyUI Render Ready: ${finalComfyFilename} (${finalComfyMeta})`}
                   </span>
                 </div>
-                {finalComfyVideoUrl && (
-                  <div className="flex items-center gap-1.5">
-                    <span className="px-2 py-0.5 rounded bg-black/50 text-slate-300 text-[9.5px] font-mono border border-white/10">
-                      📁 D:\ComfyUI\output\{finalComfyFilename}
-                    </span>
+                <div className="flex items-center gap-1.5">
+                  {(isSubmittingComfy ||
+                    activeJob?.status === 'executing' ||
+                    activeJob?.status === 'queued') && (
                     <button
                       type="button"
-                      onClick={() => setActivePassTab('side-by-side')}
-                      className="px-2 py-0.5 rounded bg-indigo-500/30 hover:bg-indigo-500/50 text-white text-[10px] font-bold border border-indigo-400/40 cursor-pointer"
+                      onClick={handleStopComfyRender}
+                      className="flex items-center gap-1 px-2.5 py-0.5 rounded bg-rose-500/25 hover:bg-rose-500/40 text-rose-200 text-[10px] font-bold border border-rose-400/40 cursor-pointer"
+                      title="Stop the running render in ComfyUI"
                     >
-                      View Side-by-Side
+                      <Square className="h-2.5 w-2.5 fill-current text-rose-400" />
+                      <span>Stop Render</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => downloadFile(finalComfyVideoUrl, finalComfyFilename || 'minimax_h3_output.mp4')}
-                      className="px-2 py-0.5 rounded bg-emerald-500/25 hover:bg-emerald-500/40 text-emerald-200 text-[10px] font-bold border border-emerald-400/40 cursor-pointer"
-                    >
-                      Download Final MP4
-                    </button>
-                  </div>
-                )}
+                  )}
+                  {finalComfyVideoUrl && (
+                    <>
+                      <span className="px-2 py-0.5 rounded bg-black/50 text-slate-300 text-[9.5px] font-mono border border-white/10">
+                        📁 D:\ComfyUI\output\{finalComfyFilename}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setActivePassTab('side-by-side')}
+                        className="px-2 py-0.5 rounded bg-indigo-500/30 hover:bg-indigo-500/50 text-white text-[10px] font-bold border border-indigo-400/40 cursor-pointer"
+                      >
+                        View Side-by-Side
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => downloadFile(finalComfyVideoUrl, finalComfyFilename || 'minimax_h3_output.mp4')}
+                        className="px-2 py-0.5 rounded bg-emerald-500/25 hover:bg-emerald-500/40 text-emerald-200 text-[10px] font-bold border border-emerald-400/40 cursor-pointer"
+                      >
+                        Download Final MP4
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -1655,19 +2103,24 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   {getReasonerConfig().provider.toUpperCase()}
                 </span>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {engineUndoCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => undoCustomPositivePrompt(activeEngineTab)}
+                    className="flex items-center gap-1 px-2 py-1 rounded bg-amber-500/15 hover:bg-amber-500/30 text-amber-200 font-mono text-[10px] transition-colors border border-amber-500/30 cursor-pointer"
+                    title="Undo last prompt edit or AI modification"
+                  >
+                    <Undo2 className="h-3 w-3" />
+                    <span>Undo ({engineUndoCount})</span>
+                  </button>
+                )}
                 <button
-                  onClick={handleResetToDeterministicPrompt}
-                  className="flex items-center gap-1 px-2 py-1 rounded bg-white/5 hover:bg-white/10 text-slate-300 font-mono text-[10px] transition-colors border border-white/10"
-                  title="Reset to deterministic compiler output without AI rewrites"
-                >
-                  <RefreshCw className="h-3 w-3" />
-                  <span>Standard</span>
-                </button>
-                <button
+                  type="button"
                   onClick={handleDirectWithAi}
                   disabled={isDirectingPrompt}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-display font-semibold text-[11px] transition-all shadow-md disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-display font-semibold text-[11px] transition-all shadow-md disabled:opacity-50 cursor-pointer"
+                  title="Polish prompt using AI Reasoner"
                 >
                   {isDirectingPrompt ? (
                     <RefreshCw className="h-3 w-3 animate-spin" />
@@ -1676,8 +2129,124 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   )}
                   <span>{isDirectingPrompt ? 'Directing...' : 'AI Polish'}</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPromptChatOpen((v) => !v)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-mono text-[10.5px] font-semibold transition-all border cursor-pointer ${
+                    isPromptChatOpen
+                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/50'
+                      : 'bg-white/5 text-slate-300 border-white/15 hover:bg-white/10'
+                  }`}
+                  title="Toggle interactive AI Prompt Co-Director Chat"
+                >
+                  <MessageSquare className="h-3 w-3" />
+                  <span>AI Chat</span>
+                </button>
               </div>
             </div>
+
+            {/* Interactive Multi-Turn AI Prompt Co-Director Chat */}
+            {isPromptChatOpen && (
+              <div className="rounded-xl bg-[#0b0f19] border border-indigo-500/30 p-3 flex flex-col gap-2.5 shadow-inner">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <MessageSquare className="h-3.5 w-3.5 text-emerald-400" />
+                    <span className="text-[11px] font-bold text-white">
+                      AI Prompt Co-Director
+                    </span>
+                  </div>
+                  {(shot.promptChatMessages || []).length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearPromptChatMessages}
+                      className="flex items-center gap-1 text-[9.5px] font-mono text-slate-400 hover:text-rose-300 transition-colors cursor-pointer"
+                      title="Clear prompt chat history"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      <span>Clear</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick Suggestion Chips (English) */}
+                <div className="flex flex-wrap gap-1">
+                  {[
+                    'Make character and camera motion smoother and more natural',
+                    'Add warm cinematic golden-hour lighting and atmospheric depth',
+                    'Enhance diegetic soundscape and environmental audio details',
+                    'Sharpen optical photorealism, lens bokeh, and surface textures',
+                  ].map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      disabled={isSendingPromptChat}
+                      onClick={() => handleSendAiPromptChat(chip)}
+                      className="px-2 py-0.5 rounded-md bg-indigo-500/15 hover:bg-indigo-500/30 border border-indigo-400/30 text-indigo-200 text-[9.5px] transition-colors disabled:opacity-40 cursor-pointer"
+                    >
+                      ✨ {chip}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Chat Messages History */}
+                {(shot.promptChatMessages || []).length > 0 && (
+                  <div className="max-h-36 overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
+                    {(shot.promptChatMessages || []).map((m) => {
+                      const isAr = /[\u0600-\u06FF]/.test(m.text);
+                      return (
+                        <div
+                          key={m.id}
+                          dir={isAr ? 'rtl' : 'ltr'}
+                          className={`rounded-lg px-2.5 py-1.5 text-[10.5px] leading-relaxed ${
+                            m.role === 'user'
+                              ? 'bg-indigo-600/25 border border-indigo-500/40 text-indigo-100'
+                              : 'bg-emerald-950/40 border border-emerald-500/30 text-emerald-200'
+                          }`}
+                        >
+                          <span className="font-mono text-[9px] font-bold opacity-75 block mb-0.5">
+                            {m.role === 'user' ? '🎬 You:' : '🤖 AI Co-Director:'}
+                          </span>
+                          <div>{m.text}</div>
+                        </div>
+                      );
+                    })}
+                    <div ref={promptChatEndRef} />
+                  </div>
+                )}
+
+                {/* Chat Input Row */}
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    dir="auto"
+                    value={promptChatInput}
+                    onChange={(e) => setPromptChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendAiPromptChat();
+                      }
+                    }}
+                    disabled={isSendingPromptChat}
+                    placeholder="Describe how you want to modify the prompt and press Enter..."
+                    className="flex-1 rounded-lg bg-black/70 border border-white/15 px-2.5 py-1.5 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-400"
+                  />
+                  <button
+                    type="button"
+                    disabled={!promptChatInput.trim() || isSendingPromptChat}
+                    onClick={() => handleSendAiPromptChat()}
+                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-mono text-[10.5px] font-bold disabled:opacity-40 transition-all cursor-pointer shrink-0"
+                  >
+                    {isSendingPromptChat ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Send className="h-3.5 w-3.5" />
+                    )}
+                    <span>{isSendingPromptChat ? 'Updating...' : 'Apply'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* AI Director Feedback notification */}
             {aiDirectorFeedback && (
@@ -1710,12 +2279,13 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                         })
                         .join(', ');
                       const appended = `${displayPositivePrompt}\n\nColor Target Map: ${colorLines}.`;
+                      setCustomPositivePrompt(activeEngineTab, appended, true);
                       setCompiledPrompt({
                         ...(compiledPrompt || deterministicPrompt),
                         positivePrompt: appended,
                       });
                     }}
-                    className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 border border-amber-400/40 text-amber-200 font-mono text-[9px] font-semibold transition-colors"
+                    className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 border border-amber-400/40 text-amber-200 font-mono text-[9px] font-semibold transition-colors cursor-pointer"
                     title="Append Object Color Target Map to Positive Prompt"
                   >
                     + Add Color Map
@@ -1742,14 +2312,30 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
               </div>
             )}
 
-            {/* Positive Prompt Card */}
+            {/* Editable Positive Prompt Card */}
             <div className="space-y-1.5 flex-1 flex flex-col">
-              <label className="text-[10px] font-mono text-slate-400 uppercase tracking-wider">
-                Positive Prompt
-              </label>
-              <div className="flex-1 min-h-[140px] rounded-xl bg-black/60 border border-white/15 p-3 text-xs font-mono text-slate-200 leading-relaxed overflow-y-auto custom-scrollbar select-all">
-                {displayPositivePrompt}
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-[10px] font-mono text-slate-300 uppercase tracking-wider font-bold">
+                  Positive Prompt
+                </label>
               </div>
+              <textarea
+                rows={9}
+                value={displayPositivePrompt}
+                onChange={(e) => {
+                  const nextText = e.target.value;
+                  setCustomPositivePrompt(activeEngineTab, nextText, false);
+                  setCompiledPrompt({
+                    ...(compiledPrompt || deterministicPrompt),
+                    positivePrompt: nextText,
+                  });
+                }}
+                onFocus={() => {
+                  setCustomPositivePrompt(activeEngineTab, displayPositivePrompt, true);
+                }}
+                placeholder="Edit your positive prompt manually here or discuss modifications with the AI Prompt Co-Director above..."
+                className="flex-1 min-h-[160px] w-full rounded-xl bg-black/60 border border-white/15 focus:border-indigo-400 p-3 text-xs font-mono text-slate-100 leading-relaxed overflow-y-auto custom-scrollbar focus:outline-none resize-y"
+              />
             </div>
 
             {/* Editable Negative Prompt Card */}

@@ -139,11 +139,60 @@ function scheduleSaveWindowState(win) {
 let mainWindow = null;
 let localProxyServer = null;
 
+function resolveSafeCorsOrigin(req) {
+  const origin = String((req && req.headers && req.headers.origin) || '').trim();
+  if (!origin) return 'http://127.0.0.1:51731';
+  if (
+    origin === 'null' ||
+    origin.startsWith('file://') ||
+    origin.startsWith('app://') ||
+    /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin)
+  ) {
+    return origin;
+  }
+  return 'http://127.0.0.1:51731';
+}
+
+function isAllowedGlbFilePath(candidatePath) {
+  if (!candidatePath || candidatePath.includes('\0')) return false;
+  const resolved = path.resolve(candidatePath).replace(/\\/g, '/').toLowerCase();
+  if (!resolved.endsWith('.glb') && !resolved.endsWith('.gltf')) return false;
+  const workspaceRoot = path.resolve(__dirname, '..').replace(/\\/g, '/').toLowerCase();
+  let customStorageRoot = '';
+  try {
+    const studioStorageService = require('../src/server/studioStorageService.cjs');
+    customStorageRoot = path
+      .resolve(studioStorageService.getActiveStorageDir())
+      .replace(/\\/g, '/')
+      .toLowerCase();
+  } catch {}
+  const allowedRoots = [
+    'd:/comfyui/output',
+    'd:/comfyui/temp',
+    'd:/comfyui/input',
+    workspaceRoot,
+    ...(customStorageRoot ? [customStorageRoot] : []),
+  ];
+  return allowedRoots.some((root) => resolved === root || resolved.startsWith(root + '/'));
+}
+
+function isValidComfyWorkflowJsonString(rawContent) {
+  try {
+    const parsed = JSON.parse(rawContent);
+    if (!parsed || typeof parsed !== 'object') return false;
+    if (Array.isArray(parsed.nodes)) return true;
+    const values = Object.values(parsed);
+    return values.some((v) => v && typeof v === 'object' && typeof v.class_type === 'string');
+  } catch {
+    return false;
+  }
+}
+
 function startLocalProxyServer() {
   if (localProxyServer) return;
   localProxyServer = http.createServer((req, res) => {
-    // Add permissive CORS headers on all responses
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    // Restrict CORS headers to localhost / Electron file:// origins only
+    res.setHeader('Access-Control-Allow-Origin', resolveSafeCorsOrigin(req));
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Access-Control-Expose-Headers', '*');
@@ -200,8 +249,15 @@ function startLocalProxyServer() {
         }
 
         let targetFile = '';
-        if (explicitPath && explicitPath.toLowerCase().endsWith('.glb') && fs.existsSync(explicitPath)) {
-          targetFile = explicitPath;
+        if (explicitPath) {
+          if (!isAllowedGlbFilePath(explicitPath)) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Forbidden: .glb path must reside in ComfyUI output or project workspace.' }));
+            return;
+          }
+          if (fs.existsSync(explicitPath)) {
+            targetFile = path.resolve(explicitPath);
+          }
         } else {
           let newestMtime = Math.max(0, sinceMs - 5000);
           const scanDir = (dir, depth = 0) => {
@@ -284,6 +340,21 @@ function startLocalProxyServer() {
       }
     }
 
+    if (rawUrl.startsWith('/api/studio-storage')) {
+      try {
+        const studioStorageService = require('../src/server/studioStorageService.cjs');
+        if (studioStorageService.handleStudioStorageRequest(req, res)) {
+          return;
+        }
+      } catch (err) {
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+        return;
+      }
+    }
+
     if (rawUrl.startsWith('/api/comfy-sync-workflows')) {
       const comfySyncService = require('../src/server/comfyWorkflowSyncService.cjs');
       if (req.method === 'GET') {
@@ -351,13 +422,24 @@ function startLocalProxyServer() {
         } else if (filePath.toLowerCase().startsWith('file://')) {
           filePath = decodeURIComponent(filePath.replace(/^file:\/\//i, ''));
         }
-        if (!filePath || !filePath.toLowerCase().endsWith('.json') || !fs.existsSync(filePath)) {
+        if (!filePath || filePath.includes('\0') || !filePath.toLowerCase().endsWith('.json') || !fs.existsSync(filePath)) {
           res.writeHead(404, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: `Local workflow JSON file not found at: ${filePath}` }));
           return;
         }
         const resolved = path.resolve(filePath);
+        const stat = fs.statSync(resolved);
+        if (!stat.isFile() || stat.size > 15 * 1024 * 1024) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid workflow file.' }));
+          return;
+        }
         const rawContent = fs.readFileSync(resolved, 'utf-8');
+        if (!isValidComfyWorkflowJsonString(rawContent)) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Forbidden: Target file is not a valid ComfyUI workflow JSON.' }));
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(rawContent);
       } catch (err) {

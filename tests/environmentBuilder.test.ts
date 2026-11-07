@@ -5,6 +5,8 @@ import {
   applyGroundSurface,
   buildPerimeterEnvironment,
   setLayerRecursively,
+  shouldHideStageBackdropInPrevis,
+  inferSemanticEnvironmentBiome,
 } from '../src/engine/staging/environmentBuilder';
 import { createBrickCanvasTexture, createWoodParquetCanvasTexture } from '../src/engine/staging/stageTextures';
 import { EnvironmentSpec } from '../src/types/shotspec';
@@ -133,5 +135,55 @@ describe('Staging Textures & Environment Builder', () => {
     expect(root.layers.isEnabled(2)).toBe(true);
     expect(child.layers.isEnabled(2)).toBe(true);
     expect(grandChild.layers.isEnabled(2)).toBe(true);
+  });
+
+  it('shouldHideStageBackdropInPrevis keeps 3D biome parallax visible in auto mode and respects manual overrides, while inferSemanticEnvironmentBiome selects matching 3D biomes', () => {
+    // 1. Default studio interior stays visible in auto mode
+    const studioDecision = shouldHideStageBackdropInPrevis({
+      environment: makeEnv({ category: 'studio', promptDescription: 'soundstage studio with cyclorama floor' }),
+      sceneDescription: 'cinematic film still, moody atmospheric interior with subtle dust motes',
+      actors: [{ name: 'Lead Subject', kind: 'human', token: 'a detective in a trench coat' }],
+    });
+    expect(studioDecision.mode).toBe('auto');
+    expect(studioDecision.hide).toBe(false);
+
+    // 2. Environment Reference Image (<Picture 4>) keeps 3D biome & cyclorama visible in auto mode for optical flow parallax
+    const envRefDecision = shouldHideStageBackdropInPrevis({
+      environment: makeEnv({ conceptImageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==' }),
+      sceneDescription: 'interior room',
+      actors: [{ name: 'Lead Subject', kind: 'human' }],
+    });
+    expect(envRefDecision.mode).toBe('auto');
+    expect(envRefDecision.hide).toBe(false);
+
+    // 3. Helicopter flying over a forest infers 'nature' biome + 'grass-terrain' ground surface
+    const forestBiome = inferSemanticEnvironmentBiome(
+      makeEnv({ promptDescription: 'a helicopter flying in the air over a forest', timeOfDay: 'day' }),
+      {
+        sceneDescription: 'a helicopter flying in the air over a forest',
+        actors: [{ name: 'Helicopter flying', kind: 'prop', token: 'a helicopter flying in the air over a forest' }],
+      }
+    );
+    expect(forestBiome.category).toBe('nature');
+    expect(forestBiome.groundSurface).toBe('grass-terrain');
+
+    // 4. Manual override 'show-stage' forces 3D stage visible
+    const manualShow = shouldHideStageBackdropInPrevis({
+      environment: makeEnv({
+        previsStageMode: 'show-stage',
+        conceptImageUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==',
+      }),
+      sceneDescription: 'a helicopter flying in the air over a forest',
+    });
+    expect(manualShow.mode).toBe('show-stage');
+    expect(manualShow.hide).toBe(false);
+
+    // 5. Manual override 'hide-stage' forces clean BG when explicitly requested by user
+    const manualHide = shouldHideStageBackdropInPrevis({
+      environment: makeEnv({ previsStageMode: 'hide-stage' }),
+      sceneDescription: 'soundstage studio',
+    });
+    expect(manualHide.mode).toBe('hide-stage');
+    expect(manualHide.hide).toBe(true);
   });
 });

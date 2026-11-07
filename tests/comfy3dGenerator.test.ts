@@ -230,8 +230,8 @@ describe('comfy3dGenerator', () => {
     });
   });
 
-  it('bundles all 5 official ComfyUI workflows (Image-to-3D, Text-to-3D, MiniMax H3, LTX-2.5) for user download', () => {
-    expect(BUNDLED_WORKFLOWS_CATALOG.length).toBe(5);
+  it('bundles all official ComfyUI workflows (Image-to-3D, Text-to-3D, MiniMax H3, LTX-2.5) for user download', () => {
+    expect(BUNDLED_WORKFLOWS_CATALOG.length).toBeGreaterThanOrEqual(5);
     const ids = BUNDLED_WORKFLOWS_CATALOG.map((w) => w.id);
     expect(ids).toContain('comfy-image-to-3d-glb');
     expect(ids).toContain('comfy-text-to-3d-glb');

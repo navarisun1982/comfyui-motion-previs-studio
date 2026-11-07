@@ -1186,7 +1186,7 @@ export function compileReadyMadeMotionKeyframes(
         // Crouch [0..0.22], Airborne parabola [0.22..0.82], Landing [0.82..1.0] per cycle
         if (cycleU > 0.2 && cycleU < 0.82) {
           const airU = (cycleU - 0.2) / 0.62;
-          curZ = startZ + Math.sin(airU * Math.PI) * 14;
+          curZ = startZ + Math.sin(airU * Math.PI) * 12.2;
           curX = cycStartX + (cycEndX - cycStartX) * airU;
           curY = cycStartY + (cycEndY - cycStartY) * airU;
         } else if (cycleU <= 0.2) {
@@ -1294,9 +1294,11 @@ export function compileReadyMadeMotionKeyframes(
       }
 
       case 'air-dive-attack': {
-        const highZ = Math.max(28, startZ);
-        curZ = highZ - smoothCycleU * 20;
-        rotX = cycleU < 0.7 ? 28 * Math.sin((cycleU / 0.7) * Math.PI) : 0;
+        const highZ = startZ > 6 ? startZ : 16;
+        const targetZ = options.targetPosition?.z;
+        const lowZ = targetZ !== undefined && targetZ < highZ ? targetZ : Math.max(4.5, highZ - 11.5);
+        curZ = highZ + (lowZ - highZ) * smoothCycleU;
+        rotX = cycleU < 0.78 ? 28 * Math.sin((cycleU / 0.78) * Math.PI) : 8;
         break;
       }
 
@@ -1318,8 +1320,9 @@ export function compileReadyMadeMotionKeyframes(
 
       case 'prop-recoil-kick': {
         const kick = Math.abs(Math.sin(cycleU * Math.PI * 3));
-        rotX = baseRot.x - kick * 28;
-        curZ = startZ + kick * 2;
+        const isGroundedTurret = startZ <= 0.5;
+        rotX = baseRot.x - kick * (isGroundedTurret ? 6 : 24);
+        curZ = isGroundedTurret ? 0 : startZ + kick * 2;
         break;
       }
 
@@ -1769,8 +1772,10 @@ export function evaluateReadyMadeHumanoidClip(
       setHipsOffsetAndTilt(0, -0.08 * impact, -0.08 * impact, -0.18 * impact, 0, 0);
       setChestTilt(-0.32 * impact, 0.12 * impact, 0.08 * impact);
 
-      solveLimbIK(rig, 'leftLeg', rigPoint(0.13, 0.04, 0.08 * impact), rigPoint(0.15, 0.32, 0.55));
-      solveLimbIK(rig, 'rightLeg', rigPoint(-0.13, 0.04, -0.12 * impact), rigPoint(-0.15, 0.32, 0.55));
+      if (!applyWalkingLegsIfTraveling()) {
+        solveLimbIK(rig, 'leftLeg', rigPoint(0.13, 0.04, 0.08 * impact), rigPoint(0.15, 0.32, 0.55));
+        solveLimbIK(rig, 'rightLeg', rigPoint(-0.13, 0.04, -0.12 * impact), rigPoint(-0.15, 0.32, 0.55));
+      }
 
       solveLimbIK(rig, 'leftArm', rigPoint(0.32, 0.68 + 0.10 * impact, 0.12), rigPoint(0.36, 0.55, -0.25));
       solveLimbIK(rig, 'rightArm', rigPoint(-0.32, 0.68 + 0.10 * impact, 0.12), rigPoint(-0.36, 0.55, -0.25));

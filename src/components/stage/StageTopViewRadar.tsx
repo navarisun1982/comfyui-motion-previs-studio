@@ -50,6 +50,124 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+export interface RadarLabelRequest {
+  id: string;
+  text: string;
+  anchorX: number;
+  anchorY: number;
+  iconRadius: number;
+  priority: number;
+}
+
+export interface RadarLabelPlacement {
+  dx: number;
+  dy: number;
+  width: number;
+  height: number;
+  displaced: boolean;
+}
+
+/**
+ * Deterministic 2D label collision-avoidance solver for the Top-View Radar (0..100 SVG space).
+ * Ensures labels for proximate actors, lights, and camera never stack on top of each other.
+ */
+export function resolveRadarLabelPlacements(
+  items: RadarLabelRequest[]
+): Record<string, RadarLabelPlacement> {
+  const result: Record<string, RadarLabelPlacement> = {};
+  if (items.length === 0) return result;
+
+  const sorted = [...items].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id));
+  const placedBoxes: Array<{ minX: number; maxX: number; minY: number; maxY: number }> = [];
+
+  for (const item of sorted) {
+    const w = Math.max(6.2, item.text.length * 1.95 + 1.8);
+    const h = 3.4;
+    const r = item.iconRadius;
+
+    // Candidate local offsets (dx, dy) where (anchorX + dx, anchorY + dy) is the text baseline center
+    const candidates: Array<{ dx: number; dy: number; displaced: boolean }> = [
+      { dx: 0, dy: -(r + 1.3), displaced: false }, // 0: Top (default)
+      { dx: 0, dy: r + h + 0.6, displaced: true }, // 1: Bottom
+      { dx: r + w * 0.5 + 1.1, dy: h * 0.35, displaced: true }, // 2: Right
+      { dx: -(r + w * 0.5 + 1.1), dy: h * 0.35, displaced: true }, // 3: Left
+      { dx: r + w * 0.42, dy: -(r + 0.9), displaced: true }, // 4: Top-Right
+      { dx: -(r + w * 0.42), dy: -(r + 0.9), displaced: true }, // 5: Top-Left
+      { dx: r + w * 0.42, dy: r + h + 0.4, displaced: true }, // 6: Bottom-Right
+      { dx: -(r + w * 0.42), dy: r + h + 0.4, displaced: true }, // 7: Bottom-Left
+      { dx: 0, dy: -(r + h + 2.2), displaced: true }, // 8: Far Top
+      { dx: 0, dy: r + h * 2 + 1.4, displaced: true }, // 9: Far Bottom
+    ];
+
+    let bestCand = candidates[0];
+    let bestScore = Infinity;
+
+    for (let idx = 0; idx < candidates.length; idx++) {
+      const cand = candidates[idx];
+      const cx = item.anchorX + cand.dx;
+      const cy = item.anchorY + cand.dy;
+      const box = {
+        minX: cx - w * 0.5 - 0.35,
+        maxX: cx + w * 0.5 + 0.35,
+        minY: cy - h - 0.2,
+        maxY: cy + 0.35,
+      };
+
+      let penalty = idx * 1.5;
+
+      // Penalty for leaving SVG safe bounds
+      if (box.minX < 2 || box.maxX > 98 || box.minY < 4 || box.maxY > 96) {
+        penalty += 120;
+      }
+
+      // Penalty for overlapping any already-placed label box
+      for (const prev of placedBoxes) {
+        const overlapX = Math.min(box.maxX, prev.maxX) - Math.max(box.minX, prev.minX);
+        const overlapY = Math.min(box.maxY, prev.maxY) - Math.max(box.minY, prev.minY);
+        if (overlapX > 0 && overlapY > 0) {
+          penalty += 500 + overlapX * overlapY * 40;
+        }
+      }
+
+      // Penalty for overlapping any other entity's icon circle
+      for (const other of items) {
+        if (other.id === item.id) continue;
+        const nearX = Math.max(box.minX, Math.min(other.anchorX, box.maxX));
+        const nearY = Math.max(box.minY, Math.min(other.anchorY, box.maxY));
+        const dist = Math.hypot(other.anchorX - nearX, other.anchorY - nearY);
+        if (dist < other.iconRadius + 0.4) {
+          penalty += 260 + (other.iconRadius + 0.4 - dist) * 50;
+        }
+      }
+
+      if (penalty < bestScore) {
+        bestScore = penalty;
+        bestCand = cand;
+        if (penalty < 2.0) break;
+      }
+    }
+
+    const finalCx = item.anchorX + bestCand.dx;
+    const finalCy = item.anchorY + bestCand.dy;
+    placedBoxes.push({
+      minX: finalCx - w * 0.5 - 0.35,
+      maxX: finalCx + w * 0.5 + 0.35,
+      minY: finalCy - h - 0.2,
+      maxY: finalCy + 0.35,
+    });
+
+    result[item.id] = {
+      dx: Number(bestCand.dx.toFixed(2)),
+      dy: Number(bestCand.dy.toFixed(2)),
+      width: Number(w.toFixed(2)),
+      height: h,
+      displaced: bestCand.displaced,
+    };
+  }
+
+  return result;
+}
+
 export interface StageTopViewRadarProps {
   currentTime: number;
   duration: number;
@@ -88,7 +206,7 @@ export const StageTopViewRadar: React.FC<StageTopViewRadarProps> = ({
   } = useShotStore();
 
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [isLightTheme, setIsLightTheme] = useState(true);
+  const [isLightTheme, setIsLightTheme] = useState(false);
   const [size, setSize] = useState<number>(232);
   const [zoom, setZoom] = useState<number>(1.0);
   const [selectedEntity, setSelectedEntity] = useState<SelectedRadarEntity>({ kind: 'camera' });
@@ -335,6 +453,71 @@ export const StageTopViewRadar: React.FC<StageTopViewRadarProps> = ({
 
   // Effective Stage Lights (1 or more freely-positioned lights)
   const stageLights = useMemo(() => getEffectiveStageLights(shot.lighting), [shot.lighting]);
+
+  // Collision-free 2D label placements for all radar entities (CAM, Actors, Lights)
+  const labelPlacements = useMemo(() => {
+    const reqs: RadarLabelRequest[] = [
+      {
+        id: '__camera__',
+        text: 'CAM',
+        anchorX: camView.x,
+        anchorY: camView.y,
+        iconRadius: 2.5,
+        priority: selectedActorId === '__camera__' || selectedEntity.kind === 'camera' ? 105 : 95,
+      },
+    ];
+
+    shot.actors.forEach((actor) => {
+      const pos = interpolateTrajectoryPosition(actor.trajectory, currentTime, safeDur);
+      const vPos = {
+        x: 50 + (pos.x - 50) * zoom,
+        y: 50 + (pos.y - 50) * zoom,
+      };
+      const isHuman = !actor.kind || actor.kind === 'human';
+      const isSelected =
+        actor.id === selectedActorId ||
+        (selectedEntity.kind === 'actor' && selectedEntity.actorId === actor.id);
+      reqs.push({
+        id: `actor:${actor.id}`,
+        text: actor.name.slice(0, 10),
+        anchorX: vPos.x,
+        anchorY: vPos.y,
+        iconRadius: isHuman ? 3.2 : 2.8,
+        priority: isSelected ? 100 : 80,
+      });
+    });
+
+    stageLights.forEach((lgt, idx) => {
+      if (lgt.enabled === false) return;
+      const lView = {
+        x: 50 + (lgt.position.x - 50) * zoom,
+        y: 50 + (lgt.position.y - 50) * zoom,
+      };
+      const isLightSelected =
+        selectedEntity.kind === 'light' && selectedEntity.lightId === lgt.id;
+      const shortLabel = stageLights.length === 1 ? 'LGT' : `LGT${idx + 1}`;
+      reqs.push({
+        id: `light:${lgt.id}`,
+        text: shortLabel,
+        anchorX: lView.x,
+        anchorY: lView.y,
+        iconRadius: 2.4,
+        priority: isLightSelected ? 98 : 65,
+      });
+    });
+
+    return resolveRadarLabelPlacements(reqs);
+  }, [
+    camView.x,
+    camView.y,
+    shot.actors,
+    stageLights,
+    currentTime,
+    safeDur,
+    zoom,
+    selectedActorId,
+    selectedEntity,
+  ]);
 
   // Pointer Down Helper with exact grab-offset calculation
   const startEntityDrag = (
@@ -679,16 +862,38 @@ export const StageTopViewRadar: React.FC<StageTopViewRadarProps> = ({
                   stroke={isLightTheme ? '#1e293b' : '#ffffff'}
                   strokeWidth="0.5"
                 />
-                <text
-                  y="-3.3"
-                  textAnchor="middle"
-                  fontSize="3.2"
-                  fontWeight="800"
-                  fontFamily="monospace"
-                  fill={isLightTheme ? '#334155' : '#f8fafc'}
-                >
-                  {shortLabel}
-                </text>
+                {(() => {
+                  const lp = labelPlacements[`light:${lgt.id}`] || {
+                    dx: 0,
+                    dy: -3.3,
+                    displaced: false,
+                  };
+                  return (
+                    <>
+                      {lp.displaced && (
+                        <line
+                          x1="0"
+                          y1="0"
+                          x2={lp.dx * 0.72}
+                          y2={(lp.dy - 1.2) * 0.72}
+                          stroke={hexToRgba(lColor, 0.55)}
+                          strokeWidth="0.35"
+                        />
+                      )}
+                      <text
+                        x={lp.dx}
+                        y={lp.dy}
+                        textAnchor="middle"
+                        fontSize="3.2"
+                        fontWeight="800"
+                        fontFamily="monospace"
+                        fill={isLightTheme ? '#334155' : '#f8fafc'}
+                      >
+                        {shortLabel}
+                      </text>
+                    </>
+                  );
+                })()}
               </g>
             </g>
           );
@@ -945,25 +1150,47 @@ export const StageTopViewRadar: React.FC<StageTopViewRadarProps> = ({
                   <title>Drag arrow tip to rotate {actor.name}</title>
                 </circle>
 
-                {/* Actor Label */}
-                <text
-                  y={isHuman ? -5.3 : -4.2}
-                  textAnchor="middle"
-                  fontSize="3.1"
-                  fontWeight="700"
-                  fontFamily="monospace"
-                  fill={
-                    isSelected
-                      ? isLightTheme
-                        ? '#1e3a8a'
-                        : '#60a5fa'
-                      : isLightTheme
-                      ? '#475569'
-                      : '#cbd5e1'
-                  }
-                >
-                  {actor.name.slice(0, 10)}
-                </text>
+                {/* Actor Label (Collision-avoided) */}
+                {(() => {
+                  const lp = labelPlacements[`actor:${actor.id}`] || {
+                    dx: 0,
+                    dy: isHuman ? -4.5 : -4.1,
+                    displaced: false,
+                  };
+                  return (
+                    <>
+                      {lp.displaced && (
+                        <line
+                          x1="0"
+                          y1="0"
+                          x2={lp.dx * 0.72}
+                          y2={(lp.dy - 1.2) * 0.72}
+                          stroke={hexToRgba(actColor, 0.55)}
+                          strokeWidth="0.35"
+                        />
+                      )}
+                      <text
+                        x={lp.dx}
+                        y={lp.dy}
+                        textAnchor="middle"
+                        fontSize="3.1"
+                        fontWeight="700"
+                        fontFamily="monospace"
+                        fill={
+                          isSelected
+                            ? isLightTheme
+                              ? '#1e3a8a'
+                              : '#60a5fa'
+                            : isLightTheme
+                            ? '#475569'
+                            : '#cbd5e1'
+                        }
+                      >
+                        {actor.name.slice(0, 10)}
+                      </text>
+                    </>
+                  );
+                })()}
               </g>
             </g>
           );
@@ -1000,16 +1227,38 @@ export const StageTopViewRadar: React.FC<StageTopViewRadarProps> = ({
             stroke={isLightTheme ? '#082f49' : '#ffffff'}
             strokeWidth="0.5"
           />
-          <text
-            y="-3.5"
-            textAnchor="middle"
-            fontSize="3.4"
-            fontWeight="800"
-            fontFamily="monospace"
-            fill={isLightTheme ? '#0f172a' : '#f8fafc'}
-          >
-            CAM
-          </text>
+          {(() => {
+            const lp = labelPlacements['__camera__'] || {
+              dx: 0,
+              dy: -3.5,
+              displaced: false,
+            };
+            return (
+              <>
+                {lp.displaced && (
+                  <line
+                    x1="0"
+                    y1="0"
+                    x2={lp.dx * 0.72}
+                    y2={(lp.dy - 1.2) * 0.72}
+                    stroke={hexToRgba(camColor, 0.55)}
+                    strokeWidth="0.35"
+                  />
+                )}
+                <text
+                  x={lp.dx}
+                  y={lp.dy}
+                  textAnchor="middle"
+                  fontSize="3.4"
+                  fontWeight="800"
+                  fontFamily="monospace"
+                  fill={isLightTheme ? '#0f172a' : '#f8fafc'}
+                >
+                  CAM
+                </text>
+              </>
+            );
+          })()}
         </g>
       </svg>
 

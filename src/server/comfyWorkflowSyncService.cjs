@@ -474,13 +474,19 @@ function sanitizeComfyPromptBuffer(reqPath, buf) {
     const str = buf.toString('utf-8');
     if (
       !str.includes('9:16 (Vertical)') &&
-      !str.includes('4:3 (Classic TV)')
+      !str.includes('4:3 (Classic TV)') &&
+      !str.includes('minimax_h3_turbo_v4_step600_ema.safetensors') &&
+      !str.includes('MiniMax-H3-Ref2VA-Acc-8Step.safetensors')
     ) {
       return buf;
     }
     const fixed = str
       .replace(/9:16 \(Vertical\)/g, '9:16 (Portrait Widescreen)')
-      .replace(/4:3 \(Classic TV\)/g, '4:3 (Standard)');
+      .replace(/4:3 \(Classic TV\)/g, '4:3 (Standard)')
+      .replace(
+        /minimax_h3_turbo_v4_step600_ema\.safetensors|MiniMax-H3-Ref2VA-Acc-8Step\.safetensors/g,
+        'minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors'
+      );
     return Buffer.from(fixed, 'utf-8');
   } catch {
     return buf;

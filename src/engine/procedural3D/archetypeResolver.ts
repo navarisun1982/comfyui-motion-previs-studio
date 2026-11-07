@@ -75,6 +75,10 @@ import {
   createRobotMechaAssembly,
 } from './geometricDecomposer';
 import { synthesizeMorphometricObject } from './morphometricReasoner';
+import {
+  CURATED_OBJECT_ARCHETYPES,
+  matchSpecificCuratedArchetype,
+} from './kits/curatedArchetypesRegistry';
 
 export interface ObjectArchetype {
   id: string;
@@ -834,6 +838,7 @@ export const ARCHETYPE_REGISTRY: ObjectArchetype[] = [
     targetScale: 2.5,
     build: (p) => createCastleTowerArchitecture(p),
   },
+  ...CURATED_OBJECT_ARCHETYPES,
 ];
 
 export interface SpatialReasoningTrace {
@@ -1001,50 +1006,96 @@ export function resolveObjectArchetype(
     }
   }
 
-  let bestArchetype: ObjectArchetype | null = null;
-  let highestScore = 0;
+  let bestArchetype: ObjectArchetype | null = matchSpecificCuratedArchetype(cleanQuery, cleanCategory);
+  let highestScore = bestArchetype ? 45.0 : 0;
+
+  // Head-noun priority tokens (words before prepositions/participles like "with", "over", "in the", "flying")
+  const headClauseText =
+    cleanQuery.split(
+      /\b(?:with|featuring|wearing|holding|mounted|resting|standing|surrounded|inside|under|over|above|across|through|near|beside|behind|around|between|against|flying|hovering|driving|running|walking|swimming|sailing|parked|floating|sitting|lying|in\s+the|on\s+the|in\s+a|on\s+a|at\s+the)\b/i
+    )[0] || cleanQuery;
+  const headNounTokens = new Set<string>(extractTokens(headClauseText));
 
   // BM25 parameters tuned for concise keyword descriptors
   const k1 = 1.2;
   const b = 0.15;
   const avgKwLength = 25;
 
-  for (const archetype of ARCHETYPE_REGISTRY) {
-    let score = 0;
-    const docLength = archetype.keywords.length;
+  const CATEGORY_COMPATIBLE_DOMAINS: Record<string, string[]> = {
+    vehicle: ['vehicle', 'aerospace', 'marine'],
+    car: ['vehicle', 'aerospace', 'marine'],
+    spaceship: ['aerospace', 'scifi', 'vehicle'],
+    creature: ['creature', 'quadruped', 'biped'],
+    quadruped: ['quadruped', 'creature'],
+    prop: ['prop', 'container', 'optics', 'audio', 'acoustic', 'electronics', 'appliance', 'food', 'signage'],
+    props: ['prop', 'container', 'optics', 'audio', 'acoustic', 'electronics', 'appliance', 'food', 'signage'],
+    weapon: ['weapon', 'defense'],
+    weapons: ['weapon', 'defense'],
+    nature: ['nature', 'foliage', 'geology'],
+    tree: ['foliage', 'nature'],
+    building: ['architecture'],
+    architecture: ['architecture'],
+    furniture: ['furniture', 'lighting', 'horology', 'appliance'],
+    chair: ['furniture'],
+    table: ['furniture'],
+    scifi: ['scifi', 'aerospace', 'electronics'],
+  };
 
-    for (const token of expandedTokens) {
+  if (!bestArchetype) {
+    for (const archetype of ARCHETYPE_REGISTRY) {
+      let score = 0;
+      const docLength = archetype.keywords.length;
+
+      // 1. Multi-word phrase keywords: require ALL tokens of the phrase to be present (NEVER truncate "air cushion" to "air"!)
       for (const kw of archetype.keywords) {
-        const cleanKw = extractTokens(kw)[0] || kw.toLowerCase();
-
-        // Exact match
-        if (cleanKw === token) {
-          score += 10.0;
-        }
-        // Sub-word stem match (minimum 4 chars prefix stem)
-        else if (token.length >= 4 && cleanKw.length >= 4 && (cleanKw.startsWith(token) || token.startsWith(cleanKw))) {
-          score += 5.0;
-        }
-        // Typo tolerance: Levenshtein distance <= 1 for words >= 5 characters (comparing word to keyword ONLY, never alias root!)
-        else if (token.length >= 5 && cleanKw.length >= 5) {
-          const dist = levenshteinDistance(token, cleanKw);
-          if (dist === 1) score += 4.0;
-          else if (dist === 2 && token.length >= 7) score += 2.0;
+        const kwTokens = extractTokens(kw);
+        if (kwTokens.length > 1) {
+          const allMatched = kwTokens.every((kt) => expandedTokens.has(kt));
+          if (allMatched) {
+            const isHeadPhrase = kwTokens.every((kt) => headNounTokens.has(kt));
+            score += 15.0 * (isHeadPhrase ? 2.5 : 0.6);
+          }
         }
       }
-    }
 
-    // BM25 length normalization
-    let normalizedScore = score / (1 + k1 * (1 - b + b * (docLength / avgKwLength)));
-    if (cleanCategory && cleanCategory !== 'custom' && cleanCategory !== 'all') {
-      if (archetype.domain === cleanCategory) {
-        normalizedScore *= 3.0;
+      // 2. Single-word keywords
+      for (const token of expandedTokens) {
+        const weight = headNounTokens.has(token) ? 2.5 : 0.35;
+        for (const kw of archetype.keywords) {
+          const kwTokens = extractTokens(kw);
+          if (kwTokens.length !== 1) continue;
+          const cleanKw = kwTokens[0];
+
+          // Exact match
+          if (cleanKw === token) {
+            score += 10.0 * weight;
+          }
+          // Sub-word stem match (minimum 4 chars prefix stem)
+          else if (token.length >= 4 && cleanKw.length >= 4 && (cleanKw.startsWith(token) || token.startsWith(cleanKw))) {
+            score += 5.0 * weight;
+          }
+          // Typo tolerance: Levenshtein distance <= 1 for words >= 5 characters (comparing word to keyword ONLY, never alias root!)
+          else if (token.length >= 5 && cleanKw.length >= 5) {
+            const dist = levenshteinDistance(token, cleanKw);
+            if (dist === 1) score += 4.0 * weight;
+            else if (dist === 2 && token.length >= 7) score += 2.0 * weight;
+          }
+        }
       }
-    }
 
-    if (normalizedScore > highestScore) {
-      highestScore = normalizedScore;
-      bestArchetype = archetype;
+      // BM25 length normalization
+      let normalizedScore = score / (1 + k1 * (1 - b + b * (docLength / avgKwLength)));
+      if (cleanCategory && cleanCategory !== 'custom' && cleanCategory !== 'all') {
+        const compatibleDomains = CATEGORY_COMPATIBLE_DOMAINS[cleanCategory] || [cleanCategory];
+        if (compatibleDomains.includes(archetype.domain)) {
+          normalizedScore *= 3.0;
+        }
+      }
+
+      if (normalizedScore > highestScore) {
+        highestScore = normalizedScore;
+        bestArchetype = archetype;
+      }
     }
   }
 

@@ -125,4 +125,42 @@ describe('Trajectory Math & Keyframe Engine', () => {
     expect(mid.y).toBe(3);
     expect(mid.z).toBe(-10);
   });
+
+  it('respects Cue 1 position when creating Cue 2 and holds Cue 2 position afterward (Auto-Cue Hold semantics)', async () => {
+    const { useShotStore } = await import('../src/stores/useShotStore');
+    const store = useShotStore.getState();
+
+    // Auto-Cue should default to 'keyframe'
+    expect(store.stagingMoveMode).toBe('keyframe');
+
+    const actorId = store.shot.actors[0]?.id;
+    expect(actorId).toBeDefined();
+    if (!actorId) return;
+
+    // 1. Place Cue 1 at t = 1.0s at (20, 30, 0)
+    store.updateActorPositionAtTime(actorId, 1.0, { x: 20, y: 30, z: 0 }, 4.0);
+    let actor = useShotStore.getState().shot.actors.find((a) => a.id === actorId)!;
+    // Before Cue 2 is added, actor holds (20, 30, 0) everywhere (no rubber-band back to old start/end!)
+    expect(interpolateTrajectoryPosition(actor.trajectory, 0.0, 4.0)).toMatchObject({ x: 20, y: 30 });
+    expect(interpolateTrajectoryPosition(actor.trajectory, 1.0, 4.0)).toMatchObject({ x: 20, y: 30 });
+    expect(interpolateTrajectoryPosition(actor.trajectory, 2.5, 4.0)).toMatchObject({ x: 20, y: 30 });
+    expect(interpolateTrajectoryPosition(actor.trajectory, 4.0, 4.0)).toMatchObject({ x: 20, y: 30 });
+
+    // 2. Place Cue 2 at t = 3.0s at (80, 70, 0)
+    useShotStore.getState().updateActorPositionAtTime(actorId, 3.0, { x: 80, y: 70, z: 0 }, 4.0);
+    actor = useShotStore.getState().shot.actors.find((a) => a.id === actorId)!;
+
+    // Cue 1 at t = 1.0s MUST STILL BE at (20, 30)!
+    expect(interpolateTrajectoryPosition(actor.trajectory, 0.5, 4.0)).toMatchObject({ x: 20, y: 30 });
+    expect(interpolateTrajectoryPosition(actor.trajectory, 1.0, 4.0)).toMatchObject({ x: 20, y: 30 });
+
+    // Midpoint at t = 2.0s should be smoothly interpolated halfway (50, 50)
+    const mid = interpolateTrajectoryPosition(actor.trajectory, 2.0, 4.0);
+    expect(mid.x).toBeCloseTo(50, 1);
+    expect(mid.y).toBeCloseTo(50, 1);
+
+    // Cue 2 at t = 3.0s and after (t = 3.8s) holds at (80, 70)
+    expect(interpolateTrajectoryPosition(actor.trajectory, 3.0, 4.0)).toMatchObject({ x: 80, y: 70 });
+    expect(interpolateTrajectoryPosition(actor.trajectory, 3.8, 4.0)).toMatchObject({ x: 80, y: 70 });
+  });
 });

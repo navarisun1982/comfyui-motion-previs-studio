@@ -27,6 +27,7 @@ import {
 } from '../../components/stage/stageGizmoHelpers';
 import { isCutoutKind, createCutoutMesh } from './cutoutMeshFactory';
 import { isGreyboxPrimitiveKind, createGreyboxPrimitiveMesh } from './greyboxPrimitives';
+import { resolvePolyforkGlbUrl } from '../../data/externalCatalogsRegistry';
 
 export interface CreateSubjectMeshOptions {
   name: string;
@@ -46,6 +47,8 @@ export interface CreateSubjectMeshOptions {
   rigType?: AutoRigType;
   rigLandmarks?: Partial<RigLandmarks>;
   showBones?: boolean;
+  actionDescription?: string;
+  onAsyncLoadComplete?: () => void;
 }
 
 /**
@@ -59,7 +62,10 @@ export interface CreateSubjectMeshOptions {
  */
 export function applyObjectTargetColor(object3d: THREE.Object3D, colorHex: number): void {
   const targetColor = new THREE.Color(colorHex);
-  const subtleEmissive = targetColor.clone().multiplyScalar(0.1);
+  const targetHSL = { h: 0, s: 0, l: 0 };
+  targetColor.getHSL(targetHSL);
+  const subtleEmissive = targetColor.clone().multiplyScalar(0.06);
+
   object3d.traverse((child) => {
     if (
       child.userData?.isBaseRing ||
@@ -74,10 +80,40 @@ export function applyObjectTargetColor(object3d: THREE.Object3D, colorHex: numbe
       const tintMaterial = (mat: THREE.Material): THREE.Material => {
         if (!mat || (mat as any).wireframe) return mat;
         const cloned = mat.clone() as any;
-        if (cloned.color) {
-          cloned.color.copy(targetColor);
+        if (cloned.color instanceof THREE.Color) {
+          const origColor = cloned.color as THREE.Color;
+          const origHSL = { h: 0, s: 0, l: 0 };
+          origColor.getHSL(origHSL);
+          const metalness = typeof cloned.metalness === 'number' ? cloned.metalness : 0;
+          const roughness = typeof cloned.roughness === 'number' ? cloned.roughness : 0.5;
+          const isGlassOrTrans = Boolean(cloned.transparent && cloned.opacity < 0.92) || roughness < 0.16;
+          const hasStrongEmissive =
+            cloned.emissive instanceof THREE.Color &&
+            (cloned.emissive.r + cloned.emissive.g + cloned.emissive.b > 0.35);
+
+          if (hasStrongEmissive || isGlassOrTrans) {
+            // Preserve glass, glowing plasma, fire, and optical lenses with only a gentle 18% harmony tint
+            origColor.lerp(targetColor, 0.18);
+          } else if (origHSL.l < 0.16) {
+            // Preserve dark tires, iron hardware, visors, and structural shadows
+            origColor.lerp(targetColor, 0.2);
+          } else if (origHSL.l > 0.82 || metalness > 0.78) {
+            // Preserve bright highlights, chrome, steel blades, and snow/marble accents
+            origColor.lerp(targetColor, 0.25);
+          } else {
+            // Shaded multi-tone tint: shift hue/saturation toward targetColor while preserving part lightness contrast
+            const shadedTint = new THREE.Color().setHSL(
+              targetHSL.h,
+              Math.max(0.35, targetHSL.s * 0.85),
+              THREE.MathUtils.clamp(origHSL.l * 0.75 + targetHSL.l * 0.25, 0.18, 0.78)
+            );
+            origColor.lerp(shadedTint, 0.62);
+          }
         }
-        if (cloned.emissive) {
+        if (
+          cloned.emissive instanceof THREE.Color &&
+          cloned.emissive.r + cloned.emissive.g + cloned.emissive.b < 0.2
+        ) {
           cloned.emissive.copy(subtleEmissive);
         }
         return cloned;
@@ -150,8 +186,67 @@ export function createSubjectMesh(
   group.userData.subjectName = name;
   group.userData.subjectKind = kind;
 
-  // 1. If explicit GLB/GLTF modelUrl is provided, load or clone from cache
-  if (modelUrl) {
+  const hasHumanoidSignals =
+    kind === 'human' ||
+    kind === 'character' ||
+    activeSculpt?.rig === 'humanoid' ||
+    activeSculpt?.parts?.some?.((p: any) => !!p.bone);
+
+  const combinedIdentityText = `${name} ${tokenPrompt || ''}`;
+
+  const hasExplicitHumanPerson =
+    /\b(character|person|man|woman|boy|girl|human|actor|actress|hero|heroine|knight|warrior|archer|scout|detective|soldier|doctor|surgeon|chef|samurai|miner|ninja|blacksmith|captain|inventor|executive|operative|astronaut|biped|pilot|wizard|mage)\b/i.test(
+      combinedIdentityText
+    ) || /(شخصية|رجل|امرأة|إنسان|بطل|فارس|محارب|محقق|جندي|ساحر|نينجا|ساموراي|طيار|حداد|طاهي|جراح)/.test(combinedIdentityText);
+
+  const isExplicitNonHumanKind =
+    kind === 'prop' ||
+    kind === 'vehicle' ||
+    kind === 'car' ||
+    kind === 'chair' ||
+    kind === 'table' ||
+    kind === 'tree' ||
+    kind === 'spaceship' ||
+    kind === 'building' ||
+    kind === 'architecture' ||
+    kind === 'creature' ||
+    kind === 'quadruped' ||
+    kind === 'nature' ||
+    kind === 'furniture' ||
+    kind === 'weapon' ||
+    kind === 'scifi' ||
+    kind === 'custom';
+
+  const isPropSignal =
+    isExplicitNonHumanKind ||
+    (!hasExplicitHumanPerson &&
+      (/\b(car|automobile|vehicle|helicopter|chopper|aircraft|airplane|jet|plane|ship|boat|yacht|submarine|train|locomotive|truck|bus|van|ambulance|motorcycle|bike|bicycle|scooter|tank|tractor|excavator|forklift|spaceship|starship|ufo|saucer|rover|mech|ring|jewelry|jewel|sword|broadsword|longsword|blade|katana|dagger|knife|axe|battleaxe|hammer|warhammer|spear|halberd|bow|crossbow|ballista|shield|gun|pistol|revolver|rifle|sniper|cannon|turret|raygun|flamethrower|shuriken|morningstar|scythe|bottle|potion|goblet|chalice|decanter|mug|cup|chair|armchair|throne|sofa|couch|bench|stool|table|desk|workbench|podium|easel|bed|cabinet|wardrobe|bookshelf|shelf|box|crate|chest|barrel|lamp|lantern|chandelier|candelabra|torch|clock|well|fountain|statue|altar|pillar|column|arch|gate|bridge|wall|fence|tower|castle|fortress|house|cottage|cabin|building|skyscraper|cathedral|church|temple|shrine|pagoda|pyramid|tent|windmill|lighthouse|ruins|tree|pine|oak|palm|willow|bamboo|cactus|bush|shrub|flower|mushroom|rock|boulder|cliff|mountain|volcano|crystal|cloud|fire|campfire|bonfire|tornado|camera|dolly|clapperboard|clapboard|megaphone|gramophone|tripod|lens|microphone|guitar|piano|drum|violin|book|scroll|globe|telescope|microscope|compass|hourglass|trophy|crown|anvil|cauldron|laptop|computer|monitor|tv|television|phone|smartphone|arcade|vending|generator|reactor|portal|stargate|satellite|beacon|console|hologram|pod|capsule|machine|drone|dog|hound|wolf|werewolf|fox|cat|lion|tiger|sabertooth|panther|leopard|horse|stallion|unicorn|pegasus|bear|deer|stag|moose|elephant|rhino|gorilla|monkey|minotaur|gargoyle|mummy|dragon|wyvern|drake|dinosaur|rex|raptor|eagle|hawk|falcon|owl|raven|crow|bird|swan|phoenix|griffin|shark|whale|dolphin|octopus|kraken|crab|lobster|fish|turtle|tortoise|frog|toad|snake|serpent|cobra|spider|scorpion|beetle|butterfly|bee|ant|worm)\b/i.test(
+        combinedIdentityText
+      ) ||
+        /(خاتم|سيارة|مركبة|طائرة|هليكوبتر|مروحية|سفينة|قارب|قطار|شاحنة|دراجة|دبابة|صاروخ|كرسي|أريكة|كنبة|سرير|خزانة|طاولة|مكتب|مصباح|فانوس|ساعة|سيف|درع|رمح|فأس|قوس|بندقية|مسدس|مدفع|زجاجة|صندوق|برميل|منزل|بيت|مبنى|قلعة|برج|جسر|بوابة|عمود|معبد|خيمة|طاحونة|منارة|شجرة|نخلة|صبار|زهرة|صخرة|جبل|بركان|كريستال|سحابة|نار|كاميرا|كتاب|حاسوب|لابتوب|تلفاز|هاتف|بوابة|قمر صناعي|مفاعل|كلب|ذئب|قط|أسد|نمر|حصان|دب|غزال|فيل|تنين|ديناصور|نسر|صقر|بومة|غراب|طائر|قرش|حوت|دلفين|ثعبان|أفعى|عنكبوت|عقرب)/.test(combinedIdentityText)));
+
+  const isMechaOrRobot =
+    /\b(robot|mecha|mech\b|automaton|golem|droid|cyberbeast)\b/i.test(combinedIdentityText) ||
+    /(روبوت|ميكا|رجل آلي)/.test(combinedIdentityText);
+
+  const isExplicitHumanKind =
+    (kind === 'human' || kind === 'character') &&
+    !isMechaOrRobot &&
+    !isPropSignal &&
+    hasExplicitHumanPerson;
+  const isHumanoid = (isExplicitHumanKind || (hasHumanoidSignals && !isPropSignal)) && !isMechaOrRobot;
+
+  const isTestEnv =
+    typeof process !== 'undefined' && Boolean(process.env?.VITEST || process.env?.NODE_ENV === 'test');
+
+  const effectiveModelUrl =
+    modelUrl ||
+    (!isTestEnv && !isCutoutKind(kind) && !isGreyboxPrimitiveKind(kind) && !isHumanoid
+      ? resolvePolyforkGlbUrl(name, tokenPrompt, kind)
+      : undefined);
+
+  // 1. If explicit or auto-resolved GLB/GLTF modelUrl is provided, load or clone from cache
+  if (effectiveModelUrl) {
     const attachGltfAnimations = (sceneRoot: THREE.Group, clips?: THREE.AnimationClip[]) => {
       if (!clips || clips.length === 0) return;
       const mixer = new THREE.AnimationMixer(sceneRoot);
@@ -259,7 +354,7 @@ export function createSubjectMesh(
       return finalSize;
     };
 
-    const cached = getCachedGltfModel(modelUrl);
+    const cached = getCachedGltfModel(effectiveModelUrl);
     if (cached) {
       const finalSize = scaleAndAutoRigGltfForStage(cached.scene);
       group.add(cached.scene);
@@ -298,7 +393,7 @@ export function createSubjectMesh(
     group.add(procMesh);
 
     // Async load GLTF via universal parser
-    loadGltfModel(modelUrl)
+    loadGltfModel(effectiveModelUrl)
       .then((result) => {
         const pl = group.getObjectByName('__gltf_placeholder__');
         if (pl) {
@@ -334,9 +429,10 @@ export function createSubjectMesh(
             child.position.y = Math.max(1.8, finalSize.y + 0.25);
           }
         });
+        opts.onAsyncLoadComplete?.();
       })
       .catch((err) => {
-        console.error(`Failed to load GLTF 3D model [${modelUrl}]:`, err);
+        console.error(`Failed to load GLTF 3D model [${effectiveModelUrl}]:`, err);
         const errBanner = createSpriteBanner(
           name || '3D MODEL',
           'GLB LOAD ERROR',
@@ -350,6 +446,7 @@ export function createSubjectMesh(
     // Base ring & banner for loading state
     const bbox = new THREE.Box3().setFromObject(procMesh);
     const size = bbox.getSize(new THREE.Vector3());
+    group.userData.modelSize = size;
     const baseRadius = Math.max(2.4, Math.max(size.x, size.z) * 0.55);
     group.add(createBaseRing(baseRadius, colorHex, isGhostWireframe, isSelected));
     const banner = createSpriteBanner(
@@ -378,6 +475,7 @@ export function createSubjectMesh(
 
     const bbox = new THREE.Box3().setFromObject(cutoutGroup);
     const size = bbox.getSize(new THREE.Vector3());
+    group.userData.modelSize = size;
     const baseRadius = Math.max(1.8, Math.max(size.x, size.z) * 0.55);
 
     group.add(createBaseRing(baseRadius, colorHex, isGhostWireframe, isSelected));
@@ -404,6 +502,7 @@ export function createSubjectMesh(
 
     const bbox = new THREE.Box3().setFromObject(primitiveMesh);
     const size = bbox.getSize(new THREE.Vector3());
+    group.userData.modelSize = size;
     const baseRadius = Math.max(1.8, Math.max(size.x, size.z) * 0.55);
 
     group.add(createBaseRing(baseRadius, colorHex, isGhostWireframe, isSelected));
@@ -421,41 +520,16 @@ export function createSubjectMesh(
   }
 
   // 4. Check if actor is a humanoid subject (character with Mixamo bone rig)
-  const hasHumanoidSignals =
-    kind === 'human' ||
-    kind === 'character' ||
-    activeSculpt?.rig === 'humanoid' ||
-    activeSculpt?.parts?.some?.((p: any) => !!p.bone);
-
-  const hasExplicitHumanPerson =
-    /\b(character|person|man|woman|boy|girl|human|actor|actress|hero|heroine|knight|warrior|archer|scout|detective|soldier|doctor|pilot|wizard|mage)\b/i.test(
-      `${name} ${tokenPrompt || ''}`
-    ) || /(شخصية|رجل|امرأة|إنسان|بطل|فارس|محارب)/.test(`${name} ${tokenPrompt || ''}`);
-
-  const isPropSignal =
-    kind === 'prop' ||
-    kind === 'vehicle' ||
-    kind === 'building' ||
-    kind === 'custom' ||
-    (!hasExplicitHumanPerson &&
-      (/\b(car|automobile|vehicle|ring|jewelry|jewel|sword|blade|bottle|chair|table|desk|box|lamp|clock|well|camera|lens|machine|drone)\b/i.test(
-        `${name} ${tokenPrompt || ''}`
-      ) ||
-        /(خاتم|سيارة|كرسي|سيف|زجاجة|طاولة|مكتب|مصباح|ساعة)/.test(`${name} ${tokenPrompt || ''}`)));
-
-  const isExplicitHumanKind = kind === 'human' || kind === 'character';
-  const isHumanoid = isExplicitHumanKind || (hasHumanoidSignals && !isPropSignal);
-
   if (isHumanoid) {
     const clayTint = colorHex || '#f2eee6';
-    const hasConcept = Boolean(conceptImageUrl);
     const fullCharacterPrompt = `${name || ''} ${tokenPrompt || ''}`.trim() || 'Character';
     const features = extractCharacterFeaturesFromModelOutput(
       partGraph || {},
       fullCharacterPrompt,
       partGraph?.palette
     );
-    const shouldDressCharacter = hasConcept || hasRequestedCharacterAccessories(features);
+    // Keep 3D stage humanoid mannequins clean and anatomical by default; only mount primitive costume attachments when explicitly requested via partGraph.dressRig
+    const shouldDressCharacter = Boolean(partGraph?.dressRig && (conceptImageUrl || hasRequestedCharacterAccessories(features)));
 
     const cachedRig = getCachedMannequinRig({ height: 5.06, tint: clayTint });
     const rig = cachedRig || createHumanoidSkeleton(5.06);
@@ -520,6 +594,7 @@ export function createSubjectMesh(
               child.position.y = Math.max(5.3, (loadedRig.height || 5.06) + 0.35);
             }
           });
+          opts.onAsyncLoadComplete?.();
         })
         .catch((err) => {
           console.warn('[SubjectMeshFactory] Procedural mannequin load fallback:', err);
@@ -545,6 +620,7 @@ export function createSubjectMesh(
       rig.root.updateMatrixWorld(true);
     }
     const size = bbox.getSize(new THREE.Vector3());
+    group.userData.modelSize = size;
     const baseRadius = Math.max(2.4, Math.max(size.x, size.z) * 0.55);
 
     group.add(createBaseRing(baseRadius, colorHex, isGhostWireframe, isSelected));
@@ -572,8 +648,28 @@ export function createSubjectMesh(
     sculpt: activeSculpt,
     partGraph: activeSculpt,
   });
-  // Snap procedural mesh base to floor (y = 0) so objects never float in mid-air or sink below floor
+
+  // Normalize stage envelope so microscopic props (< 2.2u) and colossal towers (> 8.5u tall) are always camera-readable on stage
   procMesh.updateMatrixWorld(true);
+  const initialBox = new THREE.Box3().setFromObject(procMesh);
+  if (!initialBox.isEmpty()) {
+    const rawSize = initialBox.getSize(new THREE.Vector3());
+    const maxSpan = Math.max(rawSize.x, rawSize.y, rawSize.z);
+    if (Number.isFinite(maxSpan) && maxSpan > 0.01) {
+      let stageFitFactor = 1.0;
+      if (maxSpan < 2.2) {
+        stageFitFactor = 2.4 / maxSpan;
+      } else if (rawSize.y > 8.5 || maxSpan > 10.5) {
+        stageFitFactor = Math.min(8.5 / Math.max(0.1, rawSize.y), 10.5 / maxSpan);
+      }
+      if (Math.abs(stageFitFactor - 1.0) > 0.04) {
+        procMesh.scale.multiplyScalar(stageFitFactor);
+        procMesh.updateMatrixWorld(true);
+      }
+    }
+  }
+
+  // Snap procedural mesh base to floor (y = 0) so objects never float in mid-air or sink below floor
   const rawProcBox = new THREE.Box3().setFromObject(procMesh);
   if (!rawProcBox.isEmpty() && Number.isFinite(rawProcBox.min.y) && Math.abs(rawProcBox.min.y) > 0.005) {
     procMesh.position.y -= rawProcBox.min.y;
@@ -584,6 +680,8 @@ export function createSubjectMesh(
   // Dynamic bounding geometry for ground ring and hovering HUD billboard banner
   const bbox = new THREE.Box3().setFromObject(procMesh);
   const size = bbox.getSize(new THREE.Vector3());
+  group.userData.modelSize = size;
+  group.userData.archetypeId = procMesh.userData.archetypeId;
   const baseRadius = Math.max(2.4, Math.max(size.x, size.z) * 0.55);
 
   group.add(createBaseRing(baseRadius, colorHex, isGhostWireframe, isSelected));
@@ -603,3 +701,5 @@ export function createSubjectMesh(
 
   return group;
 }
+
+export const SUBJECT_MESH_SCHEMA_VERSION = 'v3-207-blueprints';

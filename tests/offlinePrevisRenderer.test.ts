@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { createLinearDepthMaterial, invertDepthCanvas, muxFramesToMp4, renderOfflinePrevisPasses } from '../src/engine/offlinePrevisRenderer';
+import {
+  SUBJECT_ID_MASK_PALETTE,
+  createLinearDepthMaterial,
+  invertDepthCanvas,
+  muxFramesToMp4,
+  renderOfflinePrevisPasses,
+} from '../src/engine/offlinePrevisRenderer';
 import * as THREE from 'three';
 
 beforeAll(() => {
@@ -218,6 +224,85 @@ describe('offlinePrevisRenderer', () => {
       expect(onFrame).toHaveBeenCalledWith(120, 121);
       expect(result.rgbBlob).toBeDefined();
       expect(result.rgbBlob?.type).toBe('video/mp4');
+    });
+
+    it('renders Cryptomatte-style Object ID Segmentation Mask pass and restores original scene materials', async () => {
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 1000);
+
+      // Actor 1
+      const actor1Group = new THREE.Group();
+      actor1Group.userData = { actorId: 'actor-1', actorIndex: 0 };
+      const origMat1 = new THREE.MeshStandardMaterial({ color: 0xffffff });
+      const actor1Mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), origMat1);
+      const shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial());
+      shadowMesh.userData = { isContactShadow: true };
+      actor1Group.add(actor1Mesh);
+      actor1Group.add(shadowMesh);
+      scene.add(actor1Group);
+
+      // Actor 2
+      const actor2Group = new THREE.Group();
+      actor2Group.userData = { actorId: 'actor-2', actorIndex: 1 };
+      const origMat2 = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+      const actor2Mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), origMat2);
+      actor2Group.add(actor2Mesh);
+      scene.add(actor2Group);
+
+      // Non-actor stage floor mesh (should be hidden during ID Mask pass)
+      const stageFloor = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial());
+      scene.add(stageFloor);
+
+      const capturedDuringMaskRender: {
+        mat1Color?: number;
+        mat2Color?: number;
+        floorVisible?: boolean;
+        shadowVisible?: boolean;
+      }[] = [];
+
+      const fakeDom = document.createElement('canvas');
+      const fakeRenderer = {
+        domElement: fakeDom,
+        setSize: vi.fn(),
+        getSize: vi.fn((target: THREE.Vector2) => {
+          target.set(64, 36);
+          return target;
+        }),
+        render: vi.fn(() => {
+          capturedDuringMaskRender.push({
+            mat1Color: (actor1Mesh.material as unknown as THREE.MeshBasicMaterial).color?.getHex(),
+            mat2Color: (actor2Mesh.material as unknown as THREE.MeshBasicMaterial).color?.getHex(),
+            floorVisible: stageFloor.visible,
+            shadowVisible: shadowMesh.visible,
+          });
+        }),
+      } as unknown as THREE.WebGLRenderer;
+
+      const result = await renderOfflinePrevisPasses({
+        scene,
+        camera,
+        renderer: fakeRenderer,
+        durationSeconds: 0.2,
+        fps: 10,
+        width: 64,
+        height: 36,
+        renderPass: 'id-mask',
+        syncPositions: vi.fn(),
+      });
+
+      expect(result.idMaskBlob).toBeDefined();
+      expect(result.idMaskBlob?.type).toBe('video/mp4');
+      expect(capturedDuringMaskRender.length).toBeGreaterThan(0);
+      expect(capturedDuringMaskRender[0].mat1Color).toBe(SUBJECT_ID_MASK_PALETTE[0]); // #EF4444
+      expect(capturedDuringMaskRender[0].mat2Color).toBe(SUBJECT_ID_MASK_PALETTE[1]); // #22C55E
+      expect(capturedDuringMaskRender[0].floorVisible).toBe(false);
+      expect(capturedDuringMaskRender[0].shadowVisible).toBe(false);
+
+      // Verify original materials and visibility were restored after rendering
+      expect(actor1Mesh.material).toBe(origMat1);
+      expect(actor2Mesh.material).toBe(origMat2);
+      expect(stageFloor.visible).toBe(true);
+      expect(shadowMesh.visible).toBe(true);
     });
   });
 });

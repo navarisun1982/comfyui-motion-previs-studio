@@ -62,6 +62,7 @@ export const EnvironmentSpecSchema = z.object({
   groundColor: z.string().default('#131722'),
   ambientColor: z.string().default('#38bdf8'),
   visibleInPrevis: z.boolean().default(true),
+  previsStageMode: z.enum(['auto', 'hide-stage', 'show-stage']).default('auto').optional(),
   conceptImageUrl: z.string().optional(),
   conceptImageName: z.string().optional(),
 });

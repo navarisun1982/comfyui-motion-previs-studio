@@ -126,7 +126,7 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
       // Prune unused LoadImage reference slots when no reference image was supplied for that slot
       if (
         (field === 'refImage1' || field === 'refImage2' || field === 'refImage3' || field === 'refImage4') &&
-        workflow[target.node]?.class_type === 'LoadImage'
+        /^LoadImage/i.test(workflow[target.node]?.class_type || '')
       ) {
         const rawSlotVal =
           field === 'refImage1'
@@ -185,6 +185,38 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
       ASPECT_RATIO_NORMALIZATION[node.inputs.aspect_ratio]
     ) {
       node.inputs.aspect_ratio = ASPECT_RATIO_NORMALIZATION[node.inputs.aspect_ratio];
+    }
+
+    // Prevent unpruned MiniMax H3 LoRA (minimax_h3_turbo_v4_step600_ema.safetensors) or
+    // unmapped Diffusers PEFT LoRA (MiniMax-H3-Ref2VA-Acc-8Step.safetensors) from crashing
+    // or failing to load on the pruned minimax_h3_ref2va_pruned_int8_convrot model
+    // ("shape '[96768, 8]' is invalid for input of size 260112384").
+    if (node.class_type === 'Power Lora Loader (rgthree)') {
+      for (const [k, v] of Object.entries(node.inputs)) {
+        if (k.startsWith('lora_') && v && typeof v === 'object' && !Array.isArray(v)) {
+          const loraEntry = v as Record<string, unknown>;
+          if (
+            typeof loraEntry.lora === 'string' &&
+            /minimax_h3_turbo_v4_step600_ema|MiniMax-H3-Ref2VA-Acc-8Step|MiniMax-H3-FL2VA-Acc-8Step/i.test(
+              loraEntry.lora
+            )
+          ) {
+            loraEntry.lora = 'MiniMax H3\\minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors';
+          }
+        }
+      }
+    }
+    if (
+      node.class_type === 'StubeliusH3Models' &&
+      typeof node.inputs.speedup_lora === 'string' &&
+      /minimax_h3_turbo_v4_step600_ema|MiniMax-H3-Ref2VA-Acc-8Step|MiniMax-H3-FL2VA-Acc-8Step/i.test(
+        node.inputs.speedup_lora
+      )
+    ) {
+      node.inputs.speedup_lora = 'MiniMax H3\\minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors';
+    }
+    if (node.class_type === 'MiniMaxH3ReferenceToVideo' && node.inputs.ref_image_size === 'max') {
+      node.inputs.ref_image_size = 'match';
     }
   }
 
@@ -351,10 +383,18 @@ export function normalizeMiniMaxPromptForConnectedRefs(prompt: string, v: BindVa
     }
   }
 
+  // Official ComfyUI / MiniMax H3 single-keyframe pattern ("Rotating Hive Chamber"):
+  // When only 1 composite reference image is supplied in Slot 1 (<Picture 1>) and Slot 4 is empty,
+  // <Picture 1> visually defines BOTH the foreground subject (<Subject 1>) and the surrounding
+  // scene environment (<Subject 4>), so remap <Picture 4> -> <Picture 1>.
+  if (denseCounter === 1 && denseMap[0] === 1 && denseMap[3] === null) {
+    denseMap[3] = 1;
+  }
+
   // If all 4 slots are populated, 1..4 already match dense 1..4
   if (denseCounter === 4) return out;
 
-  // Replace summary range phrase `<Picture 1>–<Picture N> and <Picture 4>` or `<Picture 4>`
+  // Replace summary range phrase `<Picture 1>–<Picture N> for the foreground subject(s) and <Picture 4> for the scene environment`
   const activeDenseTags = Array.from({ length: denseCounter }, (_, idx) => `<Picture ${idx + 1}>`);
   const replacementRange =
     activeDenseTags.length === 0
@@ -363,10 +403,20 @@ export function normalizeMiniMaxPromptForConnectedRefs(prompt: string, v: BindVa
       ? activeDenseTags[0]
       : `${activeDenseTags.slice(0, -1).join(', ')} and ${activeDenseTags[activeDenseTags.length - 1]}`;
 
-  out = out.replace(
-    /<Picture \d+>[–-]<Picture \d+>\s+and\s+<Picture 4>/g,
-    replacementRange
-  );
+  out = out
+    .replace(
+      /<Picture \d+>[–-]<Picture \d+>\s+for\s+the\s+foreground\s+subject\(s\)\s+and\s+<Picture 4>\s+for\s+the\s+scene\s+environment/g,
+      `${replacementRange} for the foreground subject(s) and scene environment`
+    )
+    .replace(
+      /<Picture \d+>[–-]<Picture \d+>\s+and\s+<Picture 4>/g,
+      replacementRange
+    );
+
+  if (denseCounter === 0) {
+    // Strip standalone <Picture 1> summary definition line when zero reference images are connected
+    out = out.replace(/\n*<Picture 1> is the finished visual reference[^\n]*/g, '');
+  }
 
   // Strip or remap each slot 1..4
   for (let i = 0; i < 4; i++) {
@@ -375,7 +425,10 @@ export function normalizeMiniMaxPromptForConnectedRefs(prompt: string, v: BindVa
     if (denseNum === null) {
       out = out
         .replace(new RegExp(`\\s*\\(from <Picture ${origNum}>\\)`, 'g'), '')
+        .replace(new RegExp(`\\s*\\(defined by <Picture ${origNum}>\\)`, 'g'), '')
         .replace(new RegExp(`\\s+from <Picture ${origNum}>`, 'g'), '')
+        .replace(new RegExp(`\\s+defined by <Picture ${origNum}>`, 'g'), '')
+        .replace(new RegExp(`<Picture ${origNum}> defines\\s+`, 'g'), 'Instantiates ')
         .replace(new RegExp(`matches <Picture ${origNum}>;\\s*`, 'g'), '')
         .replace(new RegExp(`matches <Picture ${origNum}>\\.`, 'g'), 'preserves its authentic real-world identity.')
         .replace(new RegExp(`\\s+and <Picture ${origNum}>`, 'g'), '')

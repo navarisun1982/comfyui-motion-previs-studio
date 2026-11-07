@@ -74,7 +74,259 @@ export function applyGroundSurface(floorMesh: THREE.Mesh, surface: string = 'stu
 
 export interface EnvironmentBuildOptions {
   sceneDescription?: string;
-  actors?: Array<{ name: string; token?: string; kind?: string }>;
+  actors?: Array<{
+    name: string;
+    token?: string;
+    kind?: string;
+    trajectory?: {
+      startPosition?: { x: number; y: number; z?: number };
+      endPosition?: { x: number; y: number; z?: number };
+    };
+  }>;
+}
+
+export interface SemanticEnvironmentBiome {
+  category: string;
+  groundSurface: string;
+  skyColor: string;
+  fogColor: string;
+}
+
+/**
+ * Infers the optimal 3D Previs biome, ground surface, and atmospheric horizon colors
+ * from the shot's EnvironmentSpec, scene description, and active actors so that
+ * outdoor/forest/desert/urban scenes automatically get matching 3D parallax geometry
+ * instead of grey studio walls.
+ */
+export function inferSemanticEnvironmentBiome(
+  env?: EnvironmentSpec,
+  options: EnvironmentBuildOptions = {}
+): SemanticEnvironmentBiome {
+  const rawCat = (env?.category || 'interior-studio').toLowerCase();
+  const rawGround = env?.groundSurface || 'studio-floor';
+  const rawSky = env?.skyColor || '#08090c';
+  const rawFog = env?.fogColor || '#08090c';
+  const isDefaultGround = rawGround === 'studio-floor';
+  const isDefaultSky = /^#0[789]0[89ab][01][0-9a-f]$/i.test(rawSky.trim());
+
+  const isDefaultStudioCategory = rawCat === 'interior-studio' || rawCat === 'studio';
+
+  if (!isDefaultStudioCategory) {
+    if (rawCat.includes('nature') || rawCat.includes('forest')) {
+      return {
+        category: 'nature',
+        groundSurface: isDefaultGround ? 'grass-terrain' : rawGround,
+        skyColor: isDefaultSky ? '#132433' : rawSky,
+        fogColor: isDefaultSky ? '#162822' : rawFog,
+      };
+    }
+    if (rawCat.includes('desert') || rawCat.includes('wasteland')) {
+      return {
+        category: 'desert',
+        groundSurface: isDefaultGround ? 'sand-dunes' : rawGround,
+        skyColor: isDefaultSky ? '#2b1f14' : rawSky,
+        fogColor: isDefaultSky ? '#3a2818' : rawFog,
+      };
+    }
+    if (rawCat.includes('urban')) {
+      return {
+        category: 'urban',
+        groundSurface: isDefaultGround ? 'asphalt-wet' : rawGround,
+        skyColor: isDefaultSky ? '#0c1322' : rawSky,
+        fogColor: isDefaultSky ? '#0f172a' : rawFog,
+      };
+    }
+    if (rawCat.includes('historical') || rawCat.includes('castle')) {
+      return {
+        category: 'historical',
+        groundSurface: isDefaultGround ? 'stone-cobblestone' : rawGround,
+        skyColor: isDefaultSky ? '#18161b' : rawSky,
+        fogColor: isDefaultSky ? '#1c1917' : rawFog,
+      };
+    }
+    if (rawCat.includes('scifi')) {
+      return {
+        category: 'scifi',
+        groundSurface: isDefaultGround ? 'metal-grate' : rawGround,
+        skyColor: isDefaultSky ? '#070b14' : rawSky,
+        fogColor: isDefaultSky ? '#090d16' : rawFog,
+      };
+    }
+    return {
+      category: rawCat,
+      groundSurface: rawGround,
+      skyColor: rawSky,
+      fogColor: rawFog,
+    };
+  }
+
+  const combinedText = `${options.sceneDescription || ''} ${env?.promptDescription || ''} ${env?.name || ''} ${env?.conceptImageName || ''}`.toLowerCase();
+  const isDefaultSoundstageDesc =
+    combinedText.includes('soundstage studio') ||
+    combinedText.includes('cyclorama floor') ||
+    combinedText.includes('moody atmospheric interior with subtle dust motes');
+  const searchText = isDefaultSoundstageDesc
+    ? `${options.sceneDescription || ''} ${env?.name || ''} ${env?.conceptImageName || ''}`.toLowerCase()
+    : combinedText;
+
+  if (
+    /\b(forest|woods|woodland|jungle|trees|canopy|pine|redwood|meadow|valley|mountain|mountains|cliff|peak|river|lake|waterfall|nature|grass|park|island|savanna|غابة|أشجار|شجر|جبل|جبال|وادي|نهر|بحيرة|طبيعة|حديقة)\b/i.test(
+      searchText
+    )
+  ) {
+    return {
+      category: 'nature',
+      groundSurface: isDefaultGround ? 'grass-terrain' : rawGround,
+      skyColor: isDefaultSky ? '#132433' : rawSky,
+      fogColor: isDefaultSky ? '#162822' : rawFog,
+    };
+  }
+
+  if (
+    /\b(desert|dunes|canyon|wasteland|sahara|mesa|oasis|arid|sand|صحراء|كثبان|رمال)\b/i.test(
+      searchText
+    )
+  ) {
+    return {
+      category: 'desert',
+      groundSurface: isDefaultGround ? 'sand-dunes' : rawGround,
+      skyColor: isDefaultSky ? '#2b1f14' : rawSky,
+      fogColor: isDefaultSky ? '#3a2818' : rawFog,
+    };
+  }
+
+  if (
+    /\b(urban|city|cityscape|street|downtown|cyberpunk|highway|road|alley|rooftop|skyscraper|neon|traffic|bridge|مدينة|شارع|طريق|كوبري)\b/i.test(
+      searchText
+    )
+  ) {
+    return {
+      category: 'urban',
+      groundSurface: isDefaultGround ? 'asphalt-wet' : rawGround,
+      skyColor: isDefaultSky ? '#0c1322' : rawSky,
+      fogColor: isDefaultSky ? '#0f172a' : rawFog,
+    };
+  }
+
+  if (
+    /\b(castle|medieval|temple|ruins|fortress|courtyard|palace|cathedral|ancient|قلعة|معبد|حصن|قصر)\b/i.test(
+      searchText
+    )
+  ) {
+    return {
+      category: 'historical',
+      groundSurface: isDefaultGround ? 'stone-cobblestone' : rawGround,
+      skyColor: isDefaultSky ? '#18161b' : rawSky,
+      fogColor: isDefaultSky ? '#1c1917' : rawFog,
+    };
+  }
+
+  if (
+    /\b(scifi|sci-fi|spaceship|starship|orbital|space|galaxy|nebula|station|hangar|bunker|laboratory|cyber|فضاء|مركبة|محطة|مختبر)\b/i.test(
+      searchText
+    )
+  ) {
+    return {
+      category: 'scifi',
+      groundSurface: isDefaultGround ? 'metal-grate' : rawGround,
+      skyColor: isDefaultSky ? '#070b14' : rawSky,
+      fogColor: isDefaultSky ? '#090d16' : rawFog,
+    };
+  }
+
+  if (
+    /\b(room|cabin|hearth|fireplace|study|library|salon|apartment|bedroom|kitchen|office|parlor|mansion|hallway|corridor|غرفة|مكتب|منزل|مدفأة|صالة|غرفه)\b/i.test(
+      searchText
+    )
+  ) {
+    return {
+      category: 'interior-room',
+      groundSurface: isDefaultGround ? 'wood-parquet' : rawGround,
+      skyColor: rawSky,
+      fogColor: rawFog,
+    };
+  }
+
+  const hasAerialOrFlyingActor = (options.actors || []).some((a) => {
+    const actorSig = `${a.name || ''} ${a.token || ''} ${a.kind || ''}`.toLowerCase();
+    const isFlyingType =
+      a.kind === 'aircraft' ||
+      a.kind === 'spaceship' ||
+      /\b(helicopter|chopper|airplane|plane|jet|fighter|drone|quadcopter|spaceship|starship|saucer|ufo|eagle|hawk|falcon|dragon|pegasus|parachute|rocket|missile)\b/i.test(
+        actorSig
+      );
+    const startZ = a.trajectory?.startPosition?.z ?? 0;
+    const endZ = a.trajectory?.endPosition?.z ?? 0;
+    return isFlyingType || startZ >= 5 || endZ >= 5;
+  });
+
+  if (hasAerialOrFlyingActor) {
+    return {
+      category: 'nature',
+      groundSurface: isDefaultGround ? 'grass-terrain' : rawGround,
+      skyColor: isDefaultSky ? '#132433' : rawSky,
+      fogColor: isDefaultSky ? '#162822' : rawFog,
+    };
+  }
+
+  return {
+    category: 'soundstage-studio',
+    groundSurface: rawGround,
+    skyColor: rawSky,
+    fogColor: rawFog,
+  };
+}
+
+export interface PrevisStageBackdropDecision {
+  mode: 'auto' | 'hide-stage' | 'show-stage';
+  hide: boolean;
+  reason: string;
+}
+
+/**
+ * Determines whether the 3D environment and ground plane are visible in `<Video 1>` Previs renders.
+ * In 'auto' mode, the 3D biome and ground parallax stay VISIBLE (`hide: false`) so video diffusion
+ * engines (MiniMax H3 & LTX-2.5) receive continuous 3D optical flow parallax and horizon perspective
+ * for accurate camera motion tracking. Users can manually select 'hide-stage' (Clean BG) if desired.
+ */
+export function shouldHideStageBackdropInPrevis(shot: {
+  environment?: EnvironmentSpec;
+  sceneDescription?: string;
+  actors?: Array<{
+    name: string;
+    token?: string;
+    kind?: string;
+    trajectory?: {
+      startPosition?: { x: number; y: number; z?: number };
+      endPosition?: { x: number; y: number; z?: number };
+    };
+  }>;
+}): PrevisStageBackdropDecision {
+  const env = shot.environment;
+  const explicitMode =
+    env?.previsStageMode ?? (env?.visibleInPrevis === false ? 'hide-stage' : 'auto');
+
+  if (explicitMode === 'hide-stage') {
+    return {
+      mode: 'hide-stage',
+      hide: true,
+      reason: 'Manual: Clean BG',
+    };
+  }
+
+  if (explicitMode === 'show-stage') {
+    return {
+      mode: 'show-stage',
+      hide: false,
+      reason: 'Manual: 3D Stage Visible',
+    };
+  }
+
+  return {
+    mode: 'auto',
+    hide: false,
+    reason: 'Auto: 3D Biome & Parallax',
+  };
 }
 
 /**
@@ -86,7 +338,8 @@ export function buildPerimeterEnvironment(
   options: EnvironmentBuildOptions = {}
 ): void {
   envGroup.clear();
-  const rawCat = (env?.category || 'interior-studio').toLowerCase();
+  const inferred = inferSemanticEnvironmentBiome(env, options);
+  const rawCat = inferred.category.toLowerCase();
 
   if (rawCat.includes('urban')) {
     // Urban Cityscape: Distant Skyline Silhouettes, Illuminated Signs & Streetlamps
@@ -239,10 +492,10 @@ export function buildPerimeterEnvironment(
       envGroup.add(mound);
     }
 
-    // Redwood / Pine Trees
-    for (let i = 0; i < 14; i++) {
-      const angle = (i / 14) * Math.PI * 2;
-      const dist = 48 + (i % 4) * 6;
+    // Redwood / Pine Trees (Outer Horizon Ring)
+    for (let i = 0; i < 16; i++) {
+      const angle = (i / 16) * Math.PI * 2;
+      const dist = 46 + (i % 4) * 6;
       const tx = Math.cos(angle) * dist;
       const tz = Math.sin(angle) * dist;
 
@@ -256,6 +509,31 @@ export function buildPerimeterEnvironment(
         envGroup.add(cone);
       }
     }
+
+    // Midground Parallax Trees & Forest Boulders (multi-depth z layers around clear central flight/action corridor)
+    const midTreeCoords: Array<{ x: number; z: number; scale: number }> = [
+      { x: -24, z: -28, scale: 0.95 },
+      { x: 25, z: -26, scale: 1.05 },
+      { x: -34, z: -14, scale: 0.85 },
+      { x: 35, z: -12, scale: 0.9 },
+      { x: -16, z: -36, scale: 1.1 },
+      { x: 18, z: -35, scale: 1.0 },
+      { x: -28, z: 16, scale: 0.85 },
+      { x: 29, z: 18, scale: 0.95 },
+      { x: -20, z: 32, scale: 0.9 },
+      { x: 22, z: 30, scale: 1.0 },
+    ];
+    midTreeCoords.forEach((pt) => {
+      const s = pt.scale;
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.55 * s, 0.95 * s, 13 * s, 8), trunkMat);
+      trunk.position.set(pt.x, 6.5 * s, pt.z);
+      envGroup.add(trunk);
+      for (let j = 0; j < 3; j++) {
+        const cone = new THREE.Mesh(new THREE.ConeGeometry((4.2 - j * 0.9) * s, 6.8 * s, 8), foliageMat);
+        cone.position.set(pt.x, (11.5 + j * 4.2) * s, pt.z);
+        envGroup.add(cone);
+      }
+    });
   } else if (rawCat.includes('desert') || rawCat.includes('wasteland')) {
     // Sahara Desert: Undulating Sand Dunes & Weathered Rock Mesas
     const sandMat = new THREE.MeshStandardMaterial({

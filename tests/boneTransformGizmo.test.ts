@@ -7,6 +7,7 @@ import {
   createBoneTransformGizmo,
   setGizmoHoveredAxis,
   setJointDiscHovered,
+  setJointDiscSelected,
   applyBoneRotationDelta,
   applyBoneTrackballDelta,
   applyBoneTranslationDelta,
@@ -15,6 +16,7 @@ import {
   applyBonePose,
 } from '../src/engine/kinematics';
 import { HUMANOID_BONES } from '../src/engine/procedural3D/sculptSpec';
+import { resolveRadarLabelPlacements } from '../src/components/stage/StageTopViewRadar';
 
 describe('Bone-Level FK Transform Gizmo & Joint Discs', () => {
   it('defines joint discs covering all 19 standard humanoid bones', () => {
@@ -180,17 +182,62 @@ describe('Bone-Level FK Transform Gizmo & Joint Discs', () => {
     expect(yMat.emissiveIntensity).toBeCloseTo(0.55, 1);
   });
 
-  it('toggles hover highlight ring on joint discs', () => {
-    const disc = createJointDiscMesh('LeftForeArm', 'Left Forearm', 0x3d8bff, 0.14, 'actor-1');
+  it('toggles hover and selection highlight ring and opacity prominence on joint discs', () => {
+    const disc = createJointDiscMesh('LeftForeArm', 'Left Forearm', 0x3d8bff, 0.09, 'actor-1');
     const hoverRing = disc.getObjectByName('HoverHighlightRing');
+    const activeRing = disc.getObjectByName('ActiveHighlightRing');
     expect(hoverRing).toBeDefined();
     expect(hoverRing?.visible).toBe(false);
+    expect(activeRing?.visible).toBe(false);
+    expect(disc.userData.materials.ring.opacity).toBeCloseTo(0.45, 2);
 
     setJointDiscHovered(disc, true);
     expect(hoverRing?.visible).toBe(true);
+    expect(disc.userData.materials.ring.opacity).toBeCloseTo(1.0, 2);
 
     setJointDiscHovered(disc, false);
     expect(hoverRing?.visible).toBe(false);
+    expect(disc.userData.materials.ring.opacity).toBeCloseTo(0.45, 2);
+
+    setJointDiscSelected(disc, true);
+    expect(activeRing?.visible).toBe(true);
+    expect(disc.userData.materials.ring.opacity).toBeCloseTo(1.0, 2);
+
+    setJointDiscSelected(disc, false);
+    expect(activeRing?.visible).toBe(false);
+    expect(disc.userData.materials.ring.opacity).toBeCloseTo(0.45, 2);
+  });
+
+  it('resolves Top-View Radar label collisions so clustered entities (Elena, Julian, CAM, LGT1) never overlap', () => {
+    const items = [
+      { id: '__camera__', text: 'CAM', anchorX: 50, anchorY: 51, iconRadius: 2.5, priority: 105 },
+      { id: 'actor:1', text: 'Elena', anchorX: 49, anchorY: 50, iconRadius: 3.2, priority: 100 },
+      { id: 'actor:2', text: 'Julian', anchorX: 51, anchorY: 50, iconRadius: 3.2, priority: 80 },
+      { id: 'light:1', text: 'LGT1', anchorX: 50, anchorY: 49, iconRadius: 2.4, priority: 65 },
+    ];
+    const placements = resolveRadarLabelPlacements(items);
+    const boxes = items.map((it) => {
+      const p = placements[it.id];
+      const cx = it.anchorX + p.dx;
+      const cy = it.anchorY + p.dy;
+      return {
+        id: it.id,
+        minX: cx - p.width * 0.5,
+        maxX: cx + p.width * 0.5,
+        minY: cy - p.height,
+        maxY: cy,
+      };
+    });
+
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
+        const overlapX = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
+        const overlapY = Math.min(a.maxY, b.maxY) - Math.max(a.minY, b.minY);
+        expect(overlapX > 0 && overlapY > 0).toBe(false);
+      }
+    }
   });
 
   it('allows raycasting from camera directly onto Red X, Green Y, Blue Z arrow tips', () => {

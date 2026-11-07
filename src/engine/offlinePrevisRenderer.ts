@@ -5,6 +5,15 @@ import { preloadGltfModels } from './gltfModelLoader';
 import { renderOpenPoseCanvas } from './kinematics/openPoseRenderer';
 import { HumanoidRig } from './kinematics/skeletonHierarchy';
 
+export const SUBJECT_ID_MASK_PALETTE = [
+  0xef4444, // Subject 1: Crimson Red (#EF4444)
+  0x22c55e, // Subject 2: Emerald Green (#22C55E)
+  0x3b82f6, // Subject 3: Royal Blue (#3B82F6)
+  0xeab308, // Subject 4: Amber Yellow (#EAB308)
+  0xa855f7, // Subject 5: Vivid Purple (#A855F7)
+  0x06b6d4, // Subject 6: Cyan (#06B6D4)
+] as const;
+
 export interface PrevisRenderOptions {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
@@ -13,7 +22,7 @@ export interface PrevisRenderOptions {
   fps?: number;
   width?: number;
   height?: number;
-  renderPass?: 'rgb' | 'depth' | 'openpose' | 'both' | 'all';
+  renderPass?: 'rgb' | 'depth' | 'openpose' | 'id-mask' | 'both' | 'all';
   snap8n1?: boolean;
   trimStartSeconds?: number;
   trimEndSeconds?: number;
@@ -31,6 +40,8 @@ export interface PrevisRenderResult {
   depthUrl?: string;
   openposeBlob?: Blob;
   openposeUrl?: string;
+  idMaskBlob?: Blob;
+  idMaskUrl?: string;
   totalFrames: number;
   durationSeconds: number;
   fps: number;
@@ -262,19 +273,32 @@ export async function renderOfflinePrevisPasses(
   const shouldRenderRgb = renderPass === 'rgb' || renderPass === 'both' || renderPass === 'all';
   const shouldRenderDepth = renderPass === 'depth' || renderPass === 'both' || renderPass === 'all';
   const shouldRenderOpenpose = renderPass === 'openpose' || renderPass === 'all';
+  const shouldRenderIdMask = renderPass === 'id-mask' || renderPass === 'all';
 
   // 2. Offscreen intermediate canvases
   const rgbFrames: HTMLCanvasElement[] = [];
   const depthFrames: HTMLCanvasElement[] = [];
   const openposeFrames: HTMLCanvasElement[] = [];
+  const idMaskFrames: HTMLCanvasElement[] = [];
 
   // True metric linear depth override material (Near = 1.0 White, Far = 0.0 Black, Background = Black)
   const depthFar = Math.min(Math.max(camera.far * 0.1, 40.0), 80.0);
   const depthNear = Math.max(camera.near, 0.4);
   const depthMaterial = createLinearDepthMaterial(depthNear, depthFar);
+  const idMaskMaterialCache = new Map<number, THREE.MeshBasicMaterial>();
+  const getIdMaskMaterial = (colorHex: number): THREE.MeshBasicMaterial => {
+    let mat = idMaskMaterialCache.get(colorHex);
+    if (!mat) {
+      mat = new THREE.MeshBasicMaterial({ color: colorHex, toneMapped: false });
+      idMaskMaterialCache.set(colorHex, mat);
+    }
+    return mat;
+  };
 
   const prevOverride = scene.overrideMaterial;
   const prevBackground = scene.background;
+  const prevFog = scene.fog;
+  const prevShadowEnabled = renderer.shadowMap ? renderer.shadowMap.enabled : false;
   const prevSize = new THREE.Vector2();
   renderer.getSize(prevSize);
 
@@ -300,6 +324,7 @@ export async function renderOfflinePrevisPasses(
         }
         scene.overrideMaterial = null;
         scene.background = prevBackground;
+        scene.fog = prevFog;
         renderer.render(scene, camera);
 
         const frameCanvas = document.createElement('canvas');
@@ -346,7 +371,17 @@ export async function renderOfflinePrevisPasses(
 
         if (activeRigs.length === 0) {
           scene.traverse((obj) => {
-            if (obj.userData?.rig && !activeRigs.includes(obj.userData.rig)) {
+            const archetype = obj.userData?.rigArchetype || obj.userData?.autoRigType;
+            const kind = obj.userData?.kind;
+            const isNonHumanoid =
+              archetype === 'quadruped' ||
+              archetype === 'spine_flex' ||
+              archetype === 'rigid_prop' ||
+              kind === 'prop' ||
+              kind === 'vehicle' ||
+              kind === 'quadruped' ||
+              kind === 'creature';
+            if (obj.userData?.rig && !isNonHumanoid && !activeRigs.includes(obj.userData.rig)) {
               activeRigs.push(obj.userData.rig);
             }
           });
@@ -360,6 +395,112 @@ export async function renderOfflinePrevisPasses(
         const openposeCanvas = document.createElement('canvas');
         renderOpenPoseCanvas(activeRigs, camera, openposeCanvas, width, height);
         openposeFrames.push(openposeCanvas);
+      }
+
+      // --- Pass 4: Object ID Segmentation Mask Pass (Cryptomatte-style flat unlit per-subject colors on #000000) ---
+      if (shouldRenderIdMask) {
+        const actorRootOrder = new Map<THREE.Object3D, number>();
+        for (const child of scene.children) {
+          if (child.userData?.actorId !== undefined || child.userData?.isSubjectRoot === true) {
+            const explicitIdx =
+              typeof child.userData?.actorIndex === 'number'
+                ? child.userData.actorIndex
+                : actorRootOrder.size;
+            actorRootOrder.set(child, explicitIdx);
+          }
+        }
+        // Fallback for standalone unit tests where meshes are placed directly in scene without actorId
+        if (actorRootOrder.size === 0) {
+          for (const child of scene.children) {
+            const isMeshOrGroup = (child as THREE.Mesh).isMesh || child.type === 'Group';
+            const isHelper =
+              child.userData?.isContactShadow ||
+              child.userData?.isBaseRing ||
+              child.userData?.isHitProxy ||
+              child.name === '__base_ring_group__';
+            if (isMeshOrGroup && !isHelper) {
+              actorRootOrder.set(child, actorRootOrder.size);
+            }
+          }
+        }
+
+        const savedMaterials = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
+        const hiddenNonActorObjects: THREE.Object3D[] = [];
+
+        const findActorRoot = (node: THREE.Object3D): THREE.Object3D | null => {
+          let curr: THREE.Object3D | null = node;
+          while (curr && curr !== scene) {
+            if (actorRootOrder.has(curr)) return curr;
+            curr = curr.parent;
+          }
+          return null;
+        };
+
+        const isHelperOverlay = (node: THREE.Object3D): boolean => {
+          let curr: THREE.Object3D | null = node;
+          while (curr && curr !== scene) {
+            if (
+              curr.userData?.isContactShadow ||
+              curr.userData?.isBaseRing ||
+              curr.userData?.isHitProxy ||
+              curr.name === '__base_ring_group__' ||
+              (curr as THREE.Sprite).isSprite
+            ) {
+              return true;
+            }
+            curr = curr.parent;
+          }
+          return false;
+        };
+
+        scene.traverse((obj) => {
+          if (obj === scene) return;
+          const mesh = obj as THREE.Mesh;
+          if (mesh.isMesh || (obj as THREE.Sprite).isSprite || (obj as THREE.Line).isLine || (obj as THREE.Points).isPoints) {
+            const root = findActorRoot(obj);
+            if (mesh.isMesh && root && !isHelperOverlay(obj)) {
+              const idx = actorRootOrder.get(root) ?? 0;
+              const maskColorHex =
+                typeof root.userData?.idMaskColorHex === 'number'
+                  ? root.userData.idMaskColorHex
+                  : SUBJECT_ID_MASK_PALETTE[idx % SUBJECT_ID_MASK_PALETTE.length];
+              savedMaterials.set(mesh, mesh.material);
+              mesh.material = getIdMaskMaterial(maskColorHex);
+            } else if (obj.visible) {
+              obj.visible = false;
+              hiddenNonActorObjects.push(obj);
+            }
+          }
+        });
+
+        if (renderer.shadowMap) {
+          renderer.shadowMap.enabled = false;
+        }
+        scene.overrideMaterial = null;
+        scene.background = new THREE.Color(0x000000);
+        scene.fog = null;
+        renderer.render(scene, camera);
+
+        // Restore materials & visibility immediately after Pass 4
+        savedMaterials.forEach((origMat, mesh) => {
+          mesh.material = origMat;
+        });
+        for (const obj of hiddenNonActorObjects) {
+          obj.visible = true;
+        }
+        scene.fog = prevFog;
+        if (renderer.shadowMap) {
+          renderer.shadowMap.enabled = prevShadowEnabled;
+        }
+
+        const idMaskCanvas = document.createElement('canvas');
+        idMaskCanvas.width = width;
+        idMaskCanvas.height = height;
+        const idMaskCtx = idMaskCanvas.getContext('2d');
+        if (idMaskCtx) {
+          idMaskCtx.drawImage(renderer.domElement, 0, 0, width, height);
+        }
+        idMaskFrames.push(idMaskCanvas);
       }
 
       onFrame?.(f, totalFrames);
@@ -381,9 +522,11 @@ export async function renderOfflinePrevisPasses(
     let depthUrl: string | undefined;
     let openposeBlob: Blob | undefined;
     let openposeUrl: string | undefined;
+    let idMaskBlob: Blob | undefined;
+    let idMaskUrl: string | undefined;
 
     if (shouldRenderRgb && rgbFrames.length > 0) {
-      onProgress?.(85);
+      onProgress?.(84);
       rgbBlob = await muxFramesToMp4(rgbFrames, width, height, fps);
       rgbUrl =
         typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
@@ -392,7 +535,7 @@ export async function renderOfflinePrevisPasses(
     }
 
     if (shouldRenderDepth && depthFrames.length > 0) {
-      onProgress?.(92);
+      onProgress?.(90);
       depthBlob = await muxFramesToMp4(depthFrames, width, height, fps);
       depthUrl =
         typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
@@ -401,11 +544,20 @@ export async function renderOfflinePrevisPasses(
     }
 
     if (shouldRenderOpenpose && openposeFrames.length > 0) {
-      onProgress?.(98);
+      onProgress?.(95);
       openposeBlob = await muxFramesToMp4(openposeFrames, width, height, fps);
       openposeUrl =
         typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
           ? URL.createObjectURL(openposeBlob)
+          : undefined;
+    }
+
+    if (shouldRenderIdMask && idMaskFrames.length > 0) {
+      onProgress?.(98);
+      idMaskBlob = await muxFramesToMp4(idMaskFrames, width, height, fps);
+      idMaskUrl =
+        typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+          ? URL.createObjectURL(idMaskBlob)
           : undefined;
     }
 
@@ -418,6 +570,8 @@ export async function renderOfflinePrevisPasses(
       depthUrl,
       openposeBlob,
       openposeUrl,
+      idMaskBlob,
+      idMaskUrl,
       totalFrames,
       durationSeconds,
       fps,
@@ -426,8 +580,14 @@ export async function renderOfflinePrevisPasses(
     };
   } finally {
     // 4. Guaranteed restoration of scene and renderer state
+    depthMaterial.dispose();
+    idMaskMaterialCache.forEach((mat) => mat.dispose());
     scene.overrideMaterial = prevOverride;
     scene.background = prevBackground;
+    scene.fog = prevFog;
+    if (renderer.shadowMap) {
+      renderer.shadowMap.enabled = prevShadowEnabled;
+    }
     renderer.setSize(prevSize.x, prevSize.y, false);
   }
 }

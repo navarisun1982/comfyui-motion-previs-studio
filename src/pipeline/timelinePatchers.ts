@@ -182,6 +182,7 @@ const h3FirstFramePatcher: TimelinePatcher = {
         name: 'First Frame',
       };
     } else if (ctx.mode === 'control') {
+      characters.length = 0;
       const refFiles = [ctx.refImage1File, ctx.refImage2File, ctx.refImage3File, ctx.refImage4File];
       refFiles.forEach((f, idx) => {
         if (f && f.trim()) {
@@ -190,7 +191,7 @@ const h3FirstFramePatcher: TimelinePatcher = {
             file: f.trim(),
             name: desc || `Ref ${idx + 1}`,
             description: desc,
-            retention: 'fully_preserved',
+            retention: idx === 3 ? 'fully_preserved' : 'attribute_transfer',
           };
         } else {
           characters[idx] = null;
@@ -202,9 +203,9 @@ const h3FirstFramePatcher: TimelinePatcher = {
             file: ctx.controlVideoFile,
             fileName: ctx.controlVideoFile,
             role: 'reference',
-            retention: 'partially_preserved',
+            retention: 'fully_preserved',
             description:
-              '3D previz camera framing, subject screen placement, scale proportions, and motion choreography guide (preserve framing and action trajectory while rendering natural, fluid real-world motion)',
+              'original untextured 3D animation reference and authoritative temporal and spatial motion master (preserve complete animation, timing, camera transform, camera angle, framing, and trajectory without alteration)',
             includeAudio: false,
             trimStartSec: 0,
           },

@@ -88,7 +88,7 @@ describe('Environment & Scene Location System', () => {
     expect(ltx.positivePrompt).toContain('narrow neo-Tokyo cyberpunk back-alley');
 
     const minimax = compileMiniMaxPrompt(shot);
-    expect(minimax.positivePrompt).toContain('<Subject 4> is the [Scene Environment] (from <picture 4>):');
+    expect(minimax.positivePrompt).toContain('<Subject 4> is the [Scene Environment] (from <Picture 4>):');
     expect(minimax.positivePrompt).toContain('narrow neo-Tokyo cyberpunk back-alley');
 
     const seedance = compileSeedancePrompt(shot);

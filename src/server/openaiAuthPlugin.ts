@@ -10,6 +10,64 @@ function getComfySyncService() {
   return require('./comfyWorkflowSyncService.cjs');
 }
 
+function getStudioStorageService() {
+  try {
+    const resolved = require.resolve('./studioStorageService.cjs');
+    delete require.cache[resolved];
+  } catch {}
+  return require('./studioStorageService.cjs');
+}
+
+function resolveSafeCorsOrigin(req: any): string {
+  const origin = String(req?.headers?.origin || '').trim();
+  if (!origin) return 'http://127.0.0.1:5173';
+  if (
+    origin === 'null' ||
+    origin.startsWith('file://') ||
+    origin.startsWith('app://') ||
+    /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin)
+  ) {
+    return origin;
+  }
+  return 'http://127.0.0.1:5173';
+}
+
+function isAllowedGlbFilePath(candidatePath: string, pathMod: any): boolean {
+  if (!candidatePath || candidatePath.includes('\0')) return false;
+  const resolved = pathMod.resolve(candidatePath).replace(/\\/g, '/').toLowerCase();
+  if (!resolved.endsWith('.glb') && !resolved.endsWith('.gltf')) return false;
+  const workspaceRoot = pathMod.resolve(process.cwd()).replace(/\\/g, '/').toLowerCase();
+  let customStorageRoot = '';
+  try {
+    customStorageRoot = pathMod
+      .resolve(getStudioStorageService().getActiveStorageDir())
+      .replace(/\\/g, '/')
+      .toLowerCase();
+  } catch {}
+  const allowedRoots = [
+    'd:/comfyui/output',
+    'd:/comfyui/temp',
+    'd:/comfyui/input',
+    workspaceRoot,
+    ...(customStorageRoot ? [customStorageRoot] : []),
+  ];
+  return allowedRoots.some((root) => resolved === root || resolved.startsWith(root + '/'));
+}
+
+function isValidComfyWorkflowJsonString(rawContent: string): boolean {
+  try {
+    const parsed = JSON.parse(rawContent);
+    if (!parsed || typeof parsed !== 'object') return false;
+    if (Array.isArray((parsed as any).nodes)) return true;
+    const values = Object.values(parsed as Record<string, any>);
+    return values.some(
+      (v) => v && typeof v === 'object' && typeof (v as any).class_type === 'string'
+    );
+  } catch {
+    return false;
+  }
+}
+
 function attachComfyMiddleware(middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void }) {
   middlewares.use((req, res, next) => {
     const rawUrl = req.url || '';
@@ -24,7 +82,7 @@ function attachComfyMiddleware(middlewares: { use: (fn: (req: any, res: any, nex
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204, {
-        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Origin': resolveSafeCorsOrigin(req),
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': '*',
       });
@@ -59,7 +117,7 @@ function attachLocalWorkflowMiddleware(middlewares: { use: (fn: (req: any, res: 
   middlewares.use((req, res, next) => {
     const rawUrl = req.url || '';
     if (rawUrl.startsWith('/api/comfy-glb-output')) {
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Origin', resolveSafeCorsOrigin(req));
       res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', '*');
       if (req.method === 'OPTIONS') {
@@ -115,8 +173,15 @@ function attachLocalWorkflowMiddleware(middlewares: { use: (fn: (req: any, res: 
         }
 
         let targetFile = '';
-        if (explicitPath && explicitPath.toLowerCase().endsWith('.glb') && fs.existsSync(explicitPath)) {
-          targetFile = explicitPath;
+        if (explicitPath) {
+          if (!isAllowedGlbFilePath(explicitPath, path)) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Forbidden: .glb path must reside in ComfyUI output or project workspace.' }));
+            return;
+          }
+          if (fs.existsSync(explicitPath)) {
+            targetFile = path.resolve(explicitPath);
+          }
         } else {
           // Find the most recently modified .glb file across ComfyUI output directories
           let newestMtime = Math.max(0, sinceMs - 5000);
@@ -162,7 +227,7 @@ function attachLocalWorkflowMiddleware(middlewares: { use: (fn: (req: any, res: 
     }
 
     if (rawUrl.startsWith('/api/comfy-sync-workflows')) {
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Origin', resolveSafeCorsOrigin(req));
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', '*');
       if (req.method === 'OPTIONS') {
@@ -202,7 +267,7 @@ function attachLocalWorkflowMiddleware(middlewares: { use: (fn: (req: any, res: 
     }
 
     if (rawUrl.startsWith('/api/fetch-remote-workflow')) {
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Origin', resolveSafeCorsOrigin(req));
       res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', '*');
       if (req.method === 'OPTIONS') {
@@ -234,7 +299,7 @@ function attachLocalWorkflowMiddleware(middlewares: { use: (fn: (req: any, res: 
       next();
       return;
     }
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Origin', resolveSafeCorsOrigin(req));
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', '*');
     if (req.method === 'OPTIONS') {
@@ -252,13 +317,24 @@ function attachLocalWorkflowMiddleware(middlewares: { use: (fn: (req: any, res: 
       } else if (filePath.toLowerCase().startsWith('file://')) {
         filePath = decodeURIComponent(filePath.replace(/^file:\/\//i, ''));
       }
-      if (!filePath || !filePath.toLowerCase().endsWith('.json') || !fs.existsSync(filePath)) {
+      if (!filePath || filePath.includes('\0') || !filePath.toLowerCase().endsWith('.json') || !fs.existsSync(filePath)) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: `Local workflow JSON file not found at: ${filePath}` }));
         return;
       }
       const resolved = path.resolve(filePath);
+      const stat = fs.statSync(resolved);
+      if (!stat.isFile() || stat.size > 15 * 1024 * 1024) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid workflow file.' }));
+        return;
+      }
       const rawContent = fs.readFileSync(resolved, 'utf-8');
+      if (!isValidComfyWorkflowJsonString(rawContent)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Forbidden: Target file is not a valid ComfyUI workflow JSON.' }));
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(rawContent);
     } catch (err: any) {
@@ -278,7 +354,7 @@ function attachAppUpdateMiddleware(middlewares: { use: (fn: (req: any, res: any,
       return;
     }
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Origin', resolveSafeCorsOrigin(req));
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -325,6 +401,23 @@ function attachAppUpdateMiddleware(middlewares: { use: (fn: (req: any, res: any,
   });
 }
 
+function attachStudioStorageMiddleware(middlewares: { use: (fn: (req: any, res: any, next: () => void) => void) => void }) {
+  middlewares.use((req, res, next) => {
+    const rawUrl = req.url || '';
+    if (!rawUrl.startsWith('/api/studio-storage')) {
+      next();
+      return;
+    }
+    res.setHeader('Access-Control-Allow-Origin', resolveSafeCorsOrigin(req));
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Model-Id, X-Model-Name');
+    const handled = getStudioStorageService().handleStudioStorageRequest(req, res);
+    if (!handled) {
+      next();
+    }
+  });
+}
+
 export function openaiAuthPlugin(): Plugin {
   return {
     name: 'openai-auth-plugin',
@@ -332,17 +425,19 @@ export function openaiAuthPlugin(): Plugin {
       attachComfyMiddleware(server.middlewares);
       attachLocalWorkflowMiddleware(server.middlewares);
       attachAppUpdateMiddleware(server.middlewares);
+      attachStudioStorageMiddleware(server.middlewares);
     },
     configureServer(server) {
       attachComfyMiddleware(server.middlewares);
       attachLocalWorkflowMiddleware(server.middlewares);
       attachAppUpdateMiddleware(server.middlewares);
+      attachStudioStorageMiddleware(server.middlewares);
       server.middlewares.use(async (req, res, next) => {
         const rawUrl = req.url || '';
         const pathname = rawUrl.split('?')[0].replace(/\/+$/, '') || '/';
 
         if (pathname.startsWith('/api/openai')) {
-          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Origin', resolveSafeCorsOrigin(req));
           res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
           res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 

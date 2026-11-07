@@ -51,10 +51,12 @@ import {
   Download,
   GitBranch,
   ChevronDown,
+  HardDrive,
   X,
 } from 'lucide-react';
 import { GlbResourcesDirectory } from './GlbResourcesDirectory';
 import { CustomWorkflowConfigBar } from './CustomWorkflowConfigBar';
+import { StudioStorageSettingsCard } from './StudioStorageSettingsCard';
 
 type Status = { tone: 'ok' | 'err' | 'info'; text: string } | null;
 
@@ -102,7 +104,7 @@ const errMsg = (e: unknown) => (e instanceof ObjectReasonerError ? e.message : (
  * Supports direct OpenAI / ChatGPT browser authentication (no manual API key needed),
  * as well as Ollama, llama.cpp, Gemini, and custom OpenAI-compatible endpoints.
  */
-export type SettingsTabId = 'llm' | 'comfy' | 'resources';
+export type SettingsTabId = 'llm' | 'comfy' | 'storage' | 'resources';
 
 export const ReasonerSettingsPanel: React.FC<{
   onSaved?: () => void;
@@ -469,8 +471,8 @@ export const ReasonerSettingsPanel: React.FC<{
         )}
       </div>
 
-      {/* 3-Tab Navigation Bar: LLM | ComfyUI & Workflows | 3D Resources */}
-      <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-[#080b12] p-1 border border-white/10 font-mono text-xs">
+      {/* 4-Tab Navigation Bar: LLM | ComfyUI & Workflows | Studio Storage | 3D Resources */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 rounded-xl bg-[#080b12] p-1 border border-white/10 font-mono text-xs">
         <button
           type="button"
           id="settings-tab-llm"
@@ -505,6 +507,20 @@ export const ReasonerSettingsPanel: React.FC<{
               comfyStatus === 'connected' ? 'bg-emerald-400' : 'bg-rose-400'
             }`}
           />
+        </button>
+
+        <button
+          type="button"
+          id="settings-tab-storage"
+          onClick={() => setActiveSettingsTab('storage')}
+          className={`flex items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 font-semibold transition-all cursor-pointer truncate ${
+            activeSettingsTab === 'storage'
+              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-black font-bold shadow-md shadow-emerald-500/25'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <HardDrive className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">Studio Storage</span>
         </button>
 
         <button
@@ -612,7 +628,14 @@ export const ReasonerSettingsPanel: React.FC<{
         </div>
       )}
 
-      {/* TAB 3: 3D & Animated .GLB Resource Libraries Directory */}
+      {/* TAB 3: Studio Storage Unit (3D Models, Scenes, Shots, References & Renders) */}
+      {activeSettingsTab === 'storage' && (
+        <div className="space-y-3 animate-in fade-in duration-150">
+          <StudioStorageSettingsCard />
+        </div>
+      )}
+
+      {/* TAB 4: 3D & Animated .GLB Resource Libraries Directory */}
       {activeSettingsTab === 'resources' && (
         <div className="space-y-3 animate-in fade-in duration-150">
           <GlbResourcesDirectory defaultExpanded />

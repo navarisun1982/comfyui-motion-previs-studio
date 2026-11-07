@@ -9,6 +9,8 @@ import {
   applyPosePreset,
   evaluateReadyMadeHumanoidClip,
   evaluateReadyMadeObjectClip,
+  isUuidOrNoiseName,
+  inferSubjectCategoryAndCleanName,
 } from '../src/engine/kinematics';
 
 function createSyntheticHumanoidGroup(stance: 't-pose' | 'a-pose' | 'relaxed' = 'a-pose'): THREE.Group {
@@ -232,6 +234,37 @@ describe('Universal 3D Auto-Rigging & Volumetric Skinning Engine', () => {
       if (c.name === '__auto_rig_skeleton_helper__') helperCount++;
     });
     expect(helperCount).toBe(1);
+  });
+
+  it('sanitizes UUID/hash filenames and prevents squat/dome props (like a baseball cap) from being rigged as humanoids', () => {
+    expect(isUuidOrNoiseName('9d6c75de 3d44 4100 849d 649c0d0d0815')).toBe(true);
+    expect(isUuidOrNoiseName('9d6c75de-3d44-4100-849d-649c0d0d0815.png')).toBe(true);
+    expect(isUuidOrNoiseName('Red Baseball Cap')).toBe(false);
+
+    const uuidInference = inferSubjectCategoryAndCleanName('9d6c75de-3d44-4100-849d-649c0d0d0815.png');
+    expect(uuidInference.isNoiseOrUuid).toBe(true);
+    expect(uuidInference.cleanName).toBe('3D Object');
+
+    const capInference = inferSubjectCategoryAndCleanName('vintage_baseball_cap.png');
+    expect(capInference.category).toBe('prop');
+    expect(capInference.cleanName).toBe('vintage baseball cap');
+
+    // A squat/dome-shaped mesh (like a baseball cap: width=1.0, height=0.55, depth=1.25)
+    // must resolve to 'rigid_prop' by 3D bounding-box geometry even if categoryHint was left on 'human'
+    const capGroup = new THREE.Group();
+    const capMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(1.0, 0.55, 1.25),
+      new THREE.MeshStandardMaterial()
+    );
+    capGroup.add(capMesh);
+    capGroup.updateMatrixWorld(true);
+
+    expect(
+      resolveAutoRigType(capGroup, {
+        categoryHint: 'human',
+        nameHint: '9d6c75de 3d44 4100 849d 649c0d0d0815',
+      })
+    ).toBe('rigid_prop');
   });
 });
 

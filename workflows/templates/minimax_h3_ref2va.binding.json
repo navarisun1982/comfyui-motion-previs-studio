@@ -34,7 +34,8 @@
     "636": "SolAttnPatch",
     "638": "VHS_LoadVideo",
     "669": "ImageScaleToMaxDimension",
-    "674": "Power Lora Loader (rgthree)"
+    "674": "Power Lora Loader (rgthree)",
+    "686": "MiniMaxH3SigmaShift"
   },
   "fields": {
     "prompt": {
@@ -90,14 +91,14 @@
       {
         "node": "115",
         "input": "megapixels",
-        "value": 0.9
+        "value": 0.5
       }
     ],
     "final": [
       {
         "node": "115",
         "input": "megapixels",
-        "value": 1.2
+        "value": 0.8
       }
     ]
   },

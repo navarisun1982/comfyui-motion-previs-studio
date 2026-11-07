@@ -40,15 +40,17 @@ export function getEffectiveStageLights(lighting: ShotSpec['lighting']): StageLi
 import { getAdapter } from '../adapters';
 import { ValidationReport, CompiledPromptBundle } from '../adapters/types';
 import { logger } from './useLogStore';
-import { recordTrajectoryPositionAtTime, interpolateTrajectoryPosition, recordTrajectoryPoseAtTime } from '../engine/trajectoryMath';
+import { interpolateTrajectoryPosition, recordTrajectoryPoseAtTime } from '../engine/trajectoryMath';
 import { decomposeDirectorialMotion, compileMotionPlan, compileReadyMadeMotionKeyframes, matchReadyMadeMotionFromPrompt } from '../engine/kinematics';
 import { STORAGE_KEYS, safeGetItem, safeSetItem, sanitizeShotForStorage } from '../services/storage';
 import { toPersistentModelUri, offloadLargeImageToIndexedDB, resolveOffloadedImage, resolveOffloadedImageSync } from '../services/modelStorage';
+import { saveProjectToStudioStorage } from '../services/studioStorageClient';
+import { resolvePolyforkGlbUrl } from '../data/externalCatalogsRegistry';
 
 export type PrevisRendererFn = (
-  passMode?: 'rgb' | 'depth' | 'openpose' | 'all',
+  passMode?: 'rgb' | 'depth' | 'openpose' | 'id-mask' | 'all',
   resolution?: '720p' | '1080p'
-) => Promise<{ url: string; blob: Blob; openposeUrl?: string; depthUrl?: string } | null>;
+) => Promise<{ url: string; blob: Blob; openposeUrl?: string; depthUrl?: string; idMaskUrl?: string } | null>;
 
 interface RendererEntry {
   fn: PrevisRendererFn;
@@ -171,6 +173,8 @@ interface ShotState {
   previsOpenPoseBlob?: Blob;
   previsDepthUrl?: string;
   previsDepthBlob?: Blob;
+  previsIdMaskUrl?: string;
+  previsIdMaskBlob?: Blob;
   isRenderingPrevis: boolean;
   previsProgress: number;
   previsRendererFn: PrevisRendererFn | null;
@@ -179,16 +183,31 @@ interface ShotState {
     priority?: 'primary' | 'fallback'
   ) => (() => void) | void;
   renderPrevisVideo: (
-    passMode?: 'rgb' | 'depth' | 'openpose' | 'all',
+    passMode?: 'rgb' | 'depth' | 'openpose' | 'id-mask' | 'all',
     resolution?: '720p' | '1080p'
-  ) => Promise<{ url: string; blob: Blob; openposeUrl?: string; depthUrl?: string } | null>;
+  ) => Promise<{ url: string; blob: Blob; openposeUrl?: string; depthUrl?: string; idMaskUrl?: string } | null>;
   setPrevisVideo: (url?: string, blob?: Blob) => void;
   setPrevisOpenPose: (url?: string, blob?: Blob) => void;
   setPrevisDepth: (url?: string, blob?: Blob) => void;
+  setPrevisIdMask: (url?: string, blob?: Blob) => void;
   setPrevisRendering: (rendering: boolean, progress?: number) => void;
 
   // Prompt Management
   setCompiledPrompt: (bundle: CompiledPromptBundle) => void;
+  setCustomPositivePrompt: (
+    engineId: string,
+    promptText: string | undefined,
+    pushHistory?: boolean
+  ) => void;
+  undoCustomPositivePrompt: (engineId: string) => void;
+  appendPromptChatMessage: (msg: {
+    id: string;
+    role: 'user' | 'assistant';
+    text: string;
+    engine?: string;
+    timestamp?: number;
+  }) => void;
+  clearPromptChatMessages: () => void;
 
   // Full Reset / Load
   loadShot: (shot: ShotSpec) => void;
@@ -259,6 +278,7 @@ export const flushShotsPersistence = () => {
     }
     safeSetItem(STORAGE_KEYS.SHOTS_CACHE, compact);
   }
+  saveProjectToStudioStorage({ shotsById: sanitized }).catch(() => {});
 };
 
 const persistShotsMap = (shots: Record<string, ShotSpec>, immediate = false) => {
@@ -277,7 +297,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', flushShotsPersistence);
 }
 
-const BUILTIN_DEMO_VERSION = 'studio-demo-3x6-v3';
+const BUILTIN_DEMO_VERSION = 'competition-2x6-v4';
 const DEMO_VERSION_STORAGE_KEY = 'comfy_ai_director_demo_version_v1';
 
 const loadCachedShots = (): Record<string, ShotSpec> => {
@@ -301,6 +321,15 @@ const loadCachedShots = (): Record<string, ShotSpec> => {
       }
       if (Array.isArray(s.actors)) {
         s.actors = s.actors.map((a) => {
+          // Never treat 3D catalog preview thumbnails as user-uploaded ComfyUI reference images
+          if (
+            a.conceptImageUrl &&
+            /raw\.githubusercontent\.com\/lucas-martinic\/polyfork-catalog|images\.unsplash\.com/i.test(
+              a.conceptImageUrl
+            )
+          ) {
+            return { ...a, conceptImageUrl: undefined, conceptImageName: undefined };
+          }
           if (a.conceptImageUrl?.startsWith('refimg://')) {
             const syncImg = resolveOffloadedImageSync(a.conceptImageUrl);
             if (syncImg) return { ...a, conceptImageUrl: syncImg };
@@ -549,7 +578,12 @@ export const useShotStore = create<ShotState>((set, get) => {
   const evaluate = (shot: ShotSpec) => {
     const adapter = getAdapter(shot.targetModel);
     const validation = adapter.validate(shot);
-    const compiledPrompt = adapter.compilePrompt(shot);
+    const baseCompiled = adapter.compilePrompt(shot);
+    const lockedCustom = shot.customPositivePrompts?.[shot.targetModel];
+    const compiledPrompt =
+      typeof lockedCustom === 'string' && lockedCustom.trim().length > 0
+        ? { ...baseCompiled, positivePrompt: lockedCustom }
+        : baseCompiled;
     return { validation, compiledPrompt };
   };
 
@@ -576,15 +610,6 @@ export const useShotStore = create<ShotState>((set, get) => {
       }
     }
 
-    const stageChanged =
-      currentShot.actors !== updated.actors ||
-      currentShot.camera !== updated.camera ||
-      currentShot.environment !== updated.environment ||
-      currentShot.lighting !== updated.lighting ||
-      currentShot.durationSeconds !== updated.durationSeconds ||
-      currentShot.aspectRatio !== updated.aspectRatio ||
-      currentShot.claymationMode !== updated.claymationMode;
-
     const currentShots = get().shotsById;
     const nextShots = { ...currentShots, [updated.id]: updated };
     persistShotsMap(nextShots, options?.immediatePersist || false);
@@ -595,16 +620,6 @@ export const useShotStore = create<ShotState>((set, get) => {
       isDirty: true,
       canUndo: shotHistory.past.length > 0,
       canRedo: shotHistory.future.length > 0,
-      ...(stageChanged
-        ? {
-            previsVideoUrl: undefined,
-            previsVideoBlob: undefined,
-            previsOpenPoseUrl: undefined,
-            previsOpenPoseBlob: undefined,
-            previsDepthUrl: undefined,
-            previsDepthBlob: undefined,
-          }
-        : {}),
       ...extraState,
     });
   };
@@ -626,11 +641,13 @@ export const useShotStore = create<ShotState>((set, get) => {
     previsOpenPoseBlob: undefined,
     previsDepthUrl: undefined,
     previsDepthBlob: undefined,
+    previsIdMaskUrl: undefined,
+    previsIdMaskBlob: undefined,
     isRenderingPrevis: false,
     previsProgress: 0,
     previsRendererFn: null,
     setActiveDeckTab: (tab) => set({ activeDeckTab: tab }),
-    stagingMoveMode: 'base',
+    stagingMoveMode: 'keyframe',
     setStagingMoveMode: (stagingMoveMode) => set({ stagingMoveMode }),
     currentTime: 0.0,
     setCurrentTime: (currentTime) => set({ currentTime }),
@@ -701,6 +718,13 @@ export const useShotStore = create<ShotState>((set, get) => {
       set({
         previsDepthUrl: url,
         previsDepthBlob: blob,
+      });
+    },
+
+    setPrevisIdMask: (url?: string, blob?: Blob) => {
+      set({
+        previsIdMaskUrl: url,
+        previsIdMaskBlob: blob,
       });
     },
 
@@ -979,6 +1003,8 @@ export const useShotStore = create<ShotState>((set, get) => {
             speed: normalizedSpeed,
             startPosition: start,
             endPosition: end,
+            keyframes: [],
+            customTrajectory: false,
           },
         },
       };
@@ -996,6 +1022,7 @@ export const useShotStore = create<ShotState>((set, get) => {
             ...shot.camera.movement,
             startPosition,
             endPosition,
+            customTrajectory: true,
           },
         },
       };
@@ -1063,7 +1090,9 @@ export const useShotStore = create<ShotState>((set, get) => {
 
       let newMov = { ...curMov };
 
-      if (forceMode === 'base') {
+      const effectiveMode = forceMode ?? get().stagingMoveMode;
+
+      if (effectiveMode === 'base') {
         const curPosAtTime = interpolateTrajectoryPosition(curMov, clampedTime, safeDuration);
         const curZ = position.z ?? curPosAtTime.z ?? curMov.startPosition.z ?? 20;
         if (isStatic) {
@@ -1096,38 +1125,60 @@ export const useShotStore = create<ShotState>((set, get) => {
           }
         }
       } else {
-        const isAtStart = clampedTime <= 0.15;
-        const isAtEnd = clampedTime >= safeDuration - 0.15;
-
-        if (isAtStart) {
-          if (isStatic) {
-            newMov.startPosition = position;
-            newMov.endPosition = position;
-          } else {
-            newMov.startPosition = position;
-          }
-        } else if (isAtEnd) {
-          newMov.endPosition = position;
+        const curPosAtTime = interpolateTrajectoryPosition(curMov, clampedTime, safeDuration);
+        const curZ = position.z ?? curPosAtTime.z ?? curMov.startPosition.z ?? 20;
+        const cleanPos = {
+          x: Number(position.x.toFixed(2)),
+          y: Number(position.y.toFixed(2)),
+          z: Number(curZ.toFixed(2)),
+        };
+        const roundedTime = Number(clampedTime.toFixed(2));
+        if (!hasKeyframes && !isStatic && roundedTime <= 0.25) {
+          // Repositioning the start of an active movement preset (e.g. dolly-in) at t=0:
+          // Translate both startPosition and endPosition so the movement vector is preserved!
+          const dx = cleanPos.x - curMov.startPosition.x;
+          const dy = cleanPos.y - curMov.startPosition.y;
+          const dz = cleanPos.z - (curMov.startPosition.z ?? 20);
+          newMov.startPosition = { ...cleanPos };
+          newMov.endPosition = {
+            x: Number(Math.min(100, Math.max(0, curMov.endPosition.x + dx)).toFixed(2)),
+            y: Number(Math.min(100, Math.max(0, curMov.endPosition.y + dy)).toFixed(2)),
+            z: Number(Math.min(100, Math.max(0, (curMov.endPosition.z ?? 20) + dz)).toFixed(2)),
+          };
         } else {
           const kfs = [...curKeyframes];
-          const existingIdx = kfs.findIndex((k) => Math.abs(k.time - clampedTime) <= 0.25);
+          if (kfs.length === 0 && !isStatic && roundedTime > 0.25) {
+            kfs.push({
+              id: `cam_kf_start_${Date.now()}`,
+              time: 0,
+              position: {
+                x: Number(curMov.startPosition.x.toFixed(2)),
+                y: Number(curMov.startPosition.y.toFixed(2)),
+                z: Number((curMov.startPosition.z ?? 20).toFixed(2)),
+              },
+            });
+          }
+          const existingIdx = kfs.findIndex((k) => Math.abs(k.time - roundedTime) <= 0.20);
           if (existingIdx >= 0) {
-            kfs[existingIdx] = { ...kfs[existingIdx], time: clampedTime, position };
+            kfs[existingIdx] = { ...kfs[existingIdx], time: roundedTime, position: cleanPos };
           } else {
             kfs.push({
               id: `cam_kf_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-              time: Number(clampedTime.toFixed(2)),
-              position,
+              time: roundedTime,
+              position: cleanPos,
             });
           }
           kfs.sort((a, b) => a.time - b.time);
           newMov.keyframes = kfs;
+          newMov.startPosition = { ...kfs[0].position };
+          newMov.endPosition = { ...kfs[kfs.length - 1].position };
         }
       }
 
       if (!isGestureActive) {
         logger.action(`Camera keyframed at ${clampedTime.toFixed(1)}s`, position);
       }
+      newMov.customTrajectory = true;
       const updated: ShotSpec = {
         ...shot,
         camera: { ...shot.camera, movement: newMov },
@@ -1142,13 +1193,21 @@ export const useShotStore = create<ShotState>((set, get) => {
       const updatedKfs = (shot.camera.movement.keyframes || [])
         .map((k) => (k.id === keyframeId ? { ...k, time: clampedTime } : k))
         .sort((a, b) => a.time - b.time);
+      const nextStart = updatedKfs.length > 0 ? { ...updatedKfs[0].position } : shot.camera.movement.startPosition;
+      const nextEnd =
+        updatedKfs.length > 0
+          ? { ...updatedKfs[updatedKfs.length - 1].position }
+          : shot.camera.movement.endPosition;
       const updated: ShotSpec = {
         ...shot,
         camera: {
           ...shot.camera,
           movement: {
             ...shot.camera.movement,
+            startPosition: nextStart,
+            endPosition: nextEnd,
             keyframes: updatedKfs,
+            customTrajectory: true,
           },
         },
       };
@@ -1157,13 +1216,22 @@ export const useShotStore = create<ShotState>((set, get) => {
 
     removeCameraKeyframe: (keyframeId) => {
       const { shot } = get();
+      const remainingKfs = (shot.camera.movement.keyframes || []).filter((k) => k.id !== keyframeId);
+      const nextStart =
+        remainingKfs.length > 0 ? { ...remainingKfs[0].position } : shot.camera.movement.startPosition;
+      const nextEnd =
+        remainingKfs.length > 0
+          ? { ...remainingKfs[remainingKfs.length - 1].position }
+          : nextStart;
       const updated: ShotSpec = {
         ...shot,
         camera: {
           ...shot.camera,
           movement: {
             ...shot.camera.movement,
-            keyframes: (shot.camera.movement.keyframes || []).filter((k) => k.id !== keyframeId),
+            startPosition: nextStart,
+            endPosition: nextEnd,
+            keyframes: remainingKfs,
           },
         },
       };
@@ -1457,8 +1525,11 @@ export const useShotStore = create<ShotState>((set, get) => {
 
       let updatedTrajectory: typeof target.trajectory;
 
-      if (forceMode === 'base') {
-        const curPosAtTime = interpolateTrajectoryPosition(target.trajectory, time, duration);
+      const effectiveMode = forceMode ?? get().stagingMoveMode;
+      const safeDur = duration > 0 ? duration : shot.durationSeconds || 4.0;
+
+      if (effectiveMode === 'base') {
+        const curPosAtTime = interpolateTrajectoryPosition(target.trajectory, time, safeDur);
         const curZ = position.z ?? curPosAtTime.z ?? target.trajectory.startPosition.z ?? 0;
         if (isStatic) {
           updatedTrajectory = {
@@ -1494,13 +1565,71 @@ export const useShotStore = create<ShotState>((set, get) => {
           };
         }
       } else {
-        // Individual Keyframing: updates position strictly at `time` (creates or updates keyframe without touching other cues)
-        updatedTrajectory = recordTrajectoryPositionAtTime(
-          target.trajectory,
-          time,
-          duration,
-          position
-        );
+        // Standard Animation Keyframing (Auto-Cue):
+        // Records/updates a Cue at `time` and keeps startPosition = firstCue.position & endPosition = lastCue.position
+        // so the element holds its Cue position until the next Cue without drifting or rubber-banding!
+        const clampedTime = Number(Math.max(0, Math.min(safeDur, time)).toFixed(2));
+        const curPosAtTime = interpolateTrajectoryPosition(target.trajectory, clampedTime, safeDur);
+        const curZ = position.z ?? curPosAtTime.z ?? target.trajectory.startPosition.z ?? 0;
+        const cleanPos = {
+          x: Number(position.x.toFixed(2)),
+          y: Number(position.y.toFixed(2)),
+          z: Number(curZ.toFixed(2)),
+        };
+
+        const nextKfs = [...curKeyframes];
+        if (!hasKeyframes && !isStatic && clampedTime <= 0.25) {
+          const dx = cleanPos.x - target.trajectory.startPosition.x;
+          const dy = cleanPos.y - target.trajectory.startPosition.y;
+          const dz = cleanPos.z - (target.trajectory.startPosition.z ?? 0);
+          updatedTrajectory = {
+            ...target.trajectory,
+            startTimeSeconds: target.trajectory.startTimeSeconds ?? 0,
+            startPosition: { ...cleanPos },
+            endPosition: {
+              x: Number(Math.min(100, Math.max(0, target.trajectory.endPosition.x + dx)).toFixed(2)),
+              y: Number(Math.min(100, Math.max(0, target.trajectory.endPosition.y + dy)).toFixed(2)),
+              z: Number(Math.min(100, Math.max(0, (target.trajectory.endPosition.z ?? 0) + dz)).toFixed(2)),
+            },
+          };
+        } else {
+          if (nextKfs.length === 0 && !isStatic && clampedTime > 0.25) {
+            nextKfs.push({
+              id: `kf_start_${Date.now()}`,
+              time: 0,
+              position: {
+                x: Number(target.trajectory.startPosition.x.toFixed(2)),
+                y: Number(target.trajectory.startPosition.y.toFixed(2)),
+                z: Number((target.trajectory.startPosition.z ?? 0).toFixed(2)),
+              },
+            });
+          }
+          const existingIdx = nextKfs.findIndex((k) => Math.abs(k.time - clampedTime) <= 0.20);
+          if (existingIdx >= 0) {
+            nextKfs[existingIdx] = {
+              ...nextKfs[existingIdx],
+              time: clampedTime,
+              position: cleanPos,
+            };
+          } else {
+            nextKfs.push({
+              id: `kf_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+              time: clampedTime,
+              position: cleanPos,
+            });
+          }
+          nextKfs.sort((a, b) => a.time - b.time);
+
+          const firstPos = nextKfs[0].position;
+          const lastPos = nextKfs[nextKfs.length - 1].position;
+          updatedTrajectory = {
+            ...target.trajectory,
+            startTimeSeconds: target.trajectory.startTimeSeconds ?? 0,
+            startPosition: { ...firstPos },
+            endPosition: { ...lastPos },
+            keyframes: nextKfs,
+          };
+        }
       }
 
       const updatedActors = shot.actors.map((a) =>
@@ -1522,6 +1651,9 @@ export const useShotStore = create<ShotState>((set, get) => {
       const updatedKfs = (target.trajectory.keyframes || [])
         .map((k) => (k.id === keyframeId ? { ...k, time: clampedTime } : k))
         .sort((a, b) => a.time - b.time);
+      const nextStart = updatedKfs.length > 0 ? { ...updatedKfs[0].position } : target.trajectory.startPosition;
+      const nextEnd =
+        updatedKfs.length > 0 ? { ...updatedKfs[updatedKfs.length - 1].position } : target.trajectory.endPosition;
 
       const updatedActors = shot.actors.map((a) =>
         a.id === actorId
@@ -1529,6 +1661,8 @@ export const useShotStore = create<ShotState>((set, get) => {
               ...a,
               trajectory: {
                 ...a.trajectory,
+                startPosition: nextStart,
+                endPosition: nextEnd,
                 keyframes: updatedKfs,
               },
             }
@@ -1631,11 +1765,20 @@ export const useShotStore = create<ShotState>((set, get) => {
       const { shot } = get();
       const updatedActors = shot.actors.map((a) => {
         if (a.id !== actorId) return a;
+        const remainingKfs = (a.trajectory.keyframes || []).filter((k) => k.id !== keyframeId);
+        const nextStart =
+          remainingKfs.length > 0 ? { ...remainingKfs[0].position } : a.trajectory.startPosition;
+        const nextEnd =
+          remainingKfs.length > 0
+            ? { ...remainingKfs[remainingKfs.length - 1].position }
+            : nextStart;
         return {
           ...a,
           trajectory: {
             ...a.trajectory,
-            keyframes: (a.trajectory.keyframes || []).filter((k) => k.id !== keyframeId),
+            startPosition: nextStart,
+            endPosition: nextEnd,
+            keyframes: remainingKfs,
           },
         };
       });
@@ -2171,16 +2314,43 @@ export const useShotStore = create<ShotState>((set, get) => {
       const spawnX = options?.startPosition?.x ?? (35 + Math.floor(Math.random() * 30));
       const spawnY = options?.startPosition?.y ?? (35 + Math.floor(Math.random() * 30));
       const spawnZ = Math.max(0, options?.startPosition?.z ?? 0); // Always grounded at or above floor (z >= 0)
+      const combinedText = `${defaultName} ${defaultToken}`;
+      const hasPropSignalInText =
+        /\b(car|automobile|vehicle|helicopter|chopper|aircraft|airplane|jet|plane|ship|boat|yacht|submarine|train|locomotive|truck|bus|van|ambulance|motorcycle|bike|bicycle|scooter|tank|tractor|excavator|forklift|spaceship|starship|ufo|saucer|rover|mech|robot|sword|blade|katana|dagger|knife|axe|hammer|spear|bow|crossbow|shield|gun|pistol|revolver|rifle|cannon|turret|bottle|potion|chair|armchair|throne|sofa|couch|bench|stool|table|desk|bed|cabinet|wardrobe|bookshelf|crate|chest|barrel|lamp|lantern|torch|clock|statue|pillar|bridge|tower|castle|fortress|house|cottage|cabin|building|skyscraper|cathedral|church|temple|pyramid|tent|windmill|lighthouse|tree|pine|oak|palm|cactus|bush|flower|mushroom|rock|boulder|mountain|volcano|crystal|campfire|camera|guitar|piano|drum|book|globe|telescope|laptop|computer|monitor|tv|phone|arcade|generator|reactor|portal|satellite|drone|dog|wolf|fox|cat|lion|tiger|horse|unicorn|bear|deer|stag|elephant|rhino|gorilla|monkey|dragon|dinosaur|rex|raptor|eagle|hawk|owl|raven|crow|bird|shark|whale|dolphin|octopus|crab|turtle|frog|snake|spider|scorpion)\b/i.test(
+          combinedText
+        ) ||
+        /(سيارة|مركبة|طائرة|هليكوبتر|مروحية|سفينة|قارب|قطار|شاحنة|دراجة|دبابة|صاروخ|كرسي|أريكة|سرير|طاولة|مكتب|مصباح|فانوس|سيف|درع|رمح|فأس|قوس|بندقية|مسدس|مدفع|صندوق|برميل|منزل|بيت|مبنى|قلعة|برج|جسر|معبد|خيمة|طاحونة|منارة|شجرة|نخلة|صبار|زهرة|صخرة|جبل|بركان|كاميرا|حاسوب|لابتوب|تلفاز|هاتف|روبوت|كلب|ذئب|قط|أسد|نمر|حصان|دب|غزال|فيل|تنين|ديناصور|نسر|صقر|بومة|قرش|حوت|دلفين|ثعبان|عنكبوت|عقرب)/.test(
+          combinedText
+        );
+
+      const isCutoutOrGreybox =
+        resolvedKind === 'cutout' ||
+        resolvedKind === 'standee' ||
+        resolvedKind === 'backdrop' ||
+        resolvedKind === 'cube' ||
+        resolvedKind === 'sphere' ||
+        resolvedKind === 'cylinder' ||
+        resolvedKind === 'cone' ||
+        resolvedKind === 'capsule' ||
+        resolvedKind === 'plane';
+
       const isHumanoidActor =
-        resolvedKind === 'human' ||
-        resolvedKind === 'character' ||
-        resolvedKind === 'person' ||
-        options?.rigType === 'humanoid';
+        (resolvedKind === 'human' ||
+          resolvedKind === 'character' ||
+          resolvedKind === 'person' ||
+          options?.rigType === 'humanoid') &&
+        !hasPropSignalInText;
+
+      const autoResolvedModelUrl =
+        options?.modelUrl ||
+        (!isHumanoidActor && !isCutoutOrGreybox
+          ? resolvePolyforkGlbUrl(defaultName, defaultToken, resolvedKind)
+          : undefined);
 
       const newActor: Actor = {
         id: `actor-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         name: defaultName,
-        kind,
+        kind: hasPropSignalInText && (resolvedKind === 'human' || resolvedKind === 'character') ? 'prop' : kind,
         token: defaultToken,
         actionDescription: options?.actionDescription || defaultAction,
         gait: 'none',
@@ -2191,7 +2361,7 @@ export const useShotStore = create<ShotState>((set, get) => {
           startPosition: { x: spawnX, y: spawnY, z: spawnZ },
           endPosition: { x: spawnX, y: spawnY, z: spawnZ },
         },
-        modelUrl: options?.modelUrl,
+        modelUrl: autoResolvedModelUrl,
         scale: options?.scale,
         conceptImageUrl: options?.conceptImageUrl,
         sculpt: options?.sculpt,
@@ -2377,6 +2547,76 @@ export const useShotStore = create<ShotState>((set, get) => {
       const shot = { ...get().shot, negativePrompt };
       logger.action(`Updated negative prompt filter (${negativePrompt.length} chars)`);
       commitShot(shot);
+    },
+
+    setCustomPositivePrompt: (engineId, promptText, pushHistory = false) => {
+      const curShot = get().shot;
+      const prevCustomMap = { ...(curShot.customPositivePrompts || {}) };
+      const prevHistoryMap = { ...(curShot.promptHistory || {}) };
+      const currentPromptForEngine =
+        prevCustomMap[engineId] || getAdapter(engineId).compilePrompt(curShot).positivePrompt;
+
+      if (pushHistory && currentPromptForEngine && currentPromptForEngine !== promptText) {
+        const engineHist = [...(prevHistoryMap[engineId] || [])];
+        if (engineHist[engineHist.length - 1] !== currentPromptForEngine) {
+          engineHist.push(currentPromptForEngine);
+          if (engineHist.length > 25) engineHist.shift();
+        }
+        prevHistoryMap[engineId] = engineHist;
+      }
+
+      if (promptText === undefined) {
+        delete prevCustomMap[engineId];
+      } else {
+        prevCustomMap[engineId] = promptText;
+      }
+
+      const updated: ShotSpec = {
+        ...curShot,
+        customPositivePrompts: prevCustomMap,
+        promptHistory: prevHistoryMap,
+      };
+      commitShot(updated, undefined, { skipHistory: true });
+    },
+
+    undoCustomPositivePrompt: (engineId) => {
+      const curShot = get().shot;
+      const prevHistoryMap = { ...(curShot.promptHistory || {}) };
+      const engineHist = [...(prevHistoryMap[engineId] || [])];
+      if (engineHist.length === 0) return;
+
+      const restoredPrompt = engineHist.pop()!;
+      prevHistoryMap[engineId] = engineHist;
+      const prevCustomMap = { ...(curShot.customPositivePrompts || {}), [engineId]: restoredPrompt };
+      const updated: ShotSpec = {
+        ...curShot,
+        customPositivePrompts: prevCustomMap,
+        promptHistory: prevHistoryMap,
+      };
+      logger.action(`Reverted prompt for ${engineId} to previous version`);
+      commitShot(updated, undefined, { skipHistory: true });
+    },
+
+    appendPromptChatMessage: (msg) => {
+      const curShot = get().shot;
+      const nextMessages = [
+        ...(curShot.promptChatMessages || []),
+        { ...msg, timestamp: msg.timestamp ?? Date.now() },
+      ].slice(-40);
+      const updated: ShotSpec = {
+        ...curShot,
+        promptChatMessages: nextMessages,
+      };
+      commitShot(updated, undefined, { skipHistory: true });
+    },
+
+    clearPromptChatMessages: () => {
+      const curShot = get().shot;
+      const updated: ShotSpec = {
+        ...curShot,
+        promptChatMessages: [],
+      };
+      commitShot(updated, undefined, { skipHistory: true });
     },
 
     setReferenceImage: (referenceImage) => {

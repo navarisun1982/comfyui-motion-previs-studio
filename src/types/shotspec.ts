@@ -124,7 +124,7 @@ export const TrajectoryKeyframeSchema = z.object({
   gait: z.enum(['auto', 'walk', 'run', 'sneak', 'idle', 'none']).optional(),
   motionClip: z.string().optional(),
   motionCycles: z.number().int().min(1).max(20).optional(),
-  rotation: Point3DSchema.optional(),
+  rotation: z.object({ x: z.number().min(-360).max(360).default(0), y: z.number().min(-360).max(360).default(0), z: z.number().min(-360).max(360).default(0) }).optional(),
   cueLabel: z.string().optional(),
 });
 export type TrajectoryKeyframe = z.infer<typeof TrajectoryKeyframeSchema>;
@@ -178,7 +178,7 @@ export const ActorSchema = z.object({
   gait: z.enum(['auto', 'walk', 'run', 'sneak', 'idle', 'none']).default('auto').optional(),
   motionClip: z.string().optional(),
   motionCycles: z.number().int().min(1).max(20).optional(),
-  rotation: Point3DSchema.optional(),
+  rotation: z.object({ x: z.number().min(-360).max(360).default(0), y: z.number().min(-360).max(360).default(0), z: z.number().min(-360).max(360).default(0) }).optional(),
   socketToBone: ActorSocketSchema.optional(),
   color: z.string().optional(),
   rigType: z.enum(['auto', 'humanoid', 'quadruped', 'spine_flex', 'rigid_prop']).optional(),
@@ -268,7 +268,7 @@ export const ShotSpecSchema = z.object({
       startPosition: Point3DSchema.default({ x: 50, y: 85, z: 20 }),
       endPosition: Point3DSchema.default({ x: 50, y: 65, z: 20 }),
       targetLookAt: Point2DSchema.default({ x: 50, y: 50 }),
-      keyframes: z.array(CameraKeyframeSchema).optional(),
+      keyframes: z.array(CameraKeyframeSchema).optional(), customTrajectory: z.boolean().optional(),
     }),
   }),
 
@@ -301,6 +301,19 @@ export const ShotSpecSchema = z.object({
   // Scene Context & Prompt Details
   sceneDescription: z.string().default('cinematic film still, moody atmospheric interior with subtle dust motes floating in light beam'),
   negativePrompt: z.string().default('jitter, warping, distorted faces, blurry, cartoon, low quality, 3d render, plastic skin, jittery camera shake'),
+  customPositivePrompts: z.record(z.string(), z.string()).optional(),
+  promptHistory: z.record(z.string(), z.array(z.string())).optional(),
+  promptChatMessages: z
+    .array(
+      z.object({
+        id: z.string(),
+        role: z.enum(['user', 'assistant']),
+        text: z.string(),
+        engine: z.string().optional(),
+        timestamp: z.number().optional(),
+      })
+    )
+    .optional(),
 
   // Execution Constraints
   targetModel: TargetModelSchema.default('ltx-2.5'),

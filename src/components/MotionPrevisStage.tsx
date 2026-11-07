@@ -50,6 +50,8 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     updateCameraPositionAtTime,
     moveActorKeyframeTime,
     moveCameraKeyframeTime,
+    removeActorKeyframe,
+    removeCameraKeyframe,
     scaleActorCuesInRange,
     applyActorMotionCurve,
     updateVfxReference,
@@ -57,6 +59,8 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     setSelectedActorId,
     setActiveDeckTab,
     setReferenceImage,
+    stagingMoveMode,
+    setStagingMoveMode,
   } = useShotStore();
   const openAssetLibrary = useAssetLibraryStore((s) => s.openLibrary);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -415,25 +419,10 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
 
   // Add keyframe cue
   const handleAddMarker = () => {
-    const id = `m_${Date.now()}`;
     const targetActor =
       selectedActorId && selectedActorId !== '__camera__'
         ? shot.actors.find((a) => a.id === selectedActorId)
         : undefined;
-    const markerColor =
-      selectedActorId === '__camera__'
-        ? shot.camera.color || '#f59e0b'
-        : targetActor?.color || '#f59e0b';
-    const newMarker: TimelineMarker = {
-      id,
-      time: Number(currentTime.toFixed(2)),
-      label: targetActor
-        ? `${targetActor.name} Cue @ ${currentTime.toFixed(1)}s`
-        : `Cue @ ${currentTime.toFixed(1)}s`,
-      color: markerColor,
-      actorId: selectedActorId,
-    };
-    setMarkers((prev) => [...prev, newMarker]);
 
     if (selectedActorId === '__camera__') {
       const camPos = interpolateTrajectoryPosition(shot.camera.movement, currentTime, duration);
@@ -444,12 +433,34 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
           y: camPos.y,
           z: camPos.z ?? shot.camera.movement.startPosition.z ?? 45,
         },
-        duration
+        duration,
+        'keyframe'
       );
+      return;
     } else if (selectedActorId && targetActor) {
       const pos = interpolateTrajectoryPosition(targetActor.trajectory, currentTime, duration);
-      updateActorPositionAtTime(selectedActorId, currentTime, pos, duration);
+      updateActorPositionAtTime(selectedActorId, currentTime, pos, duration, 'keyframe');
+      return;
     }
+
+    // Fallback if no actor or camera is selected: place a first-actor cue if available, or a timeline note marker
+    const fallbackActor = shot.actors[0];
+    if (fallbackActor) {
+      setSelectedActorId(fallbackActor.id);
+      const pos = interpolateTrajectoryPosition(fallbackActor.trajectory, currentTime, duration);
+      updateActorPositionAtTime(fallbackActor.id, currentTime, pos, duration, 'keyframe');
+      return;
+    }
+
+    const id = `m_${Date.now()}`;
+    const newMarker: TimelineMarker = {
+      id,
+      time: Number(currentTime.toFixed(2)),
+      label: `Cue @ ${currentTime.toFixed(1)}s`,
+      color: '#f59e0b',
+      actorId: selectedActorId,
+    };
+    setMarkers((prev) => [...prev, newMarker]);
   };
 
   // Format Timecode: 00:MM:SS:FF
@@ -841,7 +852,36 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
             title="Toggle Timeline Cue Markers"
           >
             <Bookmark className="h-3 w-3" />
-            <span>Cues ({markers.length})</span>
+            <span>
+              Cues (
+              {shot.actors.reduce((acc, a) => acc + (a.trajectory.keyframes?.length || 0), 0) +
+                (shot.camera.movement.keyframes?.length || 0) +
+                markers.length}
+              )
+            </span>
+          </button>
+
+          {/* Auto-Cue Toggle Button (Right next to Cues!) */}
+          <button
+            type="button"
+            onClick={() => setStagingMoveMode(stagingMoveMode === 'keyframe' ? 'base' : 'keyframe')}
+            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-semibold transition-all text-[10.5px] cursor-pointer ${
+              stagingMoveMode === 'keyframe'
+                ? 'bg-rose-500/20 text-rose-200 border border-rose-500/50 shadow-sm'
+                : 'bg-[#131C2E] hover:bg-[#1A2436] text-[#98A5BC] border border-[#273247]'
+            }`}
+            title={
+              stagingMoveMode === 'keyframe'
+                ? 'Auto-Cue ON: Moving, rotating, or posing a selected element automatically creates or updates a Cue at the current playhead time'
+                : 'Auto-Cue OFF: Moving an element shifts its base position across the whole shot without creating a new Cue'
+            }
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                stagingMoveMode === 'keyframe' ? 'bg-rose-400 animate-pulse' : 'bg-slate-500'
+              }`}
+            />
+            <span>Auto-Cue {stagingMoveMode === 'keyframe' ? 'ON' : 'OFF'}</span>
           </button>
 
           {/* Snapshot PNG */}
@@ -1359,28 +1399,84 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[#C4BEFF] font-bold">Keyframe Cues:</span>
               <div className="flex items-center gap-1.5 flex-wrap">
-                {markers.length === 0 && (
-                  <span className="text-[#98A5BC] text-[9.5px]">No cues placed yet</span>
-                )}
-                {markers.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => setCurrentTime(m.time)}
-                    className="flex items-center gap-1 rounded-md bg-[#1A2436] hover:bg-[#223047] px-2 py-0.5 text-[#F0F3FA] border border-[#273247]"
-                  >
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: (m.actorId === '__camera__' ? shot.camera.color : m.actorId ? shot.actors.find((a) => a.id === m.actorId)?.color : undefined) || m.color }} />
-                    <span>{m.label}</span>
-                    <span
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setMarkers(markers.filter((x) => x.id !== m.id));
-                      }}
-                      className="ml-1 text-[#98A5BC] hover:text-[#EF5261]"
+                {(() => {
+                  const liveCues: Array<{
+                    id: string;
+                    time: number;
+                    label: string;
+                    color: string;
+                    onSelect: () => void;
+                    onRemove: () => void;
+                  }> = [];
+
+                  (shot.camera.movement.keyframes || []).forEach((kf) => {
+                    liveCues.push({
+                      id: `cam_${kf.id}`,
+                      time: kf.time,
+                      label: `Camera @ ${kf.time.toFixed(1)}s`,
+                      color: shot.camera.color || '#f59e0b',
+                      onSelect: () => {
+                        setSelectedActorId('__camera__');
+                        setCurrentTime(kf.time);
+                      },
+                      onRemove: () => removeCameraKeyframe(kf.id),
+                    });
+                  });
+
+                  shot.actors.forEach((act) => {
+                    (act.trajectory.keyframes || []).forEach((kf) => {
+                      liveCues.push({
+                        id: `act_${act.id}_${kf.id}`,
+                        time: kf.time,
+                        label: `${act.name} @ ${kf.time.toFixed(1)}s`,
+                        color: act.color || '#22d3ee',
+                        onSelect: () => {
+                          setSelectedActorId(act.id);
+                          setCurrentTime(kf.time);
+                        },
+                        onRemove: () => removeActorKeyframe(act.id, kf.id),
+                      });
+                    });
+                  });
+
+                  markers.forEach((m) => {
+                    liveCues.push({
+                      id: m.id,
+                      time: m.time,
+                      label: m.label,
+                      color: m.color,
+                      onSelect: () => setCurrentTime(m.time),
+                      onRemove: () => setMarkers(markers.filter((x) => x.id !== m.id)),
+                    });
+                  });
+
+                  liveCues.sort((a, b) => a.time - b.time);
+
+                  if (liveCues.length === 0) {
+                    return <span className="text-[#98A5BC] text-[9.5px]">No cues placed yet (move any selected object to auto-create a cue)</span>;
+                  }
+
+                  return liveCues.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={c.onSelect}
+                      className="flex items-center gap-1 rounded-md bg-[#1A2436] hover:bg-[#223047] px-2 py-0.5 text-[#F0F3FA] border border-[#273247]"
                     >
-                      ×
-                    </span>
-                  </button>
-                ))}
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: c.color }} />
+                      <span>{c.label}</span>
+                      <span
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          c.onRemove();
+                        }}
+                        className="ml-1 text-[#98A5BC] hover:text-[#EF5261]"
+                        title="Delete this Cue"
+                      >
+                        ×
+                      </span>
+                    </button>
+                  ));
+                })()}
               </div>
             </div>
             <div className="flex items-center gap-1.5">

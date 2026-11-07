@@ -1242,11 +1242,12 @@ CURATED_SCULPT_SPECS['برج مراقبة حجري'] = CURATED_SCULPT_SPECS['med
 CURATED_SCULPT_SPECS['برج مراقبة حجري أسطواني'] = CURATED_SCULPT_SPECS['medieval round watchtower'];
 CURATED_SCULPT_SPECS['برج مراقبة حجري أسطواني عتيق'] = CURATED_SCULPT_SPECS['medieval round watchtower'];
 
-CURATED_SCULPT_SPECS['cottage'] = CURATED_SCULPT_SPECS['timber cottage'];
-CURATED_SCULPT_SPECS['timber house'] = CURATED_SCULPT_SPECS['timber cottage'];
-CURATED_SCULPT_SPECS['كوخ'] = CURATED_SCULPT_SPECS['timber cottage'];
-CURATED_SCULPT_SPECS['كوخ خشبي'] = CURATED_SCULPT_SPECS['timber cottage'];
-CURATED_SCULPT_SPECS['كوخ قروي خشبي'] = CURATED_SCULPT_SPECS['timber cottage'];
+CURATED_SCULPT_SPECS['timber cottage'] = CURATED_SCULPT_SPECS['thatched timber cottage'];
+CURATED_SCULPT_SPECS['cottage'] = CURATED_SCULPT_SPECS['thatched timber cottage'];
+CURATED_SCULPT_SPECS['timber house'] = CURATED_SCULPT_SPECS['thatched timber cottage'];
+CURATED_SCULPT_SPECS['كوخ'] = CURATED_SCULPT_SPECS['thatched timber cottage'];
+CURATED_SCULPT_SPECS['كوخ خشبي'] = CURATED_SCULPT_SPECS['thatched timber cottage'];
+CURATED_SCULPT_SPECS['كوخ قروي خشبي'] = CURATED_SCULPT_SPECS['thatched timber cottage'];
 
 CURATED_SCULPT_SPECS['lighthouse'] = CURATED_SCULPT_SPECS['coastal lighthouse'];
 CURATED_SCULPT_SPECS['منارة'] = CURATED_SCULPT_SPECS['coastal lighthouse'];

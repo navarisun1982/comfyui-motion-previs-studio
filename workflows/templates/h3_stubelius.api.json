@@ -25,7 +25,7 @@
       "text_encoder": "Minimax h3\\qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
       "video_vae": "minimax\\minimax_h3_video_vae_fp16.safetensors",
       "audio_vae": "minimax\\minimax_h3_audio_vae_fp32.safetensors",
-      "speedup_lora": "MiniMax H3\\MiniMax-H3-Ref2VA-Acc-8Step.safetensors",
+      "speedup_lora": "MiniMax H3\\minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors",
       "pdmd_lora": "none",
       "extra_lora_1": "none",
       "extra_lora_1_strength": 1,

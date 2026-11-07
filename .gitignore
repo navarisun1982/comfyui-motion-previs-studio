@@ -48,3 +48,7 @@ PROGRESS.md
 TASKS.md
 AGENTS.md
 .agents/
+
+# Local Studio Storage runtime directory & config
+studio_storage/
+studio-storage-config.json

@@ -4,6 +4,7 @@ import { logger } from '../stores/useLogStore';
 import { ShotCreationMode, Actor, ShotSpec, createDefaultShotSpec, FocalLength, CINEMATIC_ENVIRONMENT_PRESETS } from '../types/shotspec';
 import { compileReadyMadeMotionKeyframes } from '../engine/kinematics';
 import { safeGetItem, safeSetItem, safeRemoveItem, STORAGE_KEYS } from '../services/storage';
+import { saveProjectToStudioStorage } from '../services/studioStorageClient';
 import {
   ChevronDown,
   ChevronRight,
@@ -39,20 +40,23 @@ function withMotion(
   actor: Actor,
   clipId: string,
   durationSec: number,
-  travelMode: 'auto' | 'travel' | 'in-place' = 'auto'
+  travelMode: 'auto' | 'travel' | 'in-place' = 'auto',
+  motionCycles = 1
 ): Actor {
   const startPos = {
     x: actor.trajectory.startPosition.x ?? 50,
     y: actor.trajectory.startPosition.y ?? 50,
-    z: 0,
+    z: actor.trajectory.startPosition.z ?? 0,
   };
   const endPos = {
     x: actor.trajectory.endPosition.x ?? startPos.x,
     y: actor.trajectory.endPosition.y ?? startPos.y,
-    z: 0,
+    z: actor.trajectory.endPosition.z ?? startPos.z,
   };
   const hasExplicitTravelTarget =
-    travelMode === 'travel' && Math.hypot(endPos.x - startPos.x, endPos.y - startPos.y) > 0.5;
+    travelMode === 'travel' &&
+    (Math.hypot(endPos.x - startPos.x, endPos.y - startPos.y) > 0.5 ||
+      Math.abs((endPos.z ?? 0) - (startPos.z ?? 0)) > 0.5);
 
   const compiled = compileReadyMadeMotionKeyframes(actor, clipId, {
     startTimeSec: 0,
@@ -61,15 +65,27 @@ function withMotion(
     targetPosition: hasExplicitTravelTarget ? endPos : undefined,
     startRotation: actor.rotation,
     travelMode,
+    motionCycles,
   });
 
-  // Ensure every keyframe stays grounded on the stage floor (z = 0) unless jumping
+  const allowsElevation =
+    clipId === 'human-jump-leap' ||
+    clipId === 'human-climb-ascend' ||
+    clipId === 'quad-pounce-leap' ||
+    clipId === 'quad-gallop-charge' ||
+    clipId.startsWith('air-') ||
+    clipId === 'prop-float-spin' ||
+    clipId === 'prop-drop-bounce' ||
+    startPos.z > 0 ||
+    endPos.z > 0;
+
+  // Ensure floor-bound clips stay grounded (z = 0) while preserving 3D altitude for aerial/jump clips
   const groundedKeyframes = compiled.keyframes.map((kf) => ({
     ...kf,
     position: {
       x: kf.position.x,
       y: kf.position.y,
-      z: clipId === 'human-jump-leap' ? (kf.position.z ?? 0) : 0,
+      z: allowsElevation ? (kf.position.z ?? startPos.z) : 0,
     },
   }));
 
@@ -77,6 +93,7 @@ function withMotion(
     ...actor,
     actionDescription: actor.actionDescription || compiled.clip.promptPhrase,
     motionClip: compiled.clip.id,
+    motionCycles,
     gait: compiled.clip.baseGait ?? 'none',
     posePreset: compiled.clip.basePosePreset,
     rotation: compiled.endRotation,
@@ -87,7 +104,7 @@ function withMotion(
       endPosition:
         groundedKeyframes.length > 0
           ? groundedKeyframes[groundedKeyframes.length - 1].position
-          : { ...compiled.endPosition, z: 0 },
+          : { ...compiled.endPosition, z: allowsElevation ? (compiled.endPosition.z ?? endPos.z) : 0 },
       keyframes: groundedKeyframes,
     },
   };
@@ -121,202 +138,371 @@ export const buildDefaultShotSpec = (shotItem: ShotBibleItem): ShotSpec => {
   // SCENE 01: NEON PROTOCOL (Cyberpunk Neo-Noir Action)
   // ==========================================================================
   if (shotItem.id === 'shot-01a') {
-    baseSpec.environment = getEnvPreset('env-cyberpunk-alley');
+    baseSpec.environment = {
+      ...getEnvPreset('env-cyberpunk-alley'),
+      name: 'Rain-Slicked Neo-Tokyo Rooftop Helipad',
+      nameAr: 'مهبط طائرات على سطح ناطحة سحاب ممطرة في طوكيو الجديدة',
+      promptDescription:
+        'rain-slicked cyberpunk skyscraper rooftop helipad at neon night with wet reflective asphalt, glowing cyan perimeter beacons, steam vents, and towering Neo-Tokyo hologram skyline in the rain',
+      weather: 'rain',
+      groundSurface: 'asphalt-wet',
+      timeOfDay: 'neon-night',
+      fogDensity: 0.032,
+      ambientColor: '#06b6d4',
+    };
     baseSpec.camera.movement.type = 'dolly-in';
-    baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 50, y: 78, z: 10 };
-    baseSpec.camera.movement.endPosition = { x: 50, y: 66, z: 9 };
+    baseSpec.camera.movement.speed = 'rapid-dynamic';
+    baseSpec.camera.movement.startPosition = { x: 50, y: 74, z: 7 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 61, z: 6 };
     baseSpec.camera.movement.targetLookAt = { x: 50, y: 48 };
-    baseSpec.camera.angle = 'eye-level';
+    baseSpec.camera.angle = 'low-angle';
     baseSpec.camera.shotType = 'medium-wide';
     baseSpec.lighting = {
       style: 'neon-cyberpunk',
       direction: 'side-key',
       contrast: 'high-contrast',
       lights: [
-        { id: 'lgt-1', name: 'Cyan Alley Key', position: { x: 26, y: 58, z: 48 }, color: '#38bdf8', intensity: 3.4, enabled: true },
-        { id: 'lgt-2', name: 'Magenta Neon Fill', position: { x: 74, y: 56, z: 44 }, color: '#ec4899', intensity: 3.0, enabled: true },
-        { id: 'lgt-3', name: 'Warm Streetlamp Rim', position: { x: 50, y: 26, z: 62 }, color: '#fbbf24', intensity: 2.8, enabled: true },
+        { id: 'lgt-1', name: 'Drone Crimson Searchlight', position: { x: 56, y: 44, z: 54 }, color: '#f43f5e', intensity: 3.8, enabled: true },
+        { id: 'lgt-2', name: 'Cyan Rooftop Helipad Key', position: { x: 34, y: 56, z: 44 }, color: '#06b6d4', intensity: 3.5, enabled: true },
+        { id: 'lgt-3', name: 'Amber Skyline Backlight', position: { x: 50, y: 24, z: 64 }, color: '#f59e0b', intensity: 2.9, enabled: true },
       ],
     };
 
-    // Agent Kael walks forward toward the camera down the center of the alley (y: 36 -> 54, facing +Z = 0 deg)
+    // 1. Lead Cyber-Ronin Operative charging right across the rooftop and cleaving with his rigged glowing cyan plasma katana
     const kael = withMotion(
       {
         id: 'actor-kael',
-        name: 'Agent Kael',
+        name: 'Agent Kael (Cyber-Ronin)',
         kind: 'human',
-        color: '#3b82f6',
-        token: 'cyberpunk operative in a charcoal trenchcoat walking forward down a neon-lit alley',
-        actionDescription: 'walks forward with a natural steady stride down the neon alley',
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 36, z: 0 }, endPosition: { x: 50, y: 54, z: 0 } },
+        rigType: 'humanoid',
+        color: '#38bdf8',
+        token: 'cyberpunk samurai warrior holding a glowing cyan katana sword in rain-slicked tactical exo-armor',
+        actionDescription: 'charges forward from left to center across the wet rooftop and swings two powerful diagonal plasma katana slashes into the diving attack drone',
+        partGraph: {
+          dressRig: true,
+          palette: {
+            primaryClothing: '#0f172a',
+            secondaryClothing: '#1e293b',
+            metal: '#eab308',
+            weaponAccent: '#06b6d4',
+          },
+        },
+        rotation: { x: 0, y: 90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 38, y: 48, z: 0 }, endPosition: { x: 47, y: 48, z: 0 } },
       },
-      'human-walk-forward',
+      'human-sword-slash',
       durNumber,
-      'travel'
+      'travel',
+      2
     );
-    const interceptorCar = withMotion(
+
+    // 2. Primary Syndicate Hunter-Killer Drone diving aggressively from upper-right (z: 15 -> 4.5) straight into Kael's katana clash at center stage
+    const hunterDrone = withMotion(
       {
-        id: 'veh-interceptor',
-        name: 'Interceptor Coupe',
-        kind: 'car',
-        color: '#06b6d4',
-        scale: 1.0,
-        token: 'sleek cyberpunk sports car parked on the left side of the alley',
-        actionDescription: 'idles in place with glowing cyan headlights',
-        rotation: { x: 0, y: 25, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 34, y: 44, z: 0 }, endPosition: { x: 34, y: 44, z: 0 } },
+        id: 'actor-hunter-drone',
+        name: 'Hunter-Killer Attack Drone',
+        kind: 'aircraft',
+        color: '#f43f5e',
+        scale: 1.45,
+        modelUrl: 'https://polyfork.dev/cdn/survey-drone-7c71f9.glb',
+        token: 'armored autonomous hunter-killer combat drone with glowing crimson targeting optics and twin rotors',
+        actionDescription: 'dives steeply downward from upper-right directly toward Agent Kael for a close-range strike at center stage',
+        rotation: { x: 26, y: -90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 64, y: 48, z: 15 }, endPosition: { x: 51, y: 48, z: 4.5 } },
       },
-      'veh-idle-rumble',
+      'air-dive-attack',
       durNumber,
-      'in-place'
+      'travel',
+      1
     );
-    const cyberPine: Actor = {
-      id: 'env-cyber-pine',
-      name: 'Street Planter Tree',
-      kind: 'tree',
-      color: '#10b981',
-      scale: 0.9,
-      token: 'sculpted urban street tree on the right sidewalk',
-      actionDescription: 'framing the right side of the alley',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 66, y: 42, z: 0 }, endPosition: { x: 66, y: 42, z: 0 } },
+
+    // 3. Syndicate Gunship Overwatch hovering in the background sky (z: 13)
+    const gunshipOverwatch = withMotion(
+      {
+        id: 'actor-gunship-overwatch',
+        name: 'Syndicate Gunship Overwatch',
+        kind: 'spaceship',
+        color: '#f59e0b',
+        scale: 1.55,
+        modelUrl: 'https://polyfork.dev/cdn/gunship-d2c5a9.glb',
+        token: 'armored syndicate VTOL gunship hovering in the rain with twin thruster nacelles',
+        actionDescription: 'hovers menacingly in the background sky with subtle altitude stabilization',
+        rotation: { x: 8, y: 0, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 32, z: 13 }, endPosition: { x: 50, y: 32, z: 13 } },
+      },
+      'air-hover-bob',
+      durNumber,
+      'in-place',
+      2
+    );
+
+    // 4. Rooftop Communications Antenna Mast framing stage left
+    const rooftopAntenna: Actor = {
+      id: 'env-rooftop-antenna',
+      name: 'Rooftop Antenna Array',
+      kind: 'monolith',
+      color: '#38bdf8',
+      scale: 1.45,
+      modelUrl: 'https://polyfork.dev/cdn/rooftop-antenna-mast-6e4944.glb',
+      token: 'cyberpunk rooftop communications antenna mast drenched in heavy rain',
+      actionDescription: 'standing on the left side of the rooftop helipad',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 28, y: 34, z: 0 }, endPosition: { x: 28, y: 34, z: 0 } },
     };
 
-    baseSpec.actors = [kael, interceptorCar, cyberPine];
+    baseSpec.actors = [kael, hunterDrone, gunshipOverwatch, rooftopAntenna];
     baseSpec.sceneDescription =
-      'Cinematic dolly-in down a neon-lit cyberpunk alley as Agent Kael walks purposefully toward the camera past his parked Interceptor Coupe.';
+      'Dynamic 35mm low-angle push-in across a rain-slicked Neo-Tokyo rooftop helipad at midnight as Cyber-Ronin Agent Kael charges from stage left with a glowing cyan plasma katana slash colliding head-on with a steeply diving Syndicate Hunter-Killer Attack Drone while a VTOL Gunship hovers in the background sky.';
     return baseSpec;
   }
 
   if (shotItem.id === 'shot-01b') {
-    baseSpec.environment = getEnvPreset('env-cyberpunk-alley');
-    baseSpec.camera.movement.type = 'orbit-clockwise';
-    baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 50, y: 62, z: 10 };
-    baseSpec.camera.movement.endPosition = { x: 60, y: 56, z: 10 };
-    baseSpec.camera.movement.targetLookAt = { x: 50, y: 50 };
-    baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'medium-close-up';
+    baseSpec.environment = {
+      ...getEnvPreset('env-cyberpunk-alley'),
+      name: 'Neo-Tokyo Rain-Slicked Security Checkpoint Alley',
+      nameAr: 'زقاق نقطة تفتيش أمنية ممطرة في طوكيو الجديدة',
+      promptDescription:
+        'rain-slicked cyberpunk security checkpoint alley at neon night with wet reflective asphalt, crimson turret laser beams, steam vents, and holographic signage',
+      weather: 'rain',
+      groundSurface: 'asphalt-wet',
+      timeOfDay: 'neon-night',
+      fogDensity: 0.03,
+      ambientColor: '#06b6d4',
+    };
+    baseSpec.camera.movement.type = 'truck-right';
+    baseSpec.camera.movement.speed = 'rapid-dynamic';
+    baseSpec.camera.movement.startPosition = { x: 43, y: 73, z: 7 };
+    baseSpec.camera.movement.endPosition = { x: 57, y: 71, z: 7 };
+    baseSpec.camera.movement.targetLookAt = { x: 50, y: 47 };
+    baseSpec.camera.angle = 'low-angle';
+    baseSpec.camera.shotType = 'medium-wide';
     baseSpec.lighting = {
       style: 'neon-cyberpunk',
       direction: 'side-key',
-      contrast: 'balanced',
+      contrast: 'high-contrast',
       lights: [
-        { id: 'lgt-1', name: 'Hologram Table Glow', position: { x: 50, y: 60, z: 36 }, color: '#38bdf8', intensity: 3.4, enabled: true },
-        { id: 'lgt-2', name: 'Magenta Key Right', position: { x: 72, y: 50, z: 48 }, color: '#a855f7', intensity: 3.0, enabled: true },
-        { id: 'lgt-3', name: 'Alley Backlight', position: { x: 50, y: 28, z: 58 }, color: '#f59e0b', intensity: 2.6, enabled: true },
+        { id: 'lgt-1', name: 'Plasma Muzzle Cyan Key', position: { x: 34, y: 56, z: 42 }, color: '#06b6d4', intensity: 3.6, enabled: true },
+        { id: 'lgt-2', name: 'Turret Crimson Flood', position: { x: 68, y: 52, z: 46 }, color: '#f43f5e', intensity: 3.5, enabled: true },
+        { id: 'lgt-3', name: 'Cruiser Headlight Backfill', position: { x: 50, y: 26, z: 58 }, color: '#f59e0b', intensity: 2.8, enabled: true },
       ],
     };
 
+    // 1. Agent Kael on stage left aiming and firing his rigged plasma carbine (Equipment_Gun) with 3 recoil bursts
     const kael = withMotion(
       {
         id: 'actor-kael',
-        name: 'Agent Kael',
+        name: 'Agent Kael (Tactical Marksman)',
         kind: 'human',
-        color: '#3b82f6',
-        token: 'cyberpunk operative standing on the left side of the terminal table',
-        actionDescription: 'scans the surroundings alertly during the informant meeting',
-        rotation: { x: 0, y: 90, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 42, y: 50, z: 0 }, endPosition: { x: 42, y: 50, z: 0 } },
+        rigType: 'humanoid',
+        color: '#38bdf8',
+        token: 'cyberpunk tactical operative aiming and firing a plasma rifle gun in rain-slicked exo-armor',
+        actionDescription: 'holds a low tactical stance on stage left, aiming his plasma rifle across the alley and firing three rapid recoil bursts at the Syndicate checkpoint',
+        partGraph: {
+          dressRig: true,
+          palette: {
+            primaryClothing: '#0f172a',
+            secondaryClothing: '#1e293b',
+            metal: '#38bdf8',
+            weaponAccent: '#06b6d4',
+          },
+        },
+        rotation: { x: 0, y: 85, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 36, y: 50, z: 0 }, endPosition: { x: 36, y: 50, z: 0 } },
       },
-      'human-look-search',
+      'human-aim-fire',
       durNumber,
-      'in-place'
+      'in-place',
+      3
     );
-    const cipher = withMotion(
-      {
-        id: 'actor-cipher',
-        name: 'Cipher Informant',
-        kind: 'human',
-        color: '#a855f7',
-        token: 'hooded informant standing on the right side of the table',
-        actionDescription: 'signals and gestures toward Agent Kael across the table',
-        rotation: { x: 0, y: -90, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 58, y: 50, z: 0 }, endPosition: { x: 58, y: 50, z: 0 } },
-      },
-      'human-wave-greet',
-      durNumber,
-      'in-place'
-    );
-    const holoTable: Actor = {
-      id: 'prop-holo-table',
-      name: 'Holo-Terminal Table',
-      kind: 'table',
-      color: '#06b6d4',
-      scale: 0.9,
-      token: 'sleek briefing table between the two operatives',
-      actionDescription: 'positioned at center stage between Kael and Cipher',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 50, z: 0 }, endPosition: { x: 50, y: 50, z: 0 } },
-    };
 
-    baseSpec.actors = [kael, cipher, holoTable];
+    // 2. Syndicate Enforcer Guard on stage right staggering backward under Kael's plasma fire
+    const enforcerGuard = withMotion(
+      {
+        id: 'actor-syndicate-enforcer',
+        name: 'Syndicate Enforcer Guard',
+        kind: 'human',
+        rigType: 'humanoid',
+        color: '#f43f5e',
+        token: 'armored syndicate security soldier wearing ballistic helmet and chest armor staggering backward from gunfire impact',
+        actionDescription: 'reels and staggers backward under the impact of Kael plasma rifle fire',
+        partGraph: {
+          dressRig: true,
+          palette: {
+            primaryClothing: '#450a0a',
+            secondaryClothing: '#18181b',
+            metal: '#f43f5e',
+            weaponAccent: '#f43f5e',
+          },
+        },
+        rotation: { x: 0, y: -95, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 56, y: 49, z: 0 }, endPosition: { x: 63, y: 47, z: 0 } },
+      },
+      'human-hit-stagger',
+      durNumber,
+      'travel',
+      2
+    );
+
+    // 3. Syndicate Patrol Cruiser speeding into the alley and slamming on the brakes with nose-dive pitch
+    const patrolCruiser = withMotion(
+      {
+        id: 'veh-patrol-cruiser',
+        name: 'Syndicate Patrol Cruiser',
+        kind: 'vehicle',
+        color: '#a855f7',
+        scale: 1.55,
+        modelUrl: 'https://polyfork.dev/cdn/patrol-cruiser-bed309.glb',
+        token: 'armored cyberpunk police patrol cruiser skidding to a hard brake stop on wet neon asphalt',
+        actionDescription: 'speeds down the center of the rain-slicked alley and slams on the brakes with a sharp forward nose-dive',
+        rotation: { x: 0, y: -6, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 52, y: 30, z: 0 }, endPosition: { x: 50, y: 43, z: 0 } },
+      },
+      'veh-hard-brake',
+      durNumber,
+      'travel',
+      1
+    );
+
+    // 4. Automated Defense Turret on the right flank returning fire with recoil
+    const defenseTurret = withMotion(
+      {
+        id: 'prop-defense-turret',
+        name: 'Automated Defense Turret',
+        kind: 'weapon',
+        color: '#f59e0b',
+        scale: 1.25,
+        modelUrl: 'https://polyfork.dev/cdn/defense-turret-12ba8d.glb',
+        token: 'armored automated security defense turret emplacement firing heavy rounds',
+        actionDescription: 'recoils rhythmically on the right flank while exchanging fire across the checkpoint',
+        rotation: { x: 0, y: -90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 65, y: 51, z: 0 }, endPosition: { x: 65, y: 51, z: 0 } },
+      },
+      'prop-recoil-kick',
+      durNumber,
+      'in-place',
+      3
+    );
+
+    baseSpec.actors = [kael, enforcerGuard, patrolCruiser, defenseTurret];
     baseSpec.sceneDescription =
-      'Smooth 50mm orbital camera move around Agent Kael and the Cipher Informant as they exchange intelligence across a central briefing table.';
+      'Dynamic 35mm low-angle lateral tracking shot across a rain-slicked Neo-Tokyo security checkpoint as Agent Kael fires three rapid bursts from his rigged plasma rifle, staggering a Syndicate Enforcer Guard backward beside a recoiling Automated Defense Turret while an armored Patrol Cruiser slams on its brakes in the center lane.';
     return baseSpec;
   }
 
   if (shotItem.id === 'shot-01c') {
-    baseSpec.environment = getEnvPreset('env-cyberpunk-alley');
+    baseSpec.environment = {
+      ...getEnvPreset('env-cyberpunk-alley'),
+      name: 'Neo-Tokyo Neon Highway Intersection',
+      nameAr: 'تقاطع طريق سريع مضاء بالنيون في طوكيو الجديدة',
+      promptDescription:
+        'wide rain-drenched cyberpunk highway intersection at midnight with glowing neon holographic billboards, wet tire reflections, and high-speed pursuit traffic',
+      weather: 'rain',
+      groundSurface: 'asphalt-wet',
+      timeOfDay: 'neon-night',
+      fogDensity: 0.028,
+      ambientColor: '#a855f7',
+    };
     baseSpec.camera.movement.type = 'dolly-in';
     baseSpec.camera.movement.speed = 'rapid-dynamic';
-    baseSpec.camera.movement.startPosition = { x: 50, y: 76, z: 10 };
-    baseSpec.camera.movement.endPosition = { x: 50, y: 62, z: 9 };
+    baseSpec.camera.movement.startPosition = { x: 50, y: 74, z: 6 };
+    baseSpec.camera.movement.endPosition = { x: 50, y: 62, z: 5 };
     baseSpec.camera.movement.targetLookAt = { x: 50, y: 48 };
-    baseSpec.camera.angle = 'dutch-angle';
-    baseSpec.camera.shotType = 'medium-wide';
+    baseSpec.camera.angle = 'low-angle';
+    baseSpec.camera.shotType = 'wide';
     baseSpec.lighting = {
       style: 'neon-cyberpunk',
-      direction: 'overhead-top',
+      direction: 'side-key',
       contrast: 'high-contrast',
       lights: [
-        { id: 'lgt-1', name: 'Searchlight Beam', position: { x: 50, y: 55, z: 68 }, color: '#f43f5e', intensity: 3.5, enabled: true },
-        { id: 'lgt-2', name: 'Cyan Rim Fill', position: { x: 28, y: 44, z: 45 }, color: '#06b6d4', intensity: 3.0, enabled: true },
+        { id: 'lgt-1', name: 'Magenta Highway Billboard Key', position: { x: 66, y: 52, z: 54 }, color: '#ec4899', intensity: 3.8, enabled: true },
+        { id: 'lgt-2', name: 'Cyan Streetlight Rim', position: { x: 32, y: 54, z: 48 }, color: '#06b6d4', intensity: 3.5, enabled: true },
+        { id: 'lgt-3', name: 'Headlight Streak Fill', position: { x: 50, y: 28, z: 56 }, color: '#f59e0b', intensity: 3.0, enabled: true },
       ],
     };
 
+    // 1. Agent Kael leaping in a high parabolic mid-air vault across the street right over the drifting cruiser's path
     const kael = withMotion(
       {
         id: 'actor-kael',
-        name: 'Agent Kael',
+        name: 'Agent Kael (Cyber-Runner)',
         kind: 'human',
-        color: '#3b82f6',
-        token: 'operative in tactical stance aiming forward during ambush',
-        actionDescription: 'raises weapon in a tactical stance and fires with recoil',
-        rotation: { x: 0, y: 0, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 44, y: 48, z: 0 }, endPosition: { x: 44, y: 48, z: 0 } },
+        rigType: 'humanoid',
+        color: '#38bdf8',
+        token: 'cyberpunk samurai operative holding a glowing cyan katana sword executing a high mid-air acrobatic leap across the street',
+        actionDescription: 'crouches and launches into an explosive mid-air parabolic leap from stage left to stage right directly over the drifting interceptor lane',
+        partGraph: {
+          dressRig: true,
+          palette: {
+            primaryClothing: '#0f172a',
+            secondaryClothing: '#1e293b',
+            metal: '#eab308',
+            weaponAccent: '#06b6d4',
+          },
+        },
+        rotation: { x: 0, y: 90, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 36, y: 49, z: 0 }, endPosition: { x: 58, y: 49, z: 0 } },
       },
-      'human-aim-fire',
+      'human-jump-leap',
       durNumber,
-      'in-place'
+      'travel',
+      1
     );
-    const cipher = withMotion(
+
+    // 2. Syndicate Interceptor Cruiser executing a high-speed lateral drift turn across center stage
+    const driftCruiser = withMotion(
       {
-        id: 'actor-cipher',
-        name: 'Cipher Informant',
-        kind: 'human',
-        color: '#a855f7',
-        token: 'informant sneaking forward into cover on the right flank',
-        actionDescription: 'sneaks forward in a low cautious stealth crouch',
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 58, y: 42, z: 0 }, endPosition: { x: 58, y: 54, z: 0 } },
+        id: 'veh-drift-cruiser',
+        name: 'Syndicate Drift Cruiser',
+        kind: 'vehicle',
+        color: '#f43f5e',
+        scale: 1.55,
+        modelUrl: 'https://polyfork.dev/cdn/patrol-cruiser-bed309.glb',
+        token: 'cyberpunk interceptor cruiser powersliding in a dramatic lateral tire-smoking drift across wet asphalt',
+        actionDescription: 'powerslides into a sharp 55-degree lateral drift turn across the wet neon intersection with body roll',
+        rotation: { x: 0, y: 12, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 42, y: 33, z: 0 }, endPosition: { x: 53, y: 47, z: 0 } },
       },
-      'human-sneak-prowl',
+      'veh-drift-turn',
       durNumber,
-      'travel'
+      'travel',
+      1
     );
-    const barricade: Actor = {
-      id: 'prop-barricade',
-      name: 'Security Barricade',
+
+    // 3. Outlaw Cyber-Motorcycle launching forward at full throttle along the right lane
+    const cyberMotorcycle = withMotion(
+      {
+        id: 'veh-cyber-bike',
+        name: 'Outlaw Cyber-Motorcycle',
+        kind: 'bicycle',
+        color: '#f59e0b',
+        scale: 1.35,
+        modelUrl: 'https://polyfork.dev/cdn/touring-motorcycle-3b1ad3.glb',
+        token: 'high-speed cyberpunk motorcycle launching forward with rear-squat acceleration on wet neon street',
+        actionDescription: 'accelerates explosively forward along the right flank with rear-squat nose lift',
+        rotation: { x: 0, y: 0, z: 0 },
+        trajectory: { startTimeSeconds: 0, startPosition: { x: 65, y: 35, z: 0 }, endPosition: { x: 65, y: 53, z: 0 } },
+      },
+      'veh-accel-launch',
+      durNumber,
+      'travel',
+      1
+    );
+
+    // 4. Holographic Billboard Gantry framing the background intersection
+    const holoBillboard: Actor = {
+      id: 'env-holo-billboard',
+      name: 'Neon Holo-Billboard Gantry',
       kind: 'monolith',
-      color: '#eab308',
-      scale: 0.75,
-      token: 'armored security pillar providing tactical cover',
-      actionDescription: 'standing on stage left',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 34, y: 46, z: 0 }, endPosition: { x: 34, y: 46, z: 0 } },
+      color: '#a855f7',
+      scale: 1.6,
+      modelUrl: 'https://polyfork.dev/cdn/holo-billboard-frame-96e583.glb',
+      token: 'towering cyberpunk holographic billboard gantry glowing in the rain',
+      actionDescription: 'standing in the background intersection',
+      trajectory: { startTimeSeconds: 0, startPosition: { x: 32, y: 32, z: 0 }, endPosition: { x: 32, y: 32, z: 0 } },
     };
 
-    baseSpec.actors = [kael, cipher, barricade];
+    baseSpec.actors = [kael, driftCruiser, cyberMotorcycle, holoBillboard];
     baseSpec.sceneDescription =
-      'Dynamic Dutch-angle push-in as crimson searchlights sweep the alley; Agent Kael holds tactical cover while Cipher sneaks forward along the flank.';
+      'Explosive 24mm wide low-angle push-in across a rain-slicked Neo-Tokyo intersection as Agent Kael executes a high-arcing mid-air leap over a powersliding Syndicate Drift Cruiser while an Outlaw Cyber-Motorcycle launches forward at full throttle.';
     return baseSpec;
   }
 
@@ -908,357 +1094,6 @@ export const buildDefaultShotSpec = (shotItem: ShotBibleItem): ShotSpec => {
     return baseSpec;
   }
 
-  // ==========================================================================
-  // SCENE 03: GOLDEN HOUR ROMANCE (Intimate Close-Ups, OTS Dialogue & Two-Shots)
-  // ==========================================================================
-  if (shotItem.id === 'shot-03a') {
-    baseSpec.environment = getEnvPreset('env-modern-penthouse');
-    baseSpec.camera.movement.type = 'dolly-in';
-    baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 50, y: 65, z: 10 };
-    baseSpec.camera.movement.endPosition = { x: 50, y: 58, z: 10 };
-    baseSpec.camera.movement.targetLookAt = { x: 50, y: 48 };
-    baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'medium';
-    baseSpec.lighting = {
-      style: 'golden-hour',
-      direction: 'side-key',
-      contrast: 'soft',
-      lights: [
-        { id: 'lgt-1', name: 'Sunset Golden Key', position: { x: 32, y: 58, z: 46 }, color: '#f59e0b', intensity: 3.5, enabled: true },
-        { id: 'lgt-2', name: 'Warm Rose Fill', position: { x: 68, y: 58, z: 44 }, color: '#f472b6', intensity: 2.8, enabled: true },
-        { id: 'lgt-3', name: 'Amber Hair Rim', position: { x: 50, y: 30, z: 56 }, color: '#fde047', intensity: 3.0, enabled: true },
-      ],
-    };
-
-    const julian = withMotion(
-      {
-        id: 'actor-julian',
-        name: 'Julian',
-        kind: 'human',
-        color: '#3b82f6',
-        token: 'romantic lead in a tailored navy coat walking gently toward Elena at sunset',
-        actionDescription: 'walks forward gently to meet Elena at center stage',
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 42, y: 48, z: 0 }, endPosition: { x: 47.5, y: 48, z: 0 } },
-      },
-      'human-walk-forward',
-      durNumber,
-      'travel'
-    );
-    const elena = withMotion(
-      {
-        id: 'actor-elena',
-        name: 'Elena',
-        kind: 'human',
-        color: '#ec4899',
-        token: 'graceful heroine in a rose-silk evening dress walking toward Julian',
-        actionDescription: 'walks forward warmly to meet Julian face to face',
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 58, y: 48, z: 0 }, endPosition: { x: 52.5, y: 48, z: 0 } },
-      },
-      'human-walk-forward',
-      durNumber,
-      'travel'
-    );
-
-    baseSpec.actors = [julian, elena];
-    baseSpec.sceneDescription =
-      'Romantic 50mm two-shot dolly-in across the golden-hour terrace as Julian and Elena walk toward each other and meet face-to-face.';
-    return baseSpec;
-  }
-
-  if (shotItem.id === 'shot-03b') {
-    baseSpec.environment = getEnvPreset('env-modern-penthouse');
-    baseSpec.camera.movement.type = 'dolly-in';
-    baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 49, y: 57, z: 10 };
-    baseSpec.camera.movement.endPosition = { x: 50.5, y: 54.5, z: 10 };
-    baseSpec.camera.movement.targetLookAt = { x: 52, y: 48 };
-    baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'close-up';
-    baseSpec.lighting = {
-      style: 'golden-hour',
-      direction: 'front-soft',
-      contrast: 'soft',
-      lights: [
-        { id: 'lgt-1', name: 'Beauty Key Light', position: { x: 60, y: 58, z: 45 }, color: '#fde047', intensity: 3.5, enabled: true },
-        { id: 'lgt-2', name: 'Soft Rose Cheek Fill', position: { x: 42, y: 56, z: 42 }, color: '#f472b6', intensity: 2.8, enabled: true },
-        { id: 'lgt-3', name: 'Golden Backlight Rim', position: { x: 54, y: 36, z: 54 }, color: '#f59e0b', intensity: 3.2, enabled: true },
-      ],
-    };
-
-    const elena = withMotion(
-      {
-        id: 'actor-elena',
-        name: 'Elena',
-        kind: 'human',
-        color: '#ec4899',
-        token: 'graceful heroine in rose-silk dress smiling and gesturing softly in close-up',
-        actionDescription: 'waves and gestures warmly toward Julian in intimate close-up',
-        rotation: { x: 0, y: -25, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 52, y: 48, z: 0 }, endPosition: { x: 52, y: 48, z: 0 } },
-      },
-      'human-wave-greet',
-      durNumber,
-      'in-place'
-    );
-    const julianOts = withMotion(
-      {
-        id: 'actor-julian',
-        name: 'Julian (OTS Foreground)',
-        kind: 'human',
-        color: '#3b82f6',
-        token: 'romantic lead in foreground left shoulder framing the over-the-shoulder shot',
-        actionDescription: 'stands listening attentively in foreground over-the-shoulder framing',
-        rotation: { x: 0, y: 155, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 46.5, y: 52, z: 0 }, endPosition: { x: 46.5, y: 52, z: 0 } },
-      },
-      'human-idle-breathe',
-      durNumber,
-      'in-place'
-    );
-
-    baseSpec.actors = [elena, julianOts];
-    baseSpec.sceneDescription =
-      'Intimate 85mm Over-The-Shoulder Close-Up on Elena as golden sunset light catches her face while she speaks to Julian.';
-    return baseSpec;
-  }
-
-  if (shotItem.id === 'shot-03c') {
-    baseSpec.environment = getEnvPreset('env-modern-penthouse');
-    baseSpec.camera.movement.type = 'dolly-in';
-    baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 51, y: 57, z: 10 };
-    baseSpec.camera.movement.endPosition = { x: 49.5, y: 54.5, z: 10 };
-    baseSpec.camera.movement.targetLookAt = { x: 48, y: 48 };
-    baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'close-up';
-    baseSpec.lighting = {
-      style: 'golden-hour',
-      direction: 'side-key',
-      contrast: 'soft',
-      lights: [
-        { id: 'lgt-1', name: 'Warm Sunset Key', position: { x: 38, y: 58, z: 45 }, color: '#f59e0b', intensity: 3.5, enabled: true },
-        { id: 'lgt-2', name: 'Twilight Lavender Fill', position: { x: 60, y: 56, z: 42 }, color: '#c084fc', intensity: 2.8, enabled: true },
-        { id: 'lgt-3', name: 'Shoulder Rim Glow', position: { x: 46, y: 36, z: 54 }, color: '#fde047', intensity: 3.0, enabled: true },
-      ],
-    };
-
-    const julian = withMotion(
-      {
-        id: 'actor-julian',
-        name: 'Julian',
-        kind: 'human',
-        color: '#3b82f6',
-        token: 'romantic lead speaking earnestly in an intimate 85mm close-up',
-        actionDescription: 'looks intently at Elena with gentle head movement during his confession',
-        rotation: { x: 0, y: 25, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 48, y: 48, z: 0 }, endPosition: { x: 48, y: 48, z: 0 } },
-      },
-      'human-look-search',
-      durNumber,
-      'in-place'
-    );
-    const elenaOts = withMotion(
-      {
-        id: 'actor-elena',
-        name: 'Elena (OTS Foreground)',
-        kind: 'human',
-        color: '#ec4899',
-        token: 'heroine in foreground right framing the reverse over-the-shoulder close-up',
-        actionDescription: 'stands close in the right foreground listening to Julian',
-        rotation: { x: 0, y: -155, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 53.5, y: 52, z: 0 }, endPosition: { x: 53.5, y: 52, z: 0 } },
-      },
-      'human-idle-breathe',
-      durNumber,
-      'in-place'
-    );
-
-    baseSpec.actors = [julian, elenaOts];
-    baseSpec.sceneDescription =
-      'Reverse 85mm Over-The-Shoulder Close-Up on Julian as he confesses his feelings to Elena in warm golden-hour light.';
-    return baseSpec;
-  }
-
-  if (shotItem.id === 'shot-03d') {
-    baseSpec.environment = getEnvPreset('env-rustic-hearth');
-    baseSpec.camera.movement.type = 'truck-right';
-    baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 48.5, y: 55.5, z: 10 };
-    baseSpec.camera.movement.endPosition = { x: 51.5, y: 55.5, z: 10 };
-    baseSpec.camera.movement.targetLookAt = { x: 50, y: 49 };
-    baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'extreme-close-up';
-    baseSpec.lighting = {
-      style: 'practical-candlelight',
-      direction: 'front-soft',
-      contrast: 'soft',
-      lights: [
-        { id: 'lgt-1', name: 'Candlelight Face Glow', position: { x: 50, y: 56, z: 42 }, color: '#fb923c', intensity: 3.5, enabled: true },
-        { id: 'lgt-2', name: 'Rose Amber Rim', position: { x: 50, y: 38, z: 48 }, color: '#f472b6', intensity: 3.0, enabled: true },
-      ],
-    };
-
-    const julian = withMotion(
-      {
-        id: 'actor-julian',
-        name: 'Julian',
-        kind: 'human',
-        color: '#3b82f6',
-        token: 'romantic lead standing inches from Elena in profile extreme close-up',
-        actionDescription: 'stands inches from Elena with gentle breathing in tight profile close-up',
-        rotation: { x: 0, y: 75, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 48.4, y: 49, z: 0 }, endPosition: { x: 48.4, y: 49, z: 0 } },
-      },
-      'human-idle-breathe',
-      durNumber,
-      'in-place'
-    );
-    const elena = withMotion(
-      {
-        id: 'actor-elena',
-        name: 'Elena',
-        kind: 'human',
-        color: '#ec4899',
-        token: 'heroine standing inches from Julian in profile extreme close-up',
-        actionDescription: 'gazes into Julian eyes in an intimate profile extreme close-up',
-        rotation: { x: 0, y: -75, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 51.6, y: 49, z: 0 }, endPosition: { x: 51.6, y: 49, z: 0 } },
-      },
-      'human-idle-breathe',
-      durNumber,
-      'in-place'
-    );
-
-    baseSpec.actors = [julian, elena];
-    baseSpec.sceneDescription =
-      'Ultra-intimate 135mm Extreme Close-Up profile two-shot as Julian and Elena stand inches apart by flickering firelight.';
-    return baseSpec;
-  }
-
-  if (shotItem.id === 'shot-03e') {
-    baseSpec.environment = getEnvPreset('env-rustic-hearth');
-    baseSpec.camera.movement.type = 'orbit-counter-clockwise';
-    baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 50, y: 61, z: 10 };
-    baseSpec.camera.movement.endPosition = { x: 42, y: 58, z: 10 };
-    baseSpec.camera.movement.targetLookAt = { x: 50, y: 50 };
-    baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'medium-close-up';
-    baseSpec.lighting = {
-      style: 'practical-candlelight',
-      direction: 'side-key',
-      contrast: 'balanced',
-      lights: [
-        { id: 'lgt-1', name: 'Hearth Warm Key', position: { x: 50, y: 36, z: 44 }, color: '#f97316', intensity: 3.6, enabled: true },
-        { id: 'lgt-2', name: 'Table Candle Glow', position: { x: 50, y: 58, z: 38 }, color: '#fde047', intensity: 3.0, enabled: true },
-      ],
-    };
-
-    const julian = withMotion(
-      {
-        id: 'actor-julian',
-        name: 'Julian',
-        kind: 'human',
-        color: '#3b82f6',
-        token: 'romantic lead conversing across a candlelit table',
-        actionDescription: 'gestures warmly across the candlelit table toward Elena',
-        rotation: { x: 0, y: 90, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 44, y: 50, z: 0 }, endPosition: { x: 44, y: 50, z: 0 } },
-      },
-      'human-wave-greet',
-      durNumber,
-      'in-place'
-    );
-    const elena = withMotion(
-      {
-        id: 'actor-elena',
-        name: 'Elena',
-        kind: 'human',
-        color: '#ec4899',
-        token: 'heroine smiling across the candlelit dinner table',
-        actionDescription: 'looks fondly across the table at Julian',
-        rotation: { x: 0, y: -90, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 56, y: 50, z: 0 }, endPosition: { x: 56, y: 50, z: 0 } },
-      },
-      'human-look-search',
-      durNumber,
-      'in-place'
-    );
-    const bistroTable: Actor = {
-      id: 'prop-bistro-table',
-      name: 'Candlelit Bistro Table',
-      kind: 'table',
-      color: '#eab308',
-      scale: 0.85,
-      token: 'intimate wooden bistro table between Julian and Elena',
-      actionDescription: 'placed at center stage between the couple',
-      trajectory: { startTimeSeconds: 0, startPosition: { x: 50, y: 50, z: 0 }, endPosition: { x: 50, y: 50, z: 0 } },
-    };
-
-    baseSpec.actors = [julian, elena, bistroTable];
-    baseSpec.sceneDescription =
-      'Warm 85mm Medium-Close-Up orbital move around Julian and Elena sharing an intimate conversation across a candlelit table.';
-    return baseSpec;
-  }
-
-  if (shotItem.id === 'shot-03f') {
-    baseSpec.environment = getEnvPreset('env-misty-forest');
-    baseSpec.camera.movement.type = 'dolly-out';
-    baseSpec.camera.movement.speed = 'slow-cinematic';
-    baseSpec.camera.movement.startPosition = { x: 50, y: 58, z: 10 };
-    baseSpec.camera.movement.endPosition = { x: 50, y: 70, z: 11 };
-    baseSpec.camera.movement.targetLookAt = { x: 50, y: 49 };
-    baseSpec.camera.angle = 'eye-level';
-    baseSpec.camera.shotType = 'medium-close-up';
-    baseSpec.lighting = {
-      style: 'moonlight-foggy',
-      direction: 'rim-backlit',
-      contrast: 'soft',
-      lights: [
-        { id: 'lgt-1', name: 'Starlight Silver Rim', position: { x: 50, y: 34, z: 60 }, color: '#93c5fd', intensity: 3.5, enabled: true },
-        { id: 'lgt-2', name: 'Warm Lantern Fill', position: { x: 44, y: 60, z: 42 }, color: '#fbbf24', intensity: 3.0, enabled: true },
-        { id: 'lgt-3', name: 'Rose Moonlight Glow', position: { x: 58, y: 58, z: 44 }, color: '#f472b6', intensity: 2.8, enabled: true },
-      ],
-    };
-
-    const julian = withMotion(
-      {
-        id: 'actor-julian',
-        name: 'Julian',
-        kind: 'human',
-        color: '#3b82f6',
-        token: 'romantic lead celebrating with Elena under the starlit forest canopy',
-        actionDescription: 'raises arms in joyful celebration beside Elena',
-        rotation: { x: 0, y: 15, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 47.5, y: 49, z: 0 }, endPosition: { x: 47.5, y: 49, z: 0 } },
-      },
-      'human-victory-cheer',
-      durNumber,
-      'in-place'
-    );
-    const elena = withMotion(
-      {
-        id: 'actor-elena',
-        name: 'Elena',
-        kind: 'human',
-        color: '#ec4899',
-        token: 'heroine waving joyfully beside Julian under the stars',
-        actionDescription: 'waves warmly beside Julian as the camera pulls back',
-        rotation: { x: 0, y: -15, z: 0 },
-        trajectory: { startTimeSeconds: 0, startPosition: { x: 52.5, y: 49, z: 0 }, endPosition: { x: 52.5, y: 49, z: 0 } },
-      },
-      'human-wave-greet',
-      durNumber,
-      'in-place'
-    );
-
-    baseSpec.actors = [julian, elena];
-    baseSpec.sceneDescription =
-      'Poetic 50mm pull-back starting in a Medium-Close-Up on Julian and Elena and widening out into the starlit forest clearing.';
-    return baseSpec;
-  }
-
   // Fallback default for any newly added user shot
   const defaultActor: Actor = {
     id: `actor-${Date.now()}`,
@@ -1273,7 +1108,7 @@ export const buildDefaultShotSpec = (shotItem: ShotBibleItem): ShotSpec => {
   return baseSpec;
 };
 
-export const BUILTIN_DEMO_VERSION = 'studio-demo-3x6-v3';
+export const BUILTIN_DEMO_VERSION = 'competition-2x6-v4';
 const DEMO_VERSION_STORAGE_KEY = 'comfy_ai_director_demo_version_v1';
 
 export const DEFAULT_SCENES: SceneItem[] = [
@@ -1284,30 +1119,30 @@ export const DEFAULT_SCENES: SceneItem[] = [
       {
         id: 'shot-01a',
         code: 'Shot 01A',
-        title: 'Rain Alley Arrival',
+        title: 'Rooftop Drone Stand-Off',
         duration: '5s',
         focalLength: '35mm',
-        movement: 'Crane Down Reveal',
+        movement: 'Low-Angle Push-In',
         thumbnail: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
       {
         id: 'shot-01b',
         code: 'Shot 01B',
-        title: 'The Informant Handoff',
+        title: 'Alley Turret & Cruiser Firefight',
         duration: '5s',
-        focalLength: '50mm',
-        movement: '360° Orbit Tension',
+        focalLength: '35mm',
+        movement: 'Lateral Tracking Firefight',
         thumbnail: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
       {
         id: 'shot-01c',
         code: 'Shot 01C',
-        title: 'Rooftop Drone Ambush',
-        duration: '4s',
-        focalLength: '35mm',
-        movement: 'Dutch Push-In',
+        title: 'Neon Street Drift & Mid-Air Leap',
+        duration: '5s',
+        focalLength: '24mm',
+        movement: 'Wide Dynamic Push-In',
         thumbnail: 'https://images.unsplash.com/photo-1478760329108-5c3ed9d495a0?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
@@ -1405,72 +1240,6 @@ export const DEFAULT_SCENES: SceneItem[] = [
         focalLength: '135mm',
         movement: 'Telephoto Crane Up',
         thumbnail: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=160&q=80&auto=format&fit=crop',
-        mode: 'construct-3d',
-      },
-    ],
-  },
-  {
-    id: 'scene-3',
-    name: 'Scene 03 - Golden Hour Romance',
-    shots: [
-      {
-        id: 'shot-03a',
-        code: 'Shot 03A',
-        title: 'Sunset Terrace Meet',
-        duration: '5s',
-        focalLength: '50mm',
-        movement: 'Two-Shot Dolly In',
-        thumbnail: 'https://images.unsplash.com/photo-1516589178581-6cd7833ae3b2?w=160&q=80&auto=format&fit=crop',
-        mode: 'construct-3d',
-      },
-      {
-        id: 'shot-03b',
-        code: 'Shot 03B',
-        title: 'Her Eyes (OTS Close-Up)',
-        duration: '5s',
-        focalLength: '85mm',
-        movement: 'Close-Up Push-In',
-        thumbnail: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=160&q=80&auto=format&fit=crop',
-        mode: 'construct-3d',
-      },
-      {
-        id: 'shot-03c',
-        code: 'Shot 03C',
-        title: 'His Confession (Close-Up)',
-        duration: '5s',
-        focalLength: '85mm',
-        movement: 'Reverse OTS Close-Up',
-        thumbnail: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=160&q=80&auto=format&fit=crop',
-        mode: 'construct-3d',
-      },
-      {
-        id: 'shot-03d',
-        code: 'Shot 03D',
-        title: 'Whispered Promise (ECU)',
-        duration: '5s',
-        focalLength: '135mm',
-        movement: 'Extreme Close-Up Drift',
-        thumbnail: 'https://images.unsplash.com/photo-1518199266791-5375a83190b7?w=160&q=80&auto=format&fit=crop',
-        mode: 'construct-3d',
-      },
-      {
-        id: 'shot-03e',
-        code: 'Shot 03E',
-        title: 'Candlelight Dialogue (MCU)',
-        duration: '5s',
-        focalLength: '85mm',
-        movement: 'Intimate Orbit MCU',
-        thumbnail: 'https://images.unsplash.com/photo-1511285560929-80b456fea0bc?w=160&q=80&auto=format&fit=crop',
-        mode: 'construct-3d',
-      },
-      {
-        id: 'shot-03f',
-        code: 'Shot 03F',
-        title: 'Starlight Embrace Finale',
-        duration: '6s',
-        focalLength: '50mm',
-        movement: 'MCU Pull-Back Reveal',
-        thumbnail: 'https://images.unsplash.com/photo-1519741497674-611481863552?w=160&q=80&auto=format&fit=crop',
         mode: 'construct-3d',
       },
     ],
@@ -1585,10 +1354,24 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist scenes to localStorage
+  // Persist scenes to localStorage & Studio Storage disk folder
   useEffect(() => {
     safeSetItem(STORAGE_KEYS.SCENES, scenes);
+    const castPool = useShotStore.getState().sceneCastPool;
+    saveProjectToStudioStorage({ scenes, castPool }).catch(() => {});
   }, [scenes]);
+
+  // Listen for project restoration from Studio Storage disk folder
+  useEffect(() => {
+    const handleRestored = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail && Array.isArray(detail.scenes) && detail.scenes.length > 0) {
+        setScenes(detail.scenes);
+      }
+    };
+    window.addEventListener('studio-storage:project-restored', handleRestored);
+    return () => window.removeEventListener('studio-storage:project-restored', handleRestored);
+  }, []);
 
   // Sync active shot duration & focal length to Left Panel card
   useEffect(() => {

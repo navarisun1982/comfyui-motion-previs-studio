@@ -18,6 +18,7 @@ import {
   FileCode,
   Lock,
   Plus,
+  Square,
 } from 'lucide-react';
 import { ReasonerSettingsPanel } from './ReasonerSettingsPanel';
 import { BundledWorkflowsModal } from './BundledWorkflowsModal';
@@ -35,6 +36,8 @@ import {
   evaluateReadyMadeHumanoidClip,
   evaluateReadyMadeObjectClip,
   resetToRestPose,
+  isUuidOrNoiseName,
+  inferSubjectCategoryAndCleanName,
 } from '../engine/kinematics';
 import { ActorPose } from '../types/shotspec';
 import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
@@ -45,6 +48,7 @@ import {
   Comfy3DGenerationResult,
   format3DStudioTextPrompt,
   generate3DGlbInComfy,
+  cancelActive3DGeneration,
 } from '../services/comfy3dGenerator';
 import {
   ensure3DWorkflowsSyncedToComfyUI,
@@ -73,6 +77,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 }) => {
   const addActor = useShotStore((s) => s.addActor);
   const updateActor = useShotStore((s) => s.updateActor);
+  const setSelectedActorId = useShotStore((s) => s.setSelectedActorId);
   const saveGeneratedGlbToLibrary = useAssetLibraryStore((s) => s.saveGeneratedGlbToLibrary);
   const closeLibrary = useAssetLibraryStore((s) => s.closeLibrary);
   const comfyStatus = useComfyStore((s) => s.connectionStatus);
@@ -85,8 +90,14 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   const [textPrompt, setTextPrompt] = useState<string>(initialPrompt || '');
 
   // Input & Actor Metadata
-  const [actorName, setActorName] = useState(initialPrompt || 'Hero Character');
-  const [actorCategory, setActorCategory] = useState<'human' | 'creature' | 'prop'>('human');
+  const initialInferred = inferSubjectCategoryAndCleanName(initialPrompt, 'human');
+  const [actorName, setActorName] = useState(
+    initialPrompt && !initialInferred.isNoiseOrUuid ? initialInferred.cleanName : 'Hero Character'
+  );
+  const [actorCategory, setActorCategory] = useState<'human' | 'creature' | 'prop'>(
+    initialPrompt && !initialInferred.isNoiseOrUuid ? initialInferred.category : 'human'
+  );
+  const userManuallySelectedCategoryRef = useRef<boolean>(false);
   const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(initialImageUrl || null);
   const [showWorkflowsPackModal, setShowWorkflowsPackModal] = useState<boolean>(false);
 
@@ -173,7 +184,21 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     }
     if (initialPrompt) {
       setTextPrompt(initialPrompt);
-      if (!actorName || actorName === 'Hero Character') setActorName(initialPrompt);
+      const inferred = inferSubjectCategoryAndCleanName(initialPrompt, actorCategory);
+      if (!userManuallySelectedCategoryRef.current && !inferred.isNoiseOrUuid) {
+        setActorCategory(inferred.category);
+      }
+      if (!actorName || actorName === 'Hero Character' || isUuidOrNoiseName(actorName)) {
+        setActorName(inferred.cleanName);
+      }
+    } else if (isUuidOrNoiseName(actorName)) {
+      setActorName(
+        actorCategory === 'prop'
+          ? '3D Object'
+          : actorCategory === 'creature'
+          ? '3D Creature'
+          : 'Hero Character'
+      );
     }
     setReferenceImageUrl(initialImageUrl || null);
   }, [initialPrompt, initialImageUrl, initialMode, targetActorId]);
@@ -199,29 +224,21 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     return () => window.clearInterval(interval);
   }, [isGenerating]);
 
-  const isUuidOrNoiseFilename = (raw: string): boolean => {
-    const s = raw.trim();
-    if (!s) return true;
-    // Matches UUIDs (with spaces or hyphens), long hex hashes, cmpvs_* hashes, or IMG_1234 / Screenshot_1234
-    if (/^[0-9a-f]{8}[\s_-][0-9a-f]{4}[\s_-][0-9a-f]{4}[\s_-][0-9a-f]{4}[\s_-][0-9a-f]{12}$/i.test(s)) return true;
-    if (/^[0-9a-f]{16,}$/i.test(s.replace(/[\s_-]/g, ''))) return true;
-    if (/^(cmpvs|img|dsc|screenshot|whatsapp\s+image|image|photo|untitled)[\s_-]*\d*/i.test(s)) return true;
-    return false;
-  };
+  const isUuidOrNoiseFilename = (raw: string): boolean => isUuidOrNoiseName(raw);
 
-  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.stopPropagation();
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const baseName = file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim();
-    if (!actorName || actorName === 'Hero Character' || isUuidOrNoiseFilename(actorName)) {
-      const fallbackLabel =
-        actorCategory === 'prop'
-          ? 'Hero 3D Object'
-          : actorCategory === 'creature'
-          ? 'Hero 3D Creature'
-          : 'Hero Character';
-      setActorName(!isUuidOrNoiseFilename(baseName) ? baseName : fallbackLabel);
+  const applyUploadedImageFile = (file: File) => {
+    const inferred = inferSubjectCategoryAndCleanName(file.name, actorCategory);
+    if (!userManuallySelectedCategoryRef.current && !inferred.isNoiseOrUuid) {
+      setActorCategory(inferred.category);
+    }
+    if (
+      !actorName ||
+      actorName === 'Hero Character' ||
+      actorName === '3D Object' ||
+      actorName === '3D Creature' ||
+      isUuidOrNoiseFilename(actorName)
+    ) {
+      setActorName(inferred.cleanName);
     }
     const reader = new FileReader();
     reader.onload = () => {
@@ -229,6 +246,13 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       setGenerationError(null);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    const file = e.target.files?.[0];
+    if (!file) return;
+    applyUploadedImageFile(file);
     e.target.value = '';
   };
 
@@ -413,13 +437,29 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         // Automatically fit skeleton & volumetric skin weights
         const rigRes = autoRigGltfScene(loaded.scene, {
           rigType,
-          categoryHint: actorCategory,
+          categoryHint: userManuallySelectedCategoryRef.current ? actorCategory : undefined,
           nameHint: actorName,
+          promptHint: textPrompt,
           landmarks: customLandmarks || undefined,
           showBones: showBonesRef.current,
         });
         setRigOverlayVisible(loaded.scene, showBonesRef.current, true);
         setRigInfo(rigRes);
+
+        // If the user did not manually force a category, sync actorCategory & default name with the 3D geometry detection
+        if (!userManuallySelectedCategoryRef.current) {
+          if (rigRes.rigType === 'rigid_prop' || rigRes.rigType === 'spine_flex') {
+            setActorCategory('prop');
+            setActorName((prev) =>
+              !prev || prev === 'Hero Character' || isUuidOrNoiseName(prev) ? '3D Object' : prev
+            );
+          } else if (rigRes.rigType === 'quadruped') {
+            setActorCategory('creature');
+            setActorName((prev) =>
+              !prev || prev === 'Hero Character' || isUuidOrNoiseName(prev) ? '3D Creature' : prev
+            );
+          }
+        }
       })
       .catch((err) => {
         console.error('Failed to display generated GLB in preview:', err);
@@ -828,6 +868,18 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     }
   };
 
+  const handleStop3DGeneration = async () => {
+    try {
+      await cancelActive3DGeneration();
+    } catch {
+      // ignore if ComfyUI is already offline
+    }
+    setIsGenerating(false);
+    setGenerationStage('');
+    setStepProgress(null);
+    setGenerationError('3D .GLB render stopped by user. You can adjust settings and generate again.');
+  };
+
   // Download generated .GLB file to user's computer
   const handleDownloadGlb = () => {
     if (!generatedResult) return;
@@ -938,6 +990,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         showBones,
         pose: serializedActorPose,
       });
+      setSelectedActorId(targetActorId);
     } else {
       addActor(cleanName, actorCategory, resolvedToken, {
         modelUrl: generatedResult.blobUrl,
@@ -1189,9 +1242,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                       if (isCreationLocked || isGenerating) return;
                       const file = e.dataTransfer.files?.[0];
                       if (file && file.type.startsWith('image/')) {
-                        const reader = new FileReader();
-                        reader.onload = () => setReferenceImageUrl(reader.result as string);
-                        reader.readAsDataURL(file);
+                        applyUploadedImageFile(file);
                       }
                     }}
                     className="border-2 border-dashed border-cyan-500/35 hover:border-cyan-400/70 rounded-xl p-5 flex flex-col items-center justify-center gap-2 cursor-pointer bg-cyan-950/10 hover:bg-cyan-950/20 transition-all text-center"
@@ -1255,8 +1306,18 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                   onChange={(e) => {
                     const val = e.target.value;
                     setTextPrompt(val);
-                    if (!actorName || actorName === 'Hero Character') {
-                      setActorName(val.slice(0, 34) || '3D Object');
+                    const inferred = inferSubjectCategoryAndCleanName(val, actorCategory);
+                    if (!userManuallySelectedCategoryRef.current && !inferred.isNoiseOrUuid && val.trim()) {
+                      setActorCategory(inferred.category);
+                    }
+                    if (
+                      !actorName ||
+                      actorName === 'Hero Character' ||
+                      actorName === '3D Object' ||
+                      actorName === '3D Creature' ||
+                      isUuidOrNoiseName(actorName)
+                    ) {
+                      setActorName(inferred.cleanName);
                     }
                   }}
                   placeholder="e.g. a weathered medieval treasure chest with iron bands, or an armored sci-fi scout character..."
@@ -1281,7 +1342,16 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                 type="text"
                 disabled={isCreationLocked || isGenerating}
                 value={actorName}
-                onChange={(e) => setActorName(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setActorName(val);
+                  if (!userManuallySelectedCategoryRef.current && val.trim()) {
+                    const inferred = inferSubjectCategoryAndCleanName(val, actorCategory);
+                    if (!inferred.isNoiseOrUuid) {
+                      setActorCategory(inferred.category);
+                    }
+                  }
+                }}
                 placeholder="e.g. Elven Archer, Medieval Chest, Sci-Fi Rover..."
                 className="w-full rounded-lg bg-black/70 border border-white/15 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
               />
@@ -1297,7 +1367,10 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     key={cat.id}
                     type="button"
                     disabled={isCreationLocked || isGenerating}
-                    onClick={() => setActorCategory(cat.id)}
+                    onClick={() => {
+                      userManuallySelectedCategoryRef.current = true;
+                      setActorCategory(cat.id);
+                    }}
                     className={`py-1.5 px-2 rounded-lg font-semibold border transition-all cursor-pointer truncate ${actorCategory === cat.id
                         ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200 shadow-sm'
                         : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
@@ -1546,35 +1619,48 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
             {/* 4. Generate 3D .GLB Button (Locked once a 3D object is created) */}
             {!isCreationLocked ? (
-              <button
-                type="button"
-                onClick={handleGenerateGlb}
-                disabled={
-                  isGenerating ||
-                  (generationMode === 'image-to-3d' ? !referenceImageUrl : !textPrompt.trim())
-                }
-                className="w-full py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider text-white bg-gradient-to-r from-cyan-500 via-indigo-600 to-violet-600 hover:brightness-110 disabled:opacity-40 shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>
-                      {generationMode === 'text-to-3d'
-                        ? `Generating Text-to-3D .GLB (#e7a9555b • ${elapsedSec}s)...`
-                        : `Generating Image-to-3D .GLB (#aa77013b • ${elapsedSec}s)...`}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <Zap className="h-4 w-4" />
-                    <span>
-                      {generationMode === 'text-to-3d'
-                        ? 'Generate Text-to-3D .GLB in ComfyUI (#e7a9555b)'
-                        : 'Generate Image-to-3D .GLB in ComfyUI (#aa77013b)'}
-                    </span>
-                  </>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleGenerateGlb}
+                  disabled={
+                    isGenerating ||
+                    (generationMode === 'image-to-3d' ? !referenceImageUrl : !textPrompt.trim())
+                  }
+                  className="flex-1 py-3 px-4 rounded-xl font-bold text-xs uppercase tracking-wider text-white bg-gradient-to-r from-cyan-500 via-indigo-600 to-violet-600 hover:brightness-110 disabled:opacity-40 shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  {isGenerating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>
+                        {generationMode === 'text-to-3d'
+                          ? `Generating Text-to-3D .GLB (#e7a9555b • ${elapsedSec}s)...`
+                          : `Generating Image-to-3D .GLB (#aa77013b • ${elapsedSec}s)...`}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="h-4 w-4" />
+                      <span>
+                        {generationMode === 'text-to-3d'
+                          ? 'Generate Text-to-3D .GLB in ComfyUI (#e7a9555b)'
+                          : 'Generate Image-to-3D .GLB in ComfyUI (#aa77013b)'}
+                      </span>
+                    </>
+                  )}
+                </button>
+                {isGenerating && (
+                  <button
+                    type="button"
+                    onClick={handleStop3DGeneration}
+                    className="py-3 px-3.5 rounded-xl font-mono text-xs font-bold text-rose-200 bg-rose-500/20 hover:bg-rose-500/35 border border-rose-500/40 shadow-lg shadow-rose-500/15 flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+                    title="Immediately interrupt and stop the 3D .GLB render in ComfyUI"
+                  >
+                    <Square className="h-3.5 w-3.5 fill-current text-rose-400" />
+                    <span>Stop</span>
+                  </button>
                 )}
-              </button>
+              </div>
             ) : (
               <div className="w-full py-2.5 px-3.5 rounded-xl font-mono text-xs font-bold text-emerald-300 bg-emerald-950/30 border border-emerald-500/40 space-y-2">
                 <div className="flex items-center justify-between gap-2">
@@ -1670,7 +1756,19 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                     <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[11px] font-mono font-bold">
                       ✓ .GLB Ready • {(generatedResult.sizeBytes / (1024 * 1024)).toFixed(2)} MB
                     </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-black/75 border border-white/15 text-slate-200 text-[10.5px] font-mono">
+                    <span
+                      className={`px-2.5 py-1 rounded-lg border text-[10.5px] font-mono ${
+                        generatedResult.triangleCount > 250000
+                          ? 'bg-amber-500/20 border-amber-400/50 text-amber-200 font-semibold'
+                          : 'bg-black/75 border-white/15 text-slate-200'
+                      }`}
+                      title={
+                        generatedResult.triangleCount > 250000
+                          ? 'High-density mesh (>250k triangles)'
+                          : 'Mesh vertex and triangle count'
+                      }
+                    >
+                      {generatedResult.triangleCount > 250000 ? '⚠️ ' : ''}
                       {generatedResult.vertexCount.toLocaleString()} verts •{' '}
                       {generatedResult.triangleCount.toLocaleString()} tris
                     </span>
@@ -2367,8 +2465,8 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
             )}
 
             {/* Bottom Action Bar */}
-            <div className="px-5 py-3.5 border-t border-white/10 bg-[#101420] flex flex-wrap items-center justify-between gap-3 shrink-0">
-              <div className="text-xs font-mono text-slate-400 truncate max-w-[260px]">
+            <div className="px-4 py-3 border-t border-white/10 bg-[#101420] flex flex-wrap items-center justify-between gap-2 shrink-0">
+              <div className="text-[11px] font-mono text-slate-400 truncate min-w-0 flex-1 max-w-[180px]">
                 {generatedResult ? (
                   <span className="text-emerald-300 font-semibold" title={generatedResult.diskPath}>
                     {generatedResult.filename}
@@ -2378,15 +2476,15 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
                 {generatedResult && (
                   <button
                     type="button"
                     onClick={handleDownloadGlb}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-semibold text-slate-100 cursor-pointer transition-all"
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-[11px] font-semibold text-slate-100 cursor-pointer transition-all shrink-0"
                     title="Download generated .GLB file to your PC"
                   >
-                    <Download className="h-3.5 w-3.5 text-cyan-300" />
+                    <Download className="h-3.5 w-3.5 text-cyan-300 shrink-0" />
                     <span>Download .GLB</span>
                   </button>
                 )}
@@ -2395,15 +2493,15 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                   type="button"
                   disabled={!generatedResult}
                   onClick={handleSaveToLibrary}
-                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-xs font-bold text-white shadow-md shadow-indigo-600/20 cursor-pointer transition-all"
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-[11px] font-bold text-white shadow-md shadow-indigo-600/20 cursor-pointer transition-all shrink-0"
                 >
                   {savedLibrarySuccess ? (
                     <>
-                      <Check className="h-3.5 w-3.5" />
-                      <span>Saved to 3D Library!</span>
+                      <Check className="h-3.5 w-3.5 shrink-0" />
+                      <span>Saved!</span>
                     </>
                   ) : (
-                    <span>Save to 3D Library</span>
+                    <span>Save to Library</span>
                   )}
                 </button>
 
@@ -2411,11 +2509,11 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                   type="button"
                   disabled={!generatedResult}
                   onClick={handleAddToScene}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-40 text-xs font-bold text-black shadow-md shadow-amber-500/20 cursor-pointer transition-all"
+                  className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-40 text-[11px] font-bold text-black shadow-md shadow-amber-500/20 cursor-pointer transition-all shrink-0"
                 >
                   {appliedSuccess ? (
                     <>
-                      <Check className="h-4 w-4" />
+                      <Check className="h-3.5 w-3.5 shrink-0" />
                       <span>Added to Scene!</span>
                     </>
                   ) : (

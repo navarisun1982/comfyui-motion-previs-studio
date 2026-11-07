@@ -46,6 +46,17 @@ export class JobRunner {
     return this.activeHandle;
   }
 
+  async cancelActiveJob(): Promise<void> {
+    const handle = this.activeHandle;
+    this.activeHandle = null;
+    if (handle) {
+      await handle.cancel();
+    } else {
+      await defaultComfyClient.interrupt();
+      useComfyStore.getState().setJobFailed('Render stopped by user.');
+    }
+  }
+
   async run(options: ExecuteJobOptions): Promise<ActiveJobHandle> {
     const client = options.client || defaultComfyClient;
     const comfyStore = useComfyStore.getState();
@@ -163,6 +174,8 @@ export class JobRunner {
     let isCompleted = false;
     let pollInterval: ReturnType<typeof setInterval> | null = null;
     let unregister: (() => void) | null = null;
+    let consecutiveOfflinePolls = 0;
+    let missingFromQueuePolls = 0;
 
     const cleanupJobListeners = () => {
       if (pollInterval !== null) {
@@ -175,10 +188,28 @@ export class JobRunner {
       }
     };
 
+    const failJob = (errMsg: string, isInterrupted = false) => {
+      if (isCompleted) return;
+      isCompleted = true;
+      cleanupJobListeners();
+      if (this.activeHandle?.promptId === promptId) {
+        this.activeHandle = null;
+      }
+      useComfyStore.getState().setJobFailed(errMsg);
+      if (isInterrupted) {
+        options.onInterrupted?.();
+      } else {
+        options.onError?.(new Error(errMsg));
+      }
+    };
+
     const finalizeSuccess = async () => {
       if (isCompleted) return;
       isCompleted = true;
       cleanupJobListeners();
+      if (this.activeHandle?.promptId === promptId) {
+        this.activeHandle = null;
+      }
 
       // If video wasn't captured directly via WS packet, check /history
       if (!capturedVideoUrl) {
@@ -253,16 +284,10 @@ export class JobRunner {
         finalizeSuccess();
       },
       onInterrupted: () => {
-        isCompleted = true;
-        cleanupJobListeners();
-        comfyStore.setJobFailed('Execution interrupted by user.');
-        options.onInterrupted?.();
+        failJob('Execution interrupted by user.', true);
       },
       onError: (msg) => {
-        isCompleted = true;
-        cleanupJobListeners();
-        comfyStore.setJobFailed(msg);
-        options.onError?.(new Error(msg));
+        failJob(msg, false);
       },
     });
 
@@ -272,26 +297,101 @@ export class JobRunner {
         return;
       }
       const hist = await client.getPromptHistory(promptId);
-      if (hist && hist.outputs) {
-        const outputs = hist.outputs as Record<string, Record<string, unknown>>;
-        const outputData = outputs[outputNodeId] || outputs[Object.keys(outputs)[0]];
-        if (outputData) {
-          const v = client.extractVideoOutput(outputData);
-          if (v) {
+      if (hist) {
+        consecutiveOfflinePolls = 0;
+        const status = hist.status as
+          | {
+              status_str?: string;
+              completed?: boolean;
+              messages?: Array<[string, Record<string, unknown>]>;
+            }
+          | undefined;
+
+        if (status?.status_str === 'error') {
+          let errMsg = 'ComfyUI execution failed.';
+          if (Array.isArray(status.messages)) {
+            const errEntry = status.messages.find((m) => Array.isArray(m) && m[0] === 'execution_error');
+            if (errEntry && errEntry[1]) {
+              const exMsg = errEntry[1].exception_message || errEntry[1].exception_type;
+              const nodeType = errEntry[1].node_type || errEntry[1].node_id;
+              if (exMsg) {
+                errMsg = nodeType ? `ComfyUI Error (${nodeType}): ${String(exMsg)}` : String(exMsg);
+              }
+            }
+          }
+          failJob(errMsg, false);
+          return;
+        }
+
+        if (
+          Array.isArray(status?.messages) &&
+          status.messages.some((m) => Array.isArray(m) && m[0] === 'execution_interrupted')
+        ) {
+          failJob('Execution interrupted by user.', true);
+          return;
+        }
+
+        if (hist.outputs) {
+          const outputs = hist.outputs as Record<string, Record<string, unknown>>;
+          const outputData = outputs[outputNodeId] || outputs[Object.keys(outputs)[0]];
+          if (outputData) {
+            const v = client.extractVideoOutput(outputData);
+            if (v) {
+              await finalizeSuccess();
+              return;
+            }
+          }
+          if (status?.completed === true) {
             await finalizeSuccess();
+            return;
           }
         }
+        return;
       }
-    }, 3500);
+
+      // Prompt not in /history yet: verify ComfyUI is still alive and the prompt is still in /queue
+      const queueStatus = await client.getQueueStatus();
+      if (!queueStatus.ok) {
+        consecutiveOfflinePolls += 1;
+        if (consecutiveOfflinePolls >= 2) {
+          useComfyStore.getState().setConnectionStatus('error');
+          failJob(
+            'ComfyUI server disconnected or stopped during execution. Once ComfyUI is running again, click Render in ComfyUI to retry.',
+            false
+          );
+        }
+        return;
+      }
+
+      consecutiveOfflinePolls = 0;
+      const inQueue =
+        queueStatus.runningPromptIds.includes(promptId) ||
+        queueStatus.pendingPromptIds.includes(promptId);
+      if (!inQueue) {
+        // Double-check /history immediately in case it just finished between the two requests
+        const recheckHist = await client.getPromptHistory(promptId);
+        if (recheckHist) {
+          missingFromQueuePolls = 0;
+          return;
+        }
+        missingFromQueuePolls += 1;
+        if (missingFromQueuePolls >= 2) {
+          failJob(
+            'Render job is no longer active in ComfyUI queue (ComfyUI may have restarted or encountered an error). Ready to render again.',
+            false
+          );
+        }
+      } else {
+        missingFromQueuePolls = 0;
+      }
+    }, 3000);
 
     const handle: ActiveJobHandle = {
       promptId,
       cancel: async () => {
-        isCompleted = true;
-        cleanupJobListeners();
         await client.interrupt();
         await client.deleteQueueItem(promptId);
-        comfyStore.setJobFailed('Cancelled by user');
+        failJob('Render stopped by user.', true);
       },
       getBoundWorkflow: () => boundWorkflow,
     };

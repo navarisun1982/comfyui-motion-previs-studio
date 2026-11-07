@@ -3,16 +3,66 @@ import { CompiledPromptBundle, TemporalPromptBeat } from '../adapters/types';
 import {
   analyzeShotPovVisibility,
   BeatPhase,
+  CameraKinematicsSummary,
   ShotPovVisibilityReport,
 } from './povVisibilityEngine';
 
+export function extractPureEnvironmentDescription(raw?: string): string {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  // If the user typed a combined subject+environment prompt like "a helicopter flying in the air over a forest",
+  // extract the environmental location after the preposition so <Subject 4> stays strictly environmental.
+  const match = trimmed.match(
+    /^(?:a|an|the)\s+[^,]+?\s+(?:flying|hovering|soaring|gliding|driving|racing|running|walking|standing|moving|sailing|riding|traveling)(?:\s+in\s+the\s+(?:air|sky))?\s+(?:over|above|through|across|in|inside|along|into|around)\s+(.+)$/i
+  );
+  if (match && match[1] && match[1].trim().length >= 3) {
+    return match[1].trim();
+  }
+  return trimmed;
+}
+
+export function cleanActorToken(token?: string, fallbackName?: string): string {
+  const raw = (token || fallbackName || 'subject').trim();
+  return raw
+    .replace(/,?\s*Procedural 3D stage subject for\s+"[^"]*"\.?/gi, '')
+    .replace(/^Procedural 3D stage subject for\s+"([^"]*)"\.?$/i, '$1')
+    .replace(/,?\s*placed on stage from 3D Asset Library:\s*[^,.]*/gi, '')
+    .trim();
+}
+
+export function cleanActorAction(actionDescription?: string, token?: string, name?: string): string {
+  const raw = (actionDescription || '').trim();
+  if (
+    !raw ||
+    /^Procedural 3D stage subject for\s+/i.test(raw) ||
+    /^placed on stage from 3D Asset Library:/i.test(raw)
+  ) {
+    const src = (token || name || '').trim();
+    const verbMatch = src.match(/\b((?:flying|hovering|soaring|gliding|driving|racing|running|walking|moving|sailing|riding)[^,.]*)/i);
+    if (verbMatch && verbMatch[1]) {
+      return `${verbMatch[1].trim()} with natural physical momentum`;
+    }
+    return 'moves along its 3D trajectory with authentic physical dynamics';
+  }
+  return raw
+    .replace(/,?\s*Procedural 3D stage subject for\s+"[^"]*"\.?/gi, '')
+    .replace(/,?\s*placed on stage from 3D Asset Library:\s*[^,.]*/gi, '')
+    .trim();
+}
+
 export function formatEnvironment(env?: EnvironmentSpec): string {
   if (!env) return '';
+  const pureDesc = extractPureEnvironmentDescription(env.promptDescription || env.name);
+  const isOutdoorNatural = /\b(forest|jungle|woods|trees|desert|dunes|ocean|sea|beach|mountain|valley|canyon|sky|field|meadow|river|lake|snow|tundra|island|highway|street|city|nature|urban)\b/i.test(
+    `${pureDesc} ${env.name || ''} ${env.category || ''}`
+  );
+  const showGroundSurface =
+    env.groundSurface && !(isOutdoorNatural && env.groundSurface === 'studio-floor');
   const parts = [
-    env.promptDescription || env.name,
+    pureDesc,
     env.weather && env.weather !== 'clear' ? `weather condition ${env.weather}` : '',
     env.timeOfDay ? `time of day ${env.timeOfDay.replace(/-/g, ' ')}` : '',
-    env.groundSurface ? `ground surface ${env.groundSurface.replace(/-/g, ' ')}` : '',
+    showGroundSurface ? `ground surface ${env.groundSurface!.replace(/-/g, ' ')}` : '',
     env.fogDensity && env.fogDensity >= 0.015 ? `atmospheric haze and volumetric fog (density ${Math.round(env.fogDensity * 100)}%)` : '',
   ].filter(Boolean);
   return parts.join(', ');
@@ -25,17 +75,40 @@ export function formatCameraMovement(
     arcCurve?: number;
     trackTargetActorId?: string;
     keyframes?: Array<{ time: number; position: { x: number; y: number; z?: number }; cueLabel?: string }>;
+    customTrajectory?: boolean;
+    cameraKinematics?: CameraKinematicsSummary;
   }
 ): string {
+  const isCustom = Boolean(
+    movementOpts?.customTrajectory ||
+      (movementOpts?.keyframes && movementOpts.keyframes.length > 0) ||
+      movementOpts?.cameraKinematics?.isCustomCameraTrajectory
+  );
+
+  // When the user manually repositioned or keyframed the camera in 3D space, do NOT output the stale preset name!
+  // Instead, output the true 3D camera kinematics measured from the interpolated camera trajectory.
+  if (isCustom && movementOpts?.cameraKinematics?.overallDescription) {
+    const extras: string[] = [];
+    if (movementOpts.trackTargetActorId) {
+      extras.push('actively tracking the focal subject');
+    }
+    if (movementOpts.keyframes && movementOpts.keyframes.length > 0) {
+      extras.push(`passing through ${movementOpts.keyframes.length} choreographed 3D camera waypoint(s)`);
+    }
+    return extras.length > 0
+      ? `${movementOpts.cameraKinematics.overallDescription}, ${extras.join(', ')}`
+      : movementOpts.cameraKinematics.overallDescription;
+  }
+
   const speedPhrase = speed === 'slow-cinematic' ? 'slow, controlled' : speed === 'rapid-dynamic' ? 'fast, energetic' : 'steady, continuous';
-  
+
   let baseMove = '';
   switch (type) {
     case 'dolly-in':
-      baseMove = `steady camera dolly-in (dolly in) push, camera physically moving forward toward the subject at a ${speedPhrase} pace, creating increasing emotional intimacy`;
+      baseMove = `steady camera dolly-in push, camera physically moving forward toward the subject at a ${speedPhrase} pace`;
       break;
     case 'dolly-out':
-      baseMove = `smooth camera dolly-out (dolly out) pull, camera smoothly moving backward away from the subject at a ${speedPhrase} pace, revealing the surrounding environment`;
+      baseMove = `smooth camera dolly-out pull, camera moving backward away from the subject at a ${speedPhrase} pace`;
       break;
     case 'truck-left':
       baseMove = `smooth horizontal truck left, camera laterally sliding to the left parallel to the action at a ${speedPhrase} pace`;
@@ -62,47 +135,47 @@ export function formatCameraMovement(
       baseMove = `tilting camera downward, rotating camera axis down toward the subject's feet/ground`;
       break;
     case 'orbit-clockwise':
-      baseMove = `smooth 360 orbit camera arc moving clockwise around the focal subject, dynamic volumetric parallax`;
+      baseMove = `smooth 360 orbit camera arc moving clockwise around the focal subject with volumetric parallax`;
       break;
     case 'orbit-counter-clockwise':
-      baseMove = `smooth circular orbit arc moving counter-clockwise around the focal subject, dynamic volumetric parallax`;
+      baseMove = `smooth circular orbit arc moving counter-clockwise around the focal subject with volumetric parallax`;
       break;
     case 'zoom-in':
-      baseMove = `optical zoom-in lens compression, focal length narrowing toward subject, background compression`;
+      baseMove = `optical zoom-in lens compression, focal length narrowing toward subject`;
       break;
     case 'zoom-out':
       baseMove = `optical zoom-out lens expansion, wide perspective reveal`;
       break;
     case 'handheld-subtle':
-      baseMove = `subtle organic handheld camera feel, breathing cinematic realism with gentle natural stabilization`;
+      baseMove = `subtle organic handheld camera feel with gentle natural stabilization`;
       break;
     case 'whip-pan':
-      baseMove = `rapid whip-pan transition, fast motion blur swish`;
+      baseMove = `rapid whip-pan transition with fast motion blur`;
       break;
     case 'rack-focus':
-      baseMove = `cinematic rack focus transition, smoothly shifting critical optical focus plane from foreground to background`;
+      baseMove = `cinematic rack focus transition, smoothly shifting optical focus plane from foreground to background`;
       break;
     case 'crash-zoom':
-      baseMove = `rapid crash-zoom snap telephoto rush, high-energy focal length punch-in toward the focal subject`;
+      baseMove = `rapid crash-zoom telephoto punch-in toward the focal subject`;
       break;
     case 'fpv-dive':
       baseMove = `dynamic FPV drone aerial dive, sweeping three-dimensional plunge with banked horizon roll`;
       break;
     case 'dolly-zoom-vertigo':
-      baseMove = `Hitchcock dolly-zoom vertigo effect, camera physically moving backward while lens simultaneously zooms in, keeping subject scale constant while background perspective warps dramatically`;
+      baseMove = `Hitchcock dolly-zoom vertigo effect, camera moving backward while lens simultaneously zooms in`;
       break;
     case 'steadicam-follow':
-      baseMove = `fluid Steadicam tracking rig following the subject at a ${speedPhrase} pace, maintaining constant framing distance with smooth gimbal stabilization`;
+      baseMove = `fluid Steadicam tracking rig following the subject at a ${speedPhrase} pace with smooth gimbal stabilization`;
       break;
     case 'crane-arc':
-      baseMove = `sweeping jib crane arc movement, camera rising and curving gracefully across the set with rich multi-plane parallax`;
+      baseMove = `sweeping jib crane arc movement, camera rising and curving gracefully across the set`;
       break;
     case 'spiral-orbit-in':
-      baseMove = `tightening spiral orbit camera movement, circling around the subject while progressively pushing closer into an intimate frame`;
+      baseMove = `tightening spiral orbit camera movement, circling around the subject while pushing closer`;
       break;
     case 'static':
     default:
-      baseMove = `locked-off tripod shot, completely stable, motionless camera frame`;
+      baseMove = `locked-off tripod shot, stationary camera frame`;
       break;
   }
 
@@ -116,6 +189,15 @@ export function formatCameraMovement(
   if (movementOpts?.keyframes && movementOpts.keyframes.length > 0) {
     extras.push(`passing through ${movementOpts.keyframes.length} choreographed camera waypoint(s)`);
   }
+  if (
+    movementOpts?.cameraKinematics?.overallDescription &&
+    movementOpts.cameraKinematics.overallDescription.includes('transitioning camera perspective')
+  ) {
+    const match = movementOpts.cameraKinematics.overallDescription.match(
+      /transitioning camera perspective[^,]+/
+    );
+    if (match) extras.push(match[0]);
+  }
   return extras.length > 0 ? `${baseMove}, ${extras.join(', ')}` : baseMove;
 }
 
@@ -127,11 +209,11 @@ export function formatLens(
 ): string {
   const sensorPhrase =
     sensorSize === 'imax-65mm'
-      ? 'large-format IMAX 65mm sensor'
+      ? 'IMAX 65mm sensor'
       : sensorSize === 'anamorphic-2x'
-      ? '2x anamorphic cinema sensor'
+      ? '2x anamorphic sensor'
       : sensorSize === 'super-35'
-      ? 'Super-35 cinema sensor'
+      ? 'Super-35 sensor'
       : sensorSize === 'full-frame'
       ? 'Full-Frame 35mm sensor'
       : '';
@@ -139,48 +221,36 @@ export function formatLens(
 
   if (typeof customFocalLengthMm === 'number' && Number.isFinite(customFocalLengthMm) && `${customFocalLengthMm}mm` !== focalLength) {
     const mm = Math.round(customFocalLengthMm);
-    const charDesc =
-      mm <= 16
-        ? 'ultra-wide rectilinear perspective with dramatic spatial depth'
-        : mm <= 28
-        ? 'wide-angle cinema framing with strong environmental context'
-        : mm <= 45
-        ? 'natural narrative cinema field of view'
-        : mm <= 65
-        ? 'true-to-eye standard focal length with zero distortion'
-        : mm <= 105
-        ? 'intimate portrait telephoto compression with creamy shallow depth of field'
-        : 'long telephoto axial background compression and subject isolation';
-    return `${mm}mm custom cinema lens${sensorSuffix}, ${charDesc} at ${aperture}`;
+    return `${mm}mm cinema lens${sensorSuffix} at ${aperture}`;
   }
 
   switch (focalLength) {
     case '12mm':
-      return `extreme ultra-wide 12mm rectilinear cinema lens${sensorSuffix}, 122-degree dramatic spatial depth, towering close foregrounds, deep focus`;
+      return `ultra-wide 12mm cinema lens${sensorSuffix} at ${aperture}`;
     case '14mm':
-      return `ultra-wide 14mm cinema prime lens${sensorSuffix}, 114-degree sweeping architectural scale, dramatic perspective convergence`;
+      return `ultra-wide 14mm cinema prime lens${sensorSuffix} at ${aperture}`;
     case '18mm':
-      return `ultra-wide 18mm lens${sensorSuffix}, broad expansive field of view, subtle wide-angle perspective distortion at edges, deep focus`;
+      return `ultra-wide 18mm lens${sensorSuffix} at ${aperture}`;
     case '24mm':
-      return `wide 24mm lens${sensorSuffix}, environmental framing with cinematic presence, crisp background context`;
+      return `wide 24mm cinema lens${sensorSuffix} at ${aperture}`;
     case '35mm':
-      return `classic 35mm cinema prime lens${sensorSuffix}, natural human perspective, gentle background separation at ${aperture}`;
+      return `35mm cinema prime lens${sensorSuffix} at ${aperture}`;
     case '40mm':
-      return `40mm anamorphic cinema prime lens${sensorSuffix}, classic widescreen storytelling perspective, oval bokeh highlights at ${aperture}`;
+      return `40mm anamorphic cinema prime lens${sensorSuffix} at ${aperture}`;
     case '50mm':
-      return `50mm lens${sensorSuffix}, standard focal length prime, zero perspective distortion, natural cinematic depth of field at ${aperture}`;
+      return `50mm lens (standard cinema prime)${sensorSuffix} at ${aperture}`;
     case '70mm':
-      return `70mm large-format IMAX cinema lens${sensorSuffix}, rich medium-telephoto dimensionality, razor-sharp subject presence at ${aperture}`;
+      return `70mm IMAX cinema lens${sensorSuffix} at ${aperture}`;
     case '85mm':
-      return `85mm telephoto portrait lens${sensorSuffix}, creamy shallow depth of field, compressed background bokeh at ${aperture}, isolated subject`;
+      return `85mm telephoto portrait lens${sensorSuffix} at ${aperture}`;
     case '100mm':
-      return `100mm macro-portrait cinema prime lens${sensorSuffix}, intimate detail rendering, velvety background melt at ${aperture}`;
+      return `100mm telephoto cinema prime lens${sensorSuffix} at ${aperture}`;
     case '135mm':
-      return `135mm long telephoto lens${sensorSuffix}, extreme cinematic background compression, soft creamy bokeh`;
+      return `135mm long telephoto lens${sensorSuffix} at ${aperture}`;
     case '200mm':
-      return `200mm super-telephoto cinema lens${sensorSuffix}, dramatic axial background compression, shallow razor-thin focal plane at ${aperture}`;
+      return `200mm super-telephoto cinema lens${sensorSuffix} at ${aperture}`;
     default:
-      return `${focalLength} lens${sensorSuffix}, cinematic optics`;
+      return `${focalLength} cinema lens${sensorSuffix} at ${aperture}`;
   }
 }
 
@@ -198,23 +268,23 @@ export function formatCameraAngle(
   let baseAngle = '';
   switch (angle) {
     case 'low-angle':
-      baseAngle = `${shotPhrase} shot, low-angle perspective looking up at subject, conveying stature and authority`;
+      baseAngle = `${shotPhrase} shot, low-angle perspective looking up at the subject`;
       break;
     case 'high-angle':
-      baseAngle = `${shotPhrase} shot, high-angle perspective angled downward, vulnerable composition`;
+      baseAngle = `${shotPhrase} shot, high-angle perspective angled downward`;
       break;
     case 'overhead-gods-eye':
-      baseAngle = `overhead god's eye view, perpendicular top-down vertical perspective`;
+      baseAngle = `overhead god's eye top-down perspective`;
       break;
     case 'ground-level':
-      baseAngle = `ground-level perspective, camera skimming just above the surface`;
+      baseAngle = `ground-level perspective skimming just above the surface`;
       break;
     case 'dutch-angle':
-      baseAngle = `${shotPhrase} shot, Dutch tilt angle, canted horizon line evoking psychological tension`;
+      baseAngle = `${shotPhrase} shot, Dutch tilt angle with canted horizon`;
       break;
     case 'eye-level':
     default:
-      baseAngle = `${shotPhrase} shot, neutral eye-level framing, balanced horizontal composition`;
+      baseAngle = `${shotPhrase} shot, eye-level framing`;
       break;
   }
 
@@ -243,11 +313,11 @@ export function formatLighting(
 ): string {
   const dirPhrase = direction.replace(/-/g, ' ');
   const contrastPhrase = contrast === 'high-contrast' ? 'stark chiaroscuro contrast' : contrast === 'soft' ? 'soft diffused shadows' : 'balanced cinematic contrast';
-  
+
   let baseLight = '';
   switch (style) {
     case 'low-key-film-noir':
-      baseLight = `low-key film noir lighting, ${dirPhrase} light source with deep rich shadows and ${contrastPhrase}`;
+      baseLight = `low-key film noir lighting, ${dirPhrase} light source with deep shadows and ${contrastPhrase}`;
       break;
     case 'neon-cyberpunk':
       baseLight = `stylized cyberpunk volumetric lighting, saturated neon rim lights and practical street reflections, ${contrastPhrase}`;
@@ -262,14 +332,14 @@ export function formatLighting(
       baseLight = `warm flickering candlelight glow, intimate falloff, deep shadow roll-off`;
       break;
     case 'harsh-fluorescent':
-      baseLight = `clinical fluorescent overhead tubes, cool greenish-white tint, industrial atmosphere`;
+      baseLight = `clinical fluorescent overhead tubes, cool industrial atmosphere`;
       break;
     case 'high-key-studio':
-      baseLight = `high-key commercial lighting, clean even illumination across the scene, minimal shadows`;
+      baseLight = `high-key commercial lighting, clean even illumination across the scene`;
       break;
     case 'cinematic-natural':
     default:
-      baseLight = `natural cinematic film lighting, realistic ambient bounce, ${dirPhrase} illumination with ${contrastPhrase}`;
+      baseLight = `natural cinematic film lighting, ${dirPhrase} illumination with ${contrastPhrase}`;
       break;
   }
 
@@ -286,36 +356,51 @@ export function formatLighting(
 
 /**
  * Builds chronological temporal stages for the shot based on stage duration,
- * camera motion speed/pacing, and camera-POV frustum visibility (`povVisibilityEngine`).
- * Only actors visible inside the camera POV during each beat (`open`, `mid`, `close`) are
- * described in that beat, using true camera-relative screen positions (`screen-left / center-frame / screen-right`
- * and `close foreground / midground / distant background`).
+ * camera motion speed/pacing, and universal 6-DoF camera-POV frustum visibility (`povVisibilityEngine`).
+ * Describes true camera-relative screen positions, 3D subject orientation (`front-facing`, `right-facing side profile`, `rear view`),
+ * vertical elevation (`grounded on the surface`, `lifts off and ascends`, `climbs higher`), and measured 3D camera kinematics.
  */
 export function buildTemporalTimeline(
   shot: ShotSpec,
   precomputedPov?: ShotPovVisibilityReport
 ): TemporalPromptBeat[] {
-  const duration = Math.max(1.0, shot.durationSeconds);
-  const t1 = Number((duration * 0.35).toFixed(1));
-  const t2 = Number((duration * 0.75).toFixed(1));
-
   const pov = precomputedPov || analyzeShotPovVisibility(shot);
+  const duration = pov.beatBreakpoints.duration;
+  const t1 = Number(pov.beatBreakpoints.t1.toFixed(1));
+  const t2 = Number(pov.beatBreakpoints.t2.toFixed(1));
 
   const camType = shot.camera.movement.type;
   const speed = shot.camera.movement.speed;
   const pacing = shot.camera.movement.pacing || 'ease-in-out';
   const speedTerm = speed === 'slow-cinematic' ? 'gentle' : speed === 'rapid-dynamic' ? 'brisk' : 'steady';
+  const isCustomCam = pov.cameraKinematics.isCustomCameraTrajectory;
 
-  // Helper for camera phase
+  // Helper for camera phase: uses measured 3D kinematics when camera was manually moved/keyframed,
+  // or enriches the preset with measured perspective shifts and true closing-beat motion
   const getCameraPhase = (phase: BeatPhase) => {
-    if (camType === 'static') return 'Camera holds a motionless locked-off frame';
+    const measuredBeat = pov.cameraKinematics.beatDescriptions[phase];
+    if (isCustomCam) {
+      return measuredBeat;
+    }
+    if (camType === 'static' && pov.cameraKinematics.totalDistanceMeters < 0.8) {
+      return 'Camera holds a motionless locked-off frame';
+    }
+    if (camType === 'static' && pov.cameraKinematics.totalDistanceMeters >= 0.8) {
+      return measuredBeat;
+    }
+    const perspectiveClauseMatch = measuredBeat.match(/, (?:framing|shifting perspective on) [^.]+/);
+    const perspectiveClause = perspectiveClauseMatch ? perspectiveClauseMatch[0] : '';
+
     if (phase === 'open') {
-      return `Camera establishes framing and initiates a ${speedTerm} ${camType.replace(/-/g, ' ')} with ${pacing} pacing`;
+      return `Camera establishes framing and initiates a ${speedTerm} ${camType.replace(/-/g, ' ')} (${pacing} pacing)${perspectiveClause}`;
     }
     if (phase === 'mid') {
-      return `Camera continues active ${camType.replace(/-/g, ' ')} across the scene, maintaining dynamic framing and parallax`;
+      return `Camera continues active ${camType.replace(/-/g, ' ')} across the scene${perspectiveClause}`;
     }
-    return `Camera smoothly decelerates, settling into the final composition and locking focus`;
+    if (!measuredBeat.startsWith('Camera holds a steady locked-off position')) {
+      return `${measuredBeat}, completing the ${camType.replace(/-/g, ' ')} into the closing composition`;
+    }
+    return `Camera holds the final ${camType.replace(/-/g, ' ')} composition${perspectiveClause}`;
   };
 
   const cleanCueText = (raw?: string): string => {
@@ -335,10 +420,7 @@ export function buildTemporalTimeline(
         const actor = analysis.actor;
         const beatState = analysis.beats[phase];
         const actStart = actor.trajectory?.startTimeSeconds ?? 0;
-        const startPos = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
-        const endPos = actor.trajectory?.endPosition ?? { x: 50, y: 50 };
-        const hasDisplacement =
-          Math.abs(startPos.x - endPos.x) > 3 || Math.abs(startPos.y - endPos.y) > 3;
+        const hasDisplacement = analysis.has3DDisplacement;
 
         const currentZone = beatState.screenZone;
         const openZone = analysis.beats.open.visible ? analysis.beats.open.screenZone : currentZone;
@@ -350,8 +432,10 @@ export function buildTemporalTimeline(
           (k) => k.posePreset || k.cueLabel || k.gait
         );
         const openCue = kfs.find((k) => k.time <= t1);
-        const midCue = kfs.find((k) => k.time > t1 && k.time <= t2);
-        const closeCue = kfs.find((k) => k.time > t2);
+        const midCue =
+          kfs.find((k) => k !== openCue && k.time >= t1 && k.time <= t2) ||
+          kfs.find((k) => k !== openCue && k.time <= t2);
+        const closeCue = kfs.find((k) => k !== openCue && k !== midCue && k.time >= t2);
 
         const formatCueDetail = (k?: typeof openCue) => {
           if (!k) return '';
@@ -373,13 +457,6 @@ export function buildTemporalTimeline(
         const socketStr = actor.socketToBone
           ? ` (attached to bone ${actor.socketToBone.boneName})`
           : '';
-        const clipStr = actor.motionClip
-          ? ` [motion clip: ${actor.motionClip.replace(/-/g, ' ')}${
-              actor.motionCycles && actor.motionCycles > 1 ? ` ×${actor.motionCycles} cycles` : ''
-            }]`
-          : actor.motionCycles && actor.motionCycles > 1
-          ? ` [×${actor.motionCycles} cycles]`
-          : '';
 
         const exitsAfterOpen = phase === 'open' && !analysis.visibleInBeats.mid;
         const entersInMid = phase === 'mid' && !analysis.visibleInBeats.open;
@@ -387,65 +464,96 @@ export function buildTemporalTimeline(
         const entersInClose =
           phase === 'close' && !analysis.visibleInBeats.open && !analysis.visibleInBeats.mid;
 
+        const orientNote = `seen in a ${beatState.viewOrientation}`;
+        const elevNote = beatState.elevationPhrase;
+        const vertMove = beatState.verticalMotionPhrase;
+        const relMove = beatState.cameraRelativeMotionPhrase;
+        const cleanedAction = cleanActorAction(actor.actionDescription, actor.token, actor.name);
+
         if (phase === 'open') {
           const exitSuffix = exitsAfterOpen
             ? ' before moving out of the camera frame as the view shifts'
             : '';
+          const vertClause = vertMove ? `, then ${vertMove}` : '';
+          const relClause = relMove ? ` while ${relMove}` : '';
+
           if (actStart > t1) {
-            return `${actor.name}${socketStr} holds initial position in the ${currentZone}${coverageNote}${openPoseStr}${exitSuffix}`;
+            return `${actor.name}${socketStr} starts ${elevNote} in the ${currentZone}${coverageNote}, ${orientNote}${openPoseStr}${exitSuffix}`;
           }
           if (hasDisplacement) {
-            return `${actor.name}${socketStr} begins in the ${currentZone}${coverageNote} and initiates movement${openPoseStr}${clipStr}: ${actor.actionDescription}${exitSuffix}`;
+            return `${actor.name}${socketStr} starts ${elevNote} in the ${currentZone}${coverageNote}, ${orientNote}${openPoseStr}${vertClause}${relClause}: ${cleanedAction}${exitSuffix}`;
           }
-          return `${actor.name}${socketStr} remains positioned in the ${currentZone}${coverageNote}${clipStr}: ${actor.actionDescription}${exitSuffix}`;
+          return `${actor.name}${socketStr} is positioned ${elevNote} in the ${currentZone}${coverageNote}, ${orientNote}: ${cleanedAction}${exitSuffix}`;
         }
 
         if (phase === 'mid') {
+          const prevOrient = analysis.beats.open.visible ? analysis.beats.open.viewOrientationShort : '';
+          const orientShiftClause =
+            prevOrient && prevOrient !== beatState.viewOrientationShort
+              ? `, now seen in a ${beatState.viewOrientation} (transitioning from ${prevOrient})`
+              : `, seen in a ${beatState.viewOrientationShort}`;
+
           const entryPrefix = entersInMid
-            ? `${actor.name}${socketStr} enters the camera frame in the ${currentZone}${coverageNote}`
+            ? `${actor.name}${socketStr} enters the camera frame in the ${currentZone}${coverageNote}${orientShiftClause}`
             : `${actor.name}${socketStr}`;
           const exitSuffix = exitsAfterMid ? ', passing toward the edge of the camera frame' : '';
 
           if (hasDisplacement) {
-            const transitionPhrase = entersInMid
+            const zonePhrase = entersInMid
               ? ` and advances toward the ${closeZone}`
               : openZone !== currentZone
-              ? ` moves fluidly from the ${openZone} into the ${currentZone}`
-              : ` moves steadily through the ${currentZone}`;
-            return `${entryPrefix}${transitionPhrase}${midPoseStr} with authentic real-world physical dynamics, natural secondary motion, and organic weight and momentum${exitSuffix}`;
+              ? ` moves from the ${openZone} into the ${currentZone}${orientShiftClause}`
+              : ` continues through the ${currentZone}${orientShiftClause}`;
+            const vertClause = vertMove ? `, and ${vertMove}` : '';
+            const relClause = relMove ? ` (${relMove})` : '';
+            return `${entryPrefix}${zonePhrase}${vertClause}${relClause}${midPoseStr}${exitSuffix}`;
           }
           return entersInMid
-            ? `${entryPrefix}${midPoseStr} (${actor.actionDescription})${exitSuffix}`
-            : `${entryPrefix} remains in the ${currentZone}${coverageNote} with subtle, lifelike secondary motion (${actor.actionDescription})${exitSuffix}`;
+            ? `${entryPrefix}${midPoseStr} (${cleanedAction})${exitSuffix}`
+            : `${entryPrefix} remains in the ${currentZone}${coverageNote}${orientShiftClause}${midPoseStr} (${cleanedAction})${exitSuffix}`;
         }
 
         // close
+        const prevMidOrient = analysis.beats.mid.visible
+          ? analysis.beats.mid.viewOrientationShort
+          : analysis.beats.open.visible
+          ? analysis.beats.open.viewOrientationShort
+          : '';
+        const closeOrientClause =
+          prevMidOrient && prevMidOrient !== beatState.viewOrientationShort
+            ? `, now seen in a ${beatState.viewOrientation} (having shifted from ${prevMidOrient})`
+            : `, seen in a ${beatState.viewOrientation}`;
+        const closeVertClause = vertMove ? ` as it ${vertMove}` : '';
+        const closeRelClause = relMove ? ` while ${relMove}` : '';
+
         if (entersInClose) {
-          return `${actor.name}${socketStr} enters the camera frame in the ${currentZone}${coverageNote}${closePoseStr} (${actor.actionDescription}) with natural physical presence`;
+          return `${actor.name}${socketStr} enters the camera frame in the ${currentZone}${coverageNote}${closeOrientClause}${closePoseStr} (${cleanedAction})`;
         }
         if (hasDisplacement) {
-          return `${actor.name}${socketStr} settles into the ${currentZone}${coverageNote}${closePoseStr} with natural physical follow-through`;
+          return `${actor.name}${socketStr} reaches the ${currentZone}${coverageNote}${closeOrientClause}${closeVertClause}${closeRelClause}${closePoseStr}`;
         }
-        return `${actor.name}${socketStr} maintains living presence in the ${currentZone}${coverageNote} through the final frame`;
+        return `${actor.name}${socketStr} holds position in the ${currentZone}${coverageNote}${closeOrientClause} through the final frame`;
       })
       .join('; ');
   };
 
+  const t1Str = t1.toFixed(1);
+  const t2Str = t2.toFixed(1);
   return [
     {
-      timeRange: `0.0s - ${t1}s`,
+      timeRange: `0.0s - ${t1Str}s`,
       cameraAction: getCameraPhase('open'),
       actorAction: getActorPhase('open'),
       description: `Opening beat: ${getCameraPhase('open')}. ${getActorPhase('open')}.`,
     },
     {
-      timeRange: `${t1}s - ${t2}s`,
+      timeRange: `${t1Str}s - ${t2Str}s`,
       cameraAction: getCameraPhase('mid'),
       actorAction: getActorPhase('mid'),
       description: `Progression beat: ${getCameraPhase('mid')}. ${getActorPhase('mid')}.`,
     },
     {
-      timeRange: `${t2}s - ${duration.toFixed(1)}s`,
+      timeRange: `${t2Str}s - ${duration.toFixed(1)}s`,
       cameraAction: getCameraPhase('close'),
       actorAction: getActorPhase('close'),
       description: `Resolution beat: ${getCameraPhase('close')}. ${getActorPhase('close')}.`,
@@ -455,12 +563,10 @@ export function buildTemporalTimeline(
 
 /**
  * LTX-2.5 (Lightricks Gemma-4 22B Distilled Audio-Visual DiT) Prompt Compiler
- * Follows official Lightricks LTX-2.5 prompting guidelines + Universal Previs-to-Reality Instantiation:
- * - Single continuous narrative paragraph in present tense ("walks, turns, sways, shifts").
- * - Strictly describes ONLY entities that actually enter the camera POV frustum (`pov.visibleAnalyses`).
- * - Treats 3D previz motion/layout purely as a spatial & camera blueprint, instantiating every entity
- *   from its reference image and description as a living real-world object/subject with organic secondary physics
- *   rather than texture-wrapping simplified 3D proxy geometry.
+ * Follows official Lightricks LTX-2.5 prompting guidelines:
+ * - Single continuous narrative paragraph in present tense.
+ * - Strictly describes ONLY entities that actually enter the camera POV frustum (`pov.visibleAnalyses`),
+ *   with exact camera-relative orientation, ground/air elevation, and measured 3D camera trajectory.
  */
 export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
   const pov = analyzeShotPovVisibility(shot);
@@ -468,6 +574,8 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
     arcCurve: shot.camera.movement.arcCurve,
     trackTargetActorId: shot.camera.trackTargetActorId,
     keyframes: shot.camera.movement.keyframes,
+    customTrajectory: shot.camera.movement.customTrajectory,
+    cameraKinematics: pov.cameraKinematics,
   });
   const lensInfo = formatLens(
     shot.camera.lens.focalLength,
@@ -491,12 +599,15 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
 
   const duration = shot.durationSeconds.toFixed(1);
 
-  // Subject descriptors filtered strictly to POV-visible subjects with true camera-relative zones
+  // Subject descriptors filtered strictly to POV-visible subjects with true camera-relative zones, elevation, and orientation
   const subjectSentence =
     pov.visibleAnalyses.length > 0
       ? `In the camera frame, ${pov.visibleAnalyses
           .map((analysis) => {
             const actor = analysis.actor;
+            const firstBeat = analysis.firstVisibleBeat
+              ? analysis.beats[analysis.firstVisibleBeat]
+              : analysis.beats.open;
             const scale = actor.scale ?? 1.0;
             const scalePrefix =
               scale >= 2.0
@@ -513,26 +624,26 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
                 ? 'entering the frame mid-shot in the '
                 : analysis.firstVisibleBeat === 'close'
                 ? 'entering the frame in the closing beat in the '
-                : 'positioned in the ';
-            return `${scalePrefix}${actor.token} (${actor.name}, ${entryTiming}${analysis.primaryScreenZone})`;
+                : 'initially ';
+            return `${scalePrefix}${cleanActorToken(actor.token, actor.name)} (${actor.name}, ${entryTiming}${firstBeat.elevationPhrase} in the ${analysis.primaryScreenZone}, ${firstBeat.viewOrientationShort})`;
           })
           .join(' and ')}.`
       : '';
 
-  // Construct fluid, present-tense chronological narrative
   const openingActorAction = timeline[0].actorAction;
   const midActorAction = timeline[1].actorAction;
   const closingActorAction = timeline[2].actorAction;
 
   const previsToRealityDirective =
-    'Strictly preserve the camera framing, subject screen placement, scale proportions, and choreographed action timing of the 3D previz guide, while realizing every visible element in the frame as an authentic, living real-world entity with natural three-dimensional silhouette, organic surface complexity, and fluid real-world kinematics (smoothing out any mechanical 3D keyframe stiffness without preserving synthetic proxy geometry).';
+    'Completely supplant the simplified 3D previz background, terrain, and stage proxies with the living real-world environment and entities, using the 3D previz guide strictly for camera trajectory, spatial placement, altitude, and viewing-angle timing. Every entity and background surface in the frame exhibits authentic three-dimensional real-world structure, natural secondary motion, and physical depth without any synthetic 3D previz geometry or keyframe rigidity.';
 
+  const pureEnvName = extractPureEnvironmentDescription(shot.environment?.name) || 'the space';
   const soundscapeSentence =
     pov.visibleAnalyses.length > 0
-      ? `Natural environmental acoustics matching ${shot.environment?.name || 'the space'} and synchronized physical foley accompany the motion.`
-      : `Natural ambient soundscape and spatial acoustics fill ${shot.environment?.name || 'the environment'}.`;
+      ? `Natural environmental acoustics matching ${pureEnvName} and synchronized physical foley accompany the motion.`
+      : `Natural ambient soundscape and spatial acoustics fill ${pureEnvName}.`;
 
-  const narrativeProgression = `Throughout the continuous ${duration}-second take, the ${cameraMove}. At the opening of the shot (${timeline[0].timeRange}), ${openingActorAction}. Over the mid-shot progression (${timeline[1].timeRange}), ${timeline[1].cameraAction.toLowerCase()} as ${midActorAction}. Towards the final resolution (${timeline[2].timeRange}), ${closingActorAction}, while the camera smoothly holds focus. ${previsToRealityDirective} ${soundscapeSentence}`;
+  const narrativeProgression = `Throughout the continuous ${duration}-second take, the ${cameraMove}. At the opening (${timeline[0].timeRange}), ${timeline[0].cameraAction.toLowerCase()} while ${openingActorAction}. During the mid-shot progression (${timeline[1].timeRange}), ${timeline[1].cameraAction.toLowerCase()} as ${midActorAction}. In the closing beat (${timeline[2].timeRange}), ${timeline[2].cameraAction.toLowerCase()} while ${closingActorAction}. ${previsToRealityDirective} ${soundscapeSentence}`;
 
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
 
@@ -543,7 +654,7 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
     `${shot.sceneDescription.trim()}.`,
     shot.claymationMode
       ? `Authentic stop-motion claymation aesthetic, handcrafted malleable clay surface textures, subtle fingerprint imperfections, animated on-twos at ${shot.claymationFps || 12}fps motion cadence.`
-      : `Atmospheric environment under ${lightInfo}, with volumetric light bounce, natural motion cadence at 24fps, and physical depth.`,
+      : `Atmospheric environment under ${lightInfo}, with natural 24fps motion cadence and realistic physical depth.`,
     narrativeProgression,
   ]
     .filter(Boolean)
@@ -562,7 +673,7 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
         ? pov.visibleAnalyses
             .map(
               (a) =>
-                `${a.actor.token} (${a.actor.actionDescription}; POV: ${a.primaryScreenZone}${
+                `${cleanActorToken(a.actor.token, a.actor.name)} (${cleanActorAction(a.actor.actionDescription, a.actor.token, a.actor.name)}; POV: ${a.primaryScreenZone}; Orientation: ${a.orientationTransitionSummary}${
                   a.actor.socketToBone ? `; attached to bone ${a.actor.socketToBone.boneName}` : ''
                 })`
             )
@@ -588,13 +699,11 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
 
 /**
  * MiniMax H3 / Hailuo Reference-to-Video (Ref2VA) Prompt Compiler
- * Follows the official MiniMax H3 Reference-to-Video multi-subject & video-reference schema
- * (`muse_minimax_director.py` canonical convention) + Universal Semantic Entity Instantiation Rule:
- * - subject_definitions: Maps <Subject 1..N> to <picture 1..N> ONLY for POV-visible entities (`pov.visibleAnalyses`),
- *   plus <Subject 4> (<picture 4> environment) and <Video 1> (3D previz spatial & camera blueprint).
- * - Universal Instantiation Rule: Every <Subject N> (`1..4`) is `fully_preserved` from `<picture N>`, completely
- *   supplanting its 3D placeholder volume in `<Video 1>` as a true, living real-world entity (never texture-wrapping
- *   the simplified 3D proxy mesh), while `<Video 1>` uses the official `weak_reference` tier (`camera/motion reference`).
+ * Follows the official MiniMax H3 Reference-to-Video multi-subject & video-reference schema:
+ * - subject_definitions: Maps <Subject 1..N> to <Picture 1..N> ONLY for POV-visible entities (`pov.visibleAnalyses`),
+ *   isolating the subject appearance from <Picture N> (ignoring <Picture N>'s background), plus <Subject 4> (<Picture 4> background environment)
+ *   and <Video 1> (camera & 3D motion reference).
+ * - Concise, high-attention descriptions of 3D orientation transitions, ground/air altitude changes, and measured camera trajectory.
  */
 export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
   const pov = analyzeShotPovVisibility(shot);
@@ -602,6 +711,8 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     arcCurve: shot.camera.movement.arcCurve,
     trackTargetActorId: shot.camera.trackTargetActorId,
     keyframes: shot.camera.movement.keyframes,
+    customTrajectory: shot.camera.movement.customTrajectory,
+    cameraKinematics: pov.cameraKinematics,
   });
   const lensInfo = formatLens(
     shot.camera.lens.focalLength,
@@ -623,9 +734,9 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
   );
   const timeline = buildTemporalTimeline(shot, pov);
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
-  const defaultPalette = ['#EF4444', '#06B6D4', '#F59E0B', '#10B981'];
 
   // Build subject definitions (<Subject 1..3>) strictly from POV-visible entities + <Subject 4> environment
+  // Following the official ComfyUI / MiniMax H3 Full-Reference Video Generation Prompt ("Rotating Hive Chamber") schema:
   const subjectDefLines: string[] = [];
   const retentionLines: string[] = [];
   const proxySpatialAnchors: string[] = [];
@@ -635,8 +746,12 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     const analysis = visibleTop3[i];
     const actor = analysis.actor;
     const subjIdx = i + 1;
-    const hex = (actor.color || defaultPalette[i]).toUpperCase();
-    const horizZone = analysis.primaryHorizontalZone;
+    const firstBeat = analysis.firstVisibleBeat
+      ? analysis.beats[analysis.firstVisibleBeat]
+      : analysis.beats.open;
+    const lastBeat = analysis.lastVisibleBeat
+      ? analysis.beats[analysis.lastVisibleBeat]
+      : analysis.beats.close;
     const screenZone = analysis.primaryScreenZone;
     const presenceTag = analysis.visibleInAllBeats
       ? 'present throughout'
@@ -661,15 +776,30 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
       ? ` (attached to bone ${actor.socketToBone.boneName})`
       : '';
 
+    const orientTransition =
+      firstBeat.viewOrientationShort !== lastBeat.viewOrientationShort
+        ? `initially seen in a ${firstBeat.viewOrientation} and transitioning to a ${lastBeat.viewOrientation} by the end of the shot`
+        : `seen in a ${firstBeat.viewOrientation}`;
+
+    const altitudeTransition =
+      firstBeat.elevationState === 'grounded' && lastBeat.endAltitudeMeters >= 0.8
+        ? `starts grounded on the surface and lifts off into mid-air (~${lastBeat.endAltitudeMeters.toFixed(1)}m altitude)`
+        : firstBeat.startAltitudeMeters >= 0.8 && lastBeat.elevationState === 'grounded'
+        ? `starts airborne (~${firstBeat.startAltitudeMeters.toFixed(1)}m altitude) and descends to land on the ground`
+        : `${firstBeat.elevationPhrase}`;
+
+    const cleanedToken = cleanActorToken(actor.token, actor.name);
+    const cleanedAct = cleanActorAction(actor.actionDescription, actor.token, actor.name);
+
     proxySpatialAnchors.push(
-      `<Subject ${subjIdx}> (${actor.name}) occupies the ${hex} placeholder volume in the ${screenZone}`
+      `<Subject ${subjIdx}> (${actor.name}) in the ${screenZone} (${orientTransition})`
     );
 
     subjectDefLines.push(
-      `<Subject ${subjIdx}> is ${actor.name} (from <Picture ${subjIdx}>): ${scalePrefix}${actor.token}${socketNote}, ${actor.actionDescription}. Strictly follows the screen position (${horizZone}), scale proportions, orientation, and choreographed motion trajectory of its ${hex} counterpart in <Video 1>, while instantiating the true, living real-world entity from <Picture ${subjIdx}> with its authentic silhouette, organic detail, and fluid, natural physical motion (smoothing out any stiff 3D keyframe mechanics; do NOT merely texture-wrap or paint <Picture ${subjIdx}> over the simplified 3D proxy mesh).`
+      `<Subject ${subjIdx}> is ${actor.name} (from <Picture ${subjIdx}>): ${scalePrefix}${cleanedToken}${socketNote}. <Picture ${subjIdx}> defines ${actor.name}'s finished real-world appearance, construction, materials, colors, proportions, and lighting treatment. Its complete motion trajectory, timing, body/object mechanics, ${altitudeTransition} in the ${screenZone}, and ${orientTransition} (${cleanedAct}) come strictly from <Video 1> (do NOT merely texture-wrap the untextured 3D blockout mesh).`
     );
     retentionLines.push(
-      `<Subject ${subjIdx}> (${presenceTag}): fully_preserved - matches <Picture ${subjIdx}>; instantiate the authentic real-world entity from <Picture ${subjIdx}> following the exact ${horizZone} screen trajectory, scale volume, and action timing in <Video 1>, articulated with fluid real-world biomechanics and lifelike secondary motion rather than rigid proxy geometry.`
+      `<Subject ${subjIdx}> (${presenceTag}): attribute_transfer - matches <Picture ${subjIdx}>; the finished real-world appearance, materials, and proportions from <Picture ${subjIdx}> are transferred onto the animated subject from <Video 1> while preserving the source pose sequence, 3D trajectory, altitude changes, timing, and ${analysis.orientationTransitionSummary} from <Video 1>.`
     );
   }
 
@@ -677,70 +807,79 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     for (let i = 3; i < pov.visibleAnalyses.length; i++) {
       const extraAnalysis = pov.visibleAnalyses[i];
       const extraActor = extraAnalysis.actor;
-      const hex = (extraActor.color || defaultPalette[i % defaultPalette.length]).toUpperCase();
       proxySpatialAnchors.push(
-        `${extraActor.name} (${extraActor.token}) occupies the ${hex} placeholder volume in the ${extraAnalysis.primaryScreenZone}`
+        `${extraActor.name} (${cleanActorToken(extraActor.token, extraActor.name)}) in the ${extraAnalysis.primaryScreenZone}`
       );
     }
   }
 
-  const envDesc = `${shot.environment?.promptDescription || shot.sceneDescription.trim()}${
-    envText ? ` (${envText})` : ''
-  }`;
+  // Filter out actor names from sceneDescription if the user wrote actor actions in sceneDescription so <Subject 4> remains a pure background environment
+  const rawEnvPrompt = extractPureEnvironmentDescription(
+    shot.environment?.promptDescription || shot.environment?.name || 'cinematic filming location'
+  );
+  const envDesc = `${rawEnvPrompt}${envText && !rawEnvPrompt.includes(envText) ? ` (${envText})` : ''}`;
+
   subjectDefLines.push(
-    `<Subject 4> is the [Scene Environment] (from <Picture 4>): ${envDesc}. Completely supplants the dark-slate #334155 3D previz stage blocks in <Video 1> while strictly preserving <Video 1>'s camera perspective, horizon line, and ground-plane depth, instantiating the full, living real-world environment from <Picture 4> with authentic three-dimensional structure and atmospheric depth (never texture-wrap the simplified previz blocks).`
+    `<Subject 4> is the [Scene Environment] (from <Picture 4>): ${envDesc}. Completely supplants the entire 3D previz background, terrain, and stage geometry in <Video 1> while strictly preserving <Video 1>'s 3D camera perspective, horizon line, environmental parallax, and ground-plane depth, transforming the surrounding reference geometry into the finished real-world environment defined by <Picture 4> with authentic three-dimensional structure and atmospheric depth.`
   );
   retentionLines.push(
-    `<Subject 4> (present throughout): fully_preserved - matches <Picture 4>; instantiate the authentic real-world environment from <Picture 4> across the exact 3D camera perspective and ground plane of <Video 1>.`
+    `<Subject 4> (present throughout): fully_preserved - matches <Picture 4>; the finished real-world environment, architecture, terrain, materials, and lighting from <Picture 4> define the surrounding world across <Video 1>'s exact 3D camera perspective and ground plane.`
   );
 
   const blockingDetail =
     proxySpatialAnchors.length > 0
-      ? ` and subject spatial placement (${proxySpatialAnchors.join('; ')})`
+      ? ` and subject blocking (${proxySpatialAnchors.join('; ')})`
       : ' and environmental spatial depth';
   subjectDefLines.push(
-    `<Video 1> is the 3D previz composition, camera trajectory, and motion choreography guide. Strictly preserve the camera framing, lens perspective, subject screen positions, scale proportions, and choreographed action timing shown in <Video 1>${blockingDetail}, while translating simplified 3D previz shapes and rigid keyframe interpolation into photorealistic real-world entities with fluid, natural physical motion (do NOT treat <Video 1> as literal low-poly geometry to be texture-wrapped).`
+    `<Video 1> is the original untextured 3D animation reference and the authoritative temporal and spatial source for the entire target video (${cameraMove}). It defines the exact subject animation, frame-by-frame pose and trajectory progression, altitude changes, viewing-angle transitions${blockingDetail}, environment parallax, camera angle, camera position, framing, tracking behavior, lens perspective, shot duration, and complete temporal progression. Whenever movement or framing implied by <Picture 1> differs from <Video 1>, <Video 1> takes absolute priority.`
+  );
+  subjectDefLines.push(
+    `<Picture 1> is the finished visual reference for the target rendering, defining the photorealistic subject and environment appearance, material palette, surface textures, lighting relationships, atmospheric depth, and overall cinematic rendering style.`
   );
   retentionLines.push(
-    `<Video 1> (camera/motion reference): partially_preserved - preserve the exact camera trajectory, framing, subject screen placement, scale proportions, and choreographed motion timing from <Video 1>, while upgrading synthetic 3D previz geometry and mechanical keyframe interpolation into photorealistic appearance and fluid, natural real-world motion.`
+    `<Video 1> (entire temporal structure): fully_preserved - preserve its complete animation, timing, camera transform, camera angle, framing, subject screen placement, scale proportions, altitude changes, orientation transitions, shot duration, and frame progression without alteration.`
   );
 
   // Subject micro-acting summary for metadata (POV-visible only)
   const subjectBlocks = pov.visibleAnalyses
     .map(
       (a) =>
-        `${a.actor.token} (${a.actor.name}, POV: ${a.primaryScreenZone}): ${a.actor.actionDescription}`
+        `${cleanActorToken(a.actor.token, a.actor.name)} (${a.actor.name}, POV: ${a.primaryScreenZone}, ${a.orientationTransitionSummary}): ${cleanActorAction(a.actor.actionDescription, a.actor.token, a.actor.name)}`
     )
     .join('; ');
 
   const styleLine = shot.claymationMode
     ? `Authentic stop-motion claymation aesthetic, handcrafted malleable clay surface textures, tactile fingerprint imperfections, animated on-twos at ${shot.claymationFps || 12}fps motion cadence.`
-    : `The target video is a photorealistic cinema shot in ${shot.aspectRatio}, lasting ${shot.durationSeconds.toFixed(1)} seconds at 24fps motion cadence. Use one uninterrupted take with ${lensInfo}, ${angleInfo}, ${cameraMove}, realistic motion blur, and natural 180-degree shutter angle.`;
+    : `Photorealistic cinema shot in ${shot.aspectRatio}, lasting ${shot.durationSeconds.toFixed(1)} seconds at 24fps. One continuous take filmed on a ${lensInfo}, ${angleInfo}, with ${cameraMove}.`;
 
   const beatParagraphs = timeline
     .map((beat, idx) => {
-      const prefix = idx === 0 ? `[Shot 1] From ${beat.timeRange}` : `From ${beat.timeRange}`;
+      const prefix = idx === 0 ? `From ${beat.timeRange}` : `From ${beat.timeRange}`;
       return `${prefix}, ${beat.cameraAction}. Simultaneously, ${beat.actorAction}.`;
     })
     .join('\n\n');
 
   const refRangePhrase =
     visibleTop3.length > 0
-      ? `<Picture 1>–<Picture ${visibleTop3.length}> and <Picture 4> for full real-world entity and environment instantiation`
-      : `<Picture 4> for full real-world environment instantiation`;
+      ? `<Picture 1>–<Picture ${visibleTop3.length}> for the foreground subject(s) and <Picture 4> for the scene environment`
+      : `<Picture 4> for the scene environment`;
 
+  const replaceBlockoutClause =
+    visibleTop3.length > 0
+      ? `Replace the original 3D blockout subject(s) with ${visibleTop3.map((_, idx) => `<Subject ${idx + 1}>`).join(', ')} and transform the complete surrounding stage geometry into <Subject 4>.`
+      : `Transform the complete surrounding stage geometry into <Subject 4>.`;
+
+  const soundscapeEnvName = extractPureEnvironmentDescription(shot.environment?.name) || 'the scene';
   const positivePrompt = [
     `subject_definitions:\n${subjectDefLines.join('\n\n')}`,
-    `summary: [reference generation] Create a cinematic, photorealistic ${shot.aspectRatio}, ${shot.durationSeconds.toFixed(1)}-second continuous shot ("${shot.name}"), following the exact camera framing, subject placement, and motion choreography of <Video 1> and using ${refRangePhrase}.`,
+    `summary: [reference generation] The target video recreates the exact animation, spatial blocking, and virtual-camera performance of <Video 1> across a continuous ${shot.durationSeconds.toFixed(1)}-second ${shot.aspectRatio} shot ("${shot.name}"), while applying the finished photorealistic appearance and environment established by ${refRangePhrase}. <Video 1> has absolute priority for subject movement, timing, environmental parallax, camera motion, and framing.`,
     `retention_analysis:\n${retentionLines.join('\n')}`,
-    `detailed_description: ${styleLine}\n\n${beatParagraphs}\n\nThroughout, ${lightInfo}. Every entity in the frame exhibits authentic three-dimensional structure, natural secondary motion, and physical depth without any synthetic 3D previz rigidity. No readable text, subtitles, or interface graphics.`,
-    `overall_soundscape: Natural environmental ambiance matching ${
-      shot.environment?.name || 'the scene'
-    }${
+    `detailed_description: ${styleLine} <Video 1> is the strict motion master; no movement should be regenerated from the still reference image.\n\n[Shot 1] Reproduce the complete continuous shot from <Video 1> at identical duration and timing. ${replaceBlockoutClause} Every moment follows <Video 1> frame for frame: preserve the exact camera angle, camera height, camera distance, lens perspective, tracking behavior, and subject trajectories from <Video 1>.\n\n${beatParagraphs}\n\nScene context: ${shot.sceneDescription.trim()}. Lighting: ${lightInfo}. Every entity and background surface in the frame exhibits authentic three-dimensional real-world structure, natural secondary motion, and physical depth without any synthetic 3D previz geometry or keyframe rigidity. No readable text, subtitles, or interface graphics.`,
+    `overall_soundscape: Natural environmental ambiance matching ${soundscapeEnvName}${
       visibleTop3.length > 0
-        ? ', realistic physical foley and surface interactions synchronized with visible scene motion,'
+        ? ', realistic physical foley synchronized with the visible motion,'
         : ','
-    } and subtle spatial acoustics. No unintended vocalizations.`,
+    } and spatial acoustics. No unintended vocalizations.`,
     `non_diegetic_music: N/A.`,
   ].join('\n\n');
 
@@ -774,7 +913,7 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
 /**
  * Seedance 2.0 (ByteDance Seaweed / SeaDance) Prompt Compiler
  * Follows official Seedance prompting guidelines:
- * - Structured brackets emphasizing 6-axis camera motion matrix coordinates, POV-visible subject locomotion physics,
+ * - Structured brackets emphasizing 6-axis camera motion matrix coordinates, POV-visible subject 3D orientation & altitude physics,
  *   sequential cue timetables, spatial volumetric lighting, and optical sensor profiles.
  */
 export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
@@ -783,6 +922,8 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
     arcCurve: shot.camera.movement.arcCurve,
     trackTargetActorId: shot.camera.trackTargetActorId,
     keyframes: shot.camera.movement.keyframes,
+    customTrajectory: shot.camera.movement.customTrajectory,
+    cameraKinematics: pov.cameraKinematics,
   });
   const lensInfo = formatLens(
     shot.camera.lens.focalLength,
@@ -813,6 +954,9 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
   const subjectBlocks = pov.visibleAnalyses
     .map((analysis) => {
       const actor = analysis.actor;
+      const firstBeat = analysis.firstVisibleBeat
+        ? analysis.beats[analysis.firstVisibleBeat]
+        : analysis.beats.open;
       const scale = actor.scale ?? 1.0;
       const scalePrefix =
         scale >= 2.0 ? 'towering scale ' : scale >= 1.4 ? 'large scale ' : scale <= 0.5 ? 'miniature scale ' : '';
@@ -822,7 +966,7 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
       const closeZone = analysis.beats.close.visible
         ? analysis.beats.close.screenZone
         : analysis.primaryScreenZone;
-      return `${scalePrefix}${actor.token} (${actor.name})${socketPart} [Camera POV Framing: ${analysis.primaryScreenZone} -> ${closeZone} | Stage Vector: (${start.x}%, ${start.y}%) -> (${end.x}%, ${end.y}%)], performing: ${actor.actionDescription}, instantiated as a full living real-world entity with natural secondary motion and physical mass (supplanting the 3D previz placeholder volume without texture-wrapping)`;
+      return `${scalePrefix}${cleanActorToken(actor.token, actor.name)} (${actor.name})${socketPart} [Camera POV Framing: ${analysis.primaryScreenZone} -> ${closeZone} | Orientation: ${analysis.orientationTransitionSummary} | Elevation: ${firstBeat.elevationPhrase} | Stage Vector: (${start.x}%, ${start.y}%, z:${start.z ?? 0}) -> (${end.x}%, ${end.y}%, z:${end.z ?? 0})], performing: ${cleanActorAction(actor.actionDescription, actor.token, actor.name)}`;
     })
     .join('; ');
 
@@ -834,16 +978,16 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
   const positivePrompt = [
     `[Camera 6-Axis Motion & Matrix Trajectory]: ${angleInfo}, ${cameraMove}, 3D displacement vector (dx: ${dx}, dy: ${dy}, dz: ${dz}), filmed on ${lensInfo}.`,
     subjectBlocks ? `[Subject Dynamics & Aerodynamic Physics]: ${subjectBlocks}.` : '',
-    `[Previs-to-Reality Spatial Instantiation]: Use 3D stage vectors solely for camera perspective, spatial placement, and scale volumes; replace every 3D placeholder proxy with its authentic, living real-world entity and organic secondary physics rather than texture-wrapped proxy geometry.`,
+    `[Previs-to-Reality Spatial Instantiation]: Completely supplant all simplified 3D previz background shapes, terrain, and subject proxies with the living real-world environment and entities, using the 3D previz guide strictly for camera trajectory, spatial placement, altitude, and viewing-angle timing. Every entity and background surface exhibits authentic three-dimensional real-world structure, natural secondary physics, and fluid kinematics without any synthetic 3D previz geometry or keyframe rigidity.`,
     `[Temporal Cue Timetable]: ${timelineString}.`,
-    `[Atmospheric Space & Volumetric Lighting]: ${lightInfo}, volumetric shadow falloff, spatial air density, scene environment: ${
+    `[Atmospheric Space & Volumetric Lighting]: ${lightInfo}, scene environment: ${
       shot.environment?.promptDescription || shot.sceneDescription.trim()
     }${envText ? ` (${envText})` : ''}.`,
     shot.claymationMode
       ? `[Render & Motion Profile]: Stop-motion claymation aesthetic, handcrafted tactile clay micro-textures, ${
           shot.claymationFps || 12
         }fps on-twos motion cadence.`
-      : `[Render & Motion Profile]: Optical photorealism, 24fps motion matrix coherence, natural 180-degree optical shutter angle, rich texture fidelity.`,
+      : `[Render & Motion Profile]: Optical photorealism, 24fps motion matrix coherence, natural 180-degree optical shutter angle.`,
   ]
     .filter(Boolean)
     .join(' ');
@@ -890,4 +1034,3 @@ export function compilePromptForShot(shot: ShotSpec, targetModelId?: string): Co
   }
   return compileLtxPrompt(shot);
 }
-

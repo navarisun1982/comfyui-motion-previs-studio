@@ -497,6 +497,18 @@ export function extractPreviewImageFromHistory(
  * Execute the full Image-to-3D (`#aa77013b`) or Text-to-3D (`#e7a9555b`) `.GLB` workflow in ComfyUI
  * and register the resulting `.GLB` model in the Studio's Three.js GLTF cache.
  */
+let active3DCancelFn: (() => Promise<void>) | null = null;
+
+export async function cancelActive3DGeneration(): Promise<void> {
+  const fn = active3DCancelFn;
+  active3DCancelFn = null;
+  if (fn) {
+    await fn();
+  } else {
+    await defaultComfyClient.interrupt();
+  }
+}
+
 export async function generate3DGlbInComfy(
   options: Comfy3DGenerationOptions
 ): Promise<Comfy3DGenerationResult> {
@@ -564,6 +576,32 @@ export async function generate3DGlbInComfy(
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     let currentExecutingNodeId: string | undefined;
+    let consecutiveOfflinePolls = 0;
+    let missingFromQueuePolls = 0;
+
+    const finishWithError = (errMsg: string) => {
+      if (settled) return;
+      settled = true;
+      active3DCancelFn = null;
+      window.clearInterval(pollInterval);
+      unregister();
+      reject(new Error(errMsg));
+    };
+
+    const finishSuccess = () => {
+      if (settled) return;
+      settled = true;
+      active3DCancelFn = null;
+      window.clearInterval(pollInterval);
+      unregister();
+      resolve();
+    };
+
+    active3DCancelFn = async () => {
+      await defaultComfyClient.interrupt();
+      await defaultComfyClient.deleteQueueItem(promptId);
+      finishWithError('3D .GLB render stopped by user.');
+    };
 
     const unregister = defaultComfyClient.registerJobListener({
       promptId,
@@ -597,28 +635,13 @@ export async function generate3DGlbInComfy(
         });
       },
       onSuccess: () => {
-        if (!settled) {
-          settled = true;
-          window.clearInterval(pollInterval);
-          unregister();
-          resolve();
-        }
+        finishSuccess();
       },
       onError: (errMsg) => {
-        if (!settled) {
-          settled = true;
-          window.clearInterval(pollInterval);
-          unregister();
-          reject(new Error(errMsg));
-        }
+        finishWithError(errMsg);
       },
       onInterrupted: () => {
-        if (!settled) {
-          settled = true;
-          window.clearInterval(pollInterval);
-          unregister();
-          reject(new Error('ComfyUI 3D workflow was interrupted.'));
-        }
+        finishWithError('ComfyUI 3D workflow was interrupted.');
       },
     });
 
@@ -626,16 +649,45 @@ export async function generate3DGlbInComfy(
       if (settled) return;
       try {
         const h = (await defaultComfyClient.getPromptHistory(promptId)) as Record<string, any> | null;
-        if (h && h.status?.completed) {
-          settled = true;
-          window.clearInterval(pollInterval);
-          unregister();
-          resolve();
-        } else if (h && h.status?.status_str === 'error') {
-          settled = true;
-          window.clearInterval(pollInterval);
-          unregister();
-          reject(new Error('ComfyUI 3D workflow reported an execution error.'));
+        if (h) {
+          consecutiveOfflinePolls = 0;
+          if (h.status?.completed) {
+            finishSuccess();
+            return;
+          } else if (h.status?.status_str === 'error') {
+            finishWithError('ComfyUI 3D workflow reported an execution error.');
+            return;
+          }
+          return;
+        }
+
+        const q = await defaultComfyClient.getQueueStatus();
+        if (!q.ok) {
+          consecutiveOfflinePolls += 1;
+          if (consecutiveOfflinePolls >= 2) {
+            finishWithError(
+              'ComfyUI server disconnected or stopped during 3D generation. Start ComfyUI and try again.'
+            );
+          }
+          return;
+        }
+        consecutiveOfflinePolls = 0;
+        const inQueue =
+          q.runningPromptIds.includes(promptId) || q.pendingPromptIds.includes(promptId);
+        if (!inQueue) {
+          const recheck = await defaultComfyClient.getPromptHistory(promptId);
+          if (recheck) {
+            missingFromQueuePolls = 0;
+            return;
+          }
+          missingFromQueuePolls += 1;
+          if (missingFromQueuePolls >= 2) {
+            finishWithError(
+              '3D job is no longer active in ComfyUI queue (ComfyUI may have restarted or encountered an error).'
+            );
+          }
+        } else {
+          missingFromQueuePolls = 0;
         }
       } catch {
         // ignore transient poll errors
