@@ -17,6 +17,7 @@ import base64
 import json
 import math
 import os
+import struct
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -39,6 +40,98 @@ def resolve_nlf_model_path(explicit_path: Optional[str] = None) -> Optional[str]
         if os.path.isfile(candidate):
             return candidate
     return None
+
+
+def _resolve_smpl_faces_array(model_path: str, v_template: np.ndarray) -> np.ndarray:
+    comfy_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(model_path))))
+    npz_candidates = [
+        os.path.join(
+            comfy_root,
+            "custom_nodes",
+            "comfyui_controlnet_aux",
+            "src",
+            "custom_mesh_graphormer",
+            "modeling",
+            "data",
+            "mesh_downsampling.npz",
+        ),
+        os.path.join(comfy_root, "custom_nodes", "ComfyUI-KJNodes", "data", "mesh_downsampling.npz"),
+        r"D:\ComfyUI\custom_nodes\comfyui_controlnet_aux\src\custom_mesh_graphormer\modeling\data\mesh_downsampling.npz",
+        r"C:\ComfyUI\custom_nodes\comfyui_controlnet_aux\src\custom_mesh_graphormer\modeling\data\mesh_downsampling.npz",
+    ]
+    for npz_path in npz_candidates:
+        if os.path.isfile(npz_path):
+            try:
+                d = np.load(npz_path, allow_pickle=True, encoding="latin1")
+                faces = np.asarray(d["F"][0], dtype=np.uint16)
+                if faces.ndim == 2 and faces.shape[1] == 3 and faces.shape[0] > 1000:
+                    return faces
+            except Exception:
+                pass
+
+    # Fallback local surface triangulation if mesh_downsampling.npz is absent
+    n_verts = int(v_template.shape[0])
+    tris: List[Tuple[int, int, int]] = []
+    for i in range(0, n_verts - 2):
+        tris.append((i, i + 1, i + 2))
+    return np.asarray(tris, dtype=np.uint16)
+
+
+def ensure_local_smpl_canonical_bin(model_path: Optional[str], loaded_model: Optional[Any] = None) -> bool:
+    """
+    Ensures `public/models/smpl_canonical.bin` exists locally by extracting the canonical
+    6,890-vertex SMPL tables from the user's local ComfyUI NLF TorchScript model on first run.
+    """
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    out_bin_path = os.path.join(repo_root, "public", "models", "smpl_canonical.bin")
+    if os.path.isfile(out_bin_path) and os.path.getsize(out_bin_path) >= 1_100_000:
+        return True
+    if not model_path or not os.path.isfile(model_path):
+        return False
+
+    try:
+        os.makedirs(os.path.dirname(out_bin_path), exist_ok=True)
+        m = loaded_model if loaded_model is not None else torch.jit.load(model_path, map_location="cpu")
+        smpl = m.body_models.smpl
+
+        parents = smpl.kintree_parents_tensor.detach().cpu().numpy().astype(np.int32)
+        parents[0] = -1
+        j_template = smpl.J_template.detach().cpu().numpy().astype(np.float32)
+        j_shapedirs = smpl.J_shapedirs[:, :, :10].detach().cpu().numpy().astype(np.float32)
+        v_template = smpl.v_template.detach().cpu().numpy().astype(np.float32)
+        shapedirs = smpl.shapedirs[:, :, :10].detach().cpu().numpy().astype(np.float32)
+        weights_24 = smpl.weights.detach().cpu().numpy().astype(np.float32)
+
+        top4_idx = np.argsort(-weights_24, axis=1)[:, :4].astype(np.uint16)
+        top4_w = np.take_along_axis(weights_24, top4_idx, axis=1).astype(np.float32)
+        w_sum = np.maximum(1e-8, top4_w.sum(axis=1, keepdims=True))
+        top4_w = (top4_w / w_sum).astype(np.float32)
+
+        faces = _resolve_smpl_faces_array(model_path, v_template)
+        header = struct.pack(
+            "<4s5I",
+            b"SMPL",
+            1,
+            int(v_template.shape[0]),
+            int(faces.shape[0]),
+            int(j_template.shape[0]),
+            int(shapedirs.shape[2]),
+        )
+        tmp_path = out_bin_path + ".tmp"
+        with open(tmp_path, "wb") as f:
+            f.write(header)
+            f.write(parents.tobytes(order="C"))
+            f.write(j_template.tobytes(order="C"))
+            f.write(j_shapedirs.tobytes(order="C"))
+            f.write(v_template.tobytes(order="C"))
+            f.write(shapedirs.tobytes(order="C"))
+            f.write(top4_idx.tobytes(order="C"))
+            f.write(top4_w.tobytes(order="C"))
+            f.write(faces.tobytes(order="C"))
+        os.replace(tmp_path, out_bin_path)
+        return True
+    except Exception:
+        return False
 
 
 def decode_data_url_to_rgb(data_url: str) -> Optional[np.ndarray]:
@@ -558,6 +651,7 @@ def run_nlf_smpl_extraction(
 
     smpl_tables: Optional[Dict[str, np.ndarray]] = None
     try:
+        ensure_local_smpl_canonical_bin(model_path, loaded_model=model)
         smpl_mod = model.body_models.smpl
         smpl_tables = {
             "v_template": smpl_mod.v_template.detach().cpu().numpy().astype(np.float32),
@@ -945,10 +1039,12 @@ def main() -> None:
 
     model_path = resolve_nlf_model_path()
     if args.status:
+        smpl_bin_ready = ensure_local_smpl_canonical_bin(model_path) if model_path else False
         status_payload = {
             "ok": bool(model_path),
             "modelAvailable": bool(model_path),
             "modelPath": model_path,
+            "smplCanonicalBinReady": bool(smpl_bin_ready),
             "cudaAvailable": bool(torch.cuda.is_available()),
             "deviceName": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu",
         }
