@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { useShotStore, PrevisRendererFn, getEffectiveStageLights } from '../stores/useShotStore';
 import { logger } from '../stores/useLogStore';
-import { FocalLength, AspectRatio } from '../types/shotspec';
+import { FocalLength, AspectRatio, Actor } from '../types/shotspec';
 import {
   interpolateTrajectoryPosition,
   interpolateCameraPosition,
@@ -16,6 +16,8 @@ import { registerModelFile } from '../services/modelStorage';
 import { renderOfflinePrevisPasses } from '../engine/offlinePrevisRenderer';
 import {
   preloadMannequinModel,
+  preloadSmplMannequinModel,
+  updateSmplRigShapeByProportions,
   solveLimbIK,
   solveLookAt,
   groundBothFeet,
@@ -23,7 +25,6 @@ import {
   applyPosePreset,
   exportBonePose,
   applyBonePose,
-  isSyntheticCompilerPose,
   POSE_PRESETS,
   HumanoidRig,
   evaluateGait,
@@ -44,10 +45,10 @@ import {
   applyNonHumanMeshPoseArticulation,
   getObjectAwareStagePlacements,
   OBJECT_CATEGORY_LABELS,
-  evaluateReadyMadeHumanoidClip,
   evaluateReadyMadeObjectClip,
   getReadyMadeMotionsForCategory,
   setRigOverlayVisible,
+  evaluateUnifiedHumanoidFrame,
 } from '../engine/kinematics';
 import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
 
@@ -58,7 +59,12 @@ import {
   shouldHideStageBackdropInPrevis,
   inferSemanticEnvironmentBiome,
 } from '../engine/staging/environmentBuilder';
-import { createSubjectMesh, applyObjectTargetColor, SUBJECT_MESH_SCHEMA_VERSION } from '../engine/staging/subjectMeshFactory';
+import {
+  createSubjectMesh,
+  applyObjectTargetColor,
+  resolveActorHumanoidMeshMode,
+  SUBJECT_MESH_SCHEMA_VERSION,
+} from '../engine/staging/subjectMeshFactory';
 import { StageViewfinderOverlays, updateFrustumGeometry } from './stage/StageViewfinderOverlays';
 import { StageTopViewRadar } from './stage/StageTopViewRadar';
 import {
@@ -123,6 +129,254 @@ function computeCameraFovDeg(lens: {
 }
 export const _FOV_HELPER_READY = {
 };
+
+/**
+ * Applies uniform `actor.scale` plus optional SMPL 3D anthropometric `actor.bodyProportions`
+ * (`heightMeters`, `shoulderWidthRatio`, `hipWidthRatio`, `torsoLengthRatio`, `bulkFactor`)
+ * to the 3D Stage actor mesh and its humanoid skeletal rest offsets without shearing child limbs.
+ */
+function smoothBell(val: number, center: number, halfWidth: number): number {
+  const d = Math.abs(val - center) / Math.max(1e-4, halfWidth);
+  if (d >= 1) return 0;
+  return 0.5 * (1 + Math.cos(Math.PI * d));
+}
+
+function morphMannequinSkinnedMeshByProportions(
+  rigRoot: THREE.Object3D,
+  bp: Actor['bodyProportions'] | undefined
+): void {
+  const sig = bp
+    ? `${(bp.shoulderWidthRatio ?? 1).toFixed(3)}_${(bp.hipWidthRatio ?? 1).toFixed(3)}_${(bp.bulkFactor ?? 1).toFixed(3)}_${(bp.torsoLengthRatio ?? 1).toFixed(3)}_${(bp.legLengthRatio ?? 1).toFixed(3)}`
+    : 'neutral';
+  if (rigRoot.userData._appliedBpSig === sig) return;
+  rigRoot.userData._appliedBpSig = sig;
+
+  rigRoot.traverse((child) => {
+    if (!(child as THREE.Mesh).isMesh) return;
+    const m = child as THREE.Mesh;
+    const posAttr = m.geometry?.attributes?.position as THREE.BufferAttribute | undefined;
+    const baseArr = m.geometry?.userData?._basePositions as Float32Array | undefined;
+    if (!posAttr || !baseArr || posAttr.array.length !== baseArr.length) return;
+
+    const dst = posAttr.array as Float32Array;
+    if (!bp) {
+      dst.set(baseArr);
+      posAttr.needsUpdate = true;
+      return;
+    }
+
+    const bindMinY = Number(m.geometry.userData._bindMinY ?? 0);
+    const bindH = Math.max(1, Number(m.geometry.userData._bindHeight ?? 180.47));
+    const shoulderR = THREE.MathUtils.clamp(bp.shoulderWidthRatio ?? 1.0, 0.78, 1.35);
+    const hipR = THREE.MathUtils.clamp(bp.hipWidthRatio ?? 1.0, 0.78, 1.35);
+    const bulkR = THREE.MathUtils.clamp(bp.bulkFactor ?? 1.0, 0.74, 1.42);
+
+    const shDelta = shoulderR - 1.0;
+    const hipDelta = hipR - 1.0;
+    const bulkDelta = bulkR - 1.0;
+    const armAxisY = bindMinY + 0.785 * bindH;
+
+    for (let i = 0; i < baseArr.length; i += 3) {
+      const x0 = baseArr[i];
+      const y0 = baseArr[i + 1];
+      const z0 = baseArr[i + 2];
+
+      const uy = THREE.MathUtils.clamp((y0 - bindMinY) / bindH, 0, 1);
+      const ux = Math.abs(x0) / bindH;
+      const signX = x0 >= 0 ? 1 : -1;
+
+      let nx = x0;
+      let ny = y0;
+      let nz = z0;
+
+      // 1. Outstretched T-pose arms (ux > 0.145, uy in [0.70, 0.86]):
+      //    Shift horizontally with shoulder width and scale arm thickness without stretching hand length
+      if (ux > 0.145 && uy >= 0.68 && uy <= 0.88) {
+        const armAttachShift = signX * (0.145 * bindH) * shDelta * 0.95;
+        const armThick = THREE.MathUtils.clamp(1.0 + bulkDelta * 0.75 + shDelta * 0.25, 0.78, 1.38);
+        nx = x0 + armAttachShift;
+        ny = armAxisY + (y0 - armAxisY) * armThick;
+        nz = z0 * armThick;
+      } else if (uy < 0.835) {
+        // 2. Torso & Pelvis & Legs (below neck uy < 0.835, keeping head/neck proportioned)
+        const wShoulder = smoothBell(uy, 0.76, 0.10);
+        const wChest = smoothBell(uy, 0.70, 0.11);
+        const wWaist = smoothBell(uy, 0.60, 0.11);
+        const wHip = smoothBell(uy, 0.50, 0.09);
+
+        if (uy >= 0.45) {
+          // Upper body, waist/belly, and hips
+          const sx =
+            1.0 +
+            shDelta * 1.15 * wShoulder +
+            (shDelta * 0.65 + bulkDelta * 0.55) * wChest +
+            (bulkDelta * 0.95 + hipDelta * 0.35) * wWaist +
+            (hipDelta * 1.15 + bulkDelta * 0.35) * wHip;
+          // Front (+z) abdomen/chest expands more strongly for heavier/stockier builds
+          const frontBoost = z0 >= 0 ? 1.35 : 0.75;
+          const sz =
+            1.0 +
+            (bulkDelta * 0.85 + shDelta * 0.30) * wChest * frontBoost +
+            (bulkDelta * 1.25 + hipDelta * 0.30) * wWaist * frontBoost +
+            (hipDelta * 0.65 + bulkDelta * 0.75) * wHip;
+
+          nx = x0 * THREE.MathUtils.clamp(sx, 0.74, 1.45);
+          nz = z0 * THREE.MathUtils.clamp(sz, 0.74, 1.48);
+        } else if (uy > 0.07) {
+          // Thighs & calves (tapered smoothly to 0 at ankle uy = 0.07 so feet/shoes stay crisp)
+          const wThigh = smoothBell(uy, 0.38, 0.14);
+          const wCalf = smoothBell(uy, 0.20, 0.11) * 0.55;
+          const legWeight = Math.min(1.0, wThigh + wCalf);
+          const legCenter = signX * 0.052 * bindH;
+          const hipShift = legCenter * hipDelta * 0.75 * smoothBell(uy, 0.44, 0.18);
+          const limbGirth = THREE.MathUtils.clamp(
+            1.0 + (bulkDelta * 0.85 + hipDelta * 0.40) * legWeight,
+            0.78,
+            1.42
+          );
+          nx = legCenter + hipShift + (x0 - legCenter) * limbGirth;
+          nz = z0 * limbGirth;
+        }
+      }
+
+      dst[i] = nx;
+      dst[i + 1] = ny;
+      dst[i + 2] = nz;
+    }
+
+    posAttr.needsUpdate = true;
+    m.geometry.computeVertexNormals();
+  });
+}
+
+export function applyActorScaleAndBodyProportions(mesh: THREE.Object3D, actor: Actor): void {
+  const actorScale = actor.scale ?? 1.0;
+  const bp = actor.bodyProportions;
+  const rig = mesh.userData?.rig as HumanoidRig | undefined;
+
+  // 1. True 6,890-Vertex SMPL SkinnedMesh Rig:
+  //    Evaluates exact SMPL linear blendshapes T(\beta) and J(\beta) in-place and applies
+  //    uniform stature scaling so rotating limbs never shear under non-uniform parent scale.
+  if (rig?.isSmplRig) {
+    updateSmplRigShapeByProportions(rig, bp);
+    const heightR = bp ? THREE.MathUtils.clamp((bp.heightMeters || 1.75) / 1.75, 0.72, 1.35) : 1.0;
+    const bulkR = bp ? THREE.MathUtils.clamp(bp.bulkFactor ?? 1.0, 0.75, 1.4) : 1.0;
+    const baseRatio = heightR * 0.7 + bulkR * 0.3;
+    const userMultiplier = bp && baseRatio > 0.1 ? actorScale / baseRatio : actorScale;
+    const uniformScale = Number((userMultiplier * heightR).toFixed(4));
+    mesh.scale.set(uniformScale, uniformScale, uniformScale);
+    const baseRingGroup = mesh.getObjectByName('__base_ring_group__');
+    if (baseRingGroup) {
+      baseRingGroup.scale.set(1, 1, 1);
+    }
+    return;
+  }
+
+  // 2. Mixamo Y-Bot / X-Bot Mannequin Rig:
+  //    Keep Y-Bot 100% in its natural, proportionate Mixamo shape without vertex stretching
+  //    or anisotropic X/Z warping.
+  if (rig?.isMannequinRig) {
+    morphMannequinSkinnedMeshByProportions(rig.root, undefined);
+    const heightR = bp ? THREE.MathUtils.clamp((bp.heightMeters || 1.75) / 1.75, 0.72, 1.35) : 1.0;
+    const bulkR = bp ? THREE.MathUtils.clamp(bp.bulkFactor ?? 1.0, 0.75, 1.4) : 1.0;
+    const baseRatio = heightR * 0.7 + bulkR * 0.3;
+    const userMultiplier = bp && baseRatio > 0.1 ? actorScale / baseRatio : actorScale;
+    const uniformScale = Number((userMultiplier * heightR).toFixed(4));
+    mesh.scale.set(uniformScale, uniformScale, uniformScale);
+    const baseRingGroup = mesh.getObjectByName('__base_ring_group__');
+    if (baseRingGroup) {
+      baseRingGroup.scale.set(1, 1, 1);
+    }
+    return;
+  }
+
+  if (!bp) {
+    mesh.scale.set(actorScale, actorScale, actorScale);
+    const baseRingGroup = mesh.getObjectByName('__base_ring_group__');
+    if (baseRingGroup) {
+      baseRingGroup.scale.set(1, 1, 1);
+    }
+    if (rig && (rig as any)._baseRestPositions) {
+      const baseMap = (rig as any)._baseRestPositions as Map<HumanoidBone, THREE.Vector3>;
+      for (const [bName, bVec] of baseMap.entries()) {
+        const rPos = rig.restPositions.get(bName);
+        if (rPos) rPos.copy(bVec);
+      }
+      const headBone = rig.bones.get('Head');
+      if (headBone) headBone.scale.set(1, 1, 1);
+    }
+    return;
+  }
+
+  const heightR = THREE.MathUtils.clamp((bp.heightMeters || 1.75) / 1.75, 0.72, 1.35);
+  const shoulderR = THREE.MathUtils.clamp(bp.shoulderWidthRatio ?? 1.0, 0.78, 1.35);
+  const hipR = THREE.MathUtils.clamp(bp.hipWidthRatio ?? 1.0, 0.78, 1.35);
+  const bulkR = THREE.MathUtils.clamp(bp.bulkFactor ?? 1.0, 0.75, 1.4);
+
+  const widthFactor = THREE.MathUtils.clamp(
+    shoulderR * 0.45 + hipR * 0.25 + bulkR * 0.3,
+    0.78,
+    1.35
+  );
+  const depthFactor = THREE.MathUtils.clamp(bulkR * 0.72 + hipR * 0.28, 0.78, 1.35);
+  const baseRatio = heightR * 0.7 + bulkR * 0.3;
+  const userMultiplier = baseRatio > 0.1 ? actorScale / baseRatio : actorScale;
+
+  const scaleX = Number((userMultiplier * heightR * widthFactor).toFixed(4));
+  const scaleY = Number((userMultiplier * heightR).toFixed(4));
+  const scaleZ = Number((userMultiplier * heightR * depthFactor).toFixed(4));
+  mesh.scale.set(scaleX, scaleY, scaleZ);
+
+  const baseRingGroup = mesh.getObjectByName('__base_ring_group__');
+  if (baseRingGroup && scaleX > 0.05 && scaleZ > 0.05) {
+    const avgHoriz = 0.5 * (scaleX + scaleZ);
+    baseRingGroup.scale.set(avgHoriz / scaleX, 1, avgHoriz / scaleZ);
+  }
+
+  if (rig) {
+    if (!(rig as any)._baseRestPositions) {
+      const snap = new Map<HumanoidBone, THREE.Vector3>();
+      for (const [bName, rPos] of rig.restPositions.entries()) {
+        snap.set(bName, rPos.clone());
+      }
+      (rig as any)._baseRestPositions = snap;
+    }
+    const baseMap = (rig as any)._baseRestPositions as Map<HumanoidBone, THREE.Vector3>;
+    const relShoulderX = THREE.MathUtils.clamp(shoulderR / Math.max(0.75, widthFactor), 0.88, 1.16);
+    const relHipX = THREE.MathUtils.clamp(hipR / Math.max(0.75, widthFactor), 0.88, 1.16);
+    const torsoLenR = THREE.MathUtils.clamp(bp.torsoLengthRatio ?? 1.0, 0.86, 1.16);
+
+    for (const bName of ['LeftShoulder', 'RightShoulder', 'LeftArm', 'RightArm'] as HumanoidBone[]) {
+      const baseVec = baseMap.get(bName);
+      const rPos = rig.restPositions.get(bName);
+      if (baseVec && rPos) {
+        rPos.set(baseVec.x * relShoulderX, baseVec.y, baseVec.z);
+      }
+    }
+    for (const bName of ['LeftUpLeg', 'RightUpLeg'] as HumanoidBone[]) {
+      const baseVec = baseMap.get(bName);
+      const rPos = rig.restPositions.get(bName);
+      if (baseVec && rPos) {
+        rPos.set(baseVec.x * relHipX, baseVec.y, baseVec.z);
+      }
+    }
+    for (const bName of ['Spine', 'Chest'] as HumanoidBone[]) {
+      const baseVec = baseMap.get(bName);
+      const rPos = rig.restPositions.get(bName);
+      if (baseVec && rPos) {
+        rPos.set(baseVec.x, baseVec.y * torsoLenR, baseVec.z);
+      }
+    }
+    const headBone = rig.bones.get('Head');
+    if (headBone) {
+      headBone.scale.set(
+        THREE.MathUtils.clamp(1 / Math.sqrt(widthFactor), 0.86, 1.14),
+        1,
+        THREE.MathUtils.clamp(1 / Math.sqrt(depthFactor), 0.86, 1.14)
+      );
+    }
+  }
+}
 
 const ASPECT_RATIOS: Record<AspectRatio, number> = {
   '16:9': 16 / 9,
@@ -215,6 +469,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     removeActor,
     registerPrevisRenderer,
     setPrevisVideo,
+    setPrevisClay,
     setPrevisOpenPose,
     setPrevisDepth,
     setPrevisIdMask,
@@ -495,6 +750,47 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedActorId, removeActor, setSelectedActorId]);
 
+  // Synchronize 3D Stage Orbit Camera with Solved Mocap Camera upon Import
+  useEffect(() => {
+    const handleApplyMocapCamera = () => {
+      const liveShot = useShotStore.getState().shot;
+      const liveDur = liveShot.durationSeconds || duration || 4.0;
+      const camPos = interpolateCameraPosition(liveShot.camera.movement, currentTimeRef.current, liveDur);
+      const firstKfLookAt = liveShot.camera.movement.keyframes?.[0]?.lookAt;
+      const lookStageX = firstKfLookAt?.x ?? liveShot.camera.movement.targetLookAt?.x ?? 50;
+      const lookStageY = firstKfLookAt?.y ?? liveShot.camera.movement.targetLookAt?.y ?? 50;
+      const lookStageZ = firstKfLookAt?.z ?? liveShot.camera.movement.targetLookAt?.z;
+      const lookX = (lookStageX - 50) * 1.0;
+      const lookZ = (lookStageY - 50) * 1.0;
+      const st = liveShot.camera.shotType;
+      const baseLookH =
+        st === 'extreme-close-up'
+          ? 4.48
+          : st === 'close-up'
+            ? 4.32
+            : st === 'medium-close-up'
+              ? 3.95
+              : st === 'medium'
+                ? 3.45
+                : 2.85;
+      const lookY = lookStageZ !== undefined ? baseLookH + (lookStageZ - 50) * 0.075 : baseLookH;
+      const fovDeg = computeCameraFovDeg(liveShot.camera.lens);
+      if (stageCameraRef.current) {
+        stageCameraRef.current.position.set(camPos.x, camPos.y + 1.5, camPos.z);
+        stageCameraRef.current.fov = fovDeg;
+        stageCameraRef.current.updateProjectionMatrix();
+        if (stageControlsRef.current) {
+          stageControlsRef.current.target.set(lookX, lookY, lookZ);
+          stageControlsRef.current.update();
+        } else {
+          stageCameraRef.current.lookAt(lookX, lookY, lookZ);
+        }
+      }
+    };
+    window.addEventListener('cmpvs:apply-mocap-camera', handleApplyMocapCamera);
+    return () => window.removeEventListener('cmpvs:apply-mocap-camera', handleApplyMocapCamera);
+  }, [duration]);
+
   // 2. Compute Camera 3D Position at currentTime with full keyframe interpolation (reads live store state)
   const getCameraPositionAtTime = (t: number) => {
     const liveShot = useShotStore.getState().shot;
@@ -525,8 +821,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     stageScene.fog = new THREE.Fog(0x08090c, 120, 800);
     stageSceneRef.current = stageScene;
 
-    // Preload skinned humanoid mannequin for instant actor staging
-    preloadMannequinModel()
+    // Preload both Mixamo Y-Bot/X-Bot and canonical 6,890-vertex SMPL body templates for instant actor staging
+    Promise.all([preloadMannequinModel(), preloadSmplMannequinModel()])
       .then(() => {
         syncPositions(currentTimeRef.current);
       })
@@ -1245,12 +1541,20 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         const hasTrajectoryMove =
           Boolean(act?.trajectory.keyframes && act.trajectory.keyframes.length > 1) ||
           (startP && endP ? Math.hypot(endP.x - startP.x, endP.y - startP.y) > 1.0 : false);
+        const hasPoseTrack = Boolean(
+          act?.trajectory.keyframes && act.trajectory.keyframes.some((k) => k.pose !== undefined)
+        );
         const hasExplicitActorMotion =
           hasTrajectoryMove ||
           Boolean(act?.motionClip) ||
           Boolean(act?.gait && act.gait !== 'none' && act.gait !== 'auto');
 
-        if (typeof mesh.userData.update === 'function' && isPlayingRef.current && hasExplicitActorMotion) {
+        if (
+          typeof mesh.userData.update === 'function' &&
+          isPlayingRef.current &&
+          hasExplicitActorMotion &&
+          !hasPoseTrack
+        ) {
           mesh.userData.update(dt);
         }
         if (!isPlayingRef.current && mesh.userData?.rig) {
@@ -1644,13 +1948,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         ? actor.kind.toUpperCase()
         : undefined;
       const isSelected = actor.id === selectedActorId;
-      const actorScale = actor.scale ?? 1.0;
 
       let mesh = actorMeshesRef.current.get(actor.id);
       const actorToken = (actor.token || '').trim();
       const actorName = (actor.name || '').trim();
       const actorKind = (actor.kind || 'human').trim();
       const rigLandmarksSig = actor.rigLandmarks ? JSON.stringify(actor.rigLandmarks) : '';
+      const humanoidMeshMode = resolveActorHumanoidMeshMode(actor.bodyProportions);
 
       const needsFullRebuild =
         !mesh ||
@@ -1664,7 +1968,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         mesh.userData.customColor !== actor.color ||
         mesh.userData.partGraph !== (actor.sculpt || actor.partGraph) ||
         mesh.userData.rigType !== actor.rigType ||
-        mesh.userData.rigLandmarksSig !== rigLandmarksSig;
+        mesh.userData.rigLandmarksSig !== rigLandmarksSig ||
+        mesh.userData.humanoidMeshMode !== humanoidMeshMode;
 
       if (needsFullRebuild) {
         if (mesh) {
@@ -1689,7 +1994,14 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           rigLandmarks: actor.rigLandmarks,
           showBones: actor.showBones,
           actionDescription: actor.actionDescription,
+          bodyProportions: actor.bodyProportions,
           onAsyncLoadComplete: () => {
+            const liveAct = useShotStore
+              .getState()
+              .shot.actors.find((a) => a.id === actor.id) || actor;
+            if (mesh) {
+              applyActorScaleAndBodyProportions(mesh, liveAct);
+            }
             syncPositions(currentTimeRef.current);
             if (stageRendererRef.current && stageSceneRef.current && stageCameraRef.current) {
               stageRendererRef.current.render(stageSceneRef.current, stageCameraRef.current);
@@ -1718,6 +2030,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         mesh.userData.rigType = actor.rigType;
         mesh.userData.rigLandmarks = actor.rigLandmarks;
         mesh.userData.rigLandmarksSig = rigLandmarksSig;
+        mesh.userData.humanoidMeshMode = humanoidMeshMode;
         mesh.userData.showBones = actor.showBones;
         if (!Number.isNaN(parsedCustomColor) && !isGhostMode) {
           mesh.userData.customColorHex = parsedCustomColor;
@@ -1752,7 +2065,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
         const pos = getActorPositionAtTime(actor, currentTimeRef.current);
         mesh.position.set(pos.x, pos.y, pos.z);
-        mesh.scale.set(actorScale, actorScale, actorScale);
+        applyActorScaleAndBodyProportions(mesh, actor);
         scene.add(mesh);
         mesh.updateMatrixWorld(true);
         if (mesh.userData.rig) {
@@ -1802,9 +2115,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         }
       }
 
-      // Always apply scale instantaneously
+      // Always apply scale and 3D SMPL body proportions instantaneously
       if (mesh) {
-        mesh.scale.set(actorScale, actorScale, actorScale);
+        applyActorScaleAndBodyProportions(mesh, actor);
       }
     });
 
@@ -1947,16 +2260,18 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
     const ratio = liveDur > 0 ? Math.min(1, Math.max(0, t / liveDur)) : 0;
 
-    if (liveShot.camera.movement.type === 'pan-left') {
-      targetX += (0.5 - ratio) * 15;
-    } else if (liveShot.camera.movement.type === 'pan-right') {
-      targetX += (ratio - 0.5) * 15;
-    } else if (liveShot.camera.movement.type === 'tilt-up') {
-      targetY += (ratio - 0.5) * 8;
-    } else if (liveShot.camera.movement.type === 'tilt-down') {
-      targetY += (0.5 - ratio) * 8;
-    } else if (liveShot.camera.movement.type === 'whip-pan') {
-      targetX += Math.sin(ratio * Math.PI) * 20;
+    if (camLookKfs.length === 0) {
+      if (liveShot.camera.movement.type === 'pan-left') {
+        targetX += (0.5 - ratio) * 15;
+      } else if (liveShot.camera.movement.type === 'pan-right') {
+        targetX += (ratio - 0.5) * 15;
+      } else if (liveShot.camera.movement.type === 'tilt-up') {
+        targetY += (ratio - 0.5) * 8;
+      } else if (liveShot.camera.movement.type === 'tilt-down') {
+        targetY += (0.5 - ratio) * 8;
+      } else if (liveShot.camera.movement.type === 'whip-pan') {
+        targetX += Math.sin(ratio * Math.PI) * 20;
+      }
     }
 
     // Smart Subject Tracking & Follow Lock (when trackTargetActorId is active)
@@ -1992,17 +2307,22 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
     const angle = liveShot.camera.angle;
     let effectiveTargetY = targetY + (liveShot.camera.lookAtHeightOffset ?? 0);
+    const hasCustomCamKeyframes = Boolean(
+      liveShot.camera.movement.customTrajectory && (liveShot.camera.movement.keyframes?.length ?? 0) >= 2
+    );
 
-    if (angle === 'low-angle') {
-      effectiveTargetY += 1.1;
-    } else if (angle === 'ground-level') {
-      effectiveCamY = Math.min(effectiveCamY, 0.4);
-      effectiveTargetY += 1.4;
-    } else if (angle === 'high-angle') {
-      effectiveTargetY = Math.max(1.2, effectiveTargetY - 1.2);
-    } else if (angle === 'overhead-gods-eye') {
-      effectiveCamY = Math.max(effectiveCamY, 28);
-      effectiveTargetY = 0.5;
+    if (!hasCustomCamKeyframes) {
+      if (angle === 'low-angle') {
+        effectiveTargetY += 1.1;
+      } else if (angle === 'ground-level') {
+        effectiveCamY = Math.min(effectiveCamY, 0.4);
+        effectiveTargetY += 1.4;
+      } else if (angle === 'high-angle') {
+        effectiveTargetY = Math.max(1.2, effectiveTargetY - 1.2);
+      } else if (angle === 'overhead-gods-eye') {
+        effectiveCamY = Math.max(effectiveCamY, 28);
+        effectiveTargetY = 0.5;
+      }
     }
 
     // Procedural Handheld Camera Shake
@@ -2119,6 +2439,29 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         vfCameraRef.current.fov = baseFov;
         vfCameraRef.current.updateProjectionMatrix();
       }
+
+      // During active playback of a keyframed camera trajectory (e.g., solved Mocap camera),
+      // synchronize the Stage viewport camera & lens FOV so STAGE view shows the live camera movement and proximity.
+      if (
+        isPlayingRef.current &&
+        !isFloorDraggingRef.current &&
+        !activeGizmoDragRef.current &&
+        liveShot.camera.movement.customTrajectory &&
+        (liveShot.camera.movement.keyframes?.length ?? 0) >= 2 &&
+        stageCameraRef.current
+      ) {
+        stageCameraRef.current.position.set(effectiveCamX, effectiveCamY + 1.5, effectiveCamZ);
+        if (Math.abs(stageCameraRef.current.fov - vfCameraRef.current.fov) > 0.2) {
+          stageCameraRef.current.fov = vfCameraRef.current.fov;
+          stageCameraRef.current.updateProjectionMatrix();
+        }
+        if (stageControlsRef.current) {
+          stageControlsRef.current.target.copy(targetLookAt);
+          stageControlsRef.current.update();
+        } else {
+          stageCameraRef.current.lookAt(targetLookAt);
+        }
+      }
     }
 
     // Pass 1: Root positions, orientations, bone poses, and locomotion for all non-socketed actors
@@ -2139,6 +2482,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         const hasPathDisplacement =
           Boolean(actor.trajectory.keyframes && actor.trajectory.keyframes.length > 1) ||
           Math.hypot(endPos0.x - startPos0.x, endPos0.y - startPos0.y) > 1.0;
+        const hasPoseTrack = Boolean(
+          actor.trajectory.keyframes && actor.trajectory.keyframes.some((k) => k.pose !== undefined)
+        );
         const hasActiveMotion =
           hasPathDisplacement ||
           Boolean(actor.motionClip) ||
@@ -2152,14 +2498,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         if (contactShadow) {
           contactShadow.visible = !actor.socketToBone?.targetActorId && groundedY < 0.25;
         }
-        if (typeof mesh.userData.update === 'function' && hasActiveMotion && t > 0) {
+        if (typeof mesh.userData.update === 'function' && hasActiveMotion && !hasPoseTrack && t > 0) {
           mesh.userData.update(0.016);
         }
-        if (typeof mesh.userData.setAnimationTime === 'function' && hasActiveMotion) {
+        if (typeof mesh.userData.setAnimationTime === 'function' && hasActiveMotion && !hasPoseTrack) {
           mesh.userData.setAnimationTime(t, actor.motionCycles ?? 1);
         }
-        const actorScale = actor.scale ?? 1.0;
-        mesh.scale.set(actorScale, actorScale, actorScale);
+        applyActorScaleAndBodyProportions(mesh, actor);
 
         const hasExplicitRot = actor.rotation !== undefined || (actor.trajectory.keyframes && actor.trajectory.keyframes.some((k) => k.rotation !== undefined));
         if (hasExplicitRot) {
@@ -2194,102 +2539,22 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         // Ensure parent mesh transform (position, rotation, scale) is flushed to matrixWorld before evaluating IK / gait
         mesh.updateMatrixWorld(true);
 
-        // Procedural Locomotion / Multi-Cue Bone Posing for rigged humanoids
+        // Unified Mixamo-SMPL Humanoid Motion Solver (`evaluateUnifiedHumanoidFrame`)
         if (mesh.userData.rig && isHuman) {
           const isActivelyPosing =
             activeGizmoDragRef.current?.actorId === actor.id ||
             activeIKHandleRef.current?.actorId === actor.id;
 
-          const clayOpt = liveShot.claymationMode ? { claymationFps: liveShot.claymationFps || 12 } : undefined;
-          const currentPoseResult = interpolateActorPoseAtTime(actor.trajectory, actor.pose, t, liveDur, clayOpt);
-          const activeMotionClip = currentPoseResult?.motionClip || actor.motionClip;
-
-          const dtSampleCheck = 0.08;
-          const pBef = interpolateTrajectoryPosition(actor.trajectory, Math.max(0, t - dtSampleCheck), liveDur);
-          const pAft = interpolateTrajectoryPosition(actor.trajectory, Math.min(liveDur, t + dtSampleCheck), liveDur);
-          const segSpanCheck = Math.max(0.04, Math.min(liveDur, t + dtSampleCheck) - Math.max(0, t - dtSampleCheck));
-          const instFloorSpeed = Math.hypot(pAft.x - pBef.x, pAft.y - pBef.y) / segSpanCheck;
-          const isTravelingOnFloor = instFloorSpeed > 0.8;
-
-          let handledByReadyMadeClip = false;
-          if (!isActivelyPosing && activeMotionClip) {
-            handledByReadyMadeClip = evaluateReadyMadeHumanoidClip(
-              mesh.userData.rig,
-              activeMotionClip,
-              t,
-              currentPoseResult?.clipProgress ?? (liveDur > 0 ? Math.max(0, Math.min(1, t / liveDur)) : 0),
-              isTravelingOnFloor,
-              currentPoseResult?.motionCycles ?? actor.motionCycles ?? 1
-            );
-          }
-
-          if (!isActivelyPosing && !handledByReadyMadeClip) {
-            if (currentPoseResult?.pose) {
-              applyBonePose(mesh.userData.rig, currentPoseResult.pose);
-            } else if (
-              currentPoseResult?.posePreset &&
-              POSE_PRESETS[currentPoseResult.posePreset] &&
-              (!mesh.userData.isAutoRiggedGlb || currentPoseResult.posePreset !== 'neutral-stand')
-            ) {
-              applyPosePreset(mesh.userData.rig, currentPoseResult.posePreset);
-            } else if (
-              actor.posePreset &&
-              POSE_PRESETS[actor.posePreset] &&
-              (!mesh.userData.isAutoRiggedGlb || actor.posePreset !== 'neutral-stand')
-            ) {
-              applyPosePreset(mesh.userData.rig, actor.posePreset);
-            } else if (actor.posePreset && !POSE_PRESETS[actor.posePreset] && !mesh.userData.isAutoRiggedGlb) {
-              applyPosePreset(mesh.userData.rig, 'neutral-stand');
-            } else if (mesh.userData.isAutoRiggedGlb && typeof mesh.userData.setAnimationTime !== 'function') {
-              resetToRestPose(mesh.userData.rig);
-            }
-          }
-
-          if (!handledByReadyMadeClip) {
-            const start = actor.trajectory.startPosition;
-            const end = actor.trajectory.endPosition;
-            const totalDx = end.x - start.x;
-            const totalDz = end.y - start.y;
-            const totalDist = Math.sqrt(totalDx * totalDx + totalDz * totalDz);
-
-            const dtSample = 0.08;
-            const pBefore = interpolateTrajectoryPosition(actor.trajectory, Math.max(0, t - dtSample), liveDur);
-            const pAfter = interpolateTrajectoryPosition(actor.trajectory, Math.min(liveDur, t + dtSample), liveDur);
-            const segSpan = Math.max(0.04, Math.min(liveDur, t + dtSample) - Math.max(0, t - dtSample));
-            const instDist = Math.hypot(pAfter.x - pBefore.x, pAfter.y - pBefore.y);
-            const instUnitsPerSec = instDist / segSpan;
-            const isMovingNow = instUnitsPerSec > 0.8 || (totalDist > 1.0 && (!actor.trajectory.keyframes || actor.trajectory.keyframes.length === 0));
-            const speed = isMovingNow ? Math.max((instUnitsPerSec || totalDist / Math.max(1, liveDur)) * 0.15, 1.2) : 0;
-
-            const activeCueGait = currentPoseResult?.gait;
-            const reqGait = activeCueGait && activeCueGait !== 'auto' ? activeCueGait : actor.gait;
-            const activePreset = currentPoseResult?.posePreset || actor.posePreset;
-            const hasCustomPose =
-              (!!actor.pose && !isSyntheticCompilerPose(actor.pose)) ||
-              (!!activePreset &&
-                activePreset !== 't-pose' &&
-                activePreset !== 'neutral-stand' &&
-                activePreset !== 'stride-mid');
-
-            const shouldEvaluateGait =
-              reqGait !== 'none' &&
-              (reqGait === 'walk' || reqGait === 'run' || reqGait === 'sneak'
-                ? true
-                : reqGait === 'idle'
-                ? !hasCustomPose
-                : (!reqGait || reqGait === 'auto')
-                ? (isMovingNow && !hasCustomPose)
-                : false);
-
-            if (shouldEvaluateGait) {
-              evaluateGait(mesh.userData.rig, t, {
-                gait: reqGait || 'auto',
-                speed: reqGait === 'run' ? Math.max(speed, 2.5) : reqGait === 'walk' ? Math.max(speed, 1.3) : speed,
-              });
-            }
-          }
-
-          mesh.userData.rig.root.updateMatrixWorld(true);
+          evaluateUnifiedHumanoidFrame({
+            rig: mesh.userData.rig,
+            actor,
+            timeSeconds: t,
+            shotDurationSeconds: liveDur,
+            isActivelyPosing,
+            isAutoRiggedGlb: Boolean(mesh.userData.isAutoRiggedGlb),
+            hasNativeGlbAnimation: typeof mesh.userData.setAnimationTime === 'function',
+            claymationFps: liveShot.claymationMode ? liveShot.claymationFps || 12 : undefined,
+          });
         } else {
           const clayOpt = liveShot.claymationMode ? { claymationFps: liveShot.claymationFps || 12 } : undefined;
           const currentPoseResult = interpolateActorPoseAtTime(actor.trajectory, actor.pose, t, liveDur, clayOpt);
@@ -2381,9 +2646,16 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
   // In-App 3D Previs Video Renderer (Deterministic offline fixed-timestep MP4 capture)
   const handleRenderInAppPrevis = async (
-    requestedPassMode?: 'rgb' | 'depth' | 'openpose' | 'id-mask' | 'all',
+    requestedPassMode?: 'rgb' | 'clay' | 'depth' | 'openpose' | 'id-mask' | 'all',
     requestedResolution: '720p' | '1080p' = '720p'
-  ): Promise<{ url: string; blob: Blob; openposeUrl?: string; depthUrl?: string; idMaskUrl?: string } | null> => {
+  ): Promise<{
+    url: string;
+    blob: Blob;
+    clayUrl?: string;
+    openposeUrl?: string;
+    depthUrl?: string;
+    idMaskUrl?: string;
+  } | null> => {
     if (!vfRendererRef.current) {
       initVfRendererRef.current?.();
     }
@@ -2521,6 +2793,10 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       syncPositions(currentTime);
       updateSizesRef.current?.();
 
+      if (result.clayBlob && result.clayUrl) {
+        setPrevisClay(result.clayUrl, result.clayBlob);
+      }
+
       if (result.openposeBlob && result.openposeUrl) {
         setPrevisOpenPose(result.openposeUrl, result.openposeBlob);
       }
@@ -2539,19 +2815,21 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         return {
           url: result.rgbUrl,
           blob: result.rgbBlob,
+          clayUrl: result.clayUrl,
           openposeUrl: result.openposeUrl,
           depthUrl: result.depthUrl,
           idMaskUrl: result.idMaskUrl,
         };
       }
 
-      const fallbackUrl = result.openposeUrl || result.depthUrl || result.idMaskUrl;
-      const fallbackBlob = result.openposeBlob || result.depthBlob || result.idMaskBlob;
+      const fallbackUrl = result.clayUrl || result.openposeUrl || result.depthUrl || result.idMaskUrl;
+      const fallbackBlob = result.clayBlob || result.openposeBlob || result.depthBlob || result.idMaskBlob;
       if (fallbackUrl && fallbackBlob) {
         setPrevisRendering(false, 100);
         return {
           url: fallbackUrl,
           blob: fallbackBlob,
+          clayUrl: result.clayUrl,
           openposeUrl: result.openposeUrl,
           depthUrl: result.depthUrl,
           idMaskUrl: result.idMaskUrl,
@@ -4338,6 +4616,18 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
             >
               <Upload className="h-3 w-3 text-[#8E84FF]" />
               <span>Import .GLB</span>
+            </button>
+
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('cmpvs:open-mocap-studio'));
+              }}
+              data-testid="top-toolbar-mocap-btn"
+              className="flex items-center gap-1 rounded-lg px-2.5 py-1 border border-[#38BDF8]/55 bg-[#0F2933] text-[#7DD3FC] hover:bg-[#153947] hover:text-white font-bold transition-all cursor-pointer"
+              title="Open 3D Mocap, Body & Scene Studio (Import Video .MP4 or .FBX Motion + 3D Body + Surrounding Place)"
+            >
+              <span>🎥</span>
+              <span>Mocap / Video</span>
             </button>
           </div>
         </div>

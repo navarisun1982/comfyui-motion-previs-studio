@@ -355,6 +355,23 @@ function startLocalProxyServer() {
       }
     }
 
+    if (rawUrl.startsWith('/api/mocap-nlf') || rawUrl.startsWith('/__local_mocap_nlf')) {
+      try {
+        const resolved = require.resolve('../src/server/mocapNlfService.cjs');
+        delete require.cache[resolved];
+        const mocapNlfService = require('../src/server/mocapNlfService.cjs');
+        if (mocapNlfService.handleMocapNlfRequest(req, res)) {
+          return;
+        }
+      } catch (err) {
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        }
+        return;
+      }
+    }
+
     if (rawUrl.startsWith('/api/comfy-sync-workflows')) {
       const comfySyncService = require('../src/server/comfyWorkflowSyncService.cjs');
       if (req.method === 'GET') {

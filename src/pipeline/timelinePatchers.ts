@@ -13,6 +13,8 @@ import type { GenerationMode } from './templateTypes';
  */
 export interface TimelinePatchContext {
   mode: GenerationMode;
+  /** Effective positive prompt to synchronize into director timeline_data (global_prompt & primary text segment). */
+  prompt?: string;
   /** ComfyUI input-folder filename of the uploaded first frame (I2V). */
   firstFrameFile?: string;
   /** ComfyUI input-folder filename of the uploaded geometric control/previs video (Control). */
@@ -24,6 +26,10 @@ export interface TimelinePatchContext {
   refImage4File?: string;
   /** Optional character/subject descriptions corresponding to Slots 1-4 for @ref1..@ref4 substitution. */
   refImageDescriptions?: [string, string, string, string];
+  /** Optional explicit reference_mode override ('OFF' | 'ON') from Workflow Tuning Bar. */
+  referenceMode?: 'OFF' | 'ON';
+  /** Optional explicit motion/layout control video strength (0.30..1.00). */
+  controlStrength?: number;
   durationSeconds: number;
   frameRate: number;
 }
@@ -84,7 +90,11 @@ const ltxFirstFramePatcher: TimelinePatcher = {
       })
       .map((s) => {
         if (isPlainObject(s) && s.type === 'text' && (s.start === 0 || s.start === '0')) {
-          return { ...s, length: snappedFrames };
+          return {
+            ...s,
+            length: snappedFrames,
+            ...(ctx.prompt && ctx.prompt.trim().length > 0 ? { prompt: ctx.prompt } : {}),
+          };
         }
         return s;
       });
@@ -103,13 +113,31 @@ const ltxFirstFramePatcher: TimelinePatcher = {
       normalDurationFrames: snappedFrames,
       segments: filteredSegments,
       disable_prompt_relay: true, // Use global prompt exclusively (Q5)
+      ...(ctx.prompt && ctx.prompt.trim().length > 0 ? { global_prompt: ctx.prompt } : {}),
     };
 
     const refFiles = [ctx.refImage1File, ctx.refImage2File, ctx.refImage3File, ctx.refImage4File];
     const hasAnyRef = refFiles.some((f) => typeof f === 'string' && f.trim().length > 0);
+    const effectiveStrength =
+      typeof ctx.controlStrength === 'number' && Number.isFinite(ctx.controlStrength)
+        ? Math.max(0.1, Math.min(1.0, ctx.controlStrength))
+        : 0.7;
+    // In LTX-2.5 Layout-to-Render (downscale_factor=1), motionSegments.videoStrength sets
+    // `denoise_mask = 1.0 - videoStrength` on the full-resolution 3D Previs guide latents
+    // (nodes_lt.py line 395), and videoAttentionStrength sets `log(w)` in GuideAttentionMask
+    // (model.py line 385). Scaling videoStrength to 0.25..0.52 (denoise_mask 0.48..0.75) and
+    // videoAttentionStrength to 0.14..0.28 transfers 3D camera trajectory & actor motion
+    // while allowing diffusion steps to replace the gray clay surfaces with realistic textures.
+    const guideVideoStrength = Number(Math.max(0.2, Math.min(0.52, effectiveStrength * 0.55)).toFixed(2));
+    const guideAttnStrength = Number(Math.max(0.12, Math.min(0.32, effectiveStrength * 0.3)).toFixed(2));
 
     if (ctx.mode === 'control' && ctx.controlVideoFile) {
-      result.reference_mode = hasAnyRef ? 'Ghost Mask (End)' : 'OFF';
+      result.reference_mode =
+        ctx.referenceMode === 'OFF' || ctx.referenceMode === 'ON'
+          ? 'OFF'
+          : hasAnyRef
+          ? 'Ghost Mask (End)'
+          : 'OFF';
       result.retakeVideo = null;
       result.retakeMode = false;
       result.motionTrackEnabled = true;
@@ -122,11 +150,30 @@ const ltxFirstFramePatcher: TimelinePatcher = {
           length: snappedFrames,
           trimStart: 0,
           videoDurationFrames: snappedFrames,
-          videoStrength: 0.85,
-          videoAttentionStrength: 0.65,
+          videoStrength: guideVideoStrength,
+          videoAttentionStrength: guideAttnStrength,
           resampleMode: 'nearest',
         },
       ];
+
+      // When Reference Mode is explicitly ON and a reference image is provided, anchor style via
+      // a frame-0 image segment (cropped cleanly by LTXDirectorCropGuidesCS25 without requiring MSR LoRA).
+      if (ctx.referenceMode === 'ON' && hasAnyRef) {
+        const primaryRefFile = refFiles.find((f) => typeof f === 'string' && f.trim().length > 0)?.trim();
+        const hasStartImage = Array.isArray(result.segments) &&
+          result.segments.some((s) => isPlainObject(s) && s.type === 'image' && (s.start === 0 || s.start === '0'));
+        if (primaryRefFile && !hasStartImage && Array.isArray(result.segments)) {
+          result.segments = [
+            {
+              type: 'image',
+              imageFile: primaryRefFile,
+              start: 0,
+              length: 1,
+            },
+            ...result.segments,
+          ];
+        }
+      }
     }
 
     if (hasAnyRef) {
@@ -154,7 +201,11 @@ const ltxFirstFramePatcher: TimelinePatcher = {
         };
       });
       result.characters = nextChars;
-      result.reference_mode = 'Ghost Mask (End)';
+      if (ctx.referenceMode === 'OFF' || ctx.referenceMode === 'ON') {
+        result.reference_mode = 'OFF';
+      } else {
+        result.reference_mode = 'Ghost Mask (End)';
+      }
     }
 
     return result;

@@ -671,19 +671,32 @@ export function autoDetectWorkflowBindings(
     }
   }
 
-  // 6. Detect Output Video Node
+  // 6. Detect Output Video Node & Fallback Seed/Intermediate Save Nodes
   let outputNode = overrides?.outputNode || '';
+  const fallbackOutputNodes: string[] = [];
+  const outCandidates = nodeEntries.filter(([_, n]) =>
+    /VHS_VideoCombine|SaveVideo|SaveWEBM|PreviewVideo/i.test(n.class_type)
+  );
   if (!outputNode || !api[outputNode]) {
-    const outCandidates = nodeEntries.filter(([_, n]) =>
-      /VHS_VideoCombine|SaveVideo|SaveWEBM|PreviewVideo/i.test(n.class_type)
-    );
     if (outCandidates.length > 0) {
-      // Prefer VHS_VideoCombine that has audio or is last in chain
-      const withAudio = outCandidates.find(([_, n]) => 'audio' in n.inputs);
-      outputNode = (withAudio || outCandidates[outCandidates.length - 1])[0];
+      // 1) Prefer candidate explicitly titled "FINAL" (e.g. Node 15 in Stubelius LTX, Node 12 in Stubelius H3, Node 34 in Seed Hunter)
+      const finalTitled = outCandidates.find(([_, n]) => /final/i.test(String(n._meta?.title || '')));
+      // 2) Next prefer candidate with save_output === true and audio
+      const savedWithAudio = outCandidates.find(
+        ([_, n]) => n.inputs?.save_output === true && 'audio' in n.inputs
+      );
+      // 3) Next prefer last candidate with audio, or last candidate overall
+      const withAudioList = outCandidates.filter(([_, n]) => 'audio' in n.inputs);
+      const lastWithAudio = withAudioList.length > 0 ? withAudioList[withAudioList.length - 1] : undefined;
+      outputNode = (finalTitled || savedWithAudio || lastWithAudio || outCandidates[outCandidates.length - 1])[0];
     } else {
       outputNode = nodeEntries[nodeEntries.length - 1][0];
       warnings.push(`No VHS_VideoCombine / SaveVideo node found; defaulted output to Node #${outputNode}.`);
+    }
+  }
+  for (const [candId] of outCandidates) {
+    if (candId !== outputNode) {
+      fallbackOutputNodes.push(candId);
     }
   }
 
@@ -770,6 +783,11 @@ export function autoDetectWorkflowBindings(
     };
   }
   nodesFingerprint[outputNode] = api[outputNode].class_type;
+  for (const fbId of fallbackOutputNodes) {
+    if (api[fbId]) {
+      nodesFingerprint[fbId] = api[fbId].class_type;
+    }
+  }
 
   const hasMinimaxCore = nodeEntries.some(([_, n]) =>
     /MiniMax|StubeliusH3|H3Prompt/i.test(n.class_type)
@@ -801,6 +819,7 @@ export function autoDetectWorkflowBindings(
     },
     output: {
       node: outputNode,
+      ...(fallbackOutputNodes.length > 0 ? { fallbackNodes: fallbackOutputNodes } : {}),
     },
     frameRule: detectedEngine === 'ltx-2.5' ? '8n+1' : 'any',
   };
@@ -1353,6 +1372,178 @@ export const CURATED_BUILTIN_WORKFLOWS: CuratedBuiltinWorkflow[] = [
     requiresFourRefs: false,
   },
 ];
+
+export interface WorkflowArchitectureProfile {
+  workflowId: string;
+  engine: RenderEngineId;
+  primarySaveNodeId: string;
+  primarySaveNodeLabel: string;
+  fallbackSaveNodeIds: string[];
+  fallbackSaveNodeLabel?: string;
+  controlInputNodeLabel: string;
+  architectureSummary: string;
+  recommendedPass: 'clay' | 'rgb' | 'depth' | 'openpose' | 'id-mask';
+}
+
+export const WORKFLOW_ARCHITECTURE_PROFILES: Record<string, WorkflowArchitectureProfile> = {
+  ltx25_stubelius: {
+    workflowId: 'ltx25_stubelius',
+    engine: 'ltx-2.5',
+    primarySaveNodeId: '15',
+    primarySaveNodeLabel: 'Node #15 (FINAL VIDEO • VHS_VideoCombine)',
+    fallbackSaveNodeIds: ['10', '11', '12', '13'],
+    fallbackSaveNodeLabel: 'Node #10 (Seed 1 Direct Combine)',
+    controlInputNodeLabel: 'Node #7 (LTXDirectorCS25 • motionSegments)',
+    architectureSummary:
+      'LTX-2.5 22B Distilled INT8 + Layout-to-Render IC-LoRA (Node #5) → Director Timeline (Node #7) → Seed 1 Render (Node #8/#10) → RTX VSR 1080p Finish (Node #14/#15)',
+    recommendedPass: 'clay',
+  },
+  ltx25_devdist_ollama_vsr: {
+    workflowId: 'ltx25_devdist_ollama_vsr',
+    engine: 'ltx-2.5',
+    primarySaveNodeId: '15',
+    primarySaveNodeLabel: 'Node #15 (FINAL VIDEO) / UI Node #75 (SaveVideo)',
+    fallbackSaveNodeIds: ['10', '75'],
+    fallbackSaveNodeLabel: 'Node #10 (Seed 1) / Node #75 (SaveVideo)',
+    controlInputNodeLabel: 'Node #7 (LTXDirectorCS25) / UI Node #990 (VHS_LoadVideo)',
+    architectureSummary:
+      'LTX-2.5 Dev/Distilled IC-LoRA + RTX Video Super Resolution upscaler with single-pass 24GB VRAM protection',
+    recommendedPass: 'clay',
+  },
+  ltx25_unlimited_sing_talk: {
+    workflowId: 'ltx25_unlimited_sing_talk',
+    engine: 'ltx-2.5',
+    primarySaveNodeId: '15',
+    primarySaveNodeLabel: 'Node #15 (FINAL VIDEO) / UI Node #454 (VHS_VideoCombine)',
+    fallbackSaveNodeIds: ['10', '454'],
+    fallbackSaveNodeLabel: 'Node #10 (Seed 1) / Node #454 (Combine)',
+    controlInputNodeLabel: 'Node #7 (LTXDirectorCS25) / UI Node #365 (TKVideoInputs)',
+    architectureSummary:
+      'LTX-2.5 Alternating Camera & Lip-Sync Audio pipeline with Layout-to-Render IC-LoRA motion conditioning',
+    recommendedPass: 'clay',
+  },
+  ltx25_fast_native: {
+    workflowId: 'ltx25_fast_native',
+    engine: 'ltx-2.5',
+    primarySaveNodeId: '15',
+    primarySaveNodeLabel: 'Node #15 (FINAL VIDEO • Native Pass-Through)',
+    fallbackSaveNodeIds: ['10'],
+    fallbackSaveNodeLabel: 'Node #10 (Seed 1 Native Combine)',
+    controlInputNodeLabel: 'Node #7 (LTXDirectorCS25 • motionSegments)',
+    architectureSummary:
+      'Single-pass native 1280×704 direct output without 2nd-pass upscale for rapid camera & motion blocking verification',
+    recommendedPass: 'clay',
+  },
+  ltx25_ic_lora_motion: {
+    workflowId: 'ltx25_ic_lora_motion',
+    engine: 'ltx-2.5',
+    primarySaveNodeId: '15',
+    primarySaveNodeLabel: 'Node #15 (FINAL VIDEO • VHS_VideoCombine)',
+    fallbackSaveNodeIds: ['10'],
+    fallbackSaveNodeLabel: 'Node #10 (Seed 1 Direct Combine)',
+    controlInputNodeLabel: 'Node #7 (LTXDirectorCS25 • Strict IC-LoRA)',
+    architectureSummary:
+      'High-adherence IC-LoRA structural lock (1.0 LoRA weight + balanced latent denoising) for strict 3D camera & pose tracking',
+    recommendedPass: 'depth',
+  },
+  minimax_h3_ref2va: {
+    workflowId: 'minimax_h3_ref2va',
+    engine: 'minimax-h3',
+    primarySaveNodeId: '145',
+    primarySaveNodeLabel: 'Node #145 (VHS_VideoCombine • 60fps Audio)',
+    fallbackSaveNodeIds: ['702'],
+    fallbackSaveNodeLabel: 'UI Node #702 (VHS_VideoCombine)',
+    controlInputNodeLabel: 'Node #638 (VHS_LoadVideo → Node #136 Ref2V)',
+    architectureSummary:
+      'MiniMax H3 Ref2VA + SolAttnPatch + 8-Step Turbo LoRA (Node #674) + 4 Ref Images (<Picture 1..4>) → RIFE 60fps + Audio (Node #145)',
+    recommendedPass: 'rgb',
+  },
+  minimax_h3_t2v_i2v_ref2v_advanced: {
+    workflowId: 'minimax_h3_t2v_i2v_ref2v_advanced',
+    engine: 'minimax-h3',
+    primarySaveNodeId: '145',
+    primarySaveNodeLabel: 'Node #145 (API Combine) / UI Node #702 (VHS_VideoCombine)',
+    fallbackSaveNodeIds: ['702'],
+    fallbackSaveNodeLabel: 'UI Node #702 (VHS_VideoCombine)',
+    controlInputNodeLabel: 'Node #638 (VHS_LoadVideo → Node #136 Ref2V)',
+    architectureSummary:
+      'MiniMax H3 Advanced Filmmaking v2.0 with Ref2V 3D Previs conditioning, 4 Reference Images, SolAttn, and 60fps RIFE interpolation',
+    recommendedPass: 'rgb',
+  },
+  minimax_h3_seed_hunter: {
+    workflowId: 'minimax_h3_seed_hunter',
+    engine: 'minimax-h3',
+    primarySaveNodeId: '145',
+    primarySaveNodeLabel: 'Node #145 (API Combine) / UI Node #34 (Final Video)',
+    fallbackSaveNodeIds: ['34', '134', '144', '18'],
+    fallbackSaveNodeLabel: 'UI Nodes #34 / #134 / #144 (Seed Hunter Combines)',
+    controlInputNodeLabel: 'Node #638 (VHS_LoadVideo → Ref2V)',
+    architectureSummary:
+      'MiniMax H3 Seed Hunter v2.51 with Latent Upscaler, Reference Mods, and multi-stage video combine fallback nodes',
+    recommendedPass: 'clay',
+  },
+  h3_stubelius: {
+    workflowId: 'h3_stubelius',
+    engine: 'minimax-h3',
+    primarySaveNodeId: '12',
+    primarySaveNodeLabel: 'Node #12 (FINAL VIDEO • VHS_VideoCombine)',
+    fallbackSaveNodeIds: ['18'],
+    fallbackSaveNodeLabel: 'Node #18 (StubeliusSeedPreviews)',
+    controlInputNodeLabel: 'Node #4 (StubeliusH3DirectorV2 • refVideos)',
+    architectureSummary:
+      'Stubelius Ultimate H3 Hybrid Director V2 (Node #4) + Qwen3-VL 32B INT8 + 4 Character/Env Refs → Node #11 Finish → Node #12 1080p RTX VSR MP4',
+    recommendedPass: 'rgb',
+  },
+  minimax_h3_fast_draft: {
+    workflowId: 'minimax_h3_fast_draft',
+    engine: 'minimax-h3',
+    primarySaveNodeId: '145',
+    primarySaveNodeLabel: 'Node #145 (VHS_VideoCombine • Fast Draft)',
+    fallbackSaveNodeIds: ['702'],
+    controlInputNodeLabel: 'Node #638 (VHS_LoadVideo → Node #136 Ref2V)',
+    architectureSummary:
+      'Rapid 0.50 MP draft pass with 8-Step Turbo LoRA for fast camera framing, silhouette, and motion verification',
+    recommendedPass: 'clay',
+  },
+};
+
+export function getWorkflowArchitectureProfile(
+  workflowId: string,
+  engine: RenderEngineId
+): WorkflowArchitectureProfile {
+  if (WORKFLOW_ARCHITECTURE_PROFILES[workflowId]) {
+    return WORKFLOW_ARCHITECTURE_PROFILES[workflowId];
+  }
+
+  // Check if it is a custom saved workflow in localStorage
+  const lib = loadWorkflowLibrary();
+  const saved = lib.savedWorkflows.find((w) => w.id === workflowId);
+  if (saved && saved.rawJson) {
+    try {
+      const detected = autoDetectWorkflowBindings(saved.rawJson, saved.overrides);
+      const outId = detected.binding.output.node;
+      const fbIds = detected.binding.output.fallbackNodes || [];
+      const ctrlNode = detected.detectedSlots.controlVideo?.node || '?';
+      return {
+        workflowId,
+        engine: detected.binding.engine,
+        primarySaveNodeId: outId,
+        primarySaveNodeLabel: `Node #${outId} (${detected.api[outId]?.class_type || 'Video Output'})`,
+        fallbackSaveNodeIds: fbIds,
+        fallbackSaveNodeLabel: fbIds.length > 0 ? `Nodes #${fbIds.join(', #')}` : undefined,
+        controlInputNodeLabel: `Node #${ctrlNode} (${detected.api[ctrlNode]?.class_type || 'Control Video'})`,
+        architectureSummary: `Custom Auto-Bound ${detected.binding.engine.toUpperCase()} Workflow (${saved.nodeCount} nodes) • Control Input Node #${ctrlNode} → Primary Save Node #${outId}`,
+        recommendedPass: detected.binding.engine === 'ltx-2.5' ? 'clay' : 'rgb',
+      };
+    } catch {
+      // fall through to engine default
+    }
+  }
+
+  return engine === 'ltx-2.5'
+    ? WORKFLOW_ARCHITECTURE_PROFILES.ltx25_stubelius
+    : WORKFLOW_ARCHITECTURE_PROFILES.minimax_h3_ref2va;
+}
 
 export interface SavedWorkflowEntry {
   id: string;

@@ -50,6 +50,8 @@ describe('SeedanceAdapter', () => {
     expect(bundle.positivePrompt).toContain('[Camera 6-Axis Motion & Matrix Trajectory]');
     expect(bundle.positivePrompt).toContain('[Subject Dynamics & Aerodynamic Physics]');
     expect(bundle.positivePrompt).toContain('[Temporal Cue Timetable]');
+    const paragraphs = bundle.positivePrompt.split(/\n\n+/).filter(Boolean);
+    expect(paragraphs.length).toBeGreaterThanOrEqual(5);
     expect(bundle.modelPromptParadigm).toBe('seedance-motion-matrix');
     expect(bundle.technicalMetadata.targetModel).toBe('Seedance 2.0');
     expect(bundle.temporalBeats).toHaveLength(3);

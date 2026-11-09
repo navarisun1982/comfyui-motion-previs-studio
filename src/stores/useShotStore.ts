@@ -48,9 +48,16 @@ import { saveProjectToStudioStorage } from '../services/studioStorageClient';
 import { resolvePolyforkGlbUrl } from '../data/externalCatalogsRegistry';
 
 export type PrevisRendererFn = (
-  passMode?: 'rgb' | 'depth' | 'openpose' | 'id-mask' | 'all',
+  passMode?: 'rgb' | 'clay' | 'depth' | 'openpose' | 'id-mask' | 'all',
   resolution?: '720p' | '1080p'
-) => Promise<{ url: string; blob: Blob; openposeUrl?: string; depthUrl?: string; idMaskUrl?: string } | null>;
+) => Promise<{
+  url: string;
+  blob: Blob;
+  clayUrl?: string;
+  openposeUrl?: string;
+  depthUrl?: string;
+  idMaskUrl?: string;
+} | null>;
 
 interface RendererEntry {
   fn: PrevisRendererFn;
@@ -169,6 +176,8 @@ interface ShotState {
   // In-App 3D Previs Video
   previsVideoUrl?: string;
   previsVideoBlob?: Blob;
+  previsClayUrl?: string;
+  previsClayBlob?: Blob;
   previsOpenPoseUrl?: string;
   previsOpenPoseBlob?: Blob;
   previsDepthUrl?: string;
@@ -183,10 +192,18 @@ interface ShotState {
     priority?: 'primary' | 'fallback'
   ) => (() => void) | void;
   renderPrevisVideo: (
-    passMode?: 'rgb' | 'depth' | 'openpose' | 'id-mask' | 'all',
+    passMode?: 'rgb' | 'clay' | 'depth' | 'openpose' | 'id-mask' | 'all',
     resolution?: '720p' | '1080p'
-  ) => Promise<{ url: string; blob: Blob; openposeUrl?: string; depthUrl?: string; idMaskUrl?: string } | null>;
+  ) => Promise<{
+    url: string;
+    blob: Blob;
+    clayUrl?: string;
+    openposeUrl?: string;
+    depthUrl?: string;
+    idMaskUrl?: string;
+  } | null>;
   setPrevisVideo: (url?: string, blob?: Blob) => void;
+  setPrevisClay: (url?: string, blob?: Blob) => void;
   setPrevisOpenPose: (url?: string, blob?: Blob) => void;
   setPrevisDepth: (url?: string, blob?: Blob) => void;
   setPrevisIdMask: (url?: string, blob?: Blob) => void;
@@ -300,6 +317,25 @@ if (typeof window !== 'undefined') {
 const BUILTIN_DEMO_VERSION = 'competition-2x6-v4';
 const DEMO_VERSION_STORAGE_KEY = 'comfy_ai_director_demo_version_v1';
 
+function healPoseHandedness(pose?: ActorPose): ActorPose | undefined {
+  if (!pose?.anatomicalIk) return pose;
+  const ik = pose.anatomicalIk;
+  return {
+    ...pose,
+    anatomicalIk: {
+      ...ik,
+      leftAnkle: [Math.abs(ik.leftAnkle[0]), ik.leftAnkle[1], ik.leftAnkle[2]],
+      rightAnkle: [-Math.abs(ik.rightAnkle[0]), ik.rightAnkle[1], ik.rightAnkle[2]],
+      leftKneePole: [Math.abs(ik.leftKneePole[0]), ik.leftKneePole[1], ik.leftKneePole[2]],
+      rightKneePole: [-Math.abs(ik.rightKneePole[0]), ik.rightKneePole[1], ik.rightKneePole[2]],
+      leftHand: [Math.abs(ik.leftHand[0]), ik.leftHand[1], ik.leftHand[2]],
+      rightHand: [-Math.abs(ik.rightHand[0]), ik.rightHand[1], ik.rightHand[2]],
+      leftElbowPole: [Math.abs(ik.leftElbowPole[0]), ik.leftElbowPole[1], ik.leftElbowPole[2]],
+      rightElbowPole: [-Math.abs(ik.rightElbowPole[0]), ik.rightElbowPole[1], ik.rightElbowPole[2]],
+    },
+  };
+}
+
 const loadCachedShots = (): Record<string, ShotSpec> => {
   const savedVer = safeGetItem<string | null>(DEMO_VERSION_STORAGE_KEY, null);
   if (savedVer !== BUILTIN_DEMO_VERSION) {
@@ -314,28 +350,144 @@ const loadCachedShots = (): Record<string, ShotSpec> => {
         s.environment = { ...CINEMATIC_ENVIRONMENT_PRESETS[0].spec };
       } else {
         s.environment = { ...s.environment };
+        const envText = `${s.environment.name || ''} ${s.environment.promptDescription || ''}`;
+        if (s.environment.category === 'nature' && /\b(beach|coastal|ocean|shoreline|seaside)\b/i.test(envText)) {
+          s.environment.category = 'coastal-beach';
+        }
       }
       if (s.environment?.conceptImageUrl?.startsWith('refimg://')) {
         const syncEnvImg = resolveOffloadedImageSync(s.environment.conceptImageUrl);
         if (syncEnvImg) s.environment = { ...s.environment, conceptImageUrl: syncEnvImg };
       }
       if (Array.isArray(s.actors)) {
-        s.actors = s.actors.map((a) => {
+        const hasMocapPerson = s.actors.some((a) => a.id.startsWith('mocap-person-'));
+        const humanIndices = s.actors
+          .map((a, idx) => (!a.kind || a.kind === 'human' || a.kind === 'character' ? idx : -1))
+          .filter((idx) => idx >= 0);
+        const needsPairRecenter =
+          hasMocapPerson &&
+          humanIndices.length >= 2 &&
+          Math.abs(
+            (s.actors[humanIndices[1]]?.trajectory?.startPosition?.x ?? 50) -
+              (s.actors[humanIndices[0]]?.trajectory?.startPosition?.x ?? 50)
+          ) > 12;
+
+        s.actors = s.actors.map((a, idx) => {
+          let nextActor: Actor = {
+            ...a,
+            pose: healPoseHandedness(a.pose),
+            trajectory: a.trajectory
+              ? {
+                  ...a.trajectory,
+                  keyframes: a.trajectory.keyframes?.map((kf) => ({
+                    ...kf,
+                    pose: healPoseHandedness(kf.pose),
+                  })),
+                }
+              : a.trajectory,
+          };
+
+          // Linearize legacy S-curve (smoothCycleU) locomotion keyframes so continuous walking/running
+          // starts at steady Mixamo stride velocity from t = 0.0s without first-second foot sliding.
+          if (
+            nextActor.trajectory?.keyframes &&
+            nextActor.trajectory.keyframes.length >= 2 &&
+            !nextActor.trajectory.keyframes.some((kf) => kf.pose && Object.keys(kf.pose).length > 0)
+          ) {
+            const clipId = nextActor.motionClip || '';
+            const gaitMode = nextActor.gait || 'none';
+            const isContinuousLocomotion =
+              gaitMode === 'walk' ||
+              gaitMode === 'run' ||
+              clipId === 'human-walk-forward' ||
+              clipId === 'human-run-sprint' ||
+              clipId === 'human-sneak-prowl' ||
+              clipId === 'animal-walk-trot' ||
+              clipId === 'animal-gallop-run';
+            if (isContinuousLocomotion) {
+              const kfs = nextActor.trajectory.keyframes;
+              const firstKf = kfs[0];
+              const lastKf = kfs[kfs.length - 1];
+              const spanDur = Math.max(0.001, lastKf.time - firstKf.time);
+              nextActor = {
+                ...nextActor,
+                trajectory: {
+                  ...nextActor.trajectory,
+                  keyframes: kfs.map((kf, kfIdx) => {
+                    if (kfIdx === 0 || kfIdx === kfs.length - 1) return kf;
+                    const alpha = Math.max(0, Math.min(1, (kf.time - firstKf.time) / spanDur));
+                    return {
+                      ...kf,
+                      position: {
+                        x: Number(
+                          (firstKf.position.x + (lastKf.position.x - firstKf.position.x) * alpha).toFixed(2)
+                        ),
+                        y: Number(
+                          (firstKf.position.y + (lastKf.position.y - firstKf.position.y) * alpha).toFixed(2)
+                        ),
+                      },
+                    };
+                  }),
+                },
+              };
+            }
+          }
+
+          if (needsPairRecenter && humanIndices.includes(idx) && nextActor.trajectory) {
+            const pairRank = humanIndices.indexOf(idx);
+            const targetStartX = Math.round(50 + (pairRank - (humanIndices.length - 1) * 0.5) * 6);
+            const dx = targetStartX - nextActor.trajectory.startPosition.x;
+            nextActor = {
+              ...nextActor,
+              trajectory: {
+                ...nextActor.trajectory,
+                startPosition: {
+                  ...nextActor.trajectory.startPosition,
+                  x: targetStartX,
+                },
+                endPosition: {
+                  ...nextActor.trajectory.endPosition,
+                  x: Math.max(20, Math.min(80, Math.round(nextActor.trajectory.endPosition.x + dx))),
+                },
+                keyframes: nextActor.trajectory.keyframes?.map((kf) => ({
+                  ...kf,
+                  position: {
+                    ...kf.position,
+                    x: Math.max(20, Math.min(80, Number((kf.position.x + dx).toFixed(2)))),
+                  },
+                })),
+              },
+            };
+          }
+
           // Never treat 3D catalog preview thumbnails as user-uploaded ComfyUI reference images
           if (
-            a.conceptImageUrl &&
-            /raw\.githubusercontent\.com\/lucas-martinic\/polyfork-catalog|images\.unsplash\.com/i.test(
-              a.conceptImageUrl
+            nextActor.conceptImageUrl &&
+            /raw\.githubusercontent\.com\/lucas-martinic\/polyfork-catalog|images\.unsplash\.com|images\/library\/mixamo-/i.test(
+              nextActor.conceptImageUrl
             )
           ) {
-            return { ...a, conceptImageUrl: undefined, conceptImageName: undefined };
+            return { ...nextActor, conceptImageUrl: undefined, conceptImageName: undefined };
           }
-          if (a.conceptImageUrl?.startsWith('refimg://')) {
-            const syncImg = resolveOffloadedImageSync(a.conceptImageUrl);
-            if (syncImg) return { ...a, conceptImageUrl: syncImg };
+          if (nextActor.conceptImageUrl?.startsWith('refimg://')) {
+            const syncImg = resolveOffloadedImageSync(nextActor.conceptImageUrl);
+            if (syncImg) return { ...nextActor, conceptImageUrl: syncImg };
           }
-          return a;
+          return nextActor;
         });
+
+        if (needsPairRecenter && s.camera?.movement) {
+          s.camera = {
+            ...s.camera,
+            movement: {
+              ...s.camera.movement,
+              type: s.camera.movement.type === 'pan-left' ? 'dolly-in' : s.camera.movement.type,
+              startPosition: { x: 50, y: 80, z: 22 },
+              endPosition: { x: 50, y: 68, z: 22 },
+              targetLookAt: { x: 50, y: 50 },
+            },
+          };
+        }
       }
     }
     if (typeof window !== 'undefined') {
@@ -637,6 +789,8 @@ export const useShotStore = create<ShotState>((set, get) => {
     selectedActorId: initialShot.actors[0]?.id,
     previsVideoUrl: undefined,
     previsVideoBlob: undefined,
+    previsClayUrl: undefined,
+    previsClayBlob: undefined,
     previsOpenPoseUrl: undefined,
     previsOpenPoseBlob: undefined,
     previsDepthUrl: undefined,
@@ -707,6 +861,13 @@ export const useShotStore = create<ShotState>((set, get) => {
       });
     },
 
+    setPrevisClay: (url?: string, blob?: Blob) => {
+      set({
+        previsClayUrl: url,
+        previsClayBlob: blob,
+      });
+    },
+
     setPrevisOpenPose: (url?: string, blob?: Blob) => {
       set({
         previsOpenPoseUrl: url,
@@ -769,10 +930,14 @@ export const useShotStore = create<ShotState>((set, get) => {
         canRedo: targetHistory.future.length > 0,
         previsVideoUrl: undefined,
         previsVideoBlob: undefined,
+        previsClayUrl: undefined,
+        previsClayBlob: undefined,
         previsOpenPoseUrl: undefined,
         previsOpenPoseBlob: undefined,
         previsDepthUrl: undefined,
         previsDepthBlob: undefined,
+        previsIdMaskUrl: undefined,
+        previsIdMaskBlob: undefined,
         isRenderingPrevis: false,
         previsProgress: 0,
       });

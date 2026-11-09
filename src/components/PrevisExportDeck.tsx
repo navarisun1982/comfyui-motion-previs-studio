@@ -5,6 +5,7 @@ import { getAdapter } from '../adapters';
 import { getReasonerConfig } from '../services/objectReasoner';
 import { directPromptWithAI, refinePromptWithAIChat } from '../services/aiPromptDirector';
 import { analyzeShotPovVisibility } from '../engine/povVisibilityEngine';
+import { formatReadableEnginePrompt } from '../engine/promptCompiler';
 import { exportCameraPoseBundle, exportCameraExtrinsicsJson } from '../engine/cameraMatrixExport';
 import { shouldHideStageBackdropInPrevis } from '../engine/staging/environmentBuilder';
 import { CINEMATIC_ENVIRONMENT_PRESETS } from '../types/environment';
@@ -16,12 +17,12 @@ import {
   WorkflowChoiceItem,
   ensureWorkflowSyncedToComfyUI,
   getActiveWorkflowForEngine,
+  getWorkflowArchitectureProfile,
   syncActiveEngineWorkflowToRegistry,
 } from '../pipeline/customWorkflowResolver';
 import { CustomWorkflowConfigBar } from './CustomWorkflowConfigBar';
 import { BundledWorkflowsModal } from './BundledWorkflowsModal';
 import {
-  Film,
   Download,
   Copy,
   Check,
@@ -48,10 +49,150 @@ import {
   AlertCircle,
   Square,
   MessageSquare,
-  Send,
   Undo2,
-  Trash2,
 } from 'lucide-react';
+
+export type PrevisSourcePass = 'rgb' | 'clay' | 'openpose' | 'depth' | 'id-mask';
+
+export interface WorkflowQuickTuning {
+  steps: number;
+  controlStrength: number;
+  firstPassScale: number;
+  referenceMode: 'OFF' | 'ON';
+  presetSummary: string;
+  saveNodeBadge: string;
+  inputNodeBadge: string;
+  recommendedPass: PrevisSourcePass;
+}
+
+/**
+ * Computes the scientifically optimal workflow parameters for each (Engine × Workflow × Video Pass)
+ * combination without exposing fragile internal ComfyUI constants (such as CFG=1.0 or divisible_by=32).
+ */
+export function computeOptimalWorkflowTuning(
+  engine: 'ltx-2.5' | 'minimax-h3',
+  workflowId: string,
+  sourcePass: PrevisSourcePass
+): WorkflowQuickTuning {
+  const arch = getWorkflowArchitectureProfile(workflowId, engine);
+  const saveNodeBadge = arch.fallbackSaveNodeIds.length
+    ? `Save: ${arch.primarySaveNodeLabel} + Fallback #${arch.fallbackSaveNodeIds[0]}`
+    : `Save: ${arch.primarySaveNodeLabel}`;
+  const inputNodeBadge = `Input: ${arch.controlInputNodeLabel}`;
+
+  if (engine === 'ltx-2.5') {
+    const isStrictMotion = workflowId === 'ltx25_ic_lora_motion';
+    const isFastNative = workflowId === 'ltx25_fast_native';
+    switch (sourcePass) {
+      case 'clay':
+        return {
+          steps: isStrictMotion ? 10 : 8,
+          controlStrength: isStrictMotion ? 0.75 : 0.65,
+          firstPassScale: 1.0,
+          referenceMode: 'OFF',
+          presetSummary: isFastNative
+            ? 'Fast Native Clay IC-LoRA (3D Silhouette + Full Prompt Restyle • Node #15/#10)'
+            : 'Zero-Chroma Clay IC-LoRA (3D Silhouette + Full Photoreal Restyle • 24GB Safe)',
+          saveNodeBadge,
+          inputNodeBadge,
+          recommendedPass: arch.recommendedPass,
+        };
+      case 'depth':
+        return {
+          steps: isStrictMotion ? 10 : 8,
+          controlStrength: isStrictMotion ? 0.8 : 0.7,
+          firstPassScale: 1.0,
+          referenceMode: 'OFF',
+          presetSummary: 'Volumetric Z-Depth Conditioning (Spatial Lock + Free Surface Synthesis • 24GB Safe)',
+          saveNodeBadge,
+          inputNodeBadge,
+          recommendedPass: arch.recommendedPass,
+        };
+      case 'openpose':
+        return {
+          steps: 10,
+          controlStrength: isStrictMotion ? 0.75 : 0.7,
+          firstPassScale: 1.0,
+          referenceMode: 'OFF',
+          presetSummary: 'Skeletal Pose Conditioning (Joint Trajectory Lock + Full Body Synthesis • 24GB Safe)',
+          saveNodeBadge,
+          inputNodeBadge,
+          recommendedPass: arch.recommendedPass,
+        };
+      case 'id-mask':
+        return {
+          steps: 10,
+          controlStrength: 0.5,
+          firstPassScale: 1.0,
+          referenceMode: 'OFF',
+          presetSummary: 'Segmentation Mask Conditioning (Softened Chroma to Prevent Flat Mask Bleed • 24GB Safe)',
+          saveNodeBadge,
+          inputNodeBadge,
+          recommendedPass: arch.recommendedPass,
+        };
+      case 'rgb':
+      default:
+        return {
+          steps: 10,
+          controlStrength: 0.5,
+          firstPassScale: 1.0,
+          referenceMode: 'OFF',
+          presetSummary: 'RGB Previs Restyle (Softened Chroma Lock to Prevent Mannequin Copy • 24GB Safe)',
+          saveNodeBadge,
+          inputNodeBadge,
+          recommendedPass: arch.recommendedPass,
+        };
+    }
+  }
+
+  // MiniMax H3 / Wan2.2 14B Fun V2.2 Ref2VA
+  const isStubeliusH3 = workflowId.toLowerCase().includes('stubelius');
+  const isFastDraft = workflowId === 'minimax_h3_fast_draft';
+  const isSeedHunter = workflowId === 'minimax_h3_seed_hunter';
+  const baseMp = isFastDraft ? 0.5 : 0.8;
+  switch (sourcePass) {
+    case 'clay':
+      return {
+        steps: isStubeliusH3 || isSeedHunter ? 10 : 8,
+        controlStrength: 0.8,
+        firstPassScale: baseMp,
+        referenceMode: 'ON',
+        presetSummary: isStubeliusH3
+          ? 'Stubelius H3 Clay Structure + Omni 4-Ref Identity (Save Node #12)'
+          : 'H3 Ref2VA Clay Structure + Smart 4-Ref Identity (Save Node #145)',
+        saveNodeBadge,
+        inputNodeBadge,
+        recommendedPass: arch.recommendedPass,
+      };
+    case 'depth':
+    case 'openpose':
+    case 'id-mask':
+      return {
+        steps: 10,
+        controlStrength: 0.7,
+        firstPassScale: baseMp,
+        referenceMode: 'ON',
+        presetSummary: `H3 ${sourcePass.toUpperCase()} Motion Guide + Smart 4-Ref Identity (${arch.primarySaveNodeLabel})`,
+        saveNodeBadge,
+        inputNodeBadge,
+        recommendedPass: arch.recommendedPass,
+      };
+    case 'rgb':
+    default:
+      return {
+        steps: isStubeliusH3 || isSeedHunter ? 10 : 8,
+        controlStrength: 0.75,
+        firstPassScale: baseMp,
+        referenceMode: 'ON',
+        presetSummary: isStubeliusH3
+          ? 'Stubelius H3 RGB Motion + Omni 4-Ref Identity (Save Node #12)'
+          : 'H3 Ref2VA RGB Motion + Smart 4-Ref Identity (Save Node #145)',
+        saveNodeBadge,
+        inputNodeBadge,
+        recommendedPass: arch.recommendedPass,
+      };
+  }
+}
 
 interface PrevisExportDeckProps {
   onBackToPrevis?: () => void;
@@ -68,6 +209,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     appendPromptChatMessage,
     clearPromptChatMessages,
     previsVideoUrl,
+    previsClayUrl,
     previsOpenPoseUrl,
     previsDepthUrl,
     previsIdMaskUrl,
@@ -96,8 +238,13 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   const [activeEngineTab, setActiveEngineTab] = useState<'ltx-2.5' | 'minimax-h3' | 'seedance'>(
     shot.targetModel === 'minimax-h3' ? 'minimax-h3' : shot.targetModel === 'seedance' ? 'seedance' : 'ltx-2.5'
   );
-  const [activePassTab, setActivePassTab] = useState<'rgb' | 'openpose' | 'depth' | 'id-mask' | 'comfy-final' | 'side-by-side'>('rgb');
-  const [renderPassMode, setRenderPassMode] = useState<'all' | 'rgb' | 'openpose' | 'depth' | 'id-mask'>('all');
+  const [activePassTab, setActivePassTab] = useState<
+    'rgb' | 'clay' | 'openpose' | 'depth' | 'id-mask' | 'comfy-final' | 'side-by-side'
+  >('rgb');
+  const [activeSourcePass, setActiveSourcePass] = useState<PrevisSourcePass>(
+    shot.targetModel === 'minimax-h3' ? 'rgb' : 'clay'
+  );
+  const [renderPassMode, setRenderPassMode] = useState<'all' | 'rgb' | 'clay' | 'openpose' | 'depth' | 'id-mask'>('all');
   const [compareViewMode, setCompareViewMode] = useState<'wipe' | 'split'>('wipe');
   const [wipePercent, setWipePercent] = useState<number>(50);
   const isDraggingWipeRef = useRef<boolean>(false);
@@ -175,6 +322,70 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   const [activeWorkflowChoice, setActiveWorkflowChoice] = useState<WorkflowChoiceItem>(() =>
     getActiveWorkflowForEngine(activeEngineTab === 'ltx-2.5' ? 'ltx-2.5' : 'minimax-h3')
   );
+
+  // Smart Workflow Quick Settings (Auto-Tune per Engine × Workflow × Video Pass + Manual Override)
+  const initialTuning = React.useMemo(
+    () =>
+      computeOptimalWorkflowTuning(
+        activeEngineTab === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5',
+        activeWorkflowChoice.id,
+        activeSourcePass
+      ),
+    []
+  );
+  const [isWorkflowAutoTune, setIsWorkflowAutoTune] = useState<boolean>(true);
+  const [wfSteps, setWfSteps] = useState<number>(initialTuning.steps);
+  const [wfControlStrength, setWfControlStrength] = useState<number>(initialTuning.controlStrength);
+  const [wfFirstPassScale, setWfFirstPassScale] = useState<number>(initialTuning.firstPassScale);
+  const [wfReferenceMode, setWfReferenceMode] = useState<'OFF' | 'ON'>(initialTuning.referenceMode);
+  const [wfPresetSummary, setWfPresetSummary] = useState<string>(initialTuning.presetSummary);
+  const [wfSaveNodeBadge, setWfSaveNodeBadge] = useState<string>(initialTuning.saveNodeBadge);
+  const [wfInputNodeBadge, setWfInputNodeBadge] = useState<string>(initialTuning.inputNodeBadge);
+  const [wfRecommendedPass, setWfRecommendedPass] = useState<PrevisSourcePass>(initialTuning.recommendedPass);
+
+  // Sync activeSourcePass whenever the user selects one of the 5 source video pass tabs
+  useEffect(() => {
+    if (
+      activePassTab === 'rgb' ||
+      activePassTab === 'clay' ||
+      activePassTab === 'openpose' ||
+      activePassTab === 'depth' ||
+      activePassTab === 'id-mask'
+    ) {
+      setActiveSourcePass(activePassTab);
+    }
+  }, [activePassTab]);
+
+  // Auto-Tune workflow parameters whenever (Engine × Workflow × Active Source Pass) changes
+  useEffect(() => {
+    const engineKey: 'ltx-2.5' | 'minimax-h3' = activeEngineTab === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5';
+    const optimal = computeOptimalWorkflowTuning(engineKey, activeWorkflowChoice.id, activeSourcePass);
+    setWfPresetSummary(optimal.presetSummary);
+    setWfSaveNodeBadge(optimal.saveNodeBadge);
+    setWfInputNodeBadge(optimal.inputNodeBadge);
+    setWfRecommendedPass(optimal.recommendedPass);
+    if (isWorkflowAutoTune) {
+      setWfSteps(optimal.steps);
+      setWfControlStrength(optimal.controlStrength);
+      setWfFirstPassScale(optimal.firstPassScale);
+      setWfReferenceMode(optimal.referenceMode);
+    }
+  }, [activeEngineTab, activeWorkflowChoice.id, activeSourcePass, isWorkflowAutoTune]);
+
+  const handleResetWorkflowToOptimal = () => {
+    const engineKey: 'ltx-2.5' | 'minimax-h3' = activeEngineTab === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5';
+    const optimal = computeOptimalWorkflowTuning(engineKey, activeWorkflowChoice.id, activeSourcePass);
+    setIsWorkflowAutoTune(true);
+    setWfSteps(optimal.steps);
+    setWfControlStrength(optimal.controlStrength);
+    setWfFirstPassScale(optimal.firstPassScale);
+    setWfReferenceMode(optimal.referenceMode);
+    setWfPresetSummary(optimal.presetSummary);
+    setWfSaveNodeBadge(optimal.saveNodeBadge);
+    setWfInputNodeBadge(optimal.inputNodeBadge);
+    setWfRecommendedPass(optimal.recommendedPass);
+  };
+
   const [isSubmittingComfy, setIsSubmittingComfy] = useState<boolean>(false);
   const [comfyStatusText, setComfyStatusText] = useState<string | null>(null);
   const [comfyErrorText, setComfyErrorText] = useState<string | null>(null);
@@ -407,24 +618,67 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
     setIsSubmittingComfy(true);
     try {
-      // 1. Ensure 3D RGB Previs MP4 exists (auto-render at selectedResolution if needed or if Stage Backdrop mode changed)
-      let rgbUrl = useShotStore.getState().previsVideoUrl;
+      // 1. Resolve which 3D Previs video pass is actively selected to send to ComfyUI ('clay' | 'rgb' | 'openpose' | 'depth' | 'id-mask')
+      const passToUpload: PrevisSourcePass =
+        activePassTab === 'rgb' ||
+        activePassTab === 'clay' ||
+        activePassTab === 'openpose' ||
+        activePassTab === 'depth' ||
+        activePassTab === 'id-mask'
+          ? activePassTab
+          : activeSourcePass;
+
+      const getPassUrlFromStore = (pass: PrevisSourcePass): string | undefined => {
+        const s = useShotStore.getState();
+        switch (pass) {
+          case 'clay':
+            return s.previsClayUrl;
+          case 'openpose':
+            return s.previsOpenPoseUrl;
+          case 'depth':
+            return s.previsDepthUrl;
+          case 'id-mask':
+            return s.previsIdMaskUrl;
+          case 'rgb':
+          default:
+            return s.previsVideoUrl;
+        }
+      };
+
+      const passHumanName =
+        passToUpload === 'clay'
+          ? 'Clay Layout'
+          : passToUpload === 'openpose'
+          ? 'OpenPose Rig'
+          : passToUpload === 'depth'
+          ? 'Volumetric Depth'
+          : passToUpload === 'id-mask'
+          ? 'Object ID Mask'
+          : 'RGB Plate';
+
+      let sourcePassUrl = getPassUrlFromStore(passToUpload);
       const backdropChangedSinceRender =
         lastRenderedBackdropHideRef.current !== null &&
         lastRenderedBackdropHideRef.current !== backdropDecision.hide;
-      if (!rgbUrl || backdropChangedSinceRender) {
-        setComfyStatusText(`Step 1/3: Rendering 24fps 3D RGB Previs MP4 (${selectedResolution}, ${backdropDecision.hide ? 'Clean BG' : '3D Stage'}) for <Video 1> reference...`);
-        await renderPrevisVideo('rgb', selectedResolution);
+      if (!sourcePassUrl || backdropChangedSinceRender) {
+        setComfyStatusText(
+          `Step 1/3: Rendering 24fps 3D ${passHumanName} MP4 (${selectedResolution}, ${
+            backdropDecision.hide ? 'Clean BG' : '3D Stage'
+          }) for <Video 1> reference...`
+        );
+        await renderPrevisVideo(passToUpload, selectedResolution);
         lastRenderedBackdropHideRef.current = backdropDecision.hide;
-        rgbUrl = useShotStore.getState().previsVideoUrl;
+        sourcePassUrl = getPassUrlFromStore(passToUpload);
       }
-      if (!rgbUrl) {
-        throw new Error('Failed to generate 3D RGB Previs video for ComfyUI upload.');
+      if (!sourcePassUrl) {
+        throw new Error(`Failed to generate 3D ${passHumanName} Previs video for ComfyUI upload.`);
       }
 
       // Fetch blob from object URL + resolve any DataURL thumbnails uploaded in Directing Stage into Blobs!
-      setComfyStatusText('Step 2/3: Uploading 3D Previs MP4 & Reference Images to ComfyUI (127.0.0.1:8188)...');
-      const previsBlob = await (await fetch(rgbUrl)).blob();
+      setComfyStatusText(
+        `Step 2/3: Uploading 3D ${passHumanName} MP4 & Reference Images to ComfyUI (127.0.0.1:8188)...`
+      );
+      const previsBlob = await (await fetch(sourcePassUrl)).blob();
 
       const resolvedRefBlobs: [Blob | null, Blob | null, Blob | null, Blob | null] = [null, null, null, null];
       const resolvedSlotUrls: [string | null, string | null, string | null, string | null] = [null, null, null, null];
@@ -531,7 +785,9 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
           : engineCompiled.positivePrompt;
 
       setComfyStatusText(
-        `Step 3/3: Binding "${activeWf.shortLabel}" (${selectedTemplateId}) & queuing in ComfyUI...`
+        `Step 3/3: Binding "${activeWf.shortLabel}" (${passHumanName} • ${wfSteps} steps • Str ${wfControlStrength.toFixed(
+          2
+        )} • RefMode ${wfReferenceMode}) & queuing in ComfyUI...`
       );
       await defaultJobRunner.run({
         shot,
@@ -542,6 +798,10 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
         prompt: effectivePrompt,
         negative: displayNegativePrompt,
         seed: Math.max(0, Math.floor(comfySeed)),
+        steps: wfSteps,
+        icLoraStrength: wfControlStrength,
+        firstPassScale: wfFirstPassScale,
+        referenceMode: wfReferenceMode,
         promptSource: 'compiled',
         controlVideoBlob: previsBlob,
         refImageBlobs: resolvedRefBlobs,
@@ -636,9 +896,10 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     customLockedPrompt.trim().length > 0 &&
     !isStaleLegacyPrompt;
   const engineUndoCount = (shot.promptHistory?.[activeEngineTab] || []).length;
-  const displayPositivePrompt = isCustomPromptLocked
-    ? customLockedPrompt
-    : deterministicPrompt.positivePrompt;
+  const displayPositivePrompt = formatReadableEnginePrompt(
+    isCustomPromptLocked ? customLockedPrompt : deterministicPrompt.positivePrompt,
+    activeEngineTab
+  );
   const displayNegativePrompt = shot.negativePrompt ?? compiledPrompt?.negativePrompt ?? deterministicPrompt.negativePrompt ?? '';
   const temporalBeats = deterministicPrompt.temporalBeats || compiledPrompt?.temporalBeats || [];
   const poseBundle = exportCameraPoseBundle(shot);
@@ -758,9 +1019,24 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     }
   };
 
+  const activeSourcePassUrl =
+    activeSourcePass === 'clay'
+      ? previsClayUrl
+      : activeSourcePass === 'openpose'
+      ? previsOpenPoseUrl
+      : activeSourcePass === 'depth'
+      ? previsDepthUrl
+      : activeSourcePass === 'id-mask'
+      ? previsIdMaskUrl
+      : previsVideoUrl;
+
+  const compareLeftUrl = activeSourcePassUrl || previsVideoUrl || previsClayUrl;
+
   const currentPassUrl =
     activePassTab === 'rgb'
       ? previsVideoUrl
+      : activePassTab === 'clay'
+      ? previsClayUrl
       : activePassTab === 'openpose'
       ? previsOpenPoseUrl
       : activePassTab === 'depth'
@@ -769,11 +1045,13 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       ? previsIdMaskUrl
       : activePassTab === 'comfy-final'
       ? finalComfyVideoUrl
-      : finalComfyVideoUrl || previsVideoUrl;
+      : finalComfyVideoUrl || compareLeftUrl;
 
   const currentPassLabel =
     activePassTab === 'rgb'
       ? 'RGB Viewfinder'
+      : activePassTab === 'clay'
+      ? 'Baked Clay Layout (Zero-Chroma)'
       : activePassTab === 'openpose'
       ? 'OpenPose Rig'
       : activePassTab === 'depth'
@@ -812,6 +1090,8 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     const tag =
       activePassTab === 'rgb'
         ? 'RGB'
+        : activePassTab === 'clay'
+        ? 'Clay'
         : activePassTab === 'openpose'
         ? 'OpenPose'
         : activePassTab === 'id-mask'
@@ -825,20 +1105,25 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     if (previsVideoUrl) {
       downloadFile(previsVideoUrl, `${sanitized}_RGB_${selectedResolution}.mp4`);
     }
+    if (previsClayUrl) {
+      setTimeout(() => {
+        downloadFile(previsClayUrl, `${sanitized}_Clay_${selectedResolution}.mp4`);
+      }, 250);
+    }
     if (previsOpenPoseUrl) {
       setTimeout(() => {
         downloadFile(previsOpenPoseUrl, `${sanitized}_OpenPose_${selectedResolution}.mp4`);
-      }, 300);
+      }, 500);
     }
     if (previsDepthUrl) {
       setTimeout(() => {
         downloadFile(previsDepthUrl, `${sanitized}_Depth_${selectedResolution}.mp4`);
-      }, 600);
+      }, 750);
     }
     if (previsIdMaskUrl) {
       setTimeout(() => {
         downloadFile(previsIdMaskUrl, `${sanitized}_IDMask_${selectedResolution}.mp4`);
-      }, 900);
+      }, 1000);
     }
   };
 
@@ -864,10 +1149,16 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     downloadTextFile(JSON.stringify(fullBundle, null, 2), `${sanitized}_${activeEngineTab}_production_pack.json`);
   };
 
-  const availablePassCount = [previsVideoUrl, previsOpenPoseUrl, previsDepthUrl, previsIdMaskUrl].filter(Boolean).length;
+  const availablePassCount = [
+    previsVideoUrl,
+    previsClayUrl,
+    previsOpenPoseUrl,
+    previsDepthUrl,
+    previsIdMaskUrl,
+  ].filter(Boolean).length;
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0c12] text-slate-200 overflow-y-auto custom-scrollbar font-sans">
+    <div className="flex flex-col h-full bg-[#070a12] text-slate-200 overflow-y-auto custom-scrollbar font-sans">
       {/* Bundled ComfyUI Workflows Pack Modal */}
       <BundledWorkflowsModal
         isOpen={showWorkflowsPackModal}
@@ -875,67 +1166,68 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       />
 
       {/* Top Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 border-b border-white/10 bg-[#0f121b] shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3.5 border-b border-white/10 bg-[#0b0e18]/95 backdrop-blur-md shrink-0">
+        <div className="flex items-center gap-3.5">
           {onBackToPrevis && (
             <button
               onClick={onBackToPrevis}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 transition-colors text-xs font-mono"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 hover:text-white border border-white/15 transition-colors text-xs font-medium cursor-pointer"
               title="Return to 3D Directing Stage"
             >
               <ArrowLeft className="h-3.5 w-3.5" />
               <span>Back to Stage</span>
             </button>
           )}
-          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-amber-500 to-amber-600 flex items-center justify-center text-black font-bold shadow-md shadow-amber-500/20">
-            <Film className="h-4 w-4" />
+          <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-black font-bold shadow-[0_0_20px_rgba(245,158,11,0.35)] border border-amber-300/40 shrink-0">
+            <Play className="h-4 w-4 fill-current ml-0.5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-sm font-bold text-white tracking-wide">
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-base font-bold text-white tracking-tight">
                 Render &amp; Export
               </h1>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
+              <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/35 font-semibold">
                 {shot.name} • {shot.durationSeconds}s
               </span>
             </div>
-            <p className="text-[11px] text-slate-400">
-              Render 24fps multi-pass reference videos (RGB, OpenPose, Depth), refine prompts with AI, and export camera matrices
+            <p className="text-[11.5px] text-slate-400">
+              Render multi-pass reference videos (RGB, OpenPose, Depth), refine prompts with AI, and export camera matrices.
             </p>
           </div>
         </div>
 
         {/* Engine Switcher & ComfyUI Workflows Pack */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2.5">
           <button
             type="button"
             onClick={() => setShowWorkflowsPackModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 border border-cyan-400/40 text-xs font-mono font-semibold transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-200 border border-cyan-400/40 text-xs font-semibold shadow-[0_0_15px_rgba(34,211,238,0.15)] transition-all cursor-pointer"
             title="Download all ComfyUI workflows used in this app (Image-to-3D, Text-to-3D, MiniMax H3 & LTX-2.5)"
           >
             <FileCode className="h-3.5 w-3.5 text-cyan-300" />
-            <span>📥 Workflows</span>
+            <span>Workflows</span>
           </button>
 
-          <span className="text-xs text-slate-400 font-mono">Engine:</span>
-          <div className="flex items-center bg-black/60 rounded-lg p-0.5 border border-white/15 text-xs font-mono">
+          <span className="text-xs text-slate-400 font-medium ml-1">Engine:</span>
+          <div className="flex items-center bg-[#060911] rounded-xl p-1 border border-white/15 text-xs font-medium shadow-inner">
             <button
               onClick={() => handleSelectEngine('ltx-2.5')}
-              className={`px-3 py-1 rounded-md transition-all font-semibold ${
+              className={`flex items-center gap-1 px-3.5 py-1.5 rounded-lg transition-all font-bold cursor-pointer ${
                 activeEngineTab === 'ltx-2.5'
-                  ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-black shadow-sm'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-black shadow-[0_0_15px_rgba(245,158,11,0.35)]'
+                  : 'text-slate-300 hover:text-white'
               }`}
               title="LTX-2.5 DiT Narrative Flow (8n+1 frame cadence)"
             >
-              LTX-2.5
+              <span>LTX-2.5</span>
+              <ChevronDown className="h-3 w-3 opacity-80" />
             </button>
             <button
               onClick={() => handleSelectEngine('minimax-h3')}
-              className={`px-3 py-1 rounded-md transition-all font-semibold ${
+              className={`px-3.5 py-1.5 rounded-lg transition-all font-semibold cursor-pointer ${
                 activeEngineTab === 'minimax-h3'
-                  ? 'bg-gradient-to-r from-indigo-500 to-indigo-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-[0_0_15px_rgba(99,102,241,0.35)]'
+                  : 'text-slate-300 hover:text-white'
               }`}
               title="MiniMax H3 / Hailuo Structured Micro-Acting Formula"
             >
@@ -943,10 +1235,10 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
             </button>
             <button
               onClick={() => handleSelectEngine('seedance')}
-              className={`px-3 py-1 rounded-md transition-all font-semibold ${
+              className={`px-3.5 py-1.5 rounded-lg transition-all font-semibold cursor-pointer ${
                 activeEngineTab === 'seedance'
-                  ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-black shadow-sm'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-gradient-to-r from-cyan-400 to-cyan-500 text-black shadow-[0_0_15px_rgba(34,211,238,0.35)]'
+                  : 'text-slate-300 hover:text-white'
               }`}
               title="Seedance 2.0 6-Axis Coordinate Trajectory & Sensor Profile"
             >
@@ -957,50 +1249,67 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       </div>
 
       {/* Main Grid Content */}
-      <div className="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0">
-        {/* Column 1: Reference Video Output + Temporal Beats + Camera Matrix (7 cols) */}
+      <div className="flex-1 p-5 grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-0">
+        {/* Column 1: Reference Video Output + ComfyUI Bridge + Temporal Beats + Camera Matrix (7 cols) */}
         <div className="lg:col-span-7 flex flex-col gap-4">
-          <div className="rounded-2xl border border-white/10 bg-[#0f121b] p-5 shadow-xl flex flex-col gap-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Video className="h-4 w-4 text-amber-400" />
+          <div className="rounded-2xl border border-indigo-500/25 bg-gradient-to-b from-[#0d1222]/95 to-[#090d18]/95 p-5 shadow-[0_12px_40px_rgba(0,0,0,0.5)] flex flex-col gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2.5">
+                <div className="h-7 w-7 rounded-lg bg-cyan-500/15 border border-cyan-400/35 flex items-center justify-center text-cyan-300">
+                  <Video className="h-4 w-4" />
+                </div>
                 <h2 className="text-sm font-bold text-white tracking-wide">
-                  Previs Video
+                  Preview Video
                 </h2>
               </div>
 
               {/* Multi-Pass Selector Tabs */}
-              <div className="flex flex-wrap items-center bg-black/60 rounded-xl p-1 border border-white/10 gap-1 text-[11px] font-mono">
+              <div className="flex flex-wrap items-center bg-[#060911] rounded-xl p-1 border border-white/10 gap-1 text-[11px] font-medium">
                 <button
                   onClick={() => setActivePassTab('rgb')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                     activePassTab === 'rgb'
-                      ? 'bg-amber-500 text-black font-bold shadow-sm'
-                      : 'text-slate-400 hover:text-white'
+                      ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-black font-bold shadow-[0_0_12px_rgba(245,158,11,0.35)]'
+                      : 'text-slate-300 hover:text-white'
                   }`}
+                  title="Full-color 3D Previs Plate"
                 >
                   <Video className="h-3 w-3" />
                   <span>RGB Plate</span>
                   {previsVideoUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
                 </button>
                 <button
+                  onClick={() => setActivePassTab('clay')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                    activePassTab === 'clay'
+                      ? 'bg-gradient-to-r from-slate-200 to-slate-400 text-black font-bold shadow-[0_0_12px_rgba(226,232,240,0.35)]'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                  title="Zero-Chrominance (R=G=B) Matte Studio Clay Layout Pass — Ideal for LTX-2.5 Union IC-LoRA restyling without plastic mannequin color bleed"
+                >
+                  <Layers className="h-3 w-3" />
+                  <span>Clay</span>
+                  {previsClayUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
+                </button>
+                <button
                   onClick={() => setActivePassTab('openpose')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                     activePassTab === 'openpose'
                       ? 'bg-emerald-500 text-black font-bold shadow-sm'
-                      : 'text-slate-400 hover:text-white'
+                      : 'text-slate-300 hover:text-white'
                   }`}
+                  title="OpenPose 2D/3D Skeleton Pass"
                 >
                   <Target className="h-3 w-3" />
-                  <span>OpenPose</span>
+                  <span>Pose</span>
                   {previsOpenPoseUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
                 </button>
                 <button
                   onClick={() => setActivePassTab('depth')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                     activePassTab === 'depth'
                       ? 'bg-cyan-500 text-black font-bold shadow-sm'
-                      : 'text-slate-400 hover:text-white'
+                      : 'text-slate-300 hover:text-white'
                   }`}
                 >
                   <Layers className="h-3 w-3" />
@@ -1009,46 +1318,47 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 </button>
                 <button
                   onClick={() => setActivePassTab('id-mask')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                     activePassTab === 'id-mask'
                       ? 'bg-rose-500 text-white font-bold shadow-sm'
-                      : 'text-slate-400 hover:text-white'
+                      : 'text-slate-300 hover:text-white'
                   }`}
                   title="Cryptomatte-style per-subject Object ID Segmentation Mask (#EF4444, #22C55E, #3B82F6 on #000000)"
                 >
                   <Layers className="h-3 w-3" />
-                  <span>ID Mask</span>
+                  <span>Mask</span>
                   {previsIdMaskUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
                 </button>
                 <button
                   onClick={() => setActivePassTab('comfy-final')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                     activePassTab === 'comfy-final'
                       ? 'bg-indigo-500 text-white font-bold shadow-sm'
-                      : 'text-slate-400 hover:text-white'
+                      : 'text-slate-300 hover:text-white'
                   }`}
+                  title="Final ComfyUI Render Output"
                 >
                   <Zap className="h-3 w-3" />
-                  <span>Final Render</span>
+                  <span>Final</span>
                   {finalComfyVideoUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
                 </button>
                 <button
                   onClick={() => setActivePassTab('side-by-side')}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
                     activePassTab === 'side-by-side'
                       ? 'bg-gradient-to-r from-amber-500 to-indigo-500 text-white font-bold shadow-sm'
-                      : 'text-slate-400 hover:text-white'
+                      : 'text-slate-300 hover:text-white'
                   }`}
                 >
                   <Columns className="h-3 w-3" />
                   <span>Compare</span>
-                  {previsVideoUrl && finalComfyVideoUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
+                  {compareLeftUrl && finalComfyVideoUrl && <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />}
                 </button>
               </div>
             </div>
 
             {/* Video Viewport / Player */}
-            <div className="relative rounded-xl overflow-hidden bg-black/80 border border-white/10 aspect-video flex items-center justify-center group">
+            <div className="relative rounded-2xl overflow-hidden bg-[#050811] border border-cyan-500/20 aspect-video flex items-center justify-center group shadow-inner">
               {activePassTab === 'side-by-side' ? (
                 compareViewMode === 'wipe' ? (
                   <div
@@ -1100,16 +1410,16 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                       )}
                     </div>
 
-                    {/* Top Clipped Layer (Left side of curtain): 3D RGB Previs (<Video 1>) */}
+                    {/* Top Clipped Layer (Left side of curtain): 3D Previs (<Video 1>) */}
                     <div
                       className="absolute inset-0 flex items-center justify-center bg-[#080a0f]"
                       style={{ clipPath: `inset(0 ${100 - wipePercent}% 0 0)` }}
                     >
-                      {previsVideoUrl ? (
+                      {compareLeftUrl ? (
                         <video
                           ref={syncLeftVideoRef}
-                          key={`wipe-left-${previsVideoUrl}`}
-                          src={previsVideoUrl}
+                          key={`wipe-left-${compareLeftUrl}`}
+                          src={compareLeftUrl}
                           loop
                           autoPlay
                           muted
@@ -1120,7 +1430,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                         />
                       ) : (
                         <div className="text-center p-6 text-[11px] font-mono text-slate-400">
-                          Click <strong>&quot;Render Previs&quot;</strong> below to populate the left 3D Previs layer.
+                          Click <strong>&quot;Render Preview&quot;</strong> below to populate the left 3D Previs layer.
                         </div>
                       )}
                     </div>
@@ -1137,7 +1447,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
                     {/* Left & Right Corner Badges */}
                     <div className="absolute bottom-11 left-3 px-2 py-0.5 rounded bg-black/80 border border-amber-500/40 text-[9px] font-mono text-amber-300 font-bold pointer-events-none">
-                      ◄ 1. 3D RGB PREVIS (&lt;Video 1&gt;) • {wipePercent}%
+                      ◄ 1. 3D {activeSourcePass.toUpperCase()} PREVIS (&lt;Video 1&gt;) • {wipePercent}%
                     </div>
                     <div className="absolute bottom-11 right-3 px-2 py-0.5 rounded bg-black/80 border border-indigo-500/40 text-[9px] font-mono text-indigo-300 font-bold pointer-events-none">
                       2. {activeEngineTab === 'ltx-2.5' ? 'LTX-2.5' : 'MINIMAX H3'} FINAL ({100 - wipePercent}%) ►
@@ -1174,7 +1484,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                         className="flex-1 accent-amber-400 h-1.5 bg-white/15 rounded-lg cursor-ew-resize"
                       />
                       <span className="text-[9px] font-mono text-indigo-300 font-bold shrink-0">FINAL</span>
-                      {previsVideoUrl && finalComfyVideoUrl && (
+                      {compareLeftUrl && finalComfyVideoUrl && (
                         <button
                           type="button"
                           onClick={handleSyncRestartBoth}
@@ -1205,13 +1515,13 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                         Split 2-Up
                       </button>
                     </div>
-                    {/* Left: 3D RGB Previs */}
+                    {/* Left: 3D Previs */}
                     <div className="relative rounded-lg overflow-hidden bg-[#080a0f] border border-amber-500/30 flex items-center justify-center">
-                      {previsVideoUrl ? (
+                      {compareLeftUrl ? (
                         <video
                           ref={syncLeftVideoRef}
-                          key={previsVideoUrl}
-                          src={previsVideoUrl}
+                          key={compareLeftUrl}
+                          src={compareLeftUrl}
                           controls
                           loop
                           autoPlay
@@ -1220,11 +1530,11 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                         />
                       ) : (
                         <div className="text-center p-4 text-[11px] font-mono text-slate-400">
-                          Click <strong>&quot;Render Previs Video&quot;</strong> below to populate left 3D Previs plate.
+                          Click <strong>&quot;Render Preview&quot;</strong> below to populate left 3D Previs plate.
                         </div>
                       )}
                       <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-amber-500/40 text-[9px] font-mono text-amber-300 font-bold">
-                        1. 3D RGB PREVIS (&lt;Video 1&gt;)
+                        1. 3D {activeSourcePass.toUpperCase()} PREVIS (&lt;Video 1&gt;)
                       </div>
                     </div>
                     {/* Right: Final ComfyUI Render */}
@@ -1250,7 +1560,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                         2. {activeEngineTab === 'ltx-2.5' ? 'LTX-2.5' : 'MINIMAX H3'} FINAL RENDER ({finalComfyFilename || 'ComfyUI'})
                       </div>
                     </div>
-                    {previsVideoUrl && finalComfyVideoUrl && (
+                    {compareLeftUrl && finalComfyVideoUrl && (
                       <button
                         onClick={handleSyncRestartBoth}
                         className="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-indigo-600/90 hover:bg-indigo-500 text-white font-mono text-[10px] font-bold shadow-lg border border-white/20 flex items-center gap-1.5 cursor-pointer"
@@ -1273,73 +1583,103 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   className="w-full h-full object-contain"
                 />
               ) : isRenderingPrevis ? (
-                <div className="flex flex-col items-center gap-3 p-6 text-center">
+                <div className="flex flex-col items-center gap-3 p-6 text-center z-10">
                   <div className="relative">
-                    <div className="h-12 w-12 rounded-full border-2 border-amber-500/30 border-t-amber-400 animate-spin" />
+                    <div className="h-14 w-14 rounded-full border-2 border-amber-500/30 border-t-amber-400 animate-spin" />
                     <span className="absolute inset-0 flex items-center justify-center text-xs font-mono font-bold text-amber-300">
                       {Math.round(previsProgress)}%
                     </span>
                   </div>
                   <div>
-                    <h3 className="text-xs font-bold text-white tracking-wide">
+                    <h3 className="text-sm font-bold text-white tracking-wide">
                       Rendering 3D Previs ({renderPassMode.toUpperCase()})...
                     </h3>
-                    <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">
                       Encoding frame canvases at 24fps via WebCodecs MP4 muxer
                     </p>
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-col items-center gap-3 p-6 text-center text-slate-400">
-                  <div className="h-12 w-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-amber-400">
-                    <Film className="h-6 w-6" />
+                <div className="relative w-full h-full flex flex-col items-center justify-center gap-3.5 p-6 text-center overflow-hidden">
+                  {/* Ambient Aurora Corner Glows + Decorative Wave */}
+                  <div className="pointer-events-none absolute -top-24 -left-24 h-72 w-72 rounded-full bg-cyan-500/15 blur-3xl" />
+                  <div className="pointer-events-none absolute -bottom-24 -right-16 h-72 w-72 rounded-full bg-fuchsia-600/15 blur-3xl" />
+                  <svg
+                    viewBox="0 0 400 120"
+                    className="pointer-events-none absolute bottom-0 right-0 w-72 h-28 opacity-55"
+                    fill="none"
+                  >
+                    <path
+                      d="M120 120 C 210 100, 260 30, 400 20"
+                      stroke="url(#previewWaveGrad)"
+                      strokeWidth="2"
+                    />
+                    <defs>
+                      <linearGradient id="previewWaveGrad" x1="120" y1="120" x2="400" y2="20" gradientUnits="userSpaceOnUse">
+                        <stop offset="0%" stopColor="rgba(56,189,248,0)" />
+                        <stop offset="50%" stopColor="rgba(168,85,247,0.75)" />
+                        <stop offset="100%" stopColor="rgba(236,72,153,0.9)" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+
+                  {/* 3D Rendered Amber Film Artwork with Orbiting Ring */}
+                  <div className="relative flex items-center justify-center select-none pointer-events-none">
+                    <img
+                      src="./images/preview-video-hero.png"
+                      alt="No Render Yet"
+                      className="w-36 h-auto object-contain drop-shadow-[0_0_30px_rgba(245,158,11,0.28)]"
+                    />
                   </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-white">
-                      {currentPassLabel} Not Rendered Yet
+                  <div className="z-10">
+                    <h3 className="text-lg font-bold text-white tracking-tight">
+                      No Render Yet
                     </h3>
-                    <p className="text-[10px] text-slate-400 max-w-sm mt-0.5">
-                      Select your desired render pass mode below and click <strong>&quot;Render Previs Video&quot;</strong>.
+                    <p className="text-xs text-slate-400 max-w-md mt-1">
+                      Select a render pass above and click <strong>&quot;Render Preview&quot;</strong> to generate a video.
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* Resolution & Active Pass Badge */}
-              <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/75 backdrop-blur-md border border-white/15 text-[9px] font-mono text-slate-300 flex items-center gap-1.5">
-                <span className="font-bold text-amber-400">{currentPassLabel.toUpperCase()}</span>
-                <span>•</span>
-                <span>{selectedResolution}</span>
-                <span>•</span>
-                <span>{shot.aspectRatio}</span>
-                <span>•</span>
-                <span className={backdropDecision.hide ? 'text-emerald-400 font-semibold' : 'text-slate-300'}>
-                  {backdropDecision.reason}
-                </span>
-              </div>
+              {/* Resolution & Active Pass Badge (shown when video is loaded or rendering) */}
+              {(currentPassUrl || isRenderingPrevis || activePassTab === 'side-by-side') && (
+                <div className="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-md border border-white/15 text-[9.5px] font-mono text-slate-300 flex items-center gap-1.5">
+                  <span className="font-bold text-amber-400">{currentPassLabel.toUpperCase()}</span>
+                  <span>•</span>
+                  <span>{selectedResolution}</span>
+                  <span>•</span>
+                  <span>{shot.aspectRatio}</span>
+                  <span>•</span>
+                  <span className={backdropDecision.hide ? 'text-emerald-400 font-semibold' : 'text-slate-300'}>
+                    {backdropDecision.reason}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Render & Download Controls */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-1">
               {/* Pass Mode, Stage Backdrop Mode & Resolution Controls */}
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] font-mono text-slate-400">Pass:</span>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-slate-400">Pass:</span>
                   <select
                     value={renderPassMode}
                     onChange={(e) => setRenderPassMode(e.target.value as any)}
-                    className="bg-black/60 border border-white/15 rounded-lg px-2 py-1 text-[11px] font-mono text-slate-200 focus:outline-none focus:border-amber-400"
+                    className="bg-[#060911] border border-white/15 hover:border-white/25 rounded-xl px-3 py-2 text-xs font-medium text-slate-100 focus:outline-none focus:border-amber-400 cursor-pointer"
                   >
-                    <option value="all">All Passes (RGB + Pose + Depth + ID Mask)</option>
+                    <option value="all">All Passes (RGB + Clay + Pose + Depth + Mask)</option>
                     <option value="rgb">RGB Viewfinder Only</option>
+                    <option value="clay">Clay Layout Only (Zero-Chroma)</option>
                     <option value="openpose">OpenPose Rig Only</option>
                     <option value="depth">Volumetric Depth Only</option>
                     <option value="id-mask">Object ID Mask Only</option>
                   </select>
                 </div>
 
-                <div className="flex items-center gap-1">
-                  <span className="text-[10px] font-mono text-slate-400">Stage BG:</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-slate-400">Stage BG:</span>
                   <select
                     value={backdropDecision.mode}
                     onChange={(e) => {
@@ -1352,26 +1692,26 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                       setPrevisVideo(undefined, undefined);
                     }}
                     title="Control whether the #334155 3D studio floor & walls appear in <Video 1> (Auto hides them when <Picture 4> or an outdoor/aerial environment is active)"
-                    className={`bg-black/60 border rounded-lg px-2 py-1 text-[11px] font-mono focus:outline-none ${
+                    className={`bg-[#060911] border rounded-xl px-3 py-2 text-xs font-medium focus:outline-none cursor-pointer ${
                       backdropDecision.hide
                         ? 'border-emerald-500/40 text-emerald-300 focus:border-emerald-400'
-                        : 'border-white/15 text-slate-200 focus:border-amber-400'
+                        : 'border-white/15 text-slate-100 focus:border-amber-400'
                     }`}
                   >
                     <option value="auto">
-                      Auto ({backdropDecision.hide ? 'Clean BG — Hide Studio Floor' : 'Show 3D Stage'})
+                      {backdropDecision.hide ? 'Auto (Clean BG — Hide Studio Floor)' : '3D Studio Floor & Walls (Auto)'}
                     </option>
                     <option value="hide-stage">Clean BG (Actors &amp; Camera Only)</option>
-                    <option value="show-stage">Show 3D Studio Floor &amp; Walls</option>
+                    <option value="show-stage">3D Studio Floor &amp; Walls</option>
                   </select>
                 </div>
 
-                <div className="flex items-center gap-1">
+                <div className="flex items-center bg-[#060911] border border-white/15 rounded-xl p-0.5">
                   <button
                     onClick={() => setSelectedResolution('720p')}
-                    className={`px-2 py-1 rounded text-[11px] font-mono font-semibold transition-all ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                       selectedResolution === '720p'
-                        ? 'bg-white/15 text-white border border-white/30'
+                        ? 'bg-indigo-500/25 text-white border border-indigo-400/40 shadow-sm'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
@@ -1379,9 +1719,9 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   </button>
                   <button
                     onClick={() => setSelectedResolution('1080p')}
-                    className={`px-2 py-1 rounded text-[11px] font-mono font-semibold transition-all ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                       selectedResolution === '1080p'
-                        ? 'bg-white/15 text-white border border-white/30'
+                        ? 'bg-indigo-500/25 text-white border border-indigo-400/40 shadow-sm'
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
@@ -1391,11 +1731,11 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => renderPrevisVideo(renderPassMode, selectedResolution)}
                   disabled={isRenderingPrevis}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-bold text-xs shadow-lg shadow-amber-500/20 disabled:opacity-50 transition-all cursor-pointer"
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-400 via-amber-500 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-black font-bold text-xs shadow-[0_0_20px_rgba(245,158,11,0.35)] disabled:opacity-50 transition-all cursor-pointer"
                 >
                   {isRenderingPrevis ? (
                     <>
@@ -1410,7 +1750,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   ) : (
                     <>
                       <Play className="h-3.5 w-3.5 fill-current" />
-                      <span>Render Previs</span>
+                      <span>Render Preview</span>
                     </>
                   )}
                 </button>
@@ -1418,7 +1758,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 {currentPassUrl && (
                   <button
                     onClick={handleDownloadActivePass}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all cursor-pointer"
                     title={`Download ${currentPassLabel} MP4`}
                   >
                     <Download className="h-3.5 w-3.5" />
@@ -1426,6 +1766,8 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                       Download{' '}
                       {activePassTab === 'rgb'
                         ? 'RGB'
+                        : activePassTab === 'clay'
+                        ? 'Clay'
                         : activePassTab === 'openpose'
                         ? 'Pose'
                         : activePassTab === 'depth'
@@ -1441,7 +1783,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 {availablePassCount > 1 && (
                   <button
                     onClick={handleDownloadAllPasses}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 border border-white/15 font-mono text-xs font-semibold transition-all cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-200 border border-white/15 font-mono text-xs font-semibold transition-all cursor-pointer"
                     title="Download all generated MP4 passes sequentially"
                   >
                     <Download className="h-3.5 w-3.5 text-amber-400" />
@@ -1452,48 +1794,61 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
             </div>
           </div>
 
-          {/* Live ComfyUI MiniMax H3 Reference-to-Video Bridge Card */}
-          <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-[#101424] via-[#0f121b] to-[#141126] p-5 shadow-xl flex flex-col gap-3.5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5">
-                <div className="h-7 w-7 rounded-lg bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-indigo-300">
-                  <Zap className="h-4 w-4" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-xs font-bold text-white tracking-wide uppercase">
-                      ComfyUI Render Bridge
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => probeComfyHealth()}
-                      title="Click to test & reconnect to ComfyUI at 127.0.0.1:8188"
-                      className={`px-2 py-0.5 rounded text-[9px] font-mono font-bold border transition-all cursor-pointer ${
-                        comfyOnline
-                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
-                          : 'bg-rose-500/20 text-rose-300 border-rose-500/40 hover:bg-rose-500/30'
-                      }`}
-                    >
-                      {comfyOnline ? `ONLINE • ${comfyGpuLabel}` : comfyGpuLabel}
-                    </button>
+          {/* Live ComfyUI Render Bridge Card */}
+          <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-[#0e1224] via-[#0b0f1c] to-[#121024] p-5 shadow-xl flex flex-col gap-3.5">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-xl bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.25)] shrink-0">
+                    <Zap className="h-4 w-4" />
                   </div>
-                  <p className="text-[10px] font-mono text-slate-400">
-                    Active Workflow:{' '}
-                    <span
-                      className={
-                        activeEngineTab === 'ltx-2.5'
-                          ? 'text-amber-300 font-semibold'
-                          : 'text-indigo-300 font-semibold'
-                      }
-                    >
-                      {activeWorkflowChoice.shortLabel}
-                    </span>{' '}
-                    ({activeWorkflowChoice.description})
-                  </p>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-bold text-white tracking-tight">
+                        ComfyUI Render Bridge
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => probeComfyHealth()}
+                        title="Click to test & reconnect to ComfyUI at 127.0.0.1:8188"
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border transition-all cursor-pointer ${
+                          comfyOnline
+                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/25'
+                            : 'bg-rose-500/20 text-rose-300 border-rose-500/40 hover:bg-rose-500/30'
+                        }`}
+                      >
+                        <span className={`h-1.5 w-1.5 rounded-full ${comfyOnline ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                        <span>{comfyOnline ? 'ONLINE' : comfyGpuLabel}</span>
+                      </button>
+                      {comfyOnline && (
+                        <>
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-semibold">
+                            CUDA • {storeSystemStats?.gpuName || comfyGpuLabel.split('(')[0].trim()}
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-semibold">
+                            VRAM {storeSystemStats?.vramTotalGb || 24}GB
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-1.5">
+                      <span>Active Workflow:</span>
+                      <span className="text-slate-200 font-semibold">
+                        {activeWorkflowChoice.shortLabel}
+                      </span>
+                      <span className="text-slate-600">|</span>
+                      <span>{activeWorkflowChoice.description}</span>
+                      <span className="text-slate-600">|</span>
+                      <span>4 Ref Images</span>
+                      <span className="text-slate-600">|</span>
+                      <span>{activeEngineTab === 'ltx-2.5' ? 'Node 15' : 'Node 155'}</span>
+                    </p>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
+              {/* Action Buttons Bar */}
+              <div className="flex flex-wrap items-center gap-2.5">
                 <a
                   href={`./workflows/${
                     activeWorkflowChoice.uiFilename ||
@@ -1503,7 +1858,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                     activeWorkflowChoice.uiFilename ||
                     (activeEngineTab === 'ltx-2.5' ? 'Stubelius_Ultimate_LTX.json' : 'Stubelius_Ultimate_H3.json')
                   }
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-amber-200 border border-amber-400/30 font-mono text-[11px] font-semibold transition-all cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 border border-amber-400/40 text-xs font-semibold transition-all cursor-pointer"
                   title={`Download the active ${
                     activeEngineTab === 'ltx-2.5' ? 'LTX-2.5' : 'MiniMax H3'
                   } ComfyUI workflow (.json) to drag-and-drop into ComfyUI`}
@@ -1514,10 +1869,10 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 <button
                   type="button"
                   onClick={handleLoadLatestComfyRender}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-indigo-200 border border-indigo-400/30 font-mono text-[11px] font-semibold transition-all cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 border border-white/15 text-xs font-semibold transition-all cursor-pointer"
                   title="Load the most recent completed render from ComfyUI /history into the player"
                 >
-                  <Columns className="h-3.5 w-3.5 text-indigo-400" />
+                  <Columns className="h-3.5 w-3.5 text-indigo-300" />
                   <span>Load Latest</span>
                 </button>
                 <button
@@ -1528,8 +1883,8 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                     activeJob?.status === 'executing' ||
                     activeJob?.status === 'queued'
                   }
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-indigo-500/25 disabled:opacity-50 transition-all cursor-pointer"
-                  title="Auto-upload 3D RGB Previs MP4 + Reference Images and execute the selected workflow in ComfyUI"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-600 hover:from-indigo-400 hover:to-purple-500 text-white font-bold text-xs shadow-[0_0_20px_rgba(99,102,241,0.4)] disabled:opacity-50 transition-all cursor-pointer"
+                  title={`Auto-upload 3D ${activeSourcePass.toUpperCase()} Previs MP4 + Reference Images and execute the selected workflow in ComfyUI`}
                 >
                   {isSubmittingComfy ||
                   activeJob?.status === 'executing' ||
@@ -1541,7 +1896,19 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   ) : (
                     <>
                       <Zap className="h-3.5 w-3.5 fill-current" />
-                      <span>Render in ComfyUI</span>
+                      <span>
+                        Render in ComfyUI (
+                        {activeSourcePass === 'clay'
+                          ? 'Clay'
+                          : activeSourcePass === 'rgb'
+                          ? 'RGB'
+                          : activeSourcePass === 'openpose'
+                          ? 'Pose'
+                          : activeSourcePass === 'depth'
+                          ? 'Depth'
+                          : 'Mask'}
+                        )
+                      </span>
                     </>
                   )}
                 </button>
@@ -1551,7 +1918,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   <button
                     type="button"
                     onClick={handleStopComfyRender}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 text-rose-200 border border-rose-500/40 font-mono text-[11px] font-bold shadow-lg shadow-rose-500/15 transition-all cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-500/20 hover:bg-rose-500/35 text-rose-200 border border-rose-500/40 text-xs font-bold shadow-lg shadow-rose-500/15 transition-all cursor-pointer"
                     title="Immediately interrupt and stop the current render in ComfyUI (/interrupt)"
                   >
                     <Square className="h-3 w-3 fill-current text-rose-400" />
@@ -1561,19 +1928,325 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
               </div>
             </div>
 
-            {/* Workflow Library Selector + Add Workflow by URL Bar (strictly isolated by activeEngineTab) */}
+            {/* Workflow Library Selector + Add Workflow by URL Bar + Smart Workflow Quick Settings + Live Render Progress Banner */}
             <CustomWorkflowConfigBar
               compact
               engine={activeEngineTab === 'ltx-2.5' ? 'ltx-2.5' : 'minimax-h3'}
               onWorkflowChanged={(choice) => setActiveWorkflowChoice(choice)}
-            />
+            >
+              {/* Smart Workflow Quick Settings Bar (Auto-Tune per Engine × Workflow × Video Pass) */}
+              <div className="rounded-xl border border-white/10 bg-[#050811]/90 p-3 flex flex-col gap-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                      <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                      <span>Workflow Quick Settings</span>
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[9.5px] font-mono font-bold border ${
+                        isWorkflowAutoTune
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35'
+                          : 'bg-amber-500/15 text-amber-300 border-amber-500/35'
+                      }`}
+                      title={wfPresetSummary}
+                    >
+                      {isWorkflowAutoTune ? `✨ Auto-Tuned: ${wfPresetSummary}` : '⚙️ Custom Manual Override'}
+                    </span>
+                    <span
+                      className="px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-200 border border-indigo-400/30 text-[9px] font-mono font-semibold"
+                      title="Automatic ComfyUI Video Save Node & Fallback Output Node bound for this workflow"
+                    >
+                      🎯 {wfSaveNodeBadge}
+                    </span>
+                    <span
+                      className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-200 border border-cyan-400/25 text-[9px] font-mono"
+                      title="Control Video Input Node bound for this workflow"
+                    >
+                      🔗 {wfInputNodeBadge}
+                    </span>
+                    {activeSourcePass !== wfRecommendedPass && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveSourcePass(wfRecommendedPass);
+                          setActivePassTab(wfRecommendedPass);
+                        }}
+                        className="px-2 py-0.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/40 text-[9px] font-mono font-bold transition-all cursor-pointer"
+                        title={`Switch to the recommended source pass (${wfRecommendedPass.toUpperCase()}) for this workflow`}
+                      >
+                        💡 Recommended Pass: {wfRecommendedPass.toUpperCase()} (Click to Apply)
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setIsWorkflowAutoTune((prev) => !prev)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border transition-all cursor-pointer ${
+                        isWorkflowAutoTune
+                          ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/40 hover:bg-emerald-500/30'
+                          : 'bg-white/[0.06] text-slate-300 border-white/15 hover:text-white'
+                      }`}
+                      title="When Auto-Tune is ON, switching the Video Pass tab (Clay / RGB / Depth / Pose) or Workflow automatically sets the scientifically optimal Steps, Control Strength, Scale, and Reference Mode."
+                    >
+                      Auto-Tune: {isWorkflowAutoTune ? 'ON' : 'OFF'}
+                    </button>
+                    {!isWorkflowAutoTune && (
+                      <button
+                        type="button"
+                        onClick={handleResetWorkflowToOptimal}
+                        className="px-2 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 border border-amber-400/35 text-[10px] font-mono font-semibold transition-all cursor-pointer flex items-center gap-1"
+                        title="Reset workflow settings to the optimal values for the active Engine, Workflow, and Video Pass"
+                      >
+                        <RotateCcw className="h-2.5 w-2.5" />
+                        <span>Reset Optimal</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* 5 Non-Destructive Controls Row: Video Pass to Send | Steps | Control Strength | Structure Scale | Reference Mode */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2 text-[10.5px]">
+                  {/* 1. Source Video Pass Routing */}
+                  <div className="rounded-lg bg-[#0b0f1c] border border-white/10 px-2.5 py-1.5 flex flex-col justify-between gap-1">
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>Send Video Pass</span>
+                      <span className="font-mono text-[9.5px] text-cyan-300 font-bold">
+                        &lt;Video 1&gt;
+                      </span>
+                    </div>
+                    <select
+                      aria-label="Send Video Pass to ComfyUI"
+                      value={activeSourcePass}
+                      onChange={(e) => {
+                        const nextPass = e.target.value as PrevisSourcePass;
+                        setActiveSourcePass(nextPass);
+                        setActivePassTab(nextPass);
+                      }}
+                      className="bg-[#060911] border border-white/15 rounded-md px-2 py-1 text-[11px] font-semibold text-white focus:outline-none focus:border-cyan-400 cursor-pointer"
+                    >
+                      <option value="clay">Clay (Zero-Chroma)</option>
+                      <option value="rgb">RGB Plate (Colored)</option>
+                      <option value="depth">Depth Map</option>
+                      <option value="openpose">OpenPose Skeleton</option>
+                      <option value="id-mask">Object ID Mask</option>
+                    </select>
+                  </div>
+
+                  {/* 2. Steps */}
+                  <div className="rounded-lg bg-[#0b0f1c] border border-white/10 px-2.5 py-1.5 flex flex-col justify-between gap-1">
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>Sampling Steps</span>
+                      <span className="font-mono text-[10.5px] text-amber-300 font-bold">{wfSteps}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="range"
+                        aria-label="Workflow Sampling Steps"
+                        min={4}
+                        max={20}
+                        step={1}
+                        value={wfSteps}
+                        onChange={(e) => {
+                          setIsWorkflowAutoTune(false);
+                          setWfSteps(Number(e.target.value));
+                        }}
+                        className="flex-1 accent-amber-400 h-1.5 bg-white/15 rounded-lg cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 3. Control / IC-LoRA Strength */}
+                  <div className="rounded-lg bg-[#0b0f1c] border border-white/10 px-2.5 py-1.5 flex flex-col justify-between gap-1">
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>{activeEngineTab === 'ltx-2.5' ? 'IC-LoRA Strength' : 'Control Strength'}</span>
+                      <span className="font-mono text-[10.5px] text-indigo-300 font-bold">
+                        {wfControlStrength.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="range"
+                        aria-label="Workflow Control Strength"
+                        min={0.3}
+                        max={1.0}
+                        step={0.05}
+                        value={wfControlStrength}
+                        onChange={(e) => {
+                          setIsWorkflowAutoTune(false);
+                          setWfControlStrength(Number(e.target.value));
+                        }}
+                        className="flex-1 accent-indigo-400 h-1.5 bg-white/15 rounded-lg cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 4. Structure Scale / Resolution Scale */}
+                  <div className="rounded-lg bg-[#0b0f1c] border border-white/10 px-2.5 py-1.5 flex flex-col justify-between gap-1">
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>{activeEngineTab === 'ltx-2.5' ? 'First-Pass Scale' : 'Base Megapixels'}</span>
+                      <span className="font-mono text-[10px] text-emerald-300 font-bold">
+                        {activeEngineTab === 'ltx-2.5' ? `${wfFirstPassScale}x` : `${wfFirstPassScale} MP`}
+                      </span>
+                    </div>
+                    {activeEngineTab === 'ltx-2.5' ? (
+                      <select
+                        aria-label="LTX First Pass Scale"
+                        value={String(wfFirstPassScale)}
+                        onChange={(e) => {
+                          setIsWorkflowAutoTune(false);
+                          setWfFirstPassScale(Number(e.target.value));
+                        }}
+                        title="1.00x renders full 1280×704 in a single pass and uses RTX VSR for 1080p (prevents 2nd-pass 20.4GB LTXAV reload & VRAM overflow on 24GB GPUs). 0.50x runs a 2-pass x2 latent refine."
+                        className="bg-[#060911] border border-white/15 rounded-md px-2 py-1 text-[11px] font-semibold text-white focus:outline-none focus:border-emerald-400 cursor-pointer"
+                      >
+                        <option value="1">1.00x (Single-Pass + RTX VSR • 24GB Safe)</option>
+                        <option value="0.5">0.50x (2-Pass x2 Refine • High VRAM)</option>
+                      </select>
+                    ) : (
+                      <select
+                        aria-label="MiniMax Base Megapixels"
+                        value={String(wfFirstPassScale)}
+                        onChange={(e) => {
+                          setIsWorkflowAutoTune(false);
+                          setWfFirstPassScale(Number(e.target.value));
+                        }}
+                        className="bg-[#060911] border border-white/15 rounded-md px-2 py-1 text-[11px] font-semibold text-white focus:outline-none focus:border-emerald-400 cursor-pointer"
+                      >
+                        <option value="0.5">0.50 MP (Fast Draft)</option>
+                        <option value="0.8">0.80 MP (HD Optimal)</option>
+                        <option value="1">1.00 MP (Max Detail)</option>
+                      </select>
+                    )}
+                  </div>
+
+                  {/* 5. Reference Mode: OFF / ON */}
+                  <div className="rounded-lg bg-[#0b0f1c] border border-white/10 px-2.5 py-1.5 flex flex-col justify-between gap-1">
+                    <div className="flex items-center justify-between text-slate-400">
+                      <span>Reference Mode</span>
+                      <span
+                        className={`font-mono text-[10px] font-bold ${
+                          wfReferenceMode === 'ON' ? 'text-emerald-300' : 'text-amber-300'
+                        }`}
+                      >
+                        {wfReferenceMode}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1 bg-[#060911] p-0.5 rounded-md border border-white/10">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsWorkflowAutoTune(false);
+                          setWfReferenceMode('OFF');
+                        }}
+                        title={
+                          activeEngineTab === 'ltx-2.5'
+                            ? 'OFF (Recommended for 3D Previs): Disables Ghost Mask frame-lock so LTX-2.5 generates photorealistic skin, fabric, and lighting instead of copying the 3D mannequin.'
+                            : 'OFF: Normal I2V/T2V mode without VLM multi-reference identity lock.'
+                        }
+                        className={`py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                          wfReferenceMode === 'OFF'
+                            ? 'bg-amber-500 text-black shadow-sm'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        OFF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsWorkflowAutoTune(false);
+                          setWfReferenceMode('ON');
+                        }}
+                        title={
+                          activeEngineTab === 'ltx-2.5'
+                            ? 'ON (Licon MSR): Locks onto reference image appearance frames.'
+                            : 'ON (Smart Ref2V): Uses Qwen3-VL + 4 Reference Images (<Picture 1..4>) to lock character and environment identity.'
+                        }
+                        className={`py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                          wfReferenceMode === 'ON'
+                            ? 'bg-emerald-500 text-black shadow-sm'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        ON
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {(comfyStatusText || comfyErrorText || finalComfyFilename) && (
+                <div
+                  className={`rounded-xl border px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono ${
+                    comfyErrorText
+                      ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                      : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-200'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    {comfyErrorText ? (
+                      <AlertCircle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
+                    ) : isSubmittingComfy ||
+                      activeJob?.status === 'executing' ||
+                      activeJob?.status === 'queued' ? (
+                      <RefreshCw className="h-3.5 w-3.5 text-indigo-400 animate-spin shrink-0" />
+                    ) : (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                    )}
+                    <span>
+                      {comfyErrorText ||
+                        comfyStatusText ||
+                        `Latest ComfyUI Render Ready: ${finalComfyFilename} (${finalComfyMeta})`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {(isSubmittingComfy ||
+                      activeJob?.status === 'executing' ||
+                      activeJob?.status === 'queued') && (
+                      <button
+                        type="button"
+                        onClick={handleStopComfyRender}
+                        className="flex items-center gap-1 px-2.5 py-0.5 rounded bg-rose-500/25 hover:bg-rose-500/40 text-rose-200 text-[10px] font-bold border border-rose-400/40 cursor-pointer"
+                        title="Stop the running render in ComfyUI"
+                      >
+                        <Square className="h-2.5 w-2.5 fill-current text-rose-400" />
+                        <span>Stop Render</span>
+                      </button>
+                    )}
+                    {finalComfyVideoUrl && (
+                      <>
+                        <span className="px-2 py-0.5 rounded bg-black/50 text-slate-300 text-[9.5px] font-mono border border-white/10">
+                          📁 D:\ComfyUI\output\{finalComfyFilename}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setActivePassTab('side-by-side')}
+                          className="px-2 py-0.5 rounded bg-indigo-500/30 hover:bg-indigo-500/50 text-white text-[10px] font-bold border border-indigo-400/40 cursor-pointer"
+                        >
+                          View Side-by-Side
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => downloadFile(finalComfyVideoUrl, finalComfyFilename || 'minimax_h3_output.mp4')}
+                          className="px-2 py-0.5 rounded bg-emerald-500/25 hover:bg-emerald-500/40 text-emerald-200 text-[10px] font-bold border border-emerald-400/40 cursor-pointer"
+                        >
+                          Download Final MP4
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </CustomWorkflowConfigBar>
 
             {/* Collapsible Engine-Specific Workflow Setup & Required Models Guide */}
-            <details className="rounded-xl bg-black/40 border border-white/10 px-3.5 py-2 text-[10px] font-mono text-slate-300">
-              <summary className="cursor-pointer font-semibold text-indigo-300 hover:text-indigo-200 select-none">
+            <details className="rounded-xl bg-[#070a14] border border-white/10 px-3.5 py-2.5 text-[11px] text-slate-300">
+              <summary className="cursor-pointer font-semibold text-amber-200 hover:text-white select-none">
                 {activeEngineTab === 'ltx-2.5'
-                  ? '📦 First time rendering LTX-2.5? Click here for Stubelius Ultimate LTX 2.5 Workflow & Model Setup'
-                  : '📦 First time rendering MiniMax H3? Click here for Stubelius Ultimate H3 Workflow & Model Setup'}
+                  ? '⚡ First-time rendering LTX-2.5? Click here for Stubelius Ultimate LTX 2.5 Workflow & Model Setup'
+                  : '⚡ First-time rendering MiniMax H3? Click here for Stubelius Ultimate H3 Workflow & Model Setup'}
               </summary>
               {activeEngineTab === 'ltx-2.5' ? (
                 <div className="mt-2.5 space-y-2 border-t border-white/10 pt-2.5 text-slate-300 leading-relaxed">
@@ -1883,70 +2556,6 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 />
               </div>
             </div>
-
-            {/* Live Progress / Status / Output Banner */}
-            {(comfyStatusText || comfyErrorText || finalComfyFilename) && (
-              <div
-                className={`rounded-xl border px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono ${
-                  comfyErrorText
-                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-                    : 'bg-indigo-500/10 border-indigo-500/30 text-indigo-200'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  {comfyErrorText ? (
-                    <AlertCircle className="h-3.5 w-3.5 text-rose-400 shrink-0" />
-                  ) : isSubmittingComfy ||
-                    activeJob?.status === 'executing' ||
-                    activeJob?.status === 'queued' ? (
-                    <RefreshCw className="h-3.5 w-3.5 text-indigo-400 animate-spin shrink-0" />
-                  ) : (
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                  )}
-                  <span>
-                    {comfyErrorText ||
-                      comfyStatusText ||
-                      `Latest ComfyUI Render Ready: ${finalComfyFilename} (${finalComfyMeta})`}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {(isSubmittingComfy ||
-                    activeJob?.status === 'executing' ||
-                    activeJob?.status === 'queued') && (
-                    <button
-                      type="button"
-                      onClick={handleStopComfyRender}
-                      className="flex items-center gap-1 px-2.5 py-0.5 rounded bg-rose-500/25 hover:bg-rose-500/40 text-rose-200 text-[10px] font-bold border border-rose-400/40 cursor-pointer"
-                      title="Stop the running render in ComfyUI"
-                    >
-                      <Square className="h-2.5 w-2.5 fill-current text-rose-400" />
-                      <span>Stop Render</span>
-                    </button>
-                  )}
-                  {finalComfyVideoUrl && (
-                    <>
-                      <span className="px-2 py-0.5 rounded bg-black/50 text-slate-300 text-[9.5px] font-mono border border-white/10">
-                        📁 D:\ComfyUI\output\{finalComfyFilename}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setActivePassTab('side-by-side')}
-                        className="px-2 py-0.5 rounded bg-indigo-500/30 hover:bg-indigo-500/50 text-white text-[10px] font-bold border border-indigo-400/40 cursor-pointer"
-                      >
-                        View Side-by-Side
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => downloadFile(finalComfyVideoUrl, finalComfyFilename || 'minimax_h3_output.mp4')}
-                        className="px-2 py-0.5 rounded bg-emerald-500/25 hover:bg-emerald-500/40 text-emerald-200 text-[10px] font-bold border border-emerald-400/40 cursor-pointer"
-                      >
-                        Download Final MP4
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* Stage Temporal Beats & Timeline Choreography */}
@@ -2063,52 +2672,54 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
         {/* Column 2: AI Prompt Director, Engine-Optimized Prompts & Production Pack (5 cols) */}
         <div className="lg:col-span-5 flex flex-col gap-4">
-          <div className="rounded-2xl border border-white/10 bg-[#0f121b] p-5 shadow-xl flex flex-col gap-4 flex-1">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileCode className="h-4 w-4 text-indigo-400" />
+          <div className="rounded-2xl border border-indigo-500/25 bg-gradient-to-b from-[#0d1222]/95 to-[#090d18]/95 p-5 shadow-[0_12px_40px_rgba(0,0,0,0.5)] flex flex-col gap-4 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-xl bg-indigo-500/15 border border-indigo-400/35 flex items-center justify-center text-indigo-300 shrink-0">
+                  <FileCode className="h-4 w-4" />
+                </div>
                 <div>
-                  <h2 className="text-sm font-bold text-white tracking-wide">
+                  <h2 className="text-base font-bold text-white tracking-tight">
                     {activeEngineTab === 'ltx-2.5'
                       ? 'LTX-2.5 Directorial Prompt'
                       : activeEngineTab === 'minimax-h3'
                       ? 'MiniMax H3 Motion Prompt'
                       : 'Seedance 2.0 Cinematic Prompt'}
                   </h2>
-                  <span className="text-[10px] font-mono text-slate-400">
+                  <span className="text-[11px] text-slate-400">
                     {activeEngineTab === 'seedance'
                       ? '6-Axis Coordinate Trajectory, Aerodynamic Physics & Sensor Profile'
                       : activeEngineTab === 'minimax-h3'
                       ? 'Structured Micro-Acting & Optical Photorealism Formula'
-                      : 'Present-Tense Continuous Action & DiT Temporal Pacing'}
+                      : 'Present-Tense Action & DiT Temporal Pacing'}
                   </span>
                 </div>
               </div>
               <button
                 onClick={() => handleCopyPrompt(displayPositivePrompt)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/30 hover:bg-blue-600/50 text-blue-200 font-mono text-xs font-semibold border border-blue-500/40 transition-all cursor-pointer shrink-0"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600/25 hover:bg-blue-600/40 text-blue-100 text-xs font-semibold border border-blue-400/40 shadow-[0_0_15px_rgba(59,130,246,0.2)] transition-all cursor-pointer shrink-0"
                 title="Copy positive prompt to clipboard"
               >
-                {copiedPrompt ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                {copiedPrompt ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5 text-blue-300" />}
                 <span>{copiedPrompt ? 'Copied!' : 'Copy Prompt'}</span>
               </button>
             </div>
 
             {/* AI Directing & Polish Toolbar */}
-            <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-gradient-to-r from-blue-950/40 via-indigo-950/20 to-purple-950/40 border border-blue-500/20">
+            <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-xl bg-[#080c18] border border-indigo-500/25">
               <div className="flex items-center gap-2">
                 <Brain className="h-4 w-4 text-blue-400" />
-                <span className="font-display font-semibold text-xs text-slate-200">AI Reasoner:</span>
-                <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                <span className="font-semibold text-xs text-slate-200">AI Reasoner:</span>
+                <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-300 border border-blue-400/35">
                   {getReasonerConfig().provider.toUpperCase()}
                 </span>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="flex flex-wrap items-center gap-2">
                 {engineUndoCount > 0 && (
                   <button
                     type="button"
                     onClick={() => undoCustomPositivePrompt(activeEngineTab)}
-                    className="flex items-center gap-1 px-2 py-1 rounded bg-amber-500/15 hover:bg-amber-500/30 text-amber-200 font-mono text-[10px] transition-colors border border-amber-500/30 cursor-pointer"
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/30 text-amber-200 font-mono text-[10.5px] transition-colors border border-amber-500/30 cursor-pointer"
                     title="Undo last prompt edit or AI modification"
                   >
                     <Undo2 className="h-3 w-3" />
@@ -2119,27 +2730,27 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   type="button"
                   onClick={handleDirectWithAi}
                   disabled={isDirectingPrompt}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-display font-semibold text-[11px] transition-all shadow-md disabled:opacity-50 cursor-pointer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-400 hover:to-blue-500 text-white font-semibold text-xs transition-all shadow-[0_0_15px_rgba(99,102,241,0.35)] disabled:opacity-50 cursor-pointer"
                   title="Polish prompt using AI Reasoner"
                 >
                   {isDirectingPrompt ? (
-                    <RefreshCw className="h-3 w-3 animate-spin" />
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                   ) : (
-                    <Wand2 className="h-3 w-3" />
+                    <Sparkles className="h-3.5 w-3.5" />
                   )}
                   <span>{isDirectingPrompt ? 'Directing...' : 'AI Polish'}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsPromptChatOpen((v) => !v)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg font-mono text-[10.5px] font-semibold transition-all border cursor-pointer ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border cursor-pointer ${
                     isPromptChatOpen
-                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/50'
+                      ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/50 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
                       : 'bg-white/5 text-slate-300 border-white/15 hover:bg-white/10'
                   }`}
                   title="Toggle interactive AI Prompt Co-Director Chat"
                 >
-                  <MessageSquare className="h-3 w-3" />
+                  <MessageSquare className="h-3.5 w-3.5" />
                   <span>AI Chat</span>
                 </button>
               </div>
@@ -2147,43 +2758,56 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
             {/* Interactive Multi-Turn AI Prompt Co-Director Chat */}
             {isPromptChatOpen && (
-              <div className="rounded-xl bg-[#0b0f19] border border-indigo-500/30 p-3 flex flex-col gap-2.5 shadow-inner">
+              <div className="rounded-xl bg-[#080c18] border border-indigo-500/25 p-3.5 flex flex-col gap-3 shadow-inner">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <MessageSquare className="h-3.5 w-3.5 text-emerald-400" />
-                    <span className="text-[11px] font-bold text-white">
-                      AI Prompt Co-Director
+                  <div className="flex items-center gap-2">
+                    <Wand2 className="h-4 w-4 text-cyan-400" />
+                    <span className="text-xs font-bold text-white tracking-wide">
+                      Prompt Co-Director
                     </span>
                   </div>
-                  {(shot.promptChatMessages || []).length > 0 && (
-                    <button
-                      type="button"
-                      onClick={clearPromptChatMessages}
-                      className="flex items-center gap-1 text-[9.5px] font-mono text-slate-400 hover:text-rose-300 transition-colors cursor-pointer"
-                      title="Clear prompt chat history"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                      <span>Clear</span>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearPromptChatMessages();
+                      setPromptChatInput('');
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-[10.5px] font-medium text-slate-300 hover:text-white transition-colors cursor-pointer"
+                    title="Clear prompt chat history and input"
+                  >
+                    <span>Clear</span>
+                  </button>
                 </div>
 
-                {/* Quick Suggestion Chips (English) */}
-                <div className="flex flex-wrap gap-1">
+                {/* Quick Suggestion Chips (2x2 Grid matching Reference Design) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                   {[
-                    'Make character and camera motion smoother and more natural',
-                    'Add warm cinematic golden-hour lighting and atmospheric depth',
-                    'Enhance diegetic soundscape and environmental audio details',
-                    'Sharpen optical photorealism, lens bokeh, and surface textures',
+                    {
+                      label: 'Smoother camera & character motion',
+                      prompt: 'Make character and camera motion smoother and more natural',
+                    },
+                    {
+                      label: 'Warmer cinematic light & atmosphere',
+                      prompt: 'Add warm cinematic golden-hour lighting and atmospheric depth',
+                    },
+                    {
+                      label: 'Richer diegetic soundscape & environment',
+                      prompt: 'Enhance diegetic soundscape and environmental audio details',
+                    },
+                    {
+                      label: 'Sharper photorealism, lens & texture',
+                      prompt: 'Sharpen optical photorealism, lens bokeh, and surface textures',
+                    },
                   ].map((chip) => (
                     <button
-                      key={chip}
+                      key={chip.label}
                       type="button"
                       disabled={isSendingPromptChat}
-                      onClick={() => handleSendAiPromptChat(chip)}
-                      className="px-2 py-0.5 rounded-md bg-indigo-500/15 hover:bg-indigo-500/30 border border-indigo-400/30 text-indigo-200 text-[9.5px] transition-colors disabled:opacity-40 cursor-pointer"
+                      onClick={() => handleSendAiPromptChat(chip.prompt)}
+                      className="px-2.5 py-1.5 rounded-lg bg-[#0e1526] hover:bg-indigo-500/25 border border-indigo-400/25 text-slate-200 hover:text-white text-[10.5px] font-medium text-left flex items-center gap-1.5 transition-colors disabled:opacity-40 cursor-pointer"
                     >
-                      ✨ {chip}
+                      <span className="text-cyan-400 font-bold text-xs leading-none">+</span>
+                      <span className="truncate">{chip.label}</span>
                     </button>
                   ))}
                 </div>
@@ -2215,7 +2839,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 )}
 
                 {/* Chat Input Row */}
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-2">
                   <input
                     type="text"
                     dir="auto"
@@ -2228,19 +2852,19 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                       }
                     }}
                     disabled={isSendingPromptChat}
-                    placeholder="Describe how you want to modify the prompt and press Enter..."
-                    className="flex-1 rounded-lg bg-black/70 border border-white/15 px-2.5 py-1.5 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-400"
+                    placeholder="Describe how to modify the prompt..."
+                    className="flex-1 rounded-xl bg-[#050811] border border-white/15 px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-400 shadow-inner"
                   />
                   <button
                     type="button"
                     disabled={!promptChatInput.trim() || isSendingPromptChat}
                     onClick={() => handleSendAiPromptChat()}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-mono text-[10.5px] font-bold disabled:opacity-40 transition-all cursor-pointer shrink-0"
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold border border-emerald-400/40 disabled:opacity-40 transition-all cursor-pointer shrink-0"
                   >
                     {isSendingPromptChat ? (
                       <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                     ) : (
-                      <Send className="h-3.5 w-3.5" />
+                      <Check className="h-3.5 w-3.5" />
                     )}
                     <span>{isSendingPromptChat ? 'Updating...' : 'Apply'}</span>
                   </button>
@@ -2264,17 +2888,18 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
             {/* Scene Object Color Target Map (For Color-Guided Targeting & Masking) */}
             {shot.actors.length > 0 && (
-              <div className="rounded-xl bg-black/50 border border-white/10 p-3 space-y-2">
+              <div className="rounded-xl bg-[#080c18] border border-indigo-500/20 p-3.5 space-y-2.5">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-mono font-bold text-amber-300 uppercase tracking-wider">
-                    🎨 Target Colors ({shot.actors.length})
+                  <span className="text-xs font-bold text-white tracking-wide flex items-center gap-1.5">
+                    <span>🎨 Target Colors</span>
+                    <span className="text-amber-400 font-mono">({shot.actors.length})</span>
                   </span>
                   <button
                     type="button"
                     onClick={() => {
                       const colorLines = shot.actors
                         .map((a, i) => {
-                          const hex = (a.color || ['#ef4444', '#3b82f6', '#10b981', '#eab308', '#a855f7', '#06b6d4'][i % 6]).toUpperCase();
+                          const hex = (a.color || ['#38bdf8', '#f472b6', '#cb8768', '#a18991', '#a2388f', '#a15977'][i % 6]).toUpperCase();
                           return `[${hex} = ${a.name} (${a.token || a.kind || 'subject'})]`;
                         })
                         .join(', ');
@@ -2285,26 +2910,32 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                         positivePrompt: appended,
                       });
                     }}
-                    className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 border border-amber-400/40 text-amber-200 font-mono text-[9px] font-semibold transition-colors cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 text-[10.5px] font-semibold transition-colors cursor-pointer"
                     title="Append Object Color Target Map to Positive Prompt"
                   >
-                    + Add Color Map
+                    + Add Color
                   </button>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                   {shot.actors.map((act, idx) => {
-                    const hex = act.color || ['#ef4444', '#3b82f6', '#10b981', '#eab308', '#a855f7', '#06b6d4'][idx % 6];
+                    const hex = act.color || ['#38bdf8', '#f472b6', '#cb8768', '#a18991', '#a2388f', '#a15977'][idx % 6];
                     return (
                       <div
                         key={act.id}
-                        className="flex items-center gap-1.5 rounded-md bg-white/5 border border-white/10 px-2 py-1 font-mono text-[9px] text-slate-200"
+                        className="flex items-center justify-between gap-1.5 rounded-lg bg-[#0d1222] border border-white/10 px-2.5 py-1.5 text-[10px]"
                       >
-                        <span
-                          className="h-2.5 w-2.5 rounded-full border border-white/40 shrink-0"
-                          style={{ backgroundColor: hex }}
-                        />
-                        <span className="font-bold text-white">{act.name}</span>
-                        <span className="text-slate-400 uppercase">{hex}</span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className="h-2.5 w-2.5 rounded-full border border-white/30 shrink-0 shadow-sm"
+                            style={{ backgroundColor: hex }}
+                          />
+                          <span className="font-bold text-white truncate" title={act.name}>
+                            {act.name}
+                          </span>
+                        </div>
+                        <span className="font-mono text-[9.5px] text-slate-400 uppercase shrink-0">
+                          {hex}
+                        </span>
                       </div>
                     );
                   })}
@@ -2313,10 +2944,11 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
             )}
 
             {/* Editable Positive Prompt Card */}
-            <div className="space-y-1.5 flex-1 flex flex-col">
+            <div className="space-y-2 flex-1 flex flex-col">
               <div className="flex items-center justify-between gap-2">
-                <label className="text-[10px] font-mono text-slate-300 uppercase tracking-wider font-bold">
-                  Positive Prompt
+                <label className="text-xs font-bold text-white tracking-wide flex items-center gap-2">
+                  <FileCode className="h-3.5 w-3.5 text-indigo-400" />
+                  <span>Positive Prompt</span>
                 </label>
               </div>
               <textarea
@@ -2334,19 +2966,19 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   setCustomPositivePrompt(activeEngineTab, displayPositivePrompt, true);
                 }}
                 placeholder="Edit your positive prompt manually here or discuss modifications with the AI Prompt Co-Director above..."
-                className="flex-1 min-h-[160px] w-full rounded-xl bg-black/60 border border-white/15 focus:border-indigo-400 p-3 text-xs font-mono text-slate-100 leading-relaxed overflow-y-auto custom-scrollbar focus:outline-none resize-y"
+                className="flex-1 min-h-[175px] w-full rounded-xl bg-[#050811] border border-white/15 focus:border-indigo-400 p-3.5 text-xs font-mono text-slate-100 leading-relaxed overflow-y-auto custom-scrollbar focus:outline-none resize-y shadow-inner"
               />
             </div>
 
             {/* Editable Negative Prompt Card */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-[10px] font-mono text-rose-300/90 uppercase tracking-wider font-semibold">
+                <label className="text-[10.5px] font-mono text-rose-300/90 uppercase tracking-wider font-semibold">
                   Negative Prompt
                 </label>
                 <button
                   onClick={() => handleCopyPrompt(displayNegativePrompt, true)}
-                  className="text-[10px] font-mono text-slate-400 hover:text-white flex items-center gap-1"
+                  className="text-[10.5px] font-mono text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
                 >
                   {copiedNegative ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
                   <span>{copiedNegative ? 'Copied' : 'Copy Negative'}</span>
@@ -2357,7 +2989,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 value={displayNegativePrompt}
                 onChange={(e) => setNegativePrompt(e.target.value)}
                 placeholder="blurry, distorted anatomy, extra limbs, camera jitter, morphing, watermark..."
-                className="w-full rounded-xl bg-black/60 border border-white/10 p-2.5 text-[11px] font-mono text-slate-300 leading-normal focus:outline-none focus:border-rose-500/50 resize-none"
+                className="w-full rounded-xl bg-[#050811] border border-white/10 p-2.5 text-[11px] font-mono text-slate-300 leading-normal focus:outline-none focus:border-rose-500/50 resize-none"
               />
             </div>
 
@@ -2379,7 +3011,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                   setCopiedJson(true);
                   setTimeout(() => setCopiedJson(false), 2000);
                 }}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white font-mono text-xs border border-white/10 transition-all"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white font-mono text-xs border border-white/10 transition-all cursor-pointer"
               >
                 {copiedJson ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Code2 className="h-3.5 w-3.5 text-indigo-400" />}
                 <span>{copiedJson ? 'Copied JSON!' : 'Copy JSON'}</span>
@@ -2387,7 +3019,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
               <button
                 onClick={handleDownloadFullBundle}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 font-mono text-xs font-semibold transition-all"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/40 font-mono text-xs font-semibold transition-all cursor-pointer"
                 title="Download complete ShotSpec + Compiled Prompt + Camera Extrinsics JSON package"
               >
                 <Download className="h-3.5 w-3.5 text-indigo-300" />
@@ -2402,11 +3034,11 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 <span>Quick Guide</span>
               </div>
               <p className="text-[10px] text-slate-300 leading-relaxed">
-                1. Click <strong>&quot;Render Previs Video&quot;</strong> &amp; download the MP4 passes (RGB, OpenPose, Depth).
+                1. Click <strong>&quot;Render Preview&quot;</strong> &amp; download the MP4 passes (RGB, Pose, Depth, Mask).
                 <br />
-                2. Click <strong>&quot;Direct &amp; Polish with AI&quot;</strong> or <strong>&quot;Copy Prompt&quot;</strong> for your target model.
+                2. Click <strong>&quot;AI Polish&quot;</strong> or <strong>&quot;Copy Prompt&quot;</strong> for your target model.
                 <br />
-                3. Feed the MP4 + Camera Matrix JSON into your ComfyUI LTX-2.5, ControlNet, or Video-to-Video workflow.
+                3. Click <strong>&quot;Render in ComfyUI&quot;</strong> or feed the MP4 + Camera Matrix JSON into your LTX-2.5 / MiniMax H3 workflow.
               </p>
             </div>
           </div>

@@ -100,7 +100,7 @@ export class LTXVideoAdapter implements ModelCapabilityAdapter {
 
       return {
         ...base,
-        positivePrompt: `${base.positivePrompt}. ${vfxDirectives}`,
+        positivePrompt: `${base.positivePrompt.replace(/\.+$/, '')}.\n\n${vfxDirectives}`,
         technicalMetadata: {
           ...base.technicalMetadata,
           vfxReferenceMode: mode,

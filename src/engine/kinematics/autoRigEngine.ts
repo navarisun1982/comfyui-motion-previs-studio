@@ -1388,17 +1388,37 @@ export function setRigOverlayVisible(rootGroup: THREE.Object3D, visible: boolean
  */
 function tryExtractNativeGltfRig(sceneRoot: THREE.Group, height: number): HumanoidRig | null {
   let nativeSkinnedMesh: THREE.SkinnedMesh | null = null;
-  const indexedBones: { bone: THREE.Bone; normName: string }[] = [];
+  const indexedBones: { bone: THREE.Bone; normName: string; shortName: string }[] = [];
+  const mixamoBones = new Map<string, THREE.Bone>();
+  const mixamoRestRotations = new Map<string, THREE.Quaternion>();
+  const mixamoCharSpaceRestRotations = new Map<string, THREE.Quaternion>();
+
+  sceneRoot.updateMatrixWorld(true);
+  const invRootWorldQuat = new THREE.Quaternion();
+  sceneRoot.getWorldQuaternion(invRootWorldQuat).invert();
 
   sceneRoot.traverse((child) => {
     if (!nativeSkinnedMesh && (child as THREE.SkinnedMesh).isSkinnedMesh && !child.userData?.isAutoSkinned) {
       nativeSkinnedMesh = child as THREE.SkinnedMesh;
     }
     if ((child as THREE.Bone).isBone) {
+      const bone = child as THREE.Bone;
+      const shortName = String(bone.name ?? '').replace(/^mixamorig:?/i, '').trim();
       indexedBones.push({
-        bone: child as THREE.Bone,
-        normName: normalizeBoneName(child.name),
+        bone,
+        normName: normalizeBoneName(bone.name),
+        shortName,
       });
+      if (shortName && !mixamoBones.has(shortName)) {
+        mixamoBones.set(shortName, bone);
+        mixamoRestRotations.set(shortName, bone.quaternion.clone());
+        const boneWorldQuat = new THREE.Quaternion();
+        bone.getWorldQuaternion(boneWorldQuat);
+        mixamoCharSpaceRestRotations.set(
+          shortName,
+          invRootWorldQuat.clone().multiply(boneWorldQuat)
+        );
+      }
     }
   });
 
@@ -1408,15 +1428,45 @@ function tryExtractNativeGltfRig(sceneRoot: THREE.Group, height: number): Humano
   const restPositions = new Map<HumanoidBone, THREE.Vector3>();
   const restRotations = new Map<HumanoidBone, THREE.Quaternion>();
 
+  const candidateLookup: Record<HumanoidBone, string[]> = {
+    Hips: ['mixamorighips', 'hips', 'pelvis'],
+    Spine: ['mixamorigspine', 'spine'],
+    Chest: ['mixamorigspine1', 'mixamorigspine2', 'chest'],
+    Neck: ['mixamorigneck', 'neck'],
+    Head: ['mixamorighead', 'head'],
+    LeftShoulder: ['mixamorigleftshoulder', 'leftshoulder', 'lshoulder'],
+    LeftArm: ['mixamorigleftarm', 'leftarm', 'larm', 'leftupperarm'],
+    LeftForeArm: ['mixamorigleftforearm', 'leftforearm', 'lforearm', 'leftelbow'],
+    LeftHand: ['mixamoriglefthand', 'lefthand', 'lhand', 'leftwrist'],
+    RightShoulder: ['mixamorigrightshoulder', 'rightshoulder', 'rshoulder'],
+    RightArm: ['mixamorigrightarm', 'rightarm', 'rarm', 'rightupperarm'],
+    RightForeArm: ['mixamorigrightforearm', 'rightforearm', 'rforearm', 'rightelbow'],
+    RightHand: ['mixamorigrighthand', 'righthand', 'rhand', 'rightwrist'],
+    LeftUpLeg: ['mixamorigleftupleg', 'leftupleg', 'lupleg', 'leftthigh', 'lefthip'],
+    LeftLeg: ['mixamorigleftleg', 'leftleg', 'lleg', 'leftshin', 'leftknee'],
+    LeftFoot: ['mixamorigleftfoot', 'leftfoot', 'lfoot', 'leftankle'],
+    RightUpLeg: ['mixamorigrightupleg', 'rightupleg', 'rupleg', 'rightthigh', 'righthip'],
+    RightLeg: ['mixamorigrightleg', 'rightleg', 'rleg', 'rightshin', 'rightknee'],
+    RightFoot: ['mixamorigrightfoot', 'rightfoot', 'rfoot', 'rightankle'],
+  };
+
   for (const boneName of HUMANOID_BONES) {
-    const normTarget = normalizeBoneName(boneName);
-    const match = indexedBones.find(
-      (b) => b.normName === normTarget || b.normName.endsWith(normTarget)
-    );
-    if (match) {
-      bonesMap.set(boneName, match.bone);
-      restPositions.set(boneName, match.bone.position.clone());
-      restRotations.set(boneName, match.bone.quaternion.clone());
+    const candidates = candidateLookup[boneName] || [boneName.toLowerCase()];
+    let matchedBone: THREE.Bone | null = null;
+    for (const cand of candidates) {
+      const normCand = normalizeBoneName(cand);
+      const match = indexedBones.find(
+        (b) => b.normName === normCand || b.normName.endsWith(normCand)
+      );
+      if (match) {
+        matchedBone = match.bone;
+        break;
+      }
+    }
+    if (matchedBone) {
+      bonesMap.set(boneName, matchedBone);
+      restPositions.set(boneName, matchedBone.position.clone());
+      restRotations.set(boneName, matchedBone.quaternion.clone());
     }
   }
 
@@ -1428,6 +1478,9 @@ function tryExtractNativeGltfRig(sceneRoot: THREE.Group, height: number): Humano
     bones: bonesMap,
     restPositions,
     restRotations,
+    mixamoBones: mixamoBones.size >= 15 ? mixamoBones : undefined,
+    mixamoRestRotations: mixamoBones.size >= 15 ? mixamoRestRotations : undefined,
+    mixamoCharSpaceRestRotations: mixamoBones.size >= 15 ? mixamoCharSpaceRestRotations : undefined,
     height,
   };
 }

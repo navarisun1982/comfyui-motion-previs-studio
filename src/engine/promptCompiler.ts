@@ -68,6 +68,87 @@ export function formatEnvironment(env?: EnvironmentSpec): string {
   return parts.join(', ');
 }
 
+/**
+ * Ensures `shot.sceneDescription` does not inject stale ShotBible preset narratives
+ * (e.g. "Neo-Tokyo rooftop helipad... Agent Kael... Hunter-Killer Attack Drone")
+ * after the user has replaced the environment or actors (such as via 3D Mocap Studio).
+ */
+export function resolveCoherentSceneDescription(shot: ShotSpec): string {
+  const rawDesc = (shot.sceneDescription || '').trim();
+  const envPrompt = (shot.environment?.promptDescription || shot.environment?.name || '').trim();
+  if (!rawDesc) return envPrompt;
+
+  const currentContext = [
+    envPrompt,
+    shot.environment?.name || '',
+    ...shot.actors.map((a) => `${a.name} ${a.token || ''} ${a.actionDescription || ''}`),
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  const presetSignatures = [
+    'neo-tokyo',
+    'agent kael',
+    'cyber-ronin',
+    'hunter-killer attack drone',
+    'vtol gunship',
+    'syndicate checkpoint',
+    'chronos relic',
+    'explorer aria',
+    'obsidian ziggurat',
+    'apex mecha',
+    'valkyrie',
+  ];
+
+  const hasOrphanedPresetNarrative = presetSignatures.some(
+    (sig) => rawDesc.toLowerCase().includes(sig) && !currentContext.includes(sig)
+  );
+  if (hasOrphanedPresetNarrative) {
+    return envPrompt;
+  }
+
+  return rawDesc;
+}
+
+/**
+ * Prevents orphaned Shot 01A/01B cyberpunk light rigs ("Drone Crimson Searchlight", "Cyan Rooftop Helipad Key")
+ * from polluting prompts after the user switches to a daylight/natural Mocap or custom environment.
+ */
+export function resolveCoherentLighting(shot: ShotSpec): {
+  style: LightingStyle;
+  direction: LightingDirection;
+  contrast: string;
+  lights?: ShotSpec['lighting']['lights'];
+} {
+  const envContext = `${shot.environment?.name || ''} ${shot.environment?.promptDescription || ''} ${shot.environment?.category || ''}`.toLowerCase();
+  const isCyberpunkEnv = /cyberpunk|neo-tokyo|neon|sci-fi|helipad/.test(envContext);
+  const hasKaelActor = shot.actors.some((a) => /kael|ronin|hunter-drone|syndicate/i.test(`${a.id} ${a.name}`));
+
+  const hasPresetCyberpunkLights = (shot.lighting.lights || []).some((l) =>
+    /Drone Crimson Searchlight|Cyan Rooftop Helipad Key|Plasma Muzzle Cyan Key|Turret Crimson Flood/i.test(l.name)
+  );
+
+  if (!isCyberpunkEnv && !hasKaelActor && hasPresetCyberpunkLights) {
+    const tod = shot.environment?.timeOfDay;
+    const fallbackStyle: LightingStyle =
+      tod === 'golden-hour'
+        ? 'golden-hour'
+        : tod === 'night'
+        ? 'moonlight-foggy'
+        : tod === 'neon-night'
+        ? 'neon-cyberpunk'
+        : 'cinematic-natural';
+    return {
+      style: shot.lighting.style === 'neon-cyberpunk' ? fallbackStyle : shot.lighting.style,
+      direction: shot.lighting.direction,
+      contrast: shot.lighting.contrast === 'high-contrast' && fallbackStyle === 'cinematic-natural' ? 'balanced' : shot.lighting.contrast,
+      lights: undefined,
+    };
+  }
+
+  return shot.lighting;
+}
+
 export function formatCameraMovement(
   type: CameraMovementType,
   speed: string,
@@ -589,11 +670,12 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
     yawOffsetDeg: shot.camera.yawOffsetDeg,
     shakeIntensity: shot.camera.movement.shakeIntensity,
   });
+  const coherentLighting = resolveCoherentLighting(shot);
   const lightInfo = formatLighting(
-    shot.lighting.style,
-    shot.lighting.direction,
-    shot.lighting.contrast,
-    shot.lighting.lights
+    coherentLighting.style,
+    coherentLighting.direction,
+    coherentLighting.contrast,
+    coherentLighting.lights
   );
   const timeline = buildTemporalTimeline(shot, pov);
 
@@ -643,22 +725,40 @@ export function compileLtxPrompt(shot: ShotSpec): CompiledPromptBundle {
       ? `Natural environmental acoustics matching ${pureEnvName} and synchronized physical foley accompany the motion.`
       : `Natural ambient soundscape and spatial acoustics fill ${pureEnvName}.`;
 
-  const narrativeProgression = `Throughout the continuous ${duration}-second take, the ${cameraMove}. At the opening (${timeline[0].timeRange}), ${timeline[0].cameraAction.toLowerCase()} while ${openingActorAction}. During the mid-shot progression (${timeline[1].timeRange}), ${timeline[1].cameraAction.toLowerCase()} as ${midActorAction}. In the closing beat (${timeline[2].timeRange}), ${timeline[2].cameraAction.toLowerCase()} while ${closingActorAction}. ${previsToRealityDirective} ${soundscapeSentence}`;
+  const openingBeatParagraph = `Throughout the continuous ${duration}-second take, the ${cameraMove}. At the opening (${timeline[0].timeRange}), ${timeline[0].cameraAction.toLowerCase()} while ${openingActorAction}.`;
+  const midBeatParagraph = `During the mid-shot progression (${timeline[1].timeRange}), ${timeline[1].cameraAction.toLowerCase()} as ${midActorAction}.`;
+  const closingBeatParagraph = `In the closing beat (${timeline[2].timeRange}), ${timeline[2].cameraAction.toLowerCase()} while ${closingActorAction}.`;
+  const realityAndAudioParagraph = `${previsToRealityDirective}\n\n${soundscapeSentence}`;
 
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
+  const coherentSceneDesc = resolveCoherentSceneDescription(shot);
+  const cleanedSceneDesc = coherentSceneDesc.trim().replace(/\.+$/, '');
+  const isRedundantWithEnv =
+    Boolean(envText && cleanedSceneDesc) &&
+    envText.toLowerCase().includes(cleanedSceneDesc.toLowerCase());
+  const styleAndLightSentence = shot.claymationMode
+    ? `Authentic stop-motion claymation aesthetic, handcrafted malleable clay surface textures, subtle fingerprint imperfections, animated on-twos at ${shot.claymationFps || 12}fps motion cadence.`
+    : `Atmospheric environment under ${lightInfo}, with natural 24fps motion cadence and realistic physical depth.`;
 
-  const positivePrompt = [
+  const openingSceneParagraph = [
     `Cinematic ${shot.aspectRatio} ${angleInfo}, filmed on a ${lensInfo}.`,
     subjectSentence,
     envText ? `Setting: ${envText}.` : '',
-    `${shot.sceneDescription.trim()}.`,
-    shot.claymationMode
-      ? `Authentic stop-motion claymation aesthetic, handcrafted malleable clay surface textures, subtle fingerprint imperfections, animated on-twos at ${shot.claymationFps || 12}fps motion cadence.`
-      : `Atmospheric environment under ${lightInfo}, with natural 24fps motion cadence and realistic physical depth.`,
-    narrativeProgression,
+    cleanedSceneDesc && !isRedundantWithEnv ? `${cleanedSceneDesc}.` : '',
+    styleAndLightSentence,
   ]
     .filter(Boolean)
     .join(' ');
+
+  const positivePrompt = [
+    openingSceneParagraph,
+    openingBeatParagraph,
+    midBeatParagraph,
+    closingBeatParagraph,
+    realityAndAudioParagraph,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   const negativePrompt =
     shot.negativePrompt ||
@@ -726,11 +826,12 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     yawOffsetDeg: shot.camera.yawOffsetDeg,
     shakeIntensity: shot.camera.movement.shakeIntensity,
   });
+  const coherentLighting = resolveCoherentLighting(shot);
   const lightInfo = formatLighting(
-    shot.lighting.style,
-    shot.lighting.direction,
-    shot.lighting.contrast,
-    shot.lighting.lights
+    coherentLighting.style,
+    coherentLighting.direction,
+    coherentLighting.contrast,
+    coherentLighting.lights
   );
   const timeline = buildTemporalTimeline(shot, pov);
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
@@ -874,7 +975,7 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     `subject_definitions:\n${subjectDefLines.join('\n\n')}`,
     `summary: [reference generation] The target video recreates the exact animation, spatial blocking, and virtual-camera performance of <Video 1> across a continuous ${shot.durationSeconds.toFixed(1)}-second ${shot.aspectRatio} shot ("${shot.name}"), while applying the finished photorealistic appearance and environment established by ${refRangePhrase}. <Video 1> has absolute priority for subject movement, timing, environmental parallax, camera motion, and framing.`,
     `retention_analysis:\n${retentionLines.join('\n')}`,
-    `detailed_description: ${styleLine} <Video 1> is the strict motion master; no movement should be regenerated from the still reference image.\n\n[Shot 1] Reproduce the complete continuous shot from <Video 1> at identical duration and timing. ${replaceBlockoutClause} Every moment follows <Video 1> frame for frame: preserve the exact camera angle, camera height, camera distance, lens perspective, tracking behavior, and subject trajectories from <Video 1>.\n\n${beatParagraphs}\n\nScene context: ${shot.sceneDescription.trim()}. Lighting: ${lightInfo}. Every entity and background surface in the frame exhibits authentic three-dimensional real-world structure, natural secondary motion, and physical depth without any synthetic 3D previz geometry or keyframe rigidity. No readable text, subtitles, or interface graphics.`,
+    `detailed_description: ${styleLine} <Video 1> is the strict motion master; no movement should be regenerated from the still reference image.\n\n[Shot 1] Reproduce the complete continuous shot from <Video 1> at identical duration and timing. ${replaceBlockoutClause} Every moment follows <Video 1> frame for frame: preserve the exact camera angle, camera height, camera distance, lens perspective, tracking behavior, and subject trajectories from <Video 1>.\n\n${beatParagraphs}\n\nScene context: ${resolveCoherentSceneDescription(shot).trim()}. Lighting: ${lightInfo}. Every entity and background surface in the frame exhibits authentic three-dimensional real-world structure, natural secondary motion, and physical depth without any synthetic 3D previz geometry or keyframe rigidity. No readable text, subtitles, or interface graphics.`,
     `overall_soundscape: Natural environmental ambiance matching ${soundscapeEnvName}${
       visibleTop3.length > 0
         ? ', realistic physical foley synchronized with the visible motion,'
@@ -937,11 +1038,12 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
     yawOffsetDeg: shot.camera.yawOffsetDeg,
     shakeIntensity: shot.camera.movement.shakeIntensity,
   });
+  const coherentLighting = resolveCoherentLighting(shot);
   const lightInfo = formatLighting(
-    shot.lighting.style,
-    shot.lighting.direction,
-    shot.lighting.contrast,
-    shot.lighting.lights
+    coherentLighting.style,
+    coherentLighting.direction,
+    coherentLighting.contrast,
+    coherentLighting.lights
   );
   const timeline = buildTemporalTimeline(shot, pov);
   const envText = shot.environment ? formatEnvironment(shot.environment) : '';
@@ -951,46 +1053,52 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
   const dz = (((shot.camera.movement.endPosition.z ?? 50) - (shot.camera.movement.startPosition.z ?? 50)) / 10.0).toFixed(2);
 
   // Subject with aerodynamic & locomotion physics (strictly filtered to POV-visible subjects)
-  const subjectBlocks = pov.visibleAnalyses
-    .map((analysis) => {
-      const actor = analysis.actor;
-      const firstBeat = analysis.firstVisibleBeat
-        ? analysis.beats[analysis.firstVisibleBeat]
-        : analysis.beats.open;
-      const scale = actor.scale ?? 1.0;
-      const scalePrefix =
-        scale >= 2.0 ? 'towering scale ' : scale >= 1.4 ? 'large scale ' : scale <= 0.5 ? 'miniature scale ' : '';
-      const start = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
-      const end = actor.trajectory?.endPosition ?? { x: 50, y: 50 };
-      const socketPart = actor.socketToBone ? ` [Socketed: Bone ${actor.socketToBone.boneName}]` : '';
-      const closeZone = analysis.beats.close.visible
-        ? analysis.beats.close.screenZone
-        : analysis.primaryScreenZone;
-      return `${scalePrefix}${cleanActorToken(actor.token, actor.name)} (${actor.name})${socketPart} [Camera POV Framing: ${analysis.primaryScreenZone} -> ${closeZone} | Orientation: ${analysis.orientationTransitionSummary} | Elevation: ${firstBeat.elevationPhrase} | Stage Vector: (${start.x}%, ${start.y}%, z:${start.z ?? 0}) -> (${end.x}%, ${end.y}%, z:${end.z ?? 0})], performing: ${cleanActorAction(actor.actionDescription, actor.token, actor.name)}`;
-    })
-    .join('; ');
+  const subjectEntries = pov.visibleAnalyses.map((analysis) => {
+    const actor = analysis.actor;
+    const firstBeat = analysis.firstVisibleBeat
+      ? analysis.beats[analysis.firstVisibleBeat]
+      : analysis.beats.open;
+    const scale = actor.scale ?? 1.0;
+    const scalePrefix =
+      scale >= 2.0 ? 'towering scale ' : scale >= 1.4 ? 'large scale ' : scale <= 0.5 ? 'miniature scale ' : '';
+    const start = actor.trajectory?.startPosition ?? { x: 50, y: 50 };
+    const end = actor.trajectory?.endPosition ?? { x: 50, y: 50 };
+    const socketPart = actor.socketToBone ? ` [Socketed: Bone ${actor.socketToBone.boneName}]` : '';
+    const closeZone = analysis.beats.close.visible
+      ? analysis.beats.close.screenZone
+      : analysis.primaryScreenZone;
+    return `${scalePrefix}${cleanActorToken(actor.token, actor.name)} (${actor.name})${socketPart} [Camera POV Framing: ${analysis.primaryScreenZone} -> ${closeZone} | Orientation: ${analysis.orientationTransitionSummary} | Elevation: ${firstBeat.elevationPhrase} | Stage Vector: (${start.x}%, ${start.y}%, z:${start.z ?? 0}) -> (${end.x}%, ${end.y}%, z:${end.z ?? 0})], performing: ${cleanActorAction(actor.actionDescription, actor.token, actor.name)}`;
+  });
 
-  // Chronological cue beats
+  const subjectBlocks = subjectEntries.join('; ');
+  const subjectParagraphLines =
+    subjectEntries.length > 1
+      ? subjectEntries.map((entry) => `- ${entry}.`).join('\n')
+      : subjectEntries.length === 1
+      ? `${subjectEntries[0]}.`
+      : '';
+
+  // Chronological cue beats formatted on separate readable lines
   const timelineString = timeline
-    .map((beat) => `[${beat.timeRange}]: ${beat.cameraAction}; ${beat.actorAction}`)
-    .join(' | ');
+    .map((beat) => `- [${beat.timeRange}]: ${beat.cameraAction}; ${beat.actorAction}.`)
+    .join('\n');
 
   const positivePrompt = [
-    `[Camera 6-Axis Motion & Matrix Trajectory]: ${angleInfo}, ${cameraMove}, 3D displacement vector (dx: ${dx}, dy: ${dy}, dz: ${dz}), filmed on ${lensInfo}.`,
-    subjectBlocks ? `[Subject Dynamics & Aerodynamic Physics]: ${subjectBlocks}.` : '',
-    `[Previs-to-Reality Spatial Instantiation]: Completely supplant all simplified 3D previz background shapes, terrain, and subject proxies with the living real-world environment and entities, using the 3D previz guide strictly for camera trajectory, spatial placement, altitude, and viewing-angle timing. Every entity and background surface exhibits authentic three-dimensional real-world structure, natural secondary physics, and fluid kinematics without any synthetic 3D previz geometry or keyframe rigidity.`,
-    `[Temporal Cue Timetable]: ${timelineString}.`,
-    `[Atmospheric Space & Volumetric Lighting]: ${lightInfo}, scene environment: ${
-      shot.environment?.promptDescription || shot.sceneDescription.trim()
+    `[Camera 6-Axis Motion & Matrix Trajectory]:\n${angleInfo}, ${cameraMove}, 3D displacement vector (dx: ${dx}, dy: ${dy}, dz: ${dz}), filmed on ${lensInfo}.`,
+    subjectParagraphLines ? `[Subject Dynamics & Aerodynamic Physics]:\n${subjectParagraphLines}` : '',
+    `[Previs-to-Reality Spatial Instantiation]:\nCompletely supplant all simplified 3D previz background shapes, terrain, and subject proxies with the living real-world environment and entities, using the 3D previz guide strictly for camera trajectory, spatial placement, altitude, and viewing-angle timing. Every entity and background surface exhibits authentic three-dimensional real-world structure, natural secondary physics, and fluid kinematics without any synthetic 3D previz geometry or keyframe rigidity.`,
+    `[Temporal Cue Timetable]:\n${timelineString}`,
+    `[Atmospheric Space & Volumetric Lighting]:\n${lightInfo}, scene environment: ${
+      shot.environment?.promptDescription || resolveCoherentSceneDescription(shot).trim()
     }${envText ? ` (${envText})` : ''}.`,
     shot.claymationMode
-      ? `[Render & Motion Profile]: Stop-motion claymation aesthetic, handcrafted tactile clay micro-textures, ${
+      ? `[Render & Motion Profile]:\nStop-motion claymation aesthetic, handcrafted tactile clay micro-textures, ${
           shot.claymationFps || 12
         }fps on-twos motion cadence.`
-      : `[Render & Motion Profile]: Optical photorealism, 24fps motion matrix coherence, natural 180-degree optical shutter angle.`,
+      : `[Render & Motion Profile]:\nOptical photorealism, 24fps motion matrix coherence, natural 180-degree optical shutter angle.`,
   ]
     .filter(Boolean)
-    .join(' ');
+    .join('\n\n');
 
   const negativePrompt =
     shot.negativePrompt ||
@@ -1018,6 +1126,59 @@ export function compileSeedancePrompt(shot: ShotSpec): CompiledPromptBundle {
       povOffScreenActorIds: pov.offScreenActors.map((a) => a.id),
     },
   };
+}
+
+/**
+ * Formats any single-block LTX-2.5 or Seedance 2.0 prompt (including cached custom prompts
+ * or single-paragraph LLM outputs) into clean, human-readable paragraphs separated by blank lines.
+ */
+export function formatReadableEnginePrompt(text: string, engineId?: string): string {
+  if (!text || !text.trim()) return text;
+  if (text.includes('\n\n')) return text;
+
+  const isSeedance =
+    engineId === 'seedance' ||
+    /\[(?:Camera 6-Axis Motion|Subject Dynamics|Temporal Cue Timetable)/i.test(text);
+
+  if (isSeedance) {
+    let formatted = text
+      .replace(
+        /\s*(\[(?:Camera 6-Axis Motion & Matrix Trajectory|Subject Dynamics & Aerodynamic Physics|Previs-to-Reality Spatial Instantiation|Temporal Cue Timetable|Atmospheric Space & Volumetric Lighting|Render & Motion Profile|Choreography Reference|Camera Trajectory Reference|Full Scene VFX Reference|Object Motion Reference)[^\]]*\]:?)/g,
+        '\n\n$1'
+      )
+      .replace(
+        /(\[(?:Camera 6-Axis Motion & Matrix Trajectory|Subject Dynamics & Aerodynamic Physics|Previs-to-Reality Spatial Instantiation|Temporal Cue Timetable|Atmospheric Space & Volumetric Lighting|Render & Motion Profile)\]:)\s+/g,
+        '$1\n'
+      )
+      .replace(/\n(\[0\.0s\s*-\s*\d+(?:\.\d+)?s\]:)/g, '\n- $1')
+      .replace(/\s*\|\s*(\[\d+(?:\.\d+)?s\s*-\s*\d+(?:\.\d+)?s\]:)/g, '\n- $1')
+      .trim();
+    return formatted;
+  }
+
+  // LTX-2.5 narrative paragraph organizer
+  let ltxFormatted = text
+    .replace(
+      /\s+(?=(?:Throughout the continuous |During the mid-shot progression |In the closing beat |Completely supplant the simplified 3D previz |Natural environmental acoustics |Natural ambient soundscape ))/g,
+      '\n\n'
+    )
+    .trim();
+
+  if (!ltxFormatted.includes('\n\n')) {
+    const sentences = ltxFormatted
+      .split(/(?<=[.!?])\s+(?=[A-Z])/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (sentences.length >= 3) {
+      const paragraphs: string[] = [];
+      for (let i = 0; i < sentences.length; i += 2) {
+        paragraphs.push(sentences.slice(i, i + 2).join(' '));
+      }
+      ltxFormatted = paragraphs.join('\n\n');
+    }
+  }
+
+  return ltxFormatted;
 }
 
 /**

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SubjectKind } from '../../types/shotspec';
+import { Actor, SubjectKind } from '../../types/shotspec';
 import { createProceduralActorMesh } from '../procedural3D';
 import { loadGltfModel, getCachedGltfModel } from '../gltfModelLoader';
 import {
@@ -7,6 +7,9 @@ import {
   createStylizedHumanoidStandin,
   loadMannequinModel,
   getCachedMannequinRig,
+  loadSmplMannequinModel,
+  getCachedSmplMannequinRig,
+  resolveMannequinUrlForIdentity,
   applyPosePreset,
   applyBonePose,
   dressAndTextureHumanoidRig,
@@ -48,7 +51,27 @@ export interface CreateSubjectMeshOptions {
   rigLandmarks?: Partial<RigLandmarks>;
   showBones?: boolean;
   actionDescription?: string;
+  bodyProportions?: Actor['bodyProportions'];
   onAsyncLoadComplete?: () => void;
+}
+
+/**
+ * Resolves whether a humanoid actor should instantiate the true 6,890-vertex SMPL body
+ * (`'smpl'`) or the natural, unstretched Mixamo Y-Bot / X-Bot mannequin (`'ybot'`).
+ */
+export function resolveActorHumanoidMeshMode(
+  bodyProportions?: Actor['bodyProportions']
+): 'smpl' | 'ybot' {
+  if (!bodyProportions) return 'ybot';
+  if (bodyProportions.humanoidMeshMode === 'ybot') return 'ybot';
+  if (bodyProportions.humanoidMeshMode === 'smpl') return 'smpl';
+  if (
+    bodyProportions.hasSkinnedMesh ||
+    (Array.isArray(bodyProportions.shapeBetas) && bodyProportions.shapeBetas.length > 0)
+  ) {
+    return 'smpl';
+  }
+  return 'ybot';
 }
 
 /**
@@ -112,7 +135,8 @@ export function applyObjectTargetColor(object3d: THREE.Object3D, colorHex: numbe
         }
         if (
           cloned.emissive instanceof THREE.Color &&
-          cloned.emissive.r + cloned.emissive.g + cloned.emissive.b < 0.2
+          cloned.emissive.r + cloned.emissive.g + cloned.emissive.b < 0.2 &&
+          !/_Surface$/i.test(mesh.name || '')
         ) {
           cloned.emissive.copy(subtleEmissive);
         }
@@ -239,14 +263,17 @@ export function createSubjectMesh(
   const isTestEnv =
     typeof process !== 'undefined' && Boolean(process.env?.VITEST || process.env?.NODE_ENV === 'test');
 
+  const hasExplicitAuthorSculpt =
+    activeSculpt?.route === 'author' && Array.isArray(activeSculpt.parts) && activeSculpt.parts.length > 0;
+
   const effectiveModelUrl =
     modelUrl ||
-    (!isTestEnv && !isCutoutKind(kind) && !isGreyboxPrimitiveKind(kind) && !isHumanoid
+    (!isTestEnv && !hasExplicitAuthorSculpt && !isCutoutKind(kind) && !isGreyboxPrimitiveKind(kind) && !isHumanoid
       ? resolvePolyforkGlbUrl(name, tokenPrompt, kind)
       : undefined);
 
-  // 1. If explicit or auto-resolved GLB/GLTF modelUrl is provided, load or clone from cache
-  if (effectiveModelUrl) {
+  // 1. If explicit or auto-resolved GLB/GLTF modelUrl is provided (and not an FBX mannequin), load or clone from cache
+  if (effectiveModelUrl && !/\.fbx(\?|$)/i.test(effectiveModelUrl)) {
     const attachGltfAnimations = (sceneRoot: THREE.Group, clips?: THREE.AnimationClip[]) => {
       if (!clips || clips.length === 0) return;
       const mixer = new THREE.AnimationMixer(sceneRoot);
@@ -358,7 +385,9 @@ export function createSubjectMesh(
     if (cached) {
       const finalSize = scaleAndAutoRigGltfForStage(cached.scene);
       group.add(cached.scene);
-      attachGltfAnimations(cached.scene, cached.animations);
+      if (!group.userData.rig) {
+        attachGltfAnimations(cached.scene, cached.animations);
+      }
       const baseRadius = Math.max(2.4, Math.max(finalSize.x, finalSize.z) * 0.55);
       group.add(createBaseRing(baseRadius, colorHex, isGhostWireframe, isSelected));
       const banner = createSpriteBanner(
@@ -411,7 +440,9 @@ export function createSubjectMesh(
         }
         group.add(result.scene);
         group.updateMatrixWorld(true);
-        attachGltfAnimations(result.scene, result.animations);
+        if (!group.userData.rig) {
+          attachGltfAnimations(result.scene, result.animations);
+        }
 
         // Update hit proxy cylinder to match the loaded GLB dimensions
         const hitProxy = group.getObjectByName('__actor_hit_proxy__') as THREE.Mesh | undefined;
@@ -531,7 +562,21 @@ export function createSubjectMesh(
     // Keep 3D stage humanoid mannequins clean and anatomical by default; only mount primitive costume attachments when explicitly requested via partGraph.dressRig
     const shouldDressCharacter = Boolean(partGraph?.dressRig && (conceptImageUrl || hasRequestedCharacterAccessories(features)));
 
-    const cachedRig = getCachedMannequinRig({ height: 5.06, tint: clayTint });
+    const humanoidMeshMode = resolveActorHumanoidMeshMode(opts.bodyProportions);
+    group.userData.humanoidMeshMode = humanoidMeshMode;
+
+    const targetMannequinUrl =
+      effectiveModelUrl && /\.fbx(\?|$)/i.test(effectiveModelUrl)
+        ? effectiveModelUrl
+        : resolveMannequinUrlForIdentity(fullCharacterPrompt);
+    const cachedRig =
+      humanoidMeshMode === 'smpl'
+        ? getCachedSmplMannequinRig({
+            height: 5.06,
+            tint: clayTint,
+            bodyProportions: opts.bodyProportions,
+          })
+        : getCachedMannequinRig({ modelUrl: targetMannequinUrl, height: 5.06, tint: clayTint });
     const rig = cachedRig || createHumanoidSkeleton(5.06);
 
     if (cachedRig) {
@@ -553,7 +598,16 @@ export function createSubjectMesh(
         }
       }
 
-      loadMannequinModel({ height: 5.06, tint: clayTint })
+      const loadRigPromise =
+        humanoidMeshMode === 'smpl'
+          ? loadSmplMannequinModel({
+              height: 5.06,
+              tint: clayTint,
+              bodyProportions: opts.bodyProportions,
+            })
+          : loadMannequinModel({ modelUrl: targetMannequinUrl, height: 5.06, tint: clayTint });
+
+      loadRigPromise
         .then((loadedRig) => {
           if (shouldDressCharacter) {
             try {

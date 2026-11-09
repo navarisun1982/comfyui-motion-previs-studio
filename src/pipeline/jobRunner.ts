@@ -26,6 +26,9 @@ export interface ExecuteJobOptions {
   refImageDescriptions?: [string, string, string, string];
   icLora?: string;
   icLoraStrength?: number;
+  steps?: number;
+  firstPassScale?: number;
+  referenceMode?: 'OFF' | 'ON';
   client?: ComfyClient;
   onProgress?: (progress: number, currentNodeTitle: string) => void;
   onSuccess?: (revisionId: string, videoUrl: string, filename: string) => void;
@@ -157,12 +160,16 @@ export class JobRunner {
       refImageDescriptions: options.refImageDescriptions,
       icLora: options.icLora,
       icLoraStrength: options.icLoraStrength,
+      steps: options.steps,
+      firstPassScale: options.firstPassScale,
+      referenceMode: options.referenceMode,
       filenamePrefix: `cmpvs_${options.shot.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_v${options.shot.version}`,
     };
 
     const bound = bindTemplate(reg.api, reg.binding, bindValues);
     const boundWorkflow = bound.workflow;
     const outputNodeId = reg.binding.output.node;
+    const fallbackOutputNodeIds = reg.binding.output.fallbackNodes || [];
 
     // 5. Submit Prompt
     const submitRes = await client.submitPrompt(boundWorkflow);
@@ -171,11 +178,31 @@ export class JobRunner {
 
     let capturedVideoUrl: string | null = null;
     let capturedFilename: string | null = null;
+    let fallbackVideoUrl: string | null = null;
+    let fallbackFilename: string | null = null;
     let isCompleted = false;
     let pollInterval: ReturnType<typeof setInterval> | null = null;
     let unregister: (() => void) | null = null;
     let consecutiveOfflinePolls = 0;
     let missingFromQueuePolls = 0;
+
+    const extractVideoFromHistoryOutputs = (
+      outputs?: Record<string, Record<string, unknown>>
+    ): { filename: string; subfolder?: string; type?: string } | null => {
+      if (!outputs) return null;
+      const orderedNodeIds = [
+        outputNodeId,
+        ...fallbackOutputNodeIds,
+        ...Object.keys(outputs).filter((k) => k !== outputNodeId && !fallbackOutputNodeIds.includes(k)),
+      ];
+      for (const candidateNodeId of orderedNodeIds) {
+        const outData = outputs[candidateNodeId];
+        if (!outData) continue;
+        const v = client.extractVideoOutput(outData);
+        if (v) return v;
+      }
+      return null;
+    };
 
     const cleanupJobListeners = () => {
       if (pollInterval !== null) {
@@ -188,21 +215,6 @@ export class JobRunner {
       }
     };
 
-    const failJob = (errMsg: string, isInterrupted = false) => {
-      if (isCompleted) return;
-      isCompleted = true;
-      cleanupJobListeners();
-      if (this.activeHandle?.promptId === promptId) {
-        this.activeHandle = null;
-      }
-      useComfyStore.getState().setJobFailed(errMsg);
-      if (isInterrupted) {
-        options.onInterrupted?.();
-      } else {
-        options.onError?.(new Error(errMsg));
-      }
-    };
-
     const finalizeSuccess = async () => {
       if (isCompleted) return;
       isCompleted = true;
@@ -211,21 +223,23 @@ export class JobRunner {
         this.activeHandle = null;
       }
 
-      // If video wasn't captured directly via WS packet, check /history
+      // If primary video wasn't captured directly via WS packet, check /history (primary + fallback save nodes)
       if (!capturedVideoUrl) {
         const hist = await client.getPromptHistory(promptId);
         if (hist && hist.outputs) {
           const outputs = hist.outputs as Record<string, Record<string, unknown>>;
-          // Look specifically at the designated output node
-          const outputData = outputs[outputNodeId] || outputs[Object.keys(outputs)[0]];
-          if (outputData) {
-            const v = client.extractVideoOutput(outputData);
-            if (v) {
-              capturedVideoUrl = await client.fetchVideoBlobUrl(v.filename, v.subfolder, v.type);
-              capturedFilename = v.filename;
-            }
+          const v = extractVideoFromHistoryOutputs(outputs);
+          if (v) {
+            capturedVideoUrl = await client.fetchVideoBlobUrl(v.filename, v.subfolder, v.type);
+            capturedFilename = v.filename;
           }
         }
+      }
+
+      // If still not found in /history, use fallback video captured via WS (e.g. Node #10 Seed 1)
+      if (!capturedVideoUrl && fallbackVideoUrl) {
+        capturedVideoUrl = fallbackVideoUrl;
+        capturedFilename = fallbackFilename;
       }
 
       if (capturedVideoUrl) {
@@ -257,6 +271,43 @@ export class JobRunner {
       }
     };
 
+    const failJob = async (errMsg: string, isInterrupted = false) => {
+      if (isCompleted) return;
+      // If a secondary post-processing/refine stage failed AFTER an intermediate seed save node
+      // (such as Node #10 in Stubelius LTX) already produced a valid full video, recover that video!
+      if (!isInterrupted) {
+        if (capturedVideoUrl || fallbackVideoUrl) {
+          await finalizeSuccess();
+          return;
+        }
+        try {
+          const hist = await client.getPromptHistory(promptId);
+          if (hist && hist.outputs) {
+            const v = extractVideoFromHistoryOutputs(hist.outputs as Record<string, Record<string, unknown>>);
+            if (v) {
+              fallbackVideoUrl = await client.fetchVideoBlobUrl(v.filename, v.subfolder, v.type);
+              fallbackFilename = v.filename;
+              await finalizeSuccess();
+              return;
+            }
+          }
+        } catch {
+          // proceed with normal error reporting
+        }
+      }
+      isCompleted = true;
+      cleanupJobListeners();
+      if (this.activeHandle?.promptId === promptId) {
+        this.activeHandle = null;
+      }
+      useComfyStore.getState().setJobFailed(errMsg);
+      if (isInterrupted) {
+        options.onInterrupted?.();
+      } else {
+        options.onError?.(new Error(errMsg));
+      }
+    };
+
     // 6. Register WebSocket Listener for this specific prompt_id
     unregister = client.registerJobListener({
       promptId,
@@ -273,21 +324,30 @@ export class JobRunner {
         options.onProgress?.(pct, `Sampling (${current}/${max}) - ${nodeTitle}`);
       },
       onExecuted: async (nodeId, output) => {
-        // Check if output is from the designated target output node
-        const v = client.extractVideoOutput(output, outputNodeId, nodeId);
-        if (v) {
-          capturedVideoUrl = await client.fetchVideoBlobUrl(v.filename, v.subfolder, v.type);
-          capturedFilename = v.filename;
+        // 1. Check if output is from the primary designated output node
+        const vPrimary = client.extractVideoOutput(output, outputNodeId, nodeId);
+        if (vPrimary) {
+          capturedVideoUrl = await client.fetchVideoBlobUrl(vPrimary.filename, vPrimary.subfolder, vPrimary.type);
+          capturedFilename = vPrimary.filename;
+          return;
+        }
+        // 2. Check if output is from a known fallback save node (e.g. Node #10 Seed 1 in Stubelius LTX)
+        if (fallbackOutputNodeIds.includes(nodeId)) {
+          const vFallback = client.extractVideoOutput(output);
+          if (vFallback) {
+            fallbackVideoUrl = await client.fetchVideoBlobUrl(vFallback.filename, vFallback.subfolder, vFallback.type);
+            fallbackFilename = vFallback.filename;
+          }
         }
       },
       onSuccess: () => {
-        finalizeSuccess();
+        void finalizeSuccess();
       },
       onInterrupted: () => {
-        failJob('Execution interrupted by user.', true);
+        void failJob('Execution interrupted by user.', true);
       },
       onError: (msg) => {
-        failJob(msg, false);
+        void failJob(msg, false);
       },
     });
 
@@ -319,7 +379,7 @@ export class JobRunner {
               }
             }
           }
-          failJob(errMsg, false);
+          await failJob(errMsg, false);
           return;
         }
 
@@ -327,19 +387,16 @@ export class JobRunner {
           Array.isArray(status?.messages) &&
           status.messages.some((m) => Array.isArray(m) && m[0] === 'execution_interrupted')
         ) {
-          failJob('Execution interrupted by user.', true);
+          await failJob('Execution interrupted by user.', true);
           return;
         }
 
         if (hist.outputs) {
           const outputs = hist.outputs as Record<string, Record<string, unknown>>;
-          const outputData = outputs[outputNodeId] || outputs[Object.keys(outputs)[0]];
-          if (outputData) {
-            const v = client.extractVideoOutput(outputData);
-            if (v) {
-              await finalizeSuccess();
-              return;
-            }
+          const primaryData = outputs[outputNodeId];
+          if (primaryData && client.extractVideoOutput(primaryData)) {
+            await finalizeSuccess();
+            return;
           }
           if (status?.completed === true) {
             await finalizeSuccess();

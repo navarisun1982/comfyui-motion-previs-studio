@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 export type CharacterCardSubTab = 'motion' | 'timing' | 'look' | 'rig' | 'all';
 import { Actor, Point2D, Point3D } from '../types/shotspec';
@@ -45,8 +45,14 @@ import {
   SlidersHorizontal,
   User,
   Globe,
+  Video,
 } from 'lucide-react';
 import { GlbResourcesDirectory } from './GlbResourcesDirectory';
+import {
+  MocapStudioModal,
+  MocapStudioApplyPayload,
+  applyMocapStudioPayloadToShotStore,
+} from './MocapStudioModal';
 
 export const OBJECT_TARGET_PALETTE = [
   { hex: '#ef4444', name: 'Red' },
@@ -119,6 +125,7 @@ export interface CharacterControlCardProps {
     motionCycles?: number
   ) => Promise<void>;
   onResetActorMotion?: (actorId: string) => void;
+  onRemoveActorCue?: (actorId: string, cueId: string) => void;
   onExtendShotDuration?: (nextDurationSec: number) => void;
   onMoveActorCueTime?: (actorId: string, cueId: string, newTime: number) => void;
   onScaleActorCuesInRange?: (
@@ -177,6 +184,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   onApplyReadyMadeMotion,
   onDirectCustomAction,
   onResetActorMotion,
+  onRemoveActorCue,
   onExtendShotDuration,
   onMoveActorCueTime,
   onScaleActorCuesInRange,
@@ -199,7 +207,44 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const [selectedInspectorBone, setSelectedInspectorBone] = useState<HumanoidBone>('RightArm');
   const [lastDirectedSignature, setLastDirectedSignature] = useState<string | null>(null);
   const [draggingCueId, setDraggingCueId] = useState<string | null>(null);
+  const [selectedCueId, setSelectedCueId] = useState<string | null>(null);
   const [draggingCueGrabOffsetSec, setDraggingCueGrabOffsetSec] = useState<number>(0);
+
+  useEffect(() => {
+    const handleCueSelectEvent = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { kind?: string; actorId?: string; cueId?: string } | null;
+      if (!detail || detail.kind !== 'actor-cue' || detail.actorId !== actor.id) {
+        setSelectedCueId(null);
+      } else {
+        setSelectedCueId(detail.cueId || null);
+      }
+    };
+    window.addEventListener('cmpvs:select-cue', handleCueSelectEvent);
+    return () => window.removeEventListener('cmpvs:select-cue', handleCueSelectEvent);
+  }, [actor.id]);
+
+  useEffect(() => {
+    if (!selectedCueId || !onRemoveActorCue) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (
+        activeEl?.tagName === 'INPUT' ||
+        activeEl?.tagName === 'TEXTAREA' ||
+        activeEl?.isContentEditable
+      ) {
+        return;
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        e.stopPropagation();
+        onRemoveActorCue(actor.id, selectedCueId);
+        setSelectedCueId(null);
+        window.dispatchEvent(new CustomEvent('cmpvs:select-cue', { detail: null }));
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
+  }, [actor.id, selectedCueId, onRemoveActorCue]);
   const [draggingSpanEdge, setDraggingSpanEdge] = useState<{
     side: 'start' | 'end' | 'move';
     initialStart: number;
@@ -208,6 +253,20 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
     initialTimesById: Record<string, number>;
   } | null>(null);
   const [activePacingCurve, setActivePacingCurve] = useState<'linear' | 'ease-in-out' | 'fast-start' | 'slow-start'>('linear');
+  const [isMocapStudioOpen, setIsMocapStudioOpen] = useState(false);
+  const [motionSourceFilter, setMotionSourceFilter] = useState<'all' | 'mocap' | 'clips' | 'ai'>('all');
+
+  const actorKeyframes = actor.trajectory.keyframes ?? [];
+  const hasActiveMocapTrack = actorKeyframes.some(
+    (kf) => Boolean(kf.pose?.anatomicalIk) || Boolean(kf.cueLabel && /mocap|smpl|fbx/i.test(kf.cueLabel))
+  );
+  const activeUnifiedDriverLabel = hasActiveMocapTrack
+    ? `🎥 3D Mocap (${actorKeyframes.length}f)`
+    : actor.motionClip
+      ? `🏃 Clip: ${actor.motionClip}`
+      : actorKeyframes.length > 1
+        ? `✨ AI Keyframes (${actorKeyframes.length} pts)`
+        : `🧍 Stance / Gait (${actor.gait || 'idle'})`;
 
   const kind = actor.kind || 'human';
   const shotDur = shotDurationSeconds || 4;
@@ -379,6 +438,20 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
+              setIsMocapStudioOpen(true);
+            }}
+            data-testid={`card-header-mocap-btn-${actor.id}`}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-cyan-600/25 hover:bg-cyan-600/45 text-cyan-100 border border-cyan-400/45 text-[10.5px] font-bold transition-colors cursor-pointer"
+            title="Open 3D Mocap, Body & Scene Studio (.MP4 Video or .FBX)"
+          >
+            <Video className="h-2.5 w-2.5 text-cyan-300" />
+            <span>Mocap</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
               onAddToCastPool(actor);
             }}
             className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-600/25 hover:bg-indigo-600/40 text-indigo-100 border border-indigo-400/35 text-[10.5px] font-medium transition-colors"
@@ -430,9 +503,9 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
               )}
             </div>
 
-            {/* 4 Focused Sub-Tabs + All Toggle */}
+            {/* 4 Focused Sub-Tabs + All Toggle (Smart Expanding Bar: Active = Icon + Full Name, Inactive = Large Clear Icon Only) */}
             <div
-              className="grid grid-cols-5 gap-1 rounded-xl bg-[#080b12] p-1 border border-white/[0.08]"
+              className="flex items-center gap-1 rounded-xl bg-[#080b12] p-1 border border-white/[0.08]"
               role="tablist"
               aria-label="Character Inspector Sub-Tabs"
             >
@@ -441,36 +514,41 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                   {
                     id: 'motion' as const,
                     label: 'Motion',
+                    activeLabel: 'Motion & Stance',
                     icon: '🏃',
                     dot: Boolean(actor.motionClip),
-                    tip: 'Ready-Made Motions, Floor Path, Stance & Stage Spot',
+                    tip: 'Motion & Stance: Ready-Made Motions, Floor Path, Stance & Stage Spot',
                   },
                   {
                     id: 'timing' as const,
                     label: 'Timing',
+                    activeLabel: 'Timing & Cues',
                     icon: '⏱️',
                     badge: kfs.length > 0 ? String(kfs.length) : undefined,
-                    tip: 'Timing Window (sec), Action Cycles (1x–5x) & Natural-Language AI Directing',
+                    tip: 'Timing & Cues: Timing Window (sec), Action Cycles (1x–5x) & Natural-Language AI Directing',
                   },
                   {
                     id: 'look' as const,
                     label: 'Look/Ref',
+                    activeLabel: 'Look/Ref & 3D',
                     icon: '🎨',
                     dot: Boolean(actor.conceptImageUrl || actor.modelUrl),
-                    tip: 'ComfyUI Reference Image, 3D Look Prompt, Attach .GLB & Color Swatches',
+                    tip: 'Look/Ref & 3D: ComfyUI Reference Image, 3D Look Prompt, Attach .GLB & Color Swatches',
                   },
                   {
                     id: 'rig' as const,
                     label: 'Rig/XYZ',
+                    activeLabel: 'Rig/XYZ & Bones',
                     icon: '🦴',
                     dot: Boolean(actor.socketToBone),
-                    tip: 'XYZ Stage Coordinates, Scale, Facing Angle, Bone Sockets & FK/IK Rig',
+                    tip: 'Rig/XYZ & Bones: XYZ Stage Coordinates, Scale, Facing Angle, Bone Sockets & FK/IK Rig',
                   },
                   {
                     id: 'all' as const,
                     label: 'All',
+                    activeLabel: 'All Controls',
                     icon: '⊞',
-                    tip: 'Show all sections expanded at once',
+                    tip: 'All Controls: Show all sections expanded at once',
                   },
                 ]
               ).map((tab) => {
@@ -494,18 +572,35 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                       }
                     }}
                     title={tab.tip}
-                    className={`relative flex items-center justify-center gap-1 py-1.5 px-1 rounded-lg text-[10px] font-semibold transition-all min-w-0 ${isTabActive
-                        ? 'bg-gradient-to-b from-indigo-600 to-indigo-700 text-white shadow-sm border border-indigo-400/50'
-                        : 'text-slate-400 hover:text-white hover:bg-white/[0.05] border border-transparent'
-                      }`}
+                    className={`relative flex items-center justify-center rounded-lg font-semibold transition-all cursor-pointer ${
+                      isTabActive
+                        ? 'flex-1 min-w-0 gap-1.5 py-1.5 px-2.5 text-[11px] bg-gradient-to-r from-indigo-600 via-indigo-600 to-blue-600 text-white shadow-[0_2px_10px_rgba(79,70,229,0.35)] border border-indigo-400/60'
+                        : 'w-9 h-8 shrink-0 bg-[#0d1322] text-slate-300 hover:text-white hover:bg-[#162038] hover:scale-105 border border-white/[0.06] hover:border-indigo-400/40'
+                    }`}
                   >
-                    <span className="text-[10px] leading-none shrink-0">{tab.icon}</span>
-                    <span className="truncate">{tab.label}</span>
+                    <span className={isTabActive ? 'text-[13px] leading-none shrink-0' : 'text-[14px] leading-none'}>
+                      {tab.icon}
+                    </span>
+                    <span className={isTabActive ? 'truncate font-bold tracking-tight' : 'sr-only'}>
+                      {isTabActive ? tab.activeLabel : tab.label}
+                    </span>
                     {tab.dot && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_5px_#34d399] shrink-0" />
+                      <span
+                        className={
+                          isTabActive
+                            ? 'h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_5px_#34d399] shrink-0'
+                            : 'absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_5px_#34d399]'
+                        }
+                      />
                     )}
                     {tab.badge && (
-                      <span className="px-1 rounded bg-cyan-500/25 text-cyan-200 font-mono text-[8.5px] leading-tight shrink-0">
+                      <span
+                        className={
+                          isTabActive
+                            ? 'px-1.5 py-0.2 rounded bg-cyan-500/30 text-cyan-100 font-mono text-[9px] leading-tight shrink-0'
+                            : 'absolute -top-1 -right-1 px-1 rounded-full bg-cyan-500 text-slate-950 font-mono font-bold text-[8px] leading-tight shadow'
+                        }
+                      >
                         {tab.badge}
                       </span>
                     )}
@@ -514,6 +609,133 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
               })}
             </div>
           </div>
+
+          {/* ================= MIXAMO STUDIO 3D CHARACTER BODY THUMBNAIL SELECTOR ================= */}
+          {objCategory === 'humanoid' && (
+            <div
+              className={
+                activeSubTab === 'look' || activeSubTab === 'motion' || activeSubTab === 'all'
+                  ? 'rounded-xl bg-[#0d1220] border border-cyan-500/25 p-2 space-y-1.5'
+                  : 'hidden'
+              }
+            >
+              <div className="flex items-center justify-between gap-2 text-[9.5px]">
+                <span className="font-bold text-cyan-200 flex items-center gap-1">
+                  <span>🧍</span>
+                  <span>Mixamo Studio 3D Character Rig:</span>
+                </span>
+                <span className="font-mono text-[8.5px] text-slate-400">
+                  8 Studio Bodies • 65-Bone Mocap
+                </span>
+              </div>
+              <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+                {[
+                  {
+                    id: 'ybot-male',
+                    label: 'Y-Bot M',
+                    sourceBadge: '🎭 Mixamo',
+                    modelUrl: './models/y-bot-tpose.fbx',
+                    thumb: './images/library/mixamo-ybot-male.jpg',
+                    match: (u?: string) => !u || u.includes('y-bot-tpose'),
+                  },
+                  {
+                    id: 'xbot-female',
+                    label: 'X-Bot F',
+                    sourceBadge: '🎭 Mixamo',
+                    modelUrl: './models/x-bot-tpose.fbx',
+                    thumb: './images/library/mixamo-xbot-female.jpg',
+                    match: (u?: string) => Boolean(u && u.includes('x-bot-tpose')),
+                  },
+                  {
+                    id: 'soldier',
+                    label: 'Soldier',
+                    sourceBadge: '🎭 Mixamo',
+                    modelUrl: './models/Soldier.glb',
+                    thumb: './images/library/mixamo-soldier.jpg',
+                    match: (u?: string) => Boolean(u && u.toLowerCase().includes('soldier.glb')),
+                  },
+                  {
+                    id: 'michelle',
+                    label: 'Michelle',
+                    sourceBadge: '🎭 Mixamo',
+                    modelUrl: './models/Michelle.glb',
+                    thumb: './images/library/mixamo-michelle.jpg',
+                    match: (u?: string) => Boolean(u && u.toLowerCase().includes('michelle.glb')),
+                  },
+                  {
+                    id: 'rpm-avatar',
+                    label: 'Suit & Hat',
+                    sourceBadge: '🎩 RPM',
+                    modelUrl: './models/ReadyPlayerMeAvatar.glb',
+                    thumb: './images/library/mixamo-rpm-avatar.jpg',
+                    match: (u?: string) => Boolean(u && u.toLowerCase().includes('readyplayerme')),
+                  },
+                  {
+                    id: 'xbot-studio',
+                    label: 'X-Bot GLB',
+                    sourceBadge: '🎭 Mixamo',
+                    modelUrl: './models/Xbot.glb',
+                    thumb: './images/library/mixamo-xbot-studio.jpg',
+                    match: (u?: string) => Boolean(u && u.toLowerCase().includes('xbot.glb')),
+                  },
+                  {
+                    id: 'robot-expressive',
+                    label: 'Robot CC0',
+                    sourceBadge: '🤖 CC0',
+                    modelUrl: './models/RobotExpressive.glb',
+                    thumb: './images/library/mixamo-robot-expressive.jpg',
+                    match: (u?: string) => Boolean(u && u.toLowerCase().includes('robotexpressive.glb')),
+                  },
+                  {
+                    id: 'cesium-man',
+                    label: 'Runner',
+                    sourceBadge: '🌐 glTF',
+                    modelUrl: './models/CesiumMan.glb',
+                    thumb: './images/library/mixamo-cesium-man.jpg',
+                    match: (u?: string) => Boolean(u && u.toLowerCase().includes('cesiumman.glb')),
+                  },
+                ].map((preset) => {
+                  const isActiveBody = preset.match(actor.modelUrl);
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() =>
+                        onUpdateActor(actor.id, {
+                          modelUrl: preset.modelUrl,
+                          rigType: 'humanoid',
+                        })
+                      }
+                      title={`Switch 3D Character Body to ${preset.label} (${preset.sourceBadge})`}
+                      className={`group relative flex flex-col items-center rounded-lg overflow-hidden border transition-all cursor-pointer p-0.5 ${
+                        isActiveBody
+                          ? 'border-cyan-400 bg-cyan-500/20 ring-1 ring-cyan-400/50 shadow'
+                          : 'border-white/10 bg-black/40 hover:border-cyan-400/50 hover:bg-white/5'
+                      }`}
+                    >
+                      <div className="relative w-full">
+                        <img
+                          src={preset.thumb}
+                          alt={preset.label}
+                          className="h-11 w-full rounded object-cover object-top bg-[#090d16]"
+                        />
+                        <span className="absolute top-0.5 left-0.5 rounded bg-black/75 border border-white/15 px-1 py-0 text-[7px] font-mono text-cyan-200 leading-tight">
+                          {preset.sourceBadge}
+                        </span>
+                      </div>
+                      <span
+                        className={`text-[8.5px] font-mono font-semibold truncate w-full text-center mt-0.5 ${
+                          isActiveBody ? 'text-cyan-200' : 'text-slate-300 group-hover:text-white'
+                        }`}
+                      >
+                        {preset.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* ================= SUB-TAB 3 (OR ALL): COMFYUI VIDEO REFERENCE IMAGE ================= */}
           <div
@@ -607,8 +829,108 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
 
           {/* ================= SUB-TAB 1 (MOTION & STANCE) ================= */}
           <div className={activeSubTab === 'motion' || activeSubTab === 'all' ? 'space-y-2.5' : 'hidden'}>
+            {/* UNIFIED MOTION SOURCE MODE SWITCHER + ACTIVE ENGINE DRIVER INDICATOR */}
+            <div
+              data-testid="unified-motion-source-switcher"
+              className="rounded-xl bg-[#0b101d] border border-indigo-500/25 p-2 space-y-1.5"
+            >
+              <div className="flex items-center justify-between gap-2 text-[9.5px]">
+                <span className="font-semibold text-slate-300 flex items-center gap-1 truncate">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                  <span>Active Driver:</span>
+                  <span className="font-mono text-cyan-300 truncate">{activeUnifiedDriverLabel}</span>
+                </span>
+                {hasActiveMocapTrack && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onResetActorMotion) {
+                        onResetActorMotion(actor.id);
+                      } else {
+                        onUpdateActor(actor.id, {
+                          pose: undefined,
+                          trajectory: { ...actor.trajectory, keyframes: [] },
+                        });
+                      }
+                    }}
+                    className="px-1.5 py-0.5 rounded bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/40 text-rose-200 font-semibold text-[9px] shrink-0"
+                    title="Detach 3D Mocap track so Motion Clips or AI Keyframe Direction takes priority"
+                  >
+                    Detach Mocap
+                  </button>
+                )}
+              </div>
+              <div
+                className="grid grid-cols-4 gap-1 rounded-lg bg-[#070a12] p-0.5 border border-white/[0.07] text-[9.5px]"
+                role="group"
+                aria-label="Motion Source Filter"
+              >
+                {(
+                  [
+                    { id: 'all', label: 'All', icon: '⊞', tip: 'Show all motion sources (Mocap, Clips, AI)' },
+                    { id: 'mocap', label: 'Mocap', icon: '🎥', tip: 'Focus on 3D Video / FBX Mocap Studio' },
+                    { id: 'clips', label: 'Clips', icon: '🏃', tip: 'Focus on Ready-Made Motion Clips & Stance' },
+                    { id: 'ai', label: 'AI Direct', icon: '✨', tip: 'Focus on Natural-Language AI Motion Direction' },
+                  ] as const
+                ).map((modeBtn) => {
+                  const isActiveFilter = motionSourceFilter === modeBtn.id;
+                  return (
+                    <button
+                      key={modeBtn.id}
+                      type="button"
+                      onClick={() => setMotionSourceFilter(modeBtn.id)}
+                      title={modeBtn.tip}
+                      className={`inline-flex items-center justify-center gap-1 py-1 px-1.5 rounded-md font-semibold transition-all cursor-pointer ${
+                        isActiveFilter
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <span>{modeBtn.icon}</span>
+                      <span className="truncate">{modeBtn.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* PROMINENT FULL-WIDTH 3D MOCAP & FBX STUDIO LAUNCHER */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsMocapStudioOpen(true);
+              }}
+              data-testid="open-mocap-studio-btn"
+              className={`${
+                motionSourceFilter === 'all' || motionSourceFilter === 'mocap' ? 'flex' : 'hidden'
+              } w-full rounded-xl bg-gradient-to-r from-indigo-600/35 via-blue-600/30 to-cyan-600/35 hover:from-indigo-600/55 hover:to-cyan-600/55 border border-cyan-400/50 px-3 py-2 items-center justify-between gap-2 text-left transition-all shadow-[0_4px_14px_rgba(6,182,212,0.18)] cursor-pointer group`}
+              title="Open 3D Mocap Studio: Extract 19-bone human motion, SMPL body proportions, and surrounding 3D buildings/props from RGB Video (.MP4) or toyxyz_RGBMocap / Mixamo (.FBX)"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="h-7 w-7 rounded-lg bg-cyan-500/20 border border-cyan-400/50 flex items-center justify-center text-cyan-300 shrink-0">
+                  <Video className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[11px] font-bold text-white group-hover:text-cyan-200 truncate">
+                    🎥 3D Mocap &amp; FBX Studio
+                  </div>
+                  <div className="text-[9.5px] text-cyan-200/80 truncate">
+                    Import Video (.MP4) or .FBX (Body + Motion + 3D Scene)
+                  </div>
+                </div>
+              </div>
+              <span className="px-2 py-0.5 rounded-md bg-cyan-400 text-slate-950 font-bold text-[9.5px] shrink-0">
+                Open ↗
+              </span>
+            </button>
+
             {/* ================= B. MOTION STUDIO ================= */}
-            <div className="inspector-section space-y-2">
+            <div
+              className={`${
+                motionSourceFilter === 'all' || motionSourceFilter === 'clips' ? 'block' : 'hidden'
+              } inspector-section space-y-2`}
+            >
               {/* Motion Studio Header + Active Motion Status Badge */}
               <div className="flex items-center justify-between gap-2">
                 <button
@@ -657,7 +979,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         <span>1. Category</span>
                         <span className="text-indigo-300/80 font-mono">2. Action</span>
                       </div>
-                      <div className="grid grid-cols-3 gap-1 px-1">
+                      <div className="flex items-stretch gap-1 px-1">
                         {(
                           [
                             { id: 'move', label: 'Move / Jump', fullLabel: 'Move / Jump', icon: '🏃' },
@@ -677,16 +999,25 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                                   ? `${tab.fullLabel} folder (contains active clip: ${activeMotionClipObj?.name})`
                                   : `Browse ${tab.fullLabel} action presets`
                               }
-                              className={`relative flex items-center justify-center gap-1 py-1.5 px-1 rounded-t-lg text-[9.5px] tracking-tight font-semibold border-t border-x transition-all ${isTabActive
-                                  ? 'bg-[#111726] border-indigo-400/60 text-white shadow-[0_-2px_10px_rgba(99,102,241,0.15)] z-10 -mb-px pb-2'
-                                  : 'bg-[#090d16] border-white/[0.07] text-slate-400 hover:text-slate-200 hover:bg-[#0e1320]'
-                                }`}
+                              className={`relative flex items-center justify-center rounded-t-lg tracking-tight font-semibold border-t border-x transition-all cursor-pointer ${
+                                isTabActive
+                                  ? 'flex-1 min-w-0 gap-1.5 py-1.5 px-2.5 text-[10.5px] bg-[#111726] border-indigo-400/60 text-white shadow-[0_-2px_10px_rgba(99,102,241,0.15)] z-10 -mb-px pb-2'
+                                  : 'w-10 shrink-0 py-1.5 px-2 bg-[#090d16] border-white/[0.07] text-slate-300 hover:text-white hover:bg-[#0e1526]'
+                              }`}
                             >
-                              <span className="text-[10px] leading-none shrink-0">{tab.icon}</span>
-                              <span className="truncate">{tab.label}</span>
+                              <span className={isTabActive ? 'text-[13px] leading-none shrink-0' : 'text-[14px] leading-none'}>
+                                {tab.icon}
+                              </span>
+                              <span className={isTabActive ? 'truncate font-bold' : 'sr-only'}>
+                                {tab.label}
+                              </span>
                               {hasActiveClipInTab && (
                                 <span
-                                  className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399] shrink-0"
+                                  className={
+                                    isTabActive
+                                      ? 'h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399] shrink-0'
+                                      : 'absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]'
+                                  }
                                   title={`Active motion (${activeMotionClipObj?.name}) is in this category`}
                                 />
                               )}
@@ -873,12 +1204,41 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                           : actor.rotation;
                       if (val.startsWith('gait:')) {
                         const gaitMode = val.slice(5) as Actor['gait'];
+                        let nextTrajectory = actor.trajectory;
+                        const curDist = Math.hypot(
+                          actor.trajectory.endPosition.x - actor.trajectory.startPosition.x,
+                          actor.trajectory.endPosition.y - actor.trajectory.startPosition.y
+                        );
+                        if (
+                          (gaitMode === 'walk' || gaitMode === 'run' || gaitMode === 'sneak') &&
+                          travelMode !== 'in-place' &&
+                          curDist < 1.0 &&
+                          (!actor.trajectory.keyframes || actor.trajectory.keyframes.length === 0)
+                        ) {
+                          const naturalSpeed =
+                            gaitMode === 'run' ? 6.85 : gaitMode === 'sneak' ? 2.65 : 4.16;
+                          const travelSpan = Math.min(36, Math.max(10, shotDur * naturalSpeed));
+                          const sPos = actor.trajectory.startPosition;
+                          const targetY =
+                            sPos.y <= 70
+                              ? Math.min(90, Number((sPos.y + travelSpan).toFixed(1)))
+                              : Math.max(10, Number((sPos.y - travelSpan).toFixed(1)));
+                          nextTrajectory = {
+                            ...actor.trajectory,
+                            endPosition: {
+                              x: sPos.x,
+                              y: targetY,
+                              z: sPos.z ?? 0,
+                            },
+                          };
+                        }
                         onUpdateActor(actor.id, {
                           gait: gaitMode,
                           motionClip: undefined,
                           posePreset: undefined,
                           pose: undefined,
                           rotation: uprightRot,
+                          trajectory: nextTrajectory,
                         });
                         window.dispatchEvent(
                           new CustomEvent('cmpvs:transport-play', {
@@ -1179,7 +1539,9 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
             {/* ================= AI MOTION DIRECTOR (VISIBLE IN MOTION, TIMING & ALL TABS) ================= */}
             <div
               className={
-                activeSubTab === 'motion' || activeSubTab === 'timing' || activeSubTab === 'all'
+                (activeSubTab === 'motion' && (motionSourceFilter === 'all' || motionSourceFilter === 'ai')) ||
+                activeSubTab === 'timing' ||
+                activeSubTab === 'all'
                   ? 'inspector-section space-y-2'
                   : 'hidden'
               }
@@ -1408,7 +1770,22 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         </span>
                       </span>
 
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 flex-wrap">
+                        {selectedCueId && kfs.some((k) => k.id === selectedCueId) && onRemoveActorCue && (
+                          <button
+                            type="button"
+                            data-testid={`delete-selected-cue-btn-${actor.id}`}
+                            onClick={() => {
+                              onRemoveActorCue(actor.id, selectedCueId);
+                              setSelectedCueId(null);
+                              window.dispatchEvent(new CustomEvent('cmpvs:select-cue', { detail: null }));
+                            }}
+                            className="px-1.5 py-0.5 rounded text-[8.5px] font-bold border border-rose-500/60 bg-rose-500/20 text-rose-200 hover:bg-rose-500/35 transition-colors flex items-center gap-1"
+                            title="Delete selected cue (or press Delete / Backspace)"
+                          >
+                            <span>✕ Delete Cue (Del)</span>
+                          </button>
+                        )}
                         {(
                           [
                             { id: 'linear' as const, label: 'Linear', tip: 'Constant steady speed across cues' },
@@ -1606,6 +1983,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         const kfPct = Math.max(0, Math.min(100, (kf.time / shotDur) * 100));
                         const isAirborne = (kf.position.z ?? 0) > 2;
                         const isLocomotion = kf.gait === 'walk' || kf.gait === 'run' || kf.gait === 'sneak';
+                        const isCueSelected = selectedCueId === kf.id;
 
                         return (
                           <div
@@ -1620,14 +1998,35 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                               const rawOffset = kf.time - clickedTime;
                               setDraggingCueGrabOffsetSec(Math.abs(rawOffset) <= 0.12 ? rawOffset : 0);
                               setDraggingCueId(kf.id);
+                              setSelectedCueId(kf.id);
+                              window.dispatchEvent(
+                                new CustomEvent('cmpvs:select-cue', {
+                                  detail: { kind: 'actor-cue', actorId: actor.id, cueId: kf.id },
+                                })
+                              );
                               onSeekTime?.(kf.time);
+                            }}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (onRemoveActorCue) {
+                                onRemoveActorCue(actor.id, kf.id);
+                                if (selectedCueId === kf.id) {
+                                  setSelectedCueId(null);
+                                  window.dispatchEvent(new CustomEvent('cmpvs:select-cue', { detail: null }));
+                                }
+                              }
                             }}
                             className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-30 h-5 w-5 flex items-center justify-center cursor-ew-resize group"
                             style={{ left: `${kfPct}%` }}
-                            title={`Drag Cue @ ${kf.time.toFixed(2)}s (${kf.motionClip || kf.posePreset || kf.gait || 'pose'})`}
+                            title={`Click to select & press Delete to remove • Right-click to delete • Drag to retime Cue @ ${kf.time.toFixed(2)}s (${kf.motionClip || kf.posePreset || kf.gait || 'pose'})`}
                           >
                             <div
-                              className={`h-3 w-3 border border-white shadow transition-transform group-hover:scale-125 ${
+                              className={`h-3 w-3 border shadow transition-transform group-hover:scale-125 ${
+                                isCueSelected
+                                  ? 'border-white ring-2 ring-rose-400 scale-125'
+                                  : 'border-white'
+                              } ${
                                 isAirborne
                                   ? 'rounded-sm rotate-12'
                                   : isLocomotion
@@ -2686,6 +3085,18 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
               )}
             </div>
           </div>
+      )}
+
+      {isMocapStudioOpen && (
+        <MocapStudioModal
+          isOpen={isMocapStudioOpen}
+          actor={actor}
+          shotDurationSeconds={shotDur}
+          onClose={() => setIsMocapStudioOpen(false)}
+          onApplyMocap={(payload: MocapStudioApplyPayload) => {
+            applyMocapStudioPayloadToShotStore(payload, actor, onUpdateActor);
+          }}
+        />
       )}
         </div>
       );

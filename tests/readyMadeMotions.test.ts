@@ -23,10 +23,10 @@ describe('Ready-Made Motion Library & Procedural Action Clip Engine', () => {
     expect(READY_MADE_MOTIONS.length).toBeGreaterThanOrEqual(30);
 
     const humanClips = getReadyMadeMotionsForCategory('humanoid');
-    expect(humanClips.length).toBe(21);
+    expect(humanClips.length).toBe(27);
     expect(humanClips.filter((c) => c.humanGroup === 'move').length).toBe(7);
-    expect(humanClips.filter((c) => c.humanGroup === 'combat').length).toBe(6);
-    expect(humanClips.filter((c) => c.humanGroup === 'acting').length).toBe(8);
+    expect(humanClips.filter((c) => c.humanGroup === 'combat').length).toBe(7);
+    expect(humanClips.filter((c) => c.humanGroup === 'acting').length).toBe(13);
 
     expect(getReadyMadeMotionsForCategory('quadruped').length).toBeGreaterThanOrEqual(5);
     expect(getReadyMadeMotionsForCategory('vehicle').length).toBeGreaterThanOrEqual(5);

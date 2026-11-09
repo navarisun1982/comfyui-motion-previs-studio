@@ -304,5 +304,78 @@ describe('offlinePrevisRenderer', () => {
       expect(stageFloor.visible).toBe(true);
       expect(shadowMesh.visible).toBe(true);
     });
+
+    it('renders zero-chrominance Baked Clay Layout pass, neutralizes colored lights, and restores scene state', async () => {
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 1000);
+
+      // Colored light that should be temporarily neutralized to pure white during Clay pass
+      const coloredLight = new THREE.DirectionalLight(0xff33aa, 1.5);
+      scene.add(coloredLight);
+
+      // Actor with bright colored material
+      const actorGroup = new THREE.Group();
+      actorGroup.userData = { actorId: 'actor-1', actorIndex: 0 };
+      const origActorMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8 });
+      const actorMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 2, 1), origActorMat);
+      actorGroup.add(actorMesh);
+      scene.add(actorGroup);
+
+      // Floor mesh
+      const origFloorMat = new THREE.MeshStandardMaterial({ color: 0x1e293b });
+      const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), origFloorMat);
+      floorMesh.rotation.x = -Math.PI / 2;
+      scene.add(floorMesh);
+
+      const capturedDuringClayRender: {
+        actorColorHex?: number;
+        floorColorHex?: number;
+        lightColorHex?: number;
+      }[] = [];
+
+      const fakeDom = document.createElement('canvas');
+      const fakeRenderer = {
+        domElement: fakeDom,
+        setSize: vi.fn(),
+        getSize: vi.fn((target: THREE.Vector2) => {
+          target.set(64, 36);
+          return target;
+        }),
+        render: vi.fn(() => {
+          capturedDuringClayRender.push({
+            actorColorHex: (actorMesh.material as unknown as THREE.MeshStandardMaterial).color?.getHex(),
+            floorColorHex: (floorMesh.material as unknown as THREE.MeshStandardMaterial).color?.getHex(),
+            lightColorHex: coloredLight.color.getHex(),
+          });
+        }),
+      } as unknown as THREE.WebGLRenderer;
+
+      const result = await renderOfflinePrevisPasses({
+        scene,
+        camera,
+        renderer: fakeRenderer,
+        durationSeconds: 0.2,
+        fps: 10,
+        width: 64,
+        height: 36,
+        renderPass: 'clay',
+        syncPositions: vi.fn(),
+      });
+
+      expect(result.clayBlob).toBeDefined();
+      expect(result.clayBlob?.type).toBe('video/mp4');
+      expect(result.rgbBlob).toBeUndefined();
+
+      expect(capturedDuringClayRender.length).toBeGreaterThan(0);
+      // Verify zero-chrominance (R === G === B) clay colors during render
+      expect(capturedDuringClayRender[0].actorColorHex).toBe(0xb4b4b4);
+      expect(capturedDuringClayRender[0].floorColorHex).toBe(0x626262);
+      expect(capturedDuringClayRender[0].lightColorHex).toBe(0xffffff);
+
+      // Verify original materials and colored light were restored after Clay pass
+      expect(actorMesh.material).toBe(origActorMat);
+      expect(floorMesh.material).toBe(origFloorMat);
+      expect(coloredLight.color.getHex()).toBe(0xff33aa);
+    });
   });
 });

@@ -424,8 +424,183 @@ export const AssetLibraryModal: React.FC = () => {
 
   if (!isOpen) return null;
 
-  // Combine curated assets and custom uploaded/generated assets
-  const allAssets = [...customAssets, ...CURATED_3D_ASSETS];
+  const resolveAssetThumbUrl = (asset: Asset3DItem): string | undefined => {
+    const raw = asset.conceptImageUrl;
+    if (raw) {
+      if (raw.startsWith('/images/')) {
+        return `.${raw}`;
+      }
+      return raw;
+    }
+    const modelAndName = `${asset.modelUrl || ''} ${asset.name || ''} ${asset.id || ''}`.toLowerCase();
+    if (modelAndName.includes('readyplayerme') || modelAndName.includes('rpm-avatar')) {
+      return './images/library/mixamo-rpm-avatar.jpg';
+    }
+    if (modelAndName.includes('robotexpressive') || modelAndName.includes('robot-expressive')) {
+      return './images/library/mixamo-robot-expressive.jpg';
+    }
+    if (modelAndName.includes('cesiumman') || modelAndName.includes('cesium-man')) {
+      return './images/library/mixamo-cesium-man.jpg';
+    }
+    if (modelAndName.includes('fox.glb') || modelAndName.includes('khronos-fox')) {
+      return './images/library/animal-fox.jpg';
+    }
+    if (modelAndName.includes('horse.glb') || modelAndName.includes('threejs-horse')) {
+      return './images/library/animal-horse.jpg';
+    }
+    if (modelAndName.includes('soldier') || modelAndName.includes('vanguard')) {
+      return './images/library/mixamo-soldier.jpg';
+    }
+    if (modelAndName.includes('michelle')) {
+      return './images/library/mixamo-michelle.jpg';
+    }
+    if (modelAndName.includes('xbot.glb') || modelAndName.includes('xbot-studio')) {
+      return './images/library/mixamo-xbot-studio.jpg';
+    }
+    if (
+      modelAndName.includes('x-bot') ||
+      /\b(female|woman|girl|actress|heroine|queen|princess|lady)\b/.test(modelAndName) ||
+      /(امرأة|بنت|فتاة|ممثلة|بطلة|سيدة)/.test(modelAndName)
+    ) {
+      return './images/library/mixamo-xbot-female.jpg';
+    }
+    if (
+      modelAndName.includes('y-bot') ||
+      asset.category === 'character' ||
+      asset.kind === 'human'
+    ) {
+      return './images/library/mixamo-ybot-male.jpg';
+    }
+    return undefined;
+  };
+
+  const resolveAssetSourceBadge = (
+    asset: Asset3DItem
+  ): { icon: string; label: string; title: string; className: string } => {
+    const idLower = (asset.id || '').toLowerCase();
+    const urlLower = (asset.modelUrl || '').toLowerCase();
+    const descLower = (asset.description || '').toLowerCase();
+
+    if (idLower === 'char-mixamo-rpm-avatar' || urlLower.includes('readyplayerme')) {
+      return {
+        icon: '🎩',
+        label: 'RPM • Mixamo',
+        title: 'Source: ReadyPlayerMe / Mixamo 67-Bone Rig (MIT Sample)',
+        className: 'bg-violet-950/90 text-violet-200 border-violet-400/50',
+      };
+    }
+    if (
+      idLower.startsWith('char-director-rig-') ||
+      idLower.startsWith('char-mixamo-') ||
+      urlLower.includes('y-bot-tpose') ||
+      urlLower.includes('x-bot-tpose') ||
+      urlLower.includes('soldier.glb') ||
+      urlLower.includes('michelle.glb') ||
+      urlLower.includes('xbot.glb')
+    ) {
+      return {
+        icon: '🎭',
+        label: 'Mixamo',
+        title: 'Source: Adobe Mixamo / Three.js Open Rig (65-Bone Mocap Ready)',
+        className: 'bg-cyan-950/90 text-cyan-200 border-cyan-400/50',
+      };
+    }
+    if (idLower === 'char-quaternius-robot-expressive' || urlLower.includes('robotexpressive')) {
+      return {
+        icon: '🤖',
+        label: 'Quaternius CC0',
+        title: 'Source: Quaternius / Three.js (CC0 Public Domain • 14 Embedded Clips)',
+        className: 'bg-amber-950/90 text-amber-200 border-amber-400/50',
+      };
+    }
+    if (
+      idLower === 'char-khronos-cesium-man' ||
+      idLower === 'animal-khronos-fox' ||
+      urlLower.includes('cesiumman') ||
+      urlLower.includes('fox.glb')
+    ) {
+      return {
+        icon: '🌐',
+        label: 'Khronos glTF',
+        title: 'Source: Khronos Group Official glTF Sample Models (CC0 / CC-BY 4.0)',
+        className: 'bg-teal-950/90 text-teal-200 border-teal-400/50',
+      };
+    }
+    if (idLower === 'animal-threejs-horse' || urlLower.includes('horse.glb')) {
+      return {
+        icon: '🐎',
+        label: 'Three.js MIT',
+        title: 'Source: Three.js Official MIT Examples Repository',
+        className: 'bg-sky-950/90 text-sky-200 border-sky-400/50',
+      };
+    }
+    if (
+      idLower.startsWith('pf-') ||
+      urlLower.includes('polyfork.dev') ||
+      descLower.includes('polyfork')
+    ) {
+      return {
+        icon: '🌲',
+        label: 'Polyfork',
+        title: 'Source: Polyfork Open 3D Catalog (polyfork.dev • Free GLB)',
+        className: 'bg-emerald-950/90 text-emerald-200 border-emerald-400/50',
+      };
+    }
+    if (idLower.startsWith('sand3d-') || descLower.includes('sand3d')) {
+      return {
+        icon: '🏖️',
+        label: 'Sand3D',
+        title: 'Source: Sandflow AI Sand3D (CC-BY 4.0 / SimReady)',
+        className: 'bg-amber-950/90 text-amber-200 border-amber-400/50',
+      };
+    }
+    if (asset.modelId?.startsWith('comfy-disk-') || urlLower.includes('comfy-glb-output')) {
+      return {
+        icon: '🟣',
+        label: 'ComfyUI 3D',
+        title: 'Source: Local ComfyUI 3D Studio Output (.GLB)',
+        className: 'bg-purple-950/90 text-purple-200 border-purple-400/50',
+      };
+    }
+    if (asset.source === 'ai-generated') {
+      return {
+        icon: '✨',
+        label: 'AI Reasoned',
+        title: 'Source: Generated by AI Object Reasoner / 3D Studio',
+        className: 'bg-fuchsia-950/90 text-fuchsia-200 border-fuchsia-400/50',
+      };
+    }
+    if (asset.source === 'uploaded' || asset.isCustom) {
+      return {
+        icon: '📤',
+        label: 'Uploaded',
+        title: 'Source: Custom User-Uploaded 3D Model (.GLB / .FBX)',
+        className: 'bg-blue-950/90 text-blue-200 border-blue-400/50',
+      };
+    }
+    return {
+      icon: '⚙️',
+      label: 'Studio Rig',
+      title: 'Source: Built-in Studio Procedural 3D Rig',
+      className: 'bg-slate-900/90 text-slate-200 border-white/20',
+    };
+  };
+
+  // Pin flagship Mixamo Studio 3D rigs & animated creatures at the very top of Explore so they are always the first rows
+  const featuredMixamoAssets = CURATED_3D_ASSETS.filter(
+    (a) =>
+      a.id.startsWith('char-director-rig-') ||
+      a.id.startsWith('char-mixamo-') ||
+      a.id === 'char-quaternius-robot-expressive' ||
+      a.id === 'char-khronos-cesium-man' ||
+      a.id === 'animal-khronos-fox' ||
+      a.id === 'animal-threejs-horse'
+  );
+  const featuredMixamoIds = new Set(featuredMixamoAssets.map((a) => a.id));
+  const remainingCuratedAssets = CURATED_3D_ASSETS.filter((a) => !featuredMixamoIds.has(a.id));
+
+  // Combine featured Mixamo rigs, custom uploaded/generated assets, and remaining curated catalog
+  const allAssets = [...featuredMixamoAssets, ...customAssets, ...remainingCuratedAssets];
   const reasonedTotalCount = allAssets.filter(
     (a) => lookupPartGraph(a.tokenPrompt || a.name) || a.source === 'ai-generated'
   ).length;
@@ -530,11 +705,31 @@ export const AssetLibraryModal: React.FC = () => {
     });
 
     if (previewOpts?.posePreset || (previewOpts?.gait && previewOpts.gait !== 'none')) {
-      const latestSelectedId = useShotStore.getState().selectedActorId;
+      const latestState = useShotStore.getState();
+      const latestSelectedId = latestState.selectedActorId;
       if (latestSelectedId && latestSelectedId !== '__camera__') {
+        const createdActor = latestState.shot.actors.find((a) => a.id === latestSelectedId);
+        const shotDur = Math.max(2, latestState.shot.durationSeconds || 5);
+        const naturalSpeed = previewOpts?.gait === 'run' ? 6.85 : 4.16;
+        const travelUnits =
+          previewOpts?.gait && previewOpts.gait !== 'none'
+            ? Math.min(36, Math.round(shotDur * naturalSpeed))
+            : 0;
+        const nextTrajectory =
+          createdActor && travelUnits > 0
+            ? {
+                ...createdActor.trajectory,
+                endPosition: {
+                  x: createdActor.trajectory.startPosition.x,
+                  y: Math.min(92, createdActor.trajectory.startPosition.y + travelUnits),
+                  z: createdActor.trajectory.startPosition.z || 0,
+                },
+              }
+            : undefined;
         updateActor(latestSelectedId, {
           posePreset: previewOpts.posePreset as any,
           gait: (previewOpts.gait || 'none') as any,
+          ...(nextTrajectory ? { trajectory: nextTrajectory } : {}),
         });
       }
     }
@@ -900,7 +1095,7 @@ export const AssetLibraryModal: React.FC = () => {
                 }}
               >
                 <img
-                  src="/images/library/hero-sculpture.jpg"
+                  src="./images/library/hero-sculpture.jpg"
                   alt=""
                   className="h-full w-full object-cover object-center"
                 />
@@ -1982,23 +2177,44 @@ export const AssetLibraryModal: React.FC = () => {
                               viewMode === 'compact' ? 'h-24' : 'h-36'
                             }`}
                           >
-                            {asset.conceptImageUrl ? (
-                              <img
-                                src={asset.conceptImageUrl}
-                                alt={asset.name}
-                                loading="lazy"
-                                className="h-full w-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
-                              />
-                            ) : (
-                              <div className="flex h-full w-full items-center justify-center text-4xl">
-                                <span role="img" aria-label={asset.name}>
-                                  {asset.icon}
-                                </span>
-                              </div>
-                            )}
+                            {(() => {
+                              const thumbUrl = resolveAssetThumbUrl(asset);
+                              return thumbUrl ? (
+                                <img
+                                  src={thumbUrl}
+                                  alt={asset.name}
+                                  loading="lazy"
+                                  className="h-full w-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-4xl">
+                                  <span role="img" aria-label={asset.name}>
+                                    {asset.icon}
+                                  </span>
+                                </div>
+                              );
+                            })()}
 
                             {/* Subtle bottom gradient vignette for badge legibility */}
                             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-[#111524] via-[#111524]/60 to-transparent" />
+
+                            {/* Top-Left Model Source Icon & Badge */}
+                            {(() => {
+                              const srcBadge = resolveAssetSourceBadge(asset);
+                              return (
+                                <div
+                                  className="absolute top-2.5 left-2.5 z-10"
+                                  title={srcBadge.title}
+                                >
+                                  <span
+                                    className={`inline-flex items-center gap-1 rounded-md backdrop-blur-md border px-2 py-0.5 text-[9.5px] font-mono font-bold shadow ${srcBadge.className}`}
+                                  >
+                                    <span>{srcBadge.icon}</span>
+                                    <span>{srcBadge.label}</span>
+                                  </span>
+                                </div>
+                              );
+                            })()}
 
                             {/* Top-Right Favorite Heart or Multi-Select Checkbox */}
                             <div className="absolute top-2.5 right-2.5 z-10 flex items-center gap-1">

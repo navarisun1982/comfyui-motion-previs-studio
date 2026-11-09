@@ -109,9 +109,26 @@ export const IKTargetSchema = z.object({
 });
 export type IKTarget = z.infer<typeof IKTargetSchema>;
 
+export const AnatomicalMocapIKTargetsSchema = z.object({
+  leftAnkle: z.tuple([z.number(), z.number(), z.number()]),
+  rightAnkle: z.tuple([z.number(), z.number(), z.number()]),
+  leftKneePole: z.tuple([z.number(), z.number(), z.number()]),
+  rightKneePole: z.tuple([z.number(), z.number(), z.number()]),
+  leftFootPitch: z.number(),
+  rightFootPitch: z.number(),
+  leftHand: z.tuple([z.number(), z.number(), z.number()]),
+  rightHand: z.tuple([z.number(), z.number(), z.number()]),
+  leftElbowPole: z.tuple([z.number(), z.number(), z.number()]),
+  rightElbowPole: z.tuple([z.number(), z.number(), z.number()]),
+  headLookAt: z.tuple([z.number(), z.number(), z.number()]).optional(),
+});
+export type AnatomicalMocapIKTargets = z.infer<typeof AnatomicalMocapIKTargetsSchema>;
+
 export const ActorPoseSchema = z.object({
   hipsOffset: z.tuple([z.number(), z.number(), z.number()]).optional(),
   rotations: z.record(z.string(), z.tuple([z.number(), z.number(), z.number(), z.number()])), // boneName -> [x, y, z, w] quaternion
+  charSpaceRotations: z.record(z.string(), z.tuple([z.number(), z.number(), z.number(), z.number()])).optional(),
+  anatomicalIk: AnatomicalMocapIKTargetsSchema.optional(),
 });
 export type ActorPose = z.infer<typeof ActorPoseSchema>;
 
@@ -184,6 +201,23 @@ export const ActorSchema = z.object({
   rigType: z.enum(['auto', 'humanoid', 'quadruped', 'spine_flex', 'rigid_prop']).optional(),
   rigLandmarks: z.any().optional(),
   showBones: z.boolean().optional(),
+  bodyProportions: z
+    .object({
+      heightMeters: z.number().min(0.5).max(3.0).default(1.75),
+      shoulderWidthRatio: z.number().min(0.5).max(2.0).default(1.0),
+      hipWidthRatio: z.number().min(0.5).max(2.0).default(1.0),
+      torsoLengthRatio: z.number().min(0.5).max(2.0).default(1.0),
+      legLengthRatio: z.number().min(0.5).max(2.0).default(1.0),
+      armLengthRatio: z.number().min(0.5).max(2.0).optional(),
+      bulkFactor: z.number().min(0.5).max(2.0).default(1.0),
+      hasSkinnedMesh: z.boolean().optional(),
+      vertexCount: z.number().int().min(0).optional(),
+      boneCount: z.number().int().min(0).optional(),
+      shapeBetas: z.array(z.number()).optional(),
+      tposeJointsSmpl24: z.array(z.array(z.number())).optional(),
+      humanoidMeshMode: z.enum(['smpl', 'ybot']).optional(),
+    })
+    .optional(),
 });
 export type Actor = z.infer<typeof ActorSchema>;
 export type ActorGait = 'auto' | 'walk' | 'run' | 'sneak' | 'idle' | 'none';

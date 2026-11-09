@@ -827,16 +827,33 @@ export class ComfyClient {
         return qb - qa;
       });
 
-      // Pass 1: Prefer studio renders (Node 145 or cmpvs_ / mmh3_ prefix)
+      // Known primary & fallback save nodes across all built-in LTX-2.5 & MiniMax H3 workflows
+      const PRIMARY_STUDIO_SAVE_NODES = ['15', '12', '145', '702', '34', '75', '454'];
+      const FALLBACK_STUDIO_SAVE_NODES = ['10', '11', '13', '134', '144', '18'];
+      const STUDIO_PREFIX_RE = /^(?:cmpvs_|mmh3_|StubeliusLTX|final_|seed\d+_|UH3|UltimateH3|H3)/i;
+
+      // Pass 1: Prefer studio renders (ordered by Primary Save Nodes -> Fallback Seed Save Nodes -> any other node)
       for (const preferStudioOnly of [true, false]) {
         for (const [promptId, item] of entries) {
           const outputs = item.outputs as Record<string, Record<string, unknown>> | undefined;
           if (!outputs) continue;
-          for (const [nodeId, nodeOut] of Object.entries(outputs)) {
+          const orderedNodeIds = [
+            ...PRIMARY_STUDIO_SAVE_NODES.filter((id) => id in outputs),
+            ...FALLBACK_STUDIO_SAVE_NODES.filter((id) => id in outputs),
+            ...Object.keys(outputs).filter(
+              (id) => !PRIMARY_STUDIO_SAVE_NODES.includes(id) && !FALLBACK_STUDIO_SAVE_NODES.includes(id)
+            ),
+          ];
+          for (const nodeId of orderedNodeIds) {
+            const nodeOut = outputs[nodeId];
+            if (!nodeOut) continue;
             const v = this.extractVideoOutput(nodeOut);
             if (!v) continue;
             const isStudioRender =
-              nodeId === '145' || v.filename.startsWith('cmpvs_') || v.filename.startsWith('mmh3_');
+              PRIMARY_STUDIO_SAVE_NODES.includes(nodeId) ||
+              FALLBACK_STUDIO_SAVE_NODES.includes(nodeId) ||
+              STUDIO_PREFIX_RE.test(v.filename) ||
+              STUDIO_PREFIX_RE.test(v.subfolder || '');
             if (preferStudioOnly && !isStudioRender) continue;
 
             const gifMeta = Array.isArray(nodeOut.gifs) && nodeOut.gifs[0] ? (nodeOut.gifs[0] as Record<string, unknown>) : null;

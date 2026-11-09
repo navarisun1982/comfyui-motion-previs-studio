@@ -371,6 +371,41 @@ describe('bundled production templates', () => {
     expect(controlTimeline.characters[0].description).toBe('Agent Mercer in trenchcoat');
     expect(controlTimeline.characters[3].images[0].name).toBe('char4.png');
     expect(controlTimeline.characters[3].description).toBe('Rainy neon alley');
+    expect(controlTimeline.global_prompt).toBe('@ref1 runs through the neon alley toward @ref2');
+    expect(controlTimeline.segments[0].prompt).toBe('@ref1 runs through the neon alley toward @ref2');
+
+    // Bind Control mode with explicit Smart Workflow Quick Settings (Clay Pass Auto-Tune overrides + 24GB VRAM protection)
+    const clayTunedRes = bindTemplate(apiRaw, parsed.binding!, {
+      mode: 'control',
+      profile: 'final',
+      prompt: 'A photorealistic man walking along a sunset beach',
+      negative: 'low quality',
+      seed: 8888,
+      steps: 10,
+      icLoraStrength: 0.85,
+      firstPassScale: 1.0,
+      referenceMode: 'OFF',
+      durationSeconds: 8,
+      frameRate: 24,
+      aspectRatio: '16:9',
+      width: 1280,
+      height: 704,
+      filenamePrefix: 'ltx_clay_shot',
+      controlVideoFile: 'beach_clay_layout.mp4',
+      refImage1File: 'man.png',
+    });
+
+    expect(clayTunedRes.workflow['3'].inputs.steps).toBe(10);
+    expect(clayTunedRes.workflow['3'].inputs.first_pass_scale).toBe(1.0);
+    expect(clayTunedRes.workflow['5'].inputs.ic_lora_strength).toBe(0.85);
+    expect(clayTunedRes.workflow['5'].inputs.chunk_feed_forward).toBe(true);
+    expect(clayTunedRes.workflow['5'].inputs.decode_tile_size).toBe(512);
+    const clayTimeline = JSON.parse(clayTunedRes.workflow['7'].inputs.timeline_data as string);
+    expect(clayTimeline.reference_mode).toBe('OFF');
+    expect(clayTimeline.motionSegments[0].videoStrength).toBe(0.47);
+    expect(clayTimeline.motionSegments[0].videoAttentionStrength).toBe(0.26);
+    expect(clayTimeline.global_prompt).toBe('A photorealistic man walking along a sunset beach');
+    expect(clayTimeline.segments[0].prompt).toBe('A photorealistic man walking along a sunset beach');
   });
 
   it('loads, verifies, and binds h3_stubelius without errors', async () => {

@@ -12,6 +12,7 @@
 import * as THREE from 'three';
 import { HumanoidRig } from './skeletonHierarchy';
 import { solveLimbIK, solveLookAt } from './twoBoneIKSolver';
+import { evaluateMixamoClipOnRig, MIXAMO_NATURAL_STAGE_SPEEDS } from './mixamoClipLibrary';
 
 export type GaitType = 'auto' | 'walk' | 'run' | 'sneak' | 'idle' | 'none';
 
@@ -156,6 +157,33 @@ export function evaluateGait(
   const cycleFreq = cfg.frequency * freqScale;
   const phase = ((timeSeconds * cycleFreq) % 1.0 + 1.0) % 1.0;
   const env = options.strideEnvelope !== undefined ? THREE.MathUtils.clamp(options.strideEnvelope, 0.15, 1.0) : 1.0;
+
+  // Authentic Mixamo 52-bone Studio Motion Capture path for Mixamo FBX rigs (`y-bot-tpose.fbx` and `x-bot-tpose.fbx`)
+  if (
+    rig.mixamoBones &&
+    rig.mixamoBones.size > 0 &&
+    !rig.root.userData?.isAutoRiggedGlb &&
+    (effectiveGait === 'walk' || effectiveGait === 'run' || effectiveGait === 'idle')
+  ) {
+    // Synchronize stride frequency with actual floor travel speed (`options.speed` in stage units/sec)
+    // so the planted stance foot moves backward at the exact same speed the character moves forward on the stage floor.
+    let strideLockedScale = freqScale;
+    if ((effectiveGait === 'walk' || effectiveGait === 'run') && options.speed && options.speed > 0.35) {
+      const naturalStageSpeed =
+        MIXAMO_NATURAL_STAGE_SPEEDS[effectiveGait] * Math.max(0.5, (rig.height || 5.06) / 5.06);
+      // If caller passed raw stage units/sec (> 2.0), lock 1:1 to floor velocity
+      if (options.speed > 2.0) {
+        strideLockedScale = THREE.MathUtils.clamp(options.speed / naturalStageSpeed, 0.55, 1.85);
+      }
+    }
+    const res = evaluateMixamoClipOnRig(rig, effectiveGait, timeSeconds, {
+      speedScale: strideLockedScale,
+      blendWeight: effectiveGait === 'idle' ? 1.0 : env,
+    });
+    if (res.applied) {
+      return { effectiveGait, phase };
+    }
+  }
 
   const h = rig.height;
   const root = rig.root;

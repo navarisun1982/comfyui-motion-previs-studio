@@ -62,10 +62,13 @@ describe('Skinned Mannequin Loader & Rigging Engine', () => {
         const mesh = child as THREE.SkinnedMesh;
         expect(mesh.material).toBeInstanceOf(THREE.MeshStandardMaterial);
         const mat = mesh.material as THREE.MeshStandardMaterial;
-        expect(mat.roughness).toBe(0.66);
-        expect(mat.metalness).toBe(0.0);
         if (/_Joints$/i.test(mesh.name)) {
+          expect(mat.roughness).toBe(0.38);
+          expect(mat.metalness).toBe(0.42);
           jointMeshFound = true;
+        } else {
+          expect(mat.roughness).toBe(0.34);
+          expect(mat.metalness).toBe(0.08);
         }
       }
     });

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useShotStore, getEffectiveStageLights } from '../stores/useShotStore';
+import { formatReadableEnginePrompt } from '../engine/promptCompiler';
 import {
   FocalLength,
   ShotType,
@@ -182,6 +183,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
     applyDirectorialMotion,
     applyReadyMadeMotion,
     resetActorMotion,
+    removeActorKeyframe,
     moveActorKeyframeTime,
     scaleActorCuesInRange,
     applyActorMotionCurve,
@@ -210,9 +212,12 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
   const stageLockedCustom = shot.customPositivePrompts?.[activeStageEngine];
   const isStagePromptLocked =
     typeof stageLockedCustom === 'string' && stageLockedCustom.trim().length > 0;
-  const stageDisplayPositivePrompt = isStagePromptLocked
-    ? stageLockedCustom
-    : compiledPrompt?.positivePrompt || stageDeterministicPrompt.positivePrompt;
+  const stageDisplayPositivePrompt = formatReadableEnginePrompt(
+    isStagePromptLocked
+      ? stageLockedCustom
+      : compiledPrompt?.positivePrompt || stageDeterministicPrompt.positivePrompt,
+    activeStageEngine
+  );
   const stageUndoCount = (shot.promptHistory?.[activeStageEngine] || []).length;
 
   const handleStagePromptChatSend = async (overrideInstruction?: string) => {
@@ -1348,20 +1353,40 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
         {/* ================= TAB 2: CAST & STAGE (ZERO DUPLICATES + SCENE CAST POOL) ================= */}
         {activeTab === 'staging' && (
           <div className="p-3 space-y-2.5">
-            {/* 1. Single Top Button to Open the 3D Asset Library & AI Studio Popup (No Collapsible Drawer) */}
-            <button
-              type="button"
-              onClick={() => openAssetLibrary()}
-              className="w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-amber-600/90 via-indigo-600/90 to-purple-600/90 hover:from-amber-500 hover:via-indigo-500 hover:to-purple-500 text-white font-bold text-xs flex items-center justify-between shadow-lg border border-amber-400/40 transition-all cursor-pointer"
-            >
-              <span className="flex items-center gap-2">
-                <Plus className="h-4 w-4 text-amber-300 shrink-0" />
-                <span>Add Subject</span>
-              </span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-black/45 border border-white/20 text-amber-200">
-                Library / Upload
-              </span>
-            </button>
+            {/* 1. Top Action Buttons: Add Subject (Library / Upload) + 3D Mocap / Video & Scene Studio */}
+            <div className="grid grid-cols-1 gap-2">
+              <button
+                type="button"
+                onClick={() => openAssetLibrary()}
+                className="w-full py-2.5 px-3.5 rounded-xl bg-gradient-to-r from-amber-600/90 via-indigo-600/90 to-purple-600/90 hover:from-amber-500 hover:via-indigo-500 hover:to-purple-500 text-white font-bold text-xs flex items-center justify-between shadow-lg border border-amber-400/40 transition-all cursor-pointer"
+              >
+                <span className="flex items-center gap-2">
+                  <Plus className="h-4 w-4 text-amber-300 shrink-0" />
+                  <span>Add Subject</span>
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-black/45 border border-white/20 text-amber-200">
+                  Library / Upload
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('cmpvs:open-mocap-studio'));
+                }}
+                data-testid="deck-top-mocap-btn"
+                className="w-full py-2 px-3.5 rounded-xl bg-gradient-to-r from-cyan-700/85 via-blue-700/85 to-indigo-700/85 hover:from-cyan-600 hover:via-blue-600 hover:to-indigo-600 text-white font-bold text-xs flex items-center justify-between shadow-md border border-cyan-400/50 transition-all cursor-pointer"
+                title="Open 3D Mocap, Full Body & Surrounding Scene Studio (.MP4 Video or .FBX)"
+              >
+                <span className="flex items-center gap-2">
+                  <span>🎥</span>
+                  <span>Import Video / 3D Mocap</span>
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-black/45 border border-cyan-300/30 text-cyan-200">
+                  Motion + Body + Scene
+                </span>
+              </button>
+            </div>
 
             {/* 2. Scene Cast Pool — Individual Vertical Collapsible Panel */}
             <div className="rounded-xl bg-[#121A2A] border border-[#6658F5]/35 shadow-sm p-2.5 space-y-2">
@@ -1587,6 +1612,7 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                           applyReadyMadeMotion(id, clipId, opts)
                         }
                         onResetActorMotion={(id) => resetActorMotion(id)}
+                        onRemoveActorCue={(id, cueId) => removeActorKeyframe(id, cueId)}
                         onExtendShotDuration={(nextDur) => updateDuration(nextDur)}
                         onMoveActorCueTime={(id, cueId, nextTime) => moveActorKeyframeTime(id, cueId, nextTime)}
                         onScaleActorCuesInRange={(id, oldStart, oldEnd, newStart, newEnd, initialTimesById) =>

@@ -27,8 +27,24 @@ export interface LoadedModelResult {
   animations?: THREE.AnimationClip[];
 }
 
+function normalizeLocalPublicModelUrl(url: string): string {
+  if (
+    typeof window !== 'undefined' &&
+    window.location?.protocol?.startsWith('file:') &&
+    url.startsWith('/models/')
+  ) {
+    return `.${url}`;
+  }
+  return url;
+}
+
 function storeTemplateWithAliases(modelUrl: string, template: THREE.Group): void {
   normalizedTemplateCache.set(modelUrl, template);
+  if (modelUrl.startsWith('./models/')) {
+    normalizedTemplateCache.set(modelUrl.slice(1), template);
+  } else if (modelUrl.startsWith('/models/')) {
+    normalizedTemplateCache.set(`.${modelUrl}`, template);
+  }
   const modelId = getModelIdFromUrl(modelUrl);
   if (modelId) {
     normalizedTemplateCache.set(modelId, template);
@@ -39,6 +55,13 @@ function storeTemplateWithAliases(modelUrl: string, template: THREE.Group): void
 function lookupTemplateWithAliases(modelUrl: string): THREE.Group | undefined {
   const direct = normalizedTemplateCache.get(modelUrl);
   if (direct) return direct;
+  if (modelUrl.startsWith('./models/')) {
+    const slashAlias = normalizedTemplateCache.get(modelUrl.slice(1));
+    if (slashAlias) return slashAlias;
+  } else if (modelUrl.startsWith('/models/')) {
+    const dotAlias = normalizedTemplateCache.get(`.${modelUrl}`);
+    if (dotAlias) return dotAlias;
+  }
   const modelId = getModelIdFromUrl(modelUrl);
   if (modelId) {
     return (
@@ -91,6 +114,52 @@ export function normalizeGltfScene(rawScene: THREE.Group, targetHeightMeters: nu
 
   // Work on a wrapper to preserve original object transforms
   container.add(rawScene);
+
+  // 0. If this GLTF contains a humanoid skeleton (Mixamo / standard Hips + Head + LeftUpLeg + RightUpLeg),
+  // ensure the character stands upright (+Y) and faces forward (+Z, where LeftUpLeg.x > RightUpLeg.x)
+  // before computing bounding boxes or capturing rest-pose bone matrices.
+  rawScene.updateMatrixWorld(true);
+  let hipsBone: THREE.Object3D | null = null;
+  let headBone: THREE.Object3D | null = null;
+  let leftUpLegBone: THREE.Object3D | null = null;
+  let rightUpLegBone: THREE.Object3D | null = null;
+  rawScene.traverse((child) => {
+    if ((child as THREE.Bone).isBone) {
+      const n = child.name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (!hipsBone && (n === 'mixamorighips' || n === 'hips' || n.endsWith('hips'))) {
+        hipsBone = child;
+      } else if (!headBone && (n === 'mixamorighead' || n === 'head' || n.endsWith('head'))) {
+        headBone = child;
+      } else if (!leftUpLegBone && (n.includes('leftupleg') || n.includes('lthigh'))) {
+        leftUpLegBone = child;
+      } else if (!rightUpLegBone && (n.includes('rightupleg') || n.includes('rthigh'))) {
+        rightUpLegBone = child;
+      }
+    }
+  });
+
+  if (hipsBone && headBone) {
+    const hipsPos = new THREE.Vector3();
+    const headPos = new THREE.Vector3();
+    (hipsBone as THREE.Object3D).getWorldPosition(hipsPos);
+    (headBone as THREE.Object3D).getWorldPosition(headPos);
+    const dy = headPos.y - hipsPos.y;
+    const dz = headPos.z - hipsPos.z;
+    if (Math.abs(dz) > Math.abs(dy) * 1.2) {
+      rawScene.rotateX(dz > 0 ? -Math.PI / 2 : Math.PI / 2);
+      rawScene.updateMatrixWorld(true);
+    }
+    if (leftUpLegBone && rightUpLegBone) {
+      const lPos = new THREE.Vector3();
+      const rPos = new THREE.Vector3();
+      (leftUpLegBone as THREE.Object3D).getWorldPosition(lPos);
+      (rightUpLegBone as THREE.Object3D).getWorldPosition(rPos);
+      if (lPos.x < rPos.x - 1e-4) {
+        rawScene.rotateY(Math.PI);
+        rawScene.updateMatrixWorld(true);
+      }
+    }
+  }
 
   // 1. Compute initial untransformed bounding box to determine scale
   rawScene.updateMatrixWorld(true);
@@ -223,9 +292,10 @@ export async function loadGltfModel(
       }
 
       // Step C: Fallback to standard URL loader
+      const resolvedLoadUrl = normalizeLocalPublicModelUrl(modelUrl);
       return new Promise<THREE.Group>((resolve, reject) => {
         gltfLoader.load(
-          modelUrl,
+          resolvedLoadUrl,
           (gltf) => {
             const normalized = normalizeGltfScene(gltf.scene, targetHeightMeters);
             normalized.userData.gltfAnimations = gltf.animations || [];
@@ -233,7 +303,7 @@ export async function loadGltfModel(
           },
           undefined,
           (err) => {
-            console.error(`GLTFLoader.load failed for model [${modelUrl}]:`, err);
+            console.error(`GLTFLoader.load failed for model [${resolvedLoadUrl}]:`, err);
             reject(err);
           }
         );

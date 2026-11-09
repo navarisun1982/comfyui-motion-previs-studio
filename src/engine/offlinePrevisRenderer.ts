@@ -22,7 +22,7 @@ export interface PrevisRenderOptions {
   fps?: number;
   width?: number;
   height?: number;
-  renderPass?: 'rgb' | 'depth' | 'openpose' | 'id-mask' | 'both' | 'all';
+  renderPass?: 'rgb' | 'clay' | 'depth' | 'openpose' | 'id-mask' | 'both' | 'all';
   snap8n1?: boolean;
   trimStartSeconds?: number;
   trimEndSeconds?: number;
@@ -36,6 +36,8 @@ export interface PrevisRenderOptions {
 export interface PrevisRenderResult {
   rgbBlob?: Blob;
   rgbUrl?: string;
+  clayBlob?: Blob;
+  clayUrl?: string;
   depthBlob?: Blob;
   depthUrl?: string;
   openposeBlob?: Blob;
@@ -271,12 +273,14 @@ export async function renderOfflinePrevisPasses(
     : Math.max(2, Math.round(activeDuration * fps));
 
   const shouldRenderRgb = renderPass === 'rgb' || renderPass === 'both' || renderPass === 'all';
+  const shouldRenderClay = renderPass === 'clay' || renderPass === 'all';
   const shouldRenderDepth = renderPass === 'depth' || renderPass === 'both' || renderPass === 'all';
   const shouldRenderOpenpose = renderPass === 'openpose' || renderPass === 'all';
   const shouldRenderIdMask = renderPass === 'id-mask' || renderPass === 'all';
 
   // 2. Offscreen intermediate canvases
   const rgbFrames: HTMLCanvasElement[] = [];
+  const clayFrames: HTMLCanvasElement[] = [];
   const depthFrames: HTMLCanvasElement[] = [];
   const openposeFrames: HTMLCanvasElement[] = [];
   const idMaskFrames: HTMLCanvasElement[] = [];
@@ -285,6 +289,24 @@ export async function renderOfflinePrevisPasses(
   const depthFar = Math.min(Math.max(camera.far * 0.1, 40.0), 80.0);
   const depthNear = Math.max(camera.near, 0.4);
   const depthMaterial = createLinearDepthMaterial(depthNear, depthFar);
+
+  // Albedo-Neutral Matte 3D Studio Clay Materials for LTX-2.5 `layout-to-render` (Zero Chrominance R=G=B)
+  const clayActorMaterial = new THREE.MeshStandardMaterial({
+    color: 0xb4b4b4,
+    roughness: 0.85,
+    metalness: 0.04,
+  });
+  const clayEnvMaterial = new THREE.MeshStandardMaterial({
+    color: 0x828282,
+    roughness: 0.9,
+    metalness: 0.02,
+  });
+  const clayFloorMaterial = new THREE.MeshStandardMaterial({
+    color: 0x626262,
+    roughness: 0.92,
+    metalness: 0.02,
+  });
+
   const idMaskMaterialCache = new Map<number, THREE.MeshBasicMaterial>();
   const getIdMaskMaterial = (colorHex: number): THREE.MeshBasicMaterial => {
     let mat = idMaskMaterialCache.get(colorHex);
@@ -335,6 +357,138 @@ export async function renderOfflinePrevisPasses(
           ctx.drawImage(renderer.domElement, 0, 0, width, height);
         }
         rgbFrames.push(frameCanvas);
+      }
+
+      // --- Pass 1b: Baked Clay Layout Pass (Albedo-Neutral Matte Grey 3D Shaded Geometry) ---
+      if (shouldRenderClay) {
+        const actorRootSet = new Set<THREE.Object3D>();
+        for (const child of scene.children) {
+          if (child.userData?.actorId !== undefined || child.userData?.isSubjectRoot === true) {
+            actorRootSet.add(child);
+          }
+        }
+
+        const isInsideActorRoot = (node: THREE.Object3D): boolean => {
+          let curr: THREE.Object3D | null = node;
+          while (curr && curr !== scene) {
+            if (actorRootSet.has(curr)) return true;
+            curr = curr.parent;
+          }
+          return false;
+        };
+
+        const isClayHelperOverlay = (node: THREE.Object3D): boolean => {
+          let curr: THREE.Object3D | null = node;
+          while (curr && curr !== scene) {
+            if (
+              curr.userData?.isContactShadow ||
+              curr.userData?.isBaseRing ||
+              curr.userData?.isHitProxy ||
+              curr.name === '__base_ring_group__' ||
+              curr.name === '__contact_shadow__' ||
+              (curr as THREE.Sprite).isSprite
+            ) {
+              return true;
+            }
+            curr = curr.parent;
+          }
+          return false;
+        };
+
+        const savedClayMaterials = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
+        const hiddenClayHelpers: THREE.Object3D[] = [];
+        const savedLightStates: Array<{
+          light: THREE.Light;
+          colorHex: number;
+          groundHex?: number;
+          intensity: number;
+        }> = [];
+
+        scene.traverse((obj) => {
+          if (obj === scene) return;
+
+          const asLight = obj as THREE.Light;
+          if (asLight.isLight) {
+            const hemi = asLight as THREE.HemisphereLight;
+            savedLightStates.push({
+              light: asLight,
+              colorHex: asLight.color ? asLight.color.getHex() : 0xffffff,
+              groundHex: hemi.isHemisphereLight && hemi.groundColor ? hemi.groundColor.getHex() : undefined,
+              intensity: asLight.intensity,
+            });
+            if (asLight.color) {
+              asLight.color.setHex(0xffffff);
+            }
+            if (hemi.isHemisphereLight && hemi.groundColor) {
+              hemi.groundColor.setHex(0x4a4a4a);
+            }
+            return;
+          }
+
+          if (
+            (obj as THREE.Sprite).isSprite ||
+            (obj as THREE.Points).isPoints ||
+            (obj as THREE.Line).isLine ||
+            isClayHelperOverlay(obj)
+          ) {
+            if (obj.visible) {
+              obj.visible = false;
+              hiddenClayHelpers.push(obj);
+            }
+            return;
+          }
+
+          const mesh = obj as THREE.Mesh;
+          if (mesh.isMesh) {
+            savedClayMaterials.set(mesh, mesh.material);
+            const isFloor =
+              mesh.rotation.x < -1.4 &&
+              mesh.position.y <= 0.05 &&
+              !isInsideActorRoot(mesh);
+            if (isInsideActorRoot(mesh)) {
+              mesh.material = clayActorMaterial;
+            } else if (isFloor) {
+              mesh.material = clayFloorMaterial;
+            } else {
+              mesh.material = clayEnvMaterial;
+            }
+          }
+        });
+
+        if (renderer.shadowMap) {
+          renderer.shadowMap.enabled = true;
+        }
+        scene.overrideMaterial = null;
+        scene.background = new THREE.Color(0x3a3a3e);
+        scene.fog = new THREE.Fog(0x3a3a3e, 38, 190);
+        renderer.render(scene, camera);
+
+        // Restore original materials, lights, and helper visibility immediately
+        savedClayMaterials.forEach((origMat, mesh) => {
+          mesh.material = origMat;
+        });
+        for (const obj of hiddenClayHelpers) {
+          obj.visible = true;
+        }
+        for (const st of savedLightStates) {
+          if (st.light.color) st.light.color.setHex(st.colorHex);
+          const hemi = st.light as THREE.HemisphereLight;
+          if (hemi.isHemisphereLight && hemi.groundColor && st.groundHex !== undefined) {
+            hemi.groundColor.setHex(st.groundHex);
+          }
+          st.light.intensity = st.intensity;
+        }
+        scene.background = prevBackground;
+        scene.fog = prevFog;
+
+        const clayCanvas = document.createElement('canvas');
+        clayCanvas.width = width;
+        clayCanvas.height = height;
+        const clayCtx = clayCanvas.getContext('2d');
+        if (clayCtx) {
+          clayCtx.drawImage(renderer.domElement, 0, 0, width, height);
+        }
+        clayFrames.push(clayCanvas);
       }
 
       // --- Pass 2: Volumetric Linear Depth Map ---
@@ -518,6 +672,8 @@ export async function renderOfflinePrevisPasses(
     // 3. Mux frames into compliant MP4 containers
     let rgbBlob: Blob | undefined;
     let rgbUrl: string | undefined;
+    let clayBlob: Blob | undefined;
+    let clayUrl: string | undefined;
     let depthBlob: Blob | undefined;
     let depthUrl: string | undefined;
     let openposeBlob: Blob | undefined;
@@ -526,7 +682,7 @@ export async function renderOfflinePrevisPasses(
     let idMaskUrl: string | undefined;
 
     if (shouldRenderRgb && rgbFrames.length > 0) {
-      onProgress?.(84);
+      onProgress?.(83);
       rgbBlob = await muxFramesToMp4(rgbFrames, width, height, fps);
       rgbUrl =
         typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
@@ -534,8 +690,17 @@ export async function renderOfflinePrevisPasses(
           : undefined;
     }
 
+    if (shouldRenderClay && clayFrames.length > 0) {
+      onProgress?.(87);
+      clayBlob = await muxFramesToMp4(clayFrames, width, height, fps);
+      clayUrl =
+        typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+          ? URL.createObjectURL(clayBlob)
+          : undefined;
+    }
+
     if (shouldRenderDepth && depthFrames.length > 0) {
-      onProgress?.(90);
+      onProgress?.(91);
       depthBlob = await muxFramesToMp4(depthFrames, width, height, fps);
       depthUrl =
         typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
@@ -566,6 +731,8 @@ export async function renderOfflinePrevisPasses(
     return {
       rgbBlob,
       rgbUrl,
+      clayBlob,
+      clayUrl,
       depthBlob,
       depthUrl,
       openposeBlob,
@@ -581,6 +748,9 @@ export async function renderOfflinePrevisPasses(
   } finally {
     // 4. Guaranteed restoration of scene and renderer state
     depthMaterial.dispose();
+    clayActorMaterial.dispose();
+    clayEnvMaterial.dispose();
+    clayFloorMaterial.dispose();
     idMaskMaterialCache.forEach((mat) => mat.dispose());
     scene.overrideMaterial = prevOverride;
     scene.background = prevBackground;

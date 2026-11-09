@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { LTXVideoAdapter } from '../src/adapters/ltxAdapter';
 import { createDefaultShotSpec } from '../src/types/shotspec';
+import { formatReadableEnginePrompt } from '../src/engine/promptCompiler';
 
 describe('LTXVideoAdapter', () => {
   const adapter = new LTXVideoAdapter();
@@ -8,6 +9,27 @@ describe('LTXVideoAdapter', () => {
   it('should declare open-weights compliance', () => {
     expect(adapter.capabilities.isOpenWeights).toBe(true);
     expect(adapter.capabilities.targetModelId).toBe('ltx-2.5');
+  });
+
+  it('should compile LTX-2.5 prompt into organized, human-readable paragraphs separated by blank lines', () => {
+    const shot = createDefaultShotSpec({
+      durationSeconds: 5.0,
+      frameRate: 24,
+      aspectRatio: '16:9',
+    });
+    const bundle = adapter.compilePrompt(shot);
+    const paragraphs = bundle.positivePrompt.split(/\n\n+/).filter(Boolean);
+    expect(paragraphs.length).toBeGreaterThanOrEqual(4);
+    expect(paragraphs[0]).toContain('Cinematic 16:9');
+    expect(paragraphs[1]).toContain('Throughout the continuous');
+    expect(paragraphs[2]).toContain('During the mid-shot progression');
+    expect(paragraphs[3]).toContain('In the closing beat');
+
+    // Also verifies single-block legacy LTX prompts are split into clean paragraphs
+    const flatPrompt =
+      'Cinematic 16:9 medium shot, eye-level framing. Throughout the continuous 4.0-second take, the camera moves forward. During the mid-shot progression (1.3s - 2.7s), the subject turns. In the closing beat (2.7s - 4.0s), the camera holds steady.';
+    const formatted = formatReadableEnginePrompt(flatPrompt, 'ltx-2.5');
+    expect(formatted.split(/\n\n+/).length).toBeGreaterThanOrEqual(3);
   });
 
   it('should build real ComfyUI workflow for text-to-video with LTX-2.5', () => {

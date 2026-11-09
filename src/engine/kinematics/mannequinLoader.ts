@@ -49,16 +49,34 @@ const BONE_TO_MIXAMO_CANDIDATES: Record<HumanoidBone, string[]> = {
   RightFoot: ['mixamorigrightfoot', 'rightfoot', 'rfoot', 'rightankle'],
 };
 
-// Global in-memory parsed template cache
-let cachedFbxTemplate: THREE.Group | null = null;
-let pendingLoadPromise: Promise<THREE.Group> | null = null;
+// Global in-memory parsed template cache keyed by URL (supports both y-bot-tpose.fbx and x-bot-tpose.fbx)
+const cachedFbxTemplatesByUrl = new Map<string, THREE.Group>();
+const pendingLoadPromisesByUrl = new Map<string, Promise<THREE.Group>>();
 
-const DEFAULT_MANNEQUIN_URL = '/models/y-bot-tpose.fbx';
+export const DEFAULT_MANNEQUIN_URL = '/models/y-bot-tpose.fbx';
+export const FEMALE_MANNEQUIN_URL = '/models/x-bot-tpose.fbx';
 const DEFAULT_HEIGHT = 5.06;
 const DEFAULT_CLAY_TINT = '#f2eee6';
 
+export function resolveMannequinUrlForIdentity(nameOrToken?: string): string {
+  const text = String(nameOrToken ?? '').toLowerCase();
+  if (
+    /\b(woman|female|girl|lady|heroine|actress|mother|mom|sister|queen|princess|bride|witch|sorceress|valkyrie|kunoichi|ballerina|dancer|slender\s+silhouette)\b/.test(
+      text
+    ) ||
+    /(امرأة|امراة|بنت|فتاة|سيدة|بطلة|ملكة|أميرة|اميرة|ممثلة|أخت|اخت|راقصة)/.test(text)
+  ) {
+    return FEMALE_MANNEQUIN_URL;
+  }
+  return DEFAULT_MANNEQUIN_URL;
+}
+
 export function normalizeBoneName(name: string): string {
   return String(name ?? '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+}
+
+export function stripMixamoPrefix(name: string): string {
+  return String(name ?? '').replace(/^mixamorig:?/i, '').trim();
 }
 
 /**
@@ -74,15 +92,18 @@ export function parseFbxBuffer(buffer: ArrayBuffer): THREE.Group {
  * In browser: uses window.fetch()
  * In Node/Vitest: reads directly from filesystem
  */
-export async function loadFbxTemplate(url: string = DEFAULT_MANNEQUIN_URL): Promise<THREE.Group> {
-  if (cachedFbxTemplate) {
-    return cachedFbxTemplate;
+export async function loadFbxTemplate(rawUrl: string = DEFAULT_MANNEQUIN_URL): Promise<THREE.Group> {
+  const url = rawUrl.startsWith('./models/') ? rawUrl.slice(1) : rawUrl;
+  const existing = cachedFbxTemplatesByUrl.get(url) || cachedFbxTemplatesByUrl.get(rawUrl);
+  if (existing) {
+    return existing;
   }
-  if (pendingLoadPromise) {
-    return pendingLoadPromise;
+  const pending = pendingLoadPromisesByUrl.get(url);
+  if (pending) {
+    return pending;
   }
 
-  pendingLoadPromise = (async () => {
+  const loadPromise = (async () => {
     try {
       let arrayBuffer: ArrayBuffer;
 
@@ -115,29 +136,34 @@ export async function loadFbxTemplate(url: string = DEFAULT_MANNEQUIN_URL): Prom
       }
 
       const fbx = parseFbxBuffer(arrayBuffer);
-      cachedFbxTemplate = fbx;
+      cachedFbxTemplatesByUrl.set(url, fbx);
+      cachedFbxTemplatesByUrl.set(`.${url}`, fbx);
       return fbx;
     } finally {
-      pendingLoadPromise = null;
+      pendingLoadPromisesByUrl.delete(url);
     }
   })();
 
-  return pendingLoadPromise;
+  pendingLoadPromisesByUrl.set(url, loadPromise);
+  return loadPromise;
 }
 
 /**
- * Preloads the default Y-Bot mannequin in background.
+ * Preloads both the male Y-Bot and female X-Bot mannequins in background.
  */
 export async function preloadMannequinModel(url: string = DEFAULT_MANNEQUIN_URL): Promise<void> {
   try {
-    await loadFbxTemplate(url);
+    await Promise.all([
+      loadFbxTemplate(url),
+      url === DEFAULT_MANNEQUIN_URL ? loadFbxTemplate(FEMALE_MANNEQUIN_URL).catch(() => null) : Promise.resolve(null),
+    ]);
   } catch (err) {
     console.warn(`[MannequinLoader] Could not preload mannequin from ${url}:`, err);
   }
 }
 
 /**
- * Instantiates a cloned, rigged, clay-styled HumanoidRig from a parsed FBX template.
+ * Instantiates a cloned, rigged, Mixamo-styled HumanoidRig from a parsed FBX template.
  */
 export function instantiateMannequinRig(
   template: THREE.Group,
@@ -161,20 +187,44 @@ export function instantiateMannequinRig(
   clone.position.y -= rawBbox.min.y * scaleFactor;
   clone.updateMatrixWorld(true);
 
-  // 3. Apply warm maquette clay material
-  const bodyColor = new THREE.Color(tint).multiplyScalar(0.9);
-  const jointColor = bodyColor.clone().multiplyScalar(0.62);
+  // 3. Apply authentic Mixamo 2-tone studio material:
+  //    - Outer armor surface (`_Surface`): crisp satin studio finish
+  //    - Inner mechanical joints (`_Joints`): deep gunmetal charcoal (preserved across target color tints!)
+  const bodyColor = new THREE.Color(tint).multiplyScalar(0.92);
+  const jointColor = new THREE.Color('#1c222e');
 
   clone.traverse((child) => {
     if ((child as THREE.Mesh).isMesh) {
       const mesh = child as THREE.Mesh;
+      // Clone geometry per actor instance so SMPL SkinnedMesh vertex morphing never mutates the shared cached template
+      if (mesh.geometry) {
+        mesh.geometry = mesh.geometry.clone();
+        const posAttr = mesh.geometry.attributes?.position;
+        if (posAttr && posAttr.array) {
+          const baseArr = new Float32Array(posAttr.array as ArrayLike<number>);
+          let minY = Infinity;
+          let maxY = -Infinity;
+          for (let i = 1; i < baseArr.length; i += 3) {
+            const vy = baseArr[i];
+            if (vy < minY) minY = vy;
+            if (vy > maxY) maxY = vy;
+          }
+          mesh.geometry.userData._basePositions = baseArr;
+          mesh.geometry.userData._bindMinY = Number.isFinite(minY) ? minY : 0;
+          mesh.geometry.userData._bindHeight =
+            Number.isFinite(maxY - minY) && maxY - minY > 1 ? maxY - minY : 180.47;
+        }
+      }
       const isJointShell = /_Joints$/i.test(mesh.name);
+      if (isJointShell) {
+        mesh.userData.preserveAccessoryColor = true;
+      }
 
       mesh.material = new THREE.MeshStandardMaterial({
         color: isJointShell ? jointColor : bodyColor,
-        roughness: 0.66,
-        metalness: 0.0,
-        envMapIntensity: 0.35,
+        roughness: isJointShell ? 0.38 : 0.34,
+        metalness: isJointShell ? 0.42 : 0.08,
+        envMapIntensity: isJointShell ? 0.65 : 0.55,
       });
       mesh.castShadow = true;
       mesh.receiveShadow = true;
@@ -182,19 +232,39 @@ export function instantiateMannequinRig(
     }
   });
 
-  // 4. Map bones to canonical 19-bone hierarchy
+  // 4. Map bones to canonical 19-bone hierarchy AND full 67-bone Mixamo map
   const bonesMap = new Map<HumanoidBone, THREE.Bone>();
   const restPositions = new Map<HumanoidBone, THREE.Vector3>();
   const restRotations = new Map<HumanoidBone, THREE.Quaternion>();
+  const mixamoBones = new Map<string, THREE.Bone>();
+  const mixamoRestRotations = new Map<string, THREE.Quaternion>();
+  const mixamoCharSpaceRestRotations = new Map<string, THREE.Quaternion>();
 
-  // Index all bones in clone
-  const indexedBones: { bone: THREE.Bone; normName: string }[] = [];
+  clone.updateMatrixWorld(true);
+  const invRootWorldQuat = new THREE.Quaternion();
+  clone.getWorldQuaternion(invRootWorldQuat).invert();
+
+  // Index all bones in clone (first pre-order occurrence is the hierarchy parent bone in FBXLoader)
+  const indexedBones: { bone: THREE.Bone; normName: string; shortName: string }[] = [];
   clone.traverse((child) => {
     if ((child as THREE.Bone).isBone) {
+      const bone = child as THREE.Bone;
+      const shortName = stripMixamoPrefix(bone.name);
       indexedBones.push({
-        bone: child as THREE.Bone,
-        normName: normalizeBoneName(child.name),
+        bone,
+        normName: normalizeBoneName(bone.name),
+        shortName,
       });
+      if (shortName && !mixamoBones.has(shortName)) {
+        mixamoBones.set(shortName, bone);
+        mixamoRestRotations.set(shortName, bone.quaternion.clone());
+        const boneWorldQuat = new THREE.Quaternion();
+        bone.getWorldQuaternion(boneWorldQuat);
+        mixamoCharSpaceRestRotations.set(
+          shortName,
+          invRootWorldQuat.clone().multiply(boneWorldQuat)
+        );
+      }
     }
   });
 
@@ -240,7 +310,11 @@ export function instantiateMannequinRig(
     bones: bonesMap,
     restPositions,
     restRotations,
+    mixamoBones,
+    mixamoRestRotations,
+    mixamoCharSpaceRestRotations,
     height: targetHeight,
+    isMannequinRig: true,
   };
 }
 
@@ -248,8 +322,10 @@ export function instantiateMannequinRig(
  * Returns a cloned HumanoidRig synchronously if template is already cached.
  */
 export function getCachedMannequinRig(options: MannequinOptions = {}): HumanoidRig | null {
-  if (!cachedFbxTemplate) return null;
-  return instantiateMannequinRig(cachedFbxTemplate, options);
+  const targetUrl = options.modelUrl || DEFAULT_MANNEQUIN_URL;
+  const tpl = cachedFbxTemplatesByUrl.get(targetUrl) || cachedFbxTemplatesByUrl.get(DEFAULT_MANNEQUIN_URL);
+  if (!tpl) return null;
+  return instantiateMannequinRig(tpl, options);
 }
 
 /**
@@ -263,6 +339,6 @@ export async function loadMannequinModel(options: MannequinOptions = {}): Promis
 /**
  * Returns true if the mannequin FBX is cached and ready for instant synchronous cloning.
  */
-export function isMannequinReady(): boolean {
-  return cachedFbxTemplate !== null;
+export function isMannequinReady(url: string = DEFAULT_MANNEQUIN_URL): boolean {
+  return cachedFbxTemplatesByUrl.has(url) || cachedFbxTemplatesByUrl.size > 0;
 }

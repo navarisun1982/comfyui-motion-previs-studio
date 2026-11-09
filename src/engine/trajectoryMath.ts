@@ -13,6 +13,7 @@ export interface CameraTrajectoryData {
   endPosition: Point3D;
   targetLookAt?: Point2D;
   keyframes?: CameraKeyframe[];
+  customTrajectory?: boolean;
   type?: string;
   pacing?: 'linear' | 'ease-in-out' | 'ease-in' | 'ease-out';
   arcCurve?: number;
@@ -209,11 +210,13 @@ export function interpolateCameraPosition(
     }
   }
 
-  // Orbit adjustments if orbital trajectory (pivoting around targetLookAt)
+  // Orbit adjustments if orbital trajectory (pivoting around targetLookAt, unless explicit customTrajectory keyframes are active)
+  const hasCustomKeyframes = Boolean(cameraMovement.customTrajectory && rawKeyframes.length >= 2);
   if (
-    cameraMovement.type === 'orbit-clockwise' ||
-    cameraMovement.type === 'orbit-counter-clockwise' ||
-    cameraMovement.type === 'spiral-orbit-in'
+    !hasCustomKeyframes &&
+    (cameraMovement.type === 'orbit-clockwise' ||
+      cameraMovement.type === 'orbit-counter-clockwise' ||
+      cameraMovement.type === 'spiral-orbit-in')
   ) {
     const ratio = clampedTime / safeDuration;
     const pivotStage = cameraMovement.targetLookAt ?? { x: 50, y: 50 };
@@ -228,7 +231,7 @@ export function interpolateCameraPosition(
     const baseAngle = Math.atan2(startZ, startX);
     threeX = pivotX + Math.cos(baseAngle + angleOffset) * radius;
     threeZ = pivotZ + Math.sin(baseAngle + angleOffset) * radius;
-  } else if (cameraMovement.type === 'crane-arc') {
+  } else if (!hasCustomKeyframes && cameraMovement.type === 'crane-arc') {
     const ratio = clampedTime / safeDuration;
     const parabola = 4 * ratio * (1 - ratio);
     threeY += parabola * 6.5;
@@ -587,9 +590,60 @@ export function slerpActorPoses(poseA: ActorPose, poseB: ActorPose, t: number): 
     ];
   }
 
+  let anatomicalIk: ActorPose['anatomicalIk'];
+  if (poseA.anatomicalIk && poseB.anatomicalIk) {
+    const ikA = poseA.anatomicalIk;
+    const ikB = poseB.anatomicalIk;
+    const lerpVec3 = (
+      a: [number, number, number],
+      b: [number, number, number]
+    ): [number, number, number] => [
+      a[0] + (b[0] - a[0]) * t,
+      a[1] + (b[1] - a[1]) * t,
+      a[2] + (b[2] - a[2]) * t,
+    ];
+    anatomicalIk = {
+      leftAnkle: lerpVec3(ikA.leftAnkle, ikB.leftAnkle),
+      rightAnkle: lerpVec3(ikA.rightAnkle, ikB.rightAnkle),
+      leftKneePole: lerpVec3(ikA.leftKneePole, ikB.leftKneePole),
+      rightKneePole: lerpVec3(ikA.rightKneePole, ikB.rightKneePole),
+      leftFootPitch: ikA.leftFootPitch + (ikB.leftFootPitch - ikA.leftFootPitch) * t,
+      rightFootPitch: ikA.rightFootPitch + (ikB.rightFootPitch - ikA.rightFootPitch) * t,
+      leftHand: lerpVec3(ikA.leftHand, ikB.leftHand),
+      rightHand: lerpVec3(ikA.rightHand, ikB.rightHand),
+      leftElbowPole: lerpVec3(ikA.leftElbowPole, ikB.leftElbowPole),
+      rightElbowPole: lerpVec3(ikA.rightElbowPole, ikB.rightElbowPole),
+      headLookAt:
+        ikA.headLookAt && ikB.headLookAt
+          ? lerpVec3(ikA.headLookAt, ikB.headLookAt)
+          : ikA.headLookAt || ikB.headLookAt,
+    };
+  } else if (poseA.anatomicalIk || poseB.anatomicalIk) {
+    anatomicalIk = poseA.anatomicalIk || poseB.anatomicalIk;
+  }
+
+  let resultCharSpaceRotations: Record<string, [number, number, number, number]> | undefined;
+  if (poseA.charSpaceRotations || poseB.charSpaceRotations) {
+    resultCharSpaceRotations = {};
+    const allCharBones = new Set([
+      ...Object.keys(poseA.charSpaceRotations || {}),
+      ...Object.keys(poseB.charSpaceRotations || {}),
+    ]);
+    for (const bName of allCharBones) {
+      const rotA = poseA.charSpaceRotations?.[bName] || [0, 0, 0, 1];
+      const rotB = poseB.charSpaceRotations?.[bName] || [0, 0, 0, 1];
+      qA.set(rotA[0], rotA[1], rotA[2], rotA[3]);
+      qB.set(rotB[0], rotB[1], rotB[2], rotB[3]);
+      qA.slerp(qB, t);
+      resultCharSpaceRotations[bName] = [qA.x, qA.y, qA.z, qA.w];
+    }
+  }
+
   return {
     rotations: resultRotations,
+    ...(resultCharSpaceRotations ? { charSpaceRotations: resultCharSpaceRotations } : {}),
     hipsOffset,
+    ...(anatomicalIk ? { anatomicalIk } : {}),
   };
 }
 
@@ -797,9 +851,11 @@ export function interpolateObjectRotationAtTime(
       const t = segSpan > 0 ? (clampedTime - kA.time) / segSpan : 0;
       const rotA = kA.rotation || defaultRot;
       const rotB = kB.rotation || defaultRot;
+      const rawDy = rotB.y - rotA.y;
+      const shortestDy = Math.abs(rawDy) > 180 ? ((((rawDy % 360) + 540) % 360) - 180) : rawDy;
       return {
         x: rotA.x + (rotB.x - rotA.x) * t,
-        y: rotA.y + (rotB.y - rotA.y) * t,
+        y: rotA.y + shortestDy * t,
         z: (rotA.z ?? 0) + ((rotB.z ?? 0) - (rotA.z ?? 0)) * t,
       };
     }

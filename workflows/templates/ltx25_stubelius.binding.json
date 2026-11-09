@@ -16,6 +16,7 @@
     "6": "StubeliusLTXOutput",
     "7": "LTXDirectorCS25",
     "8": "StubeliusLTXSeeds",
+    "10": "VHS_VideoCombine",
     "14": "StubeliusLTXFinish",
     "15": "VHS_VideoCombine"
   },
@@ -81,7 +82,10 @@
     ]
   },
   "output": {
-    "node": "15"
+    "node": "15",
+    "fallbackNodes": [
+      "10"
+    ]
   },
   "frameRule": "8n+1",
   "notes": [

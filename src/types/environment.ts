@@ -35,6 +35,7 @@ export type EnvironmentTimeOfDay = z.infer<typeof EnvironmentTimeOfDaySchema>;
 export const EnvironmentCategorySchema = z.enum([
   'urban',
   'nature',
+  'coastal-beach',
   'interior',
   'scifi',
   'historical',

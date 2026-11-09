@@ -13,7 +13,7 @@ import {
   resolveWireUrl,
   PROVIDERS,
 } from './objectReasoner';
-import { buildTemporalTimeline, formatEnvironment } from '../engine/promptCompiler';
+import { buildTemporalTimeline, formatEnvironment, formatReadableEnginePrompt } from '../engine/promptCompiler';
 import { analyzeShotPovVisibility } from '../engine/povVisibilityEngine';
 
 export interface DirectedPromptResult {
@@ -25,17 +25,20 @@ export interface DirectedPromptResult {
 }
 
 const LTX_SYSTEM_INSTRUCTION = `You are a world-class Hollywood cinematographer and AI Prompt Director specialized in Lightricks LTX-Video (LTX-2.5 Gemma-4 22B Distilled Audio-Visual DiT).
-Your objective is to convert a 3D directorial ShotSpec into a single continuous, natural descriptive paragraph written strictly in the present tense.
+Your objective is to convert a 3D directorial ShotSpec into a clear, well-organized multi-paragraph narrative prompt written strictly in the present tense, separated by blank lines (\\n\\n) for easy human readability.
 
 CORE LTX-2.5 OFFICIAL RULES:
 1. STRICT CAMERA-POV VISIBILITY ONLY: Describe ONLY the entities listed under "POV-VISIBLE STAGE ACTORS". Never mention or allude to any off-screen stage objects. If zero entities are visible in the camera POV, write a pure environmental/architectural shot.
 2. UNIVERSAL PREVIS-TO-REALITY INSTANTIATION (NO TEXTURE-WRAPPING): Treat the 3D previz guide strictly as a spatial and camera blueprint (position, scale volume, and perspective). Every visible entity (whether a human, animal, tree/foliage, vehicle, prop, architecture, or environment) must completely supplant its 3D placeholder proxy as a true, living real-world entity with its own authentic silhouette, organic complexity, and natural secondary physics—never a texture-wrapped or painted-over 3D proxy mesh.
 3. WRITE IN PRESENT TENSE ONLY ("walks, turns, sways, shifts, breathes" — NEVER past tense or passive participles).
 4. PHYSICAL CUES & CAMERA-RELATIVE FRAMING: Describe each visible entity's camera-relative screen zone (screen-left, center-frame, screen-right; close foreground, midground, distant background), authentic physical dynamics, and secondary micro-motion.
-5. NARRATIVE FLOW ACROSS TIME: Structure the paragraph chronologically across the shot duration (opening camera/action -> mid-shot movement -> closing resolution), noting if an entity enters or exits the camera frame during a pan or track.
-6. DIEGETIC SOUNDSCAPE CUES: Conclude with a concise present-tense sentence describing synchronized diegetic audio (footsteps, wind through foliage, cloth rustle, mechanical or environmental acoustics) for the LTX-2.5 audio VAE.
-7. AVOID AI BUZZWORDS: Absolutely NO "8k, masterpiece, hyperrealistic, trending on artstation". Use real-world optical terms (depth of field, shutter angle, lens focal length, volumetric light).
-8. OUTPUT FORMAT: Return ONLY the final positive prompt text paragraph. Do not add conversational preamble.`;
+5. ORGANIZED PARAGRAPH STRUCTURE (4-5 READABLE PARAGRAPHS SEPARATED BY \\n\\n):
+   - Paragraph 1: Camera framing, lens optics, POV-visible subjects, setting, and lighting/atmosphere.
+   - Paragraph 2: Continuous camera trajectory and opening beat choreography.
+   - Paragraph 3: Mid-shot progression and closing beat resolution.
+   - Paragraph 4: Previs-to-reality spatial fidelity and synchronized diegetic soundscape cues (footsteps, wind, cloth rustle, environmental acoustics) for the LTX-2.5 audio VAE.
+6. AVOID AI BUZZWORDS: Absolutely NO "8k, masterpiece, hyperrealistic, trending on artstation". Use real-world optical terms (depth of field, shutter angle, lens focal length, volumetric light).
+7. OUTPUT FORMAT: Return ONLY the final organized multi-paragraph positive prompt text. Do not add conversational preamble.`;
 
 const MINIMAX_SYSTEM_INSTRUCTION = `You are an elite Hollywood director and prompt engineer specialized in MiniMax H3 Reference-to-Video (MiniMaxH3ReferenceToVideo / Hailuo Ref2VA).
 Your objective is to convert a 3D directorial ShotSpec into the canonical 6-section MiniMax H3 Full-Reference Video Generation Prompt schema (subject_definitions, summary, retention_analysis, detailed_description, overall_soundscape, non_diegetic_music).
@@ -69,20 +72,32 @@ N/A (or subtle score if requested).
 OUTPUT FORMAT: Return ONLY the final structured prompt text. Do not add conversational preamble.`;
 
 const SEEDANCE_SYSTEM_INSTRUCTION = `You are an elite Hollywood Director and AI Prompt Engineer specialized in Seedance 2.0 (ByteDance Seaweed Video Architecture).
-Your objective is to translate a 3D directorial ShotSpec into the canonical, high-fidelity Seedance motion-matrix prompt formula.
+Your objective is to translate a 3D directorial ShotSpec into the canonical, high-fidelity Seedance motion-matrix prompt formula, organized into distinct paragraphs separated by blank lines (\\n\\n) for easy human readability.
 
 CORE SEEDANCE 2.0 OFFICIAL FORMULA:
 1. STRICT CAMERA-POV VISIBILITY ONLY: Include ONLY the POV-visible entities listed under "POV-VISIBLE STAGE ACTORS". Never mention off-screen stage objects.
 2. UNIVERSAL PREVIS-TO-REALITY INSTANTIATION: Use 3D stage vectors strictly for camera perspective, spatial placement, and scale volumes; instantiate every visible entity (human, tree, vehicle, prop, architecture, environment) as a full, living real-world entity with natural secondary physics rather than texture-wrapped proxy geometry.
-3. Structure the prompt strictly with these labeled brackets:
-[Camera 6-Axis Motion & Matrix Trajectory]: Explicit 3D movement trajectory (dolly, truck, pedestal, pan, tilt), lens focal length, dynamic depth of field, and camera physics.
-[Subject Dynamics & Aerodynamic Physics]: POV-visible entity physical appearance, camera-relative screen framing, organic secondary motion, and velocity (omit if 0 visible entities).
-[Previs-to-Reality Spatial Instantiation]: Explicit instruction to replace 3D placeholder volumes with authentic living real-world entities.
-[Temporal Cue Timetable]: Sequential time-coded action beats across the shot ([0.0s - Xs]: ... | [Xs - Ys]: ... | [Ys - Zs]: ...).
-[Atmospheric Space & Volumetric Lighting]: Light source geometry, volumetric falloff, atmospheric density, and environmental reflections.
-[Render & Motion Profile]: Optical photorealism, 24fps motion matrix coherence, 180-degree shutter angle.
+3. Structure the prompt strictly with these labeled brackets, placing EACH bracketed section in its own paragraph separated by a blank line (\\n\\n):
 
-OUTPUT FORMAT: Return ONLY the final assembled bracketed prompt text. Do not add conversational preamble.`;
+[Camera 6-Axis Motion & Matrix Trajectory]:
+Explicit 3D movement trajectory (dolly, truck, pedestal, pan, tilt), lens focal length, dynamic depth of field, and camera physics.
+
+[Subject Dynamics & Aerodynamic Physics]:
+POV-visible entity physical appearance, camera-relative screen framing, organic secondary motion, and velocity (omit if 0 visible entities).
+
+[Previs-to-Reality Spatial Instantiation]:
+Explicit instruction to replace 3D placeholder volumes with authentic living real-world entities.
+
+[Temporal Cue Timetable]:
+Sequential time-coded action beats across the shot, with each beat on its own line (- [0.0s - Xs]: ... \\n- [Xs - Ys]: ... \\n- [Ys - Zs]: ...).
+
+[Atmospheric Space & Volumetric Lighting]:
+Light source geometry, volumetric falloff, atmospheric density, and environmental reflections.
+
+[Render & Motion Profile]:
+Optical photorealism, 24fps motion matrix coherence, 180-degree shutter angle.
+
+OUTPUT FORMAT: Return ONLY the final assembled multi-paragraph bracketed prompt text. Do not add conversational preamble.`;
 
 export async function directPromptWithAI(
   shot: ShotSpec,
@@ -256,11 +271,12 @@ Generate the optimal, high-fidelity prompt for ${isSeedance ? 'Seedance 2.0' : i
 
   const data = await res.json();
   const rawText = extractResponseText(providerInfo.protocol, data);
-  const positivePrompt = rawText
+  const cleanedPositive = rawText
     .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/```(?:markdown|text)?/gi, '')
     .trim()
     .replace(/^["']|["']$/g, '');
+  const positivePrompt = formatReadableEnginePrompt(cleanedPositive, model);
 
   const negativePrompt = isMiniMax
     ? 'blurry, low quality, deformed limbs, floating artifacts, jerky camera, unnatural motion, digital noise, oversaturated, morphing'
@@ -326,8 +342,8 @@ INTERACTIVE AI PROMPT CO-DIRECTOR MODE:
 You are collaborating directly with the Film Director to refine the existing video generation prompt.
 CRITICAL RULES:
 1. Modify ONLY the prompt text ("positivePrompt" and optionally "negativePrompt") according to the Director's instruction.
-2. Keep the positivePrompt in English and strictly formatted for ${
-    isMiniMax ? 'MiniMax H3 (6-section schema with <Subject N> / <Picture N> / <Video 1>)' : isSeedance ? 'Seedance 2.0 bracketed formula' : 'LTX-2.5 present-tense narrative paragraph'
+2. Keep the positivePrompt in English and strictly formatted into organized paragraphs separated by blank lines (\\n\\n) for ${
+    isMiniMax ? 'MiniMax H3 (6-section schema with <Subject N> / <Picture N> / <Video 1>)' : isSeedance ? 'Seedance 2.0 multi-paragraph bracketed formula' : 'LTX-2.5 present-tense multi-paragraph narrative'
   }, even if the Director speaks to you in Arabic.
 3. Preserve all parts of the current prompt that the Director did NOT ask to change.
 4. Write "assistantReply" in ${
@@ -487,7 +503,7 @@ Apply the Director's request to the prompt while preserving the ${
   }
 
   return {
-    positivePrompt: parsedPositive,
+    positivePrompt: formatReadableEnginePrompt(parsedPositive, model),
     negativePrompt: parsedNegative,
     assistantReply: parsedReply,
     providerUsed: providerInfo.label,

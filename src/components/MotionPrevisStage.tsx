@@ -23,7 +23,14 @@ import {
   Trash2,
   RotateCcw,
   Clock,
+  Video,
 } from 'lucide-react';
+import {
+  MocapStudioModal,
+  MocapStudioApplyPayload,
+  applyMocapStudioPayloadToShotStore,
+} from './MocapStudioModal';
+import { Actor } from '../types/shotspec';
 
 export interface TimelineMarker {
   id: string;
@@ -73,6 +80,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   // Fullscreen support for the entire stage
   const stageContainerRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isStageMocapOpen, setIsStageMocapOpen] = useState(false);
 
   const storeSetCurrentTime = useShotStore((s) => s.setCurrentTime);
   const storeSetIsPlaying = useShotStore((s) => s.setIsPlaying);
@@ -96,8 +104,15 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
       setIsPlaying(nextPlay);
       storeSetIsPlaying(nextPlay);
     };
+    const onOpenMocapStudio = () => {
+      setIsStageMocapOpen(true);
+    };
     window.addEventListener('cmpvs:transport-play', onTransportPlay);
-    return () => window.removeEventListener('cmpvs:transport-play', onTransportPlay);
+    window.addEventListener('cmpvs:open-mocap-studio', onOpenMocapStudio);
+    return () => {
+      window.removeEventListener('cmpvs:transport-play', onTransportPlay);
+      window.removeEventListener('cmpvs:open-mocap-studio', onOpenMocapStudio);
+    };
   }, [storeSetCurrentTime, storeSetIsPlaying]);
 
   useEffect(() => {
@@ -145,6 +160,39 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
       }
     | null
   >(null);
+  const [selectedTimelineCue, setSelectedTimelineCue] = useState<
+    | { kind: 'actor-cue'; actorId: string; cueId: string }
+    | { kind: 'camera-cue'; cueId: string }
+    | { kind: 'marker'; markerId: string }
+    | null
+  >(null);
+
+  useEffect(() => {
+    const handleCueSelectEvent = (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { kind: 'actor-cue'; actorId: string; cueId: string }
+        | { kind: 'camera-cue'; cueId: string }
+        | { kind: 'marker'; markerId: string }
+        | null;
+      setSelectedTimelineCue(detail || null);
+    };
+    window.addEventListener('cmpvs:select-cue', handleCueSelectEvent);
+    return () => window.removeEventListener('cmpvs:select-cue', handleCueSelectEvent);
+  }, []);
+
+  const deleteSelectedTimelineCue = useCallback(() => {
+    if (!selectedTimelineCue) return false;
+    if (selectedTimelineCue.kind === 'actor-cue') {
+      removeActorKeyframe(selectedTimelineCue.actorId, selectedTimelineCue.cueId);
+    } else if (selectedTimelineCue.kind === 'camera-cue') {
+      removeCameraKeyframe(selectedTimelineCue.cueId);
+    } else if (selectedTimelineCue.kind === 'marker') {
+      setMarkers((prev) => prev.filter((m) => m.id !== selectedTimelineCue.markerId));
+    }
+    setSelectedTimelineCue(null);
+    window.dispatchEvent(new CustomEvent('cmpvs:select-cue', { detail: null }));
+    return true;
+  }, [selectedTimelineCue, removeActorKeyframe, removeCameraKeyframe]);
 
   const duration = shot.durationSeconds || 4;
   const timelineRef = useRef<HTMLDivElement | null>(null);
@@ -198,7 +246,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     return () => cancelAnimationFrame(animId);
   }, [isPlaying]);
 
-  // Keyboard Shortcut for Object Deletion (Delete / Backspace)
+  // Keyboard Shortcut for Cue Deletion (Priority 1) or Object Deletion (Priority 2) (Delete / Backspace)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement as HTMLElement | null;
@@ -209,14 +257,21 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
       ) {
         return;
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedActorId && selectedActorId !== '__camera__') {
-        removeActor(selectedActorId);
-        setSelectedActorId(undefined);
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedTimelineCue) {
+          e.preventDefault();
+          deleteSelectedTimelineCue();
+          return;
+        }
+        if (selectedActorId && selectedActorId !== '__camera__') {
+          removeActor(selectedActorId);
+          setSelectedActorId(undefined);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedActorId, removeActor, setSelectedActorId]);
+  }, [selectedTimelineCue, deleteSelectedTimelineCue, selectedActorId, removeActor, setSelectedActorId]);
 
   // Spacebar Play/Pause Keyboard Handler
   useEffect(() => {
@@ -263,6 +318,8 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   const handleTimelinePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('[data-trim-handle]') || (e.target as HTMLElement).closest('[data-cue-handle]')) return;
     e.preventDefault();
+    setSelectedTimelineCue(null);
+    window.dispatchEvent(new CustomEvent('cmpvs:select-cue', { detail: null }));
     timelineRef.current?.setPointerCapture(e.pointerId);
     setIsDraggingPlayhead(true);
     scrubToClientX(e.clientX);
@@ -542,8 +599,8 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
       </div>
 
       {/* 2. Compact Stage Cast & Environment Selector Strip (Single-Line, Zero Duplicates) */}
-      <div className="h-11 shrink-0 border-t border-b border-[#273247] bg-[#0D1320] px-3.5 flex items-center justify-between gap-2.5 overflow-x-auto no-scrollbar z-20">
-        <div className="flex items-center gap-2 min-w-0 flex-1">
+      <div className="h-11 shrink-0 border-t border-b border-[#273247] bg-[#0D1320] px-3.5 flex items-center justify-between gap-2.5 overflow-hidden z-20">
+        <div className="flex items-center gap-1.5 w-0 min-w-0 flex-1 overflow-x-auto no-scrollbar">
           {/* Direct Environment Location Quick-Access Pill */}
           <button
             onClick={() => setActiveDeckTab('environment')}
@@ -571,7 +628,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
             </div>
           )}
 
-          <span className="text-[#273247]">|</span>
+          <span className="text-[#273247] shrink-0">|</span>
 
           {/* Camera Rig Selection Pill */}
           <button
@@ -591,65 +648,63 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
             <span className="text-[#F0AE42]/90">{shot.camera.lens.focalLength}</span>
           </button>
 
-          {/* Active Stage Cast Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
-            {shot.actors.map((act) => {
-              const isSelected = act.id === selectedActorId;
-              const icon =
-                act.kind === 'cutout' || act.kind === 'standee' || act.kind === 'backdrop'
-                  ? '🖼️'
-                  : act.kind === 'cube' || act.kind === 'box'
-                  ? '⬛'
-                  : act.kind === 'cylinder'
-                  ? '🏛️'
-                  : act.kind === 'plane'
-                  ? '📐'
-                  : act.kind === 'car'
-                  ? '🚗'
-                  : act.kind === 'table'
-                  ? '🪑'
-                  : act.kind === 'tree'
-                  ? '🌲'
-                  : act.kind === 'chair'
-                  ? '💺'
-                  : act.kind === 'prop'
-                  ? '📦'
-                  : '👤';
-              return (
-                <div
-                  key={act.id}
-                  onClick={() => {
-                    setSelectedActorId(act.id);
-                    setActiveDeckTab('staging');
+          {/* Active Stage Cast Pills (Direct flex children of the w-0 flex-1 strip so they never push right buttons off-screen) */}
+          {shot.actors.map((act) => {
+            const isSelected = act.id === selectedActorId;
+            const icon =
+              act.kind === 'cutout' || act.kind === 'standee' || act.kind === 'backdrop'
+                ? '🖼️'
+                : act.kind === 'cube' || act.kind === 'box'
+                ? '⬛'
+                : act.kind === 'cylinder'
+                ? '🏛️'
+                : act.kind === 'plane'
+                ? '📐'
+                : act.kind === 'car'
+                ? '🚗'
+                : act.kind === 'table'
+                ? '🪑'
+                : act.kind === 'tree'
+                ? '🌲'
+                : act.kind === 'chair'
+                ? '💺'
+                : act.kind === 'prop'
+                ? '📦'
+                : '👤';
+            return (
+              <div
+                key={act.id}
+                onClick={() => {
+                  setSelectedActorId(act.id);
+                  setActiveDeckTab('staging');
+                }}
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-mono text-[10.5px] transition-all cursor-pointer shrink-0 ${
+                  isSelected
+                    ? 'bg-[#6658F5]/25 border border-[#6658F5] text-white ring-1 ring-[#6658F5]/70 shadow-[0_2px_8px_rgba(102,88,245,0.3)]'
+                    : 'bg-[#131C2E] border border-[#273247] text-[#D0D9E8] hover:bg-[#1A2436] hover:text-white'
+                }`}
+                title="Select subject & edit in Cast & Stage Inspector"
+              >
+                <span
+                  className="h-2 w-2 rounded-full shrink-0 border border-white/30"
+                  style={{ backgroundColor: act.color || '#eab308' }}
+                />
+                <span>{icon}</span>
+                <span className="font-semibold text-white max-w-[100px] truncate">{act.name}</span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeActor(act.id);
                   }}
-                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 font-mono text-[10.5px] transition-all cursor-pointer shrink-0 ${
-                    isSelected
-                      ? 'bg-[#6658F5]/25 border border-[#6658F5] text-white ring-1 ring-[#6658F5]/70 shadow-[0_2px_8px_rgba(102,88,245,0.3)]'
-                      : 'bg-[#131C2E] border border-[#273247] text-[#D0D9E8] hover:bg-[#1A2436] hover:text-white'
-                  }`}
-                  title="Select subject & edit in Cast & Stage Inspector"
+                  className="ml-0.5 text-[#64748B] hover:text-[#EF5261] transition-colors"
+                  title="Remove from Soundstage"
                 >
-                  <span
-                    className="h-2 w-2 rounded-full shrink-0 border border-white/30"
-                    style={{ backgroundColor: act.color || '#eab308' }}
-                  />
-                  <span>{icon}</span>
-                  <span className="font-semibold text-white max-w-[100px] truncate">{act.name}</span>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeActor(act.id);
-                    }}
-                    className="ml-0.5 text-[#64748B] hover:text-[#EF5261] transition-colors"
-                    title="Remove from Soundstage"
-                  >
-                    <Trash2 className="h-2.5 w-2.5" />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+                  <Trash2 className="h-2.5 w-2.5" />
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         {/* Right Side: Clean Stage, Add in Inspector & 3D Asset Library */}
@@ -672,6 +727,16 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
           >
             <Plus className="h-3 w-3 text-[#8E84FF]" />
             <span>Add / Cast ({shot.actors.length})</span>
+          </button>
+
+          <button
+            onClick={() => setIsStageMocapOpen(true)}
+            data-testid="stage-bar-mocap-btn"
+            className="flex items-center gap-1 rounded-lg bg-[#0F2933] hover:bg-[#153947] text-[#38BDF8] border border-[#38BDF8]/45 px-2.5 py-1 font-bold transition-all cursor-pointer"
+            title="Open 3D Mocap, Full Body & Scene Capture Studio (.MP4 Video or toyxyz_RGBMocap / Mixamo .FBX)"
+          >
+            <Video className="h-3 w-3 text-[#38BDF8]" />
+            <span>3D Mocap / FBX</span>
           </button>
 
           <button
@@ -884,6 +949,19 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
             <span>Auto-Cue {stagingMoveMode === 'keyframe' ? 'ON' : 'OFF'}</span>
           </button>
 
+          {/* Delete Selected Cue Button (Shown when any Cue is selected on Timeline or Character Card) */}
+          {selectedTimelineCue && (
+            <button
+              type="button"
+              data-testid="delete-selected-timeline-cue-btn"
+              onClick={deleteSelectedTimelineCue}
+              className="flex items-center gap-1 rounded-lg bg-rose-500/25 hover:bg-rose-500/40 border border-rose-500/60 px-2.5 py-1 text-rose-200 hover:text-white font-semibold transition-all text-[10.5px] cursor-pointer shadow-sm"
+              title="Delete Selected Cue (or press Delete / Backspace)"
+            >
+              <span>✕ Delete Cue (Del)</span>
+            </button>
+          )}
+
           {/* Snapshot PNG */}
           <button
             onClick={handleTakeSnapshot}
@@ -1033,6 +1111,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                       e.preventDefault();
                       timelineRef.current?.setPointerCapture(e.pointerId);
                       if (m.actorId) setSelectedActorId(m.actorId);
+                      setSelectedTimelineCue({ kind: 'marker', markerId: m.id });
                       setCurrentTime(m.time);
                       const rect = timelineRef.current?.getBoundingClientRect();
                       const clickedTime =
@@ -1045,12 +1124,24 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                         grabOffsetSec: Math.abs(rawOffset) <= 0.12 ? rawOffset : 0,
                       });
                     }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setMarkers((prev) => prev.filter((item) => item.id !== m.id));
+                      if (selectedTimelineCue?.kind === 'marker' && selectedTimelineCue.markerId === m.id) {
+                        setSelectedTimelineCue(null);
+                      }
+                    }}
                     className="absolute top-1 z-30 h-5 w-5 flex items-center justify-center cursor-ew-resize group pointer-events-auto"
                     style={{ left: `${mPct}%`, transform: 'translateX(-50%)' }}
-                    title={`${m.label} (${m.time.toFixed(1)}s) — Drag left/right to retime`}
+                    title={`${m.label} (${m.time.toFixed(1)}s) — Click & press Delete to remove • Right-click to delete • Drag left/right to retime`}
                   >
                     <div
-                      className="h-3.5 w-3.5 rotate-45 border-2 border-white shadow-md transition-transform group-hover:scale-125"
+                      className={`h-3.5 w-3.5 rotate-45 border-2 border-white shadow-md transition-transform group-hover:scale-125 ${
+                        selectedTimelineCue?.kind === 'marker' && selectedTimelineCue.markerId === m.id
+                          ? 'ring-2 ring-rose-400 scale-125'
+                          : ''
+                      }`}
                       style={{ backgroundColor: effectiveMarkerColor }}
                     />
                     <span
@@ -1087,6 +1178,8 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                       data-cue-handle="true"
                       onPointerDown={(e) => {
                         e.stopPropagation();
+                        setSelectedTimelineCue(null);
+                        window.dispatchEvent(new CustomEvent('cmpvs:select-cue', { detail: null }));
                         setSelectedActorId('__camera__');
                       }}
                       className={`relative z-20 ml-1.5 flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-[9.5px] font-bold border pointer-events-auto transition-all cursor-pointer ${
@@ -1104,6 +1197,8 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                     {/* Draggable Camera Keyframe Diamonds (Strictly Centered at Exact Time%) */}
                     {camKfs.map((ckf) => {
                       const kfPct = Math.max(0, Math.min(100, (ckf.time / duration) * 100));
+                      const isCueSelected =
+                        selectedTimelineCue?.kind === 'camera-cue' && selectedTimelineCue.cueId === ckf.id;
                       return (
                         <div
                           key={ckf.id}
@@ -1114,6 +1209,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                             e.preventDefault();
                             timelineRef.current?.setPointerCapture(e.pointerId);
                             setSelectedActorId('__camera__');
+                            setSelectedTimelineCue({ kind: 'camera-cue', cueId: ckf.id });
                             setCurrentTime(ckf.time);
                             const rect = timelineRef.current?.getBoundingClientRect();
                             const clickedTime =
@@ -1126,13 +1222,23 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                               grabOffsetSec: Math.abs(rawOffset) <= 0.12 ? rawOffset : 0,
                             });
                           }}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            removeCameraKeyframe(ckf.id);
+                            if (isCueSelected) setSelectedTimelineCue(null);
+                          }}
                           className="absolute top-1/2 z-30 h-6 w-6 flex items-center justify-center cursor-ew-resize group pointer-events-auto"
                           style={{ left: `${kfPct}%`, transform: 'translate(-50%, -50%)' }}
-                          title={`[CAM] Camera Cue @ ${ckf.time.toFixed(2)}s — Drag left/right to retime`}
+                          title={`[CAM] Camera Cue @ ${ckf.time.toFixed(2)}s — Click & press Delete to remove • Right-click to delete • Drag left/right to retime`}
                         >
                           <div
                             className={`h-3.5 w-3.5 rotate-45 border-2 shadow-md transition-transform group-hover:scale-125 ${
-                              isCamSelected ? 'border-white scale-110' : 'border-white/85'
+                              isCueSelected
+                                ? 'border-white ring-2 ring-rose-400 scale-125'
+                                : isCamSelected
+                                ? 'border-white scale-110'
+                                : 'border-white/85'
                             }`}
                             style={{ backgroundColor: camColor }}
                           />
@@ -1201,6 +1307,8 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                         data-cue-handle="true"
                         onPointerDown={(e) => {
                           e.stopPropagation();
+                          setSelectedTimelineCue(null);
+                          window.dispatchEvent(new CustomEvent('cmpvs:select-cue', { detail: null }));
                           setSelectedActorId(act.id);
                         }}
                         className={`relative z-25 ml-1.5 flex items-center gap-1.5 rounded-md px-2 py-0.5 font-mono text-[10px] font-bold border pointer-events-auto transition-all cursor-pointer ${
@@ -1275,7 +1383,8 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
 
                           {/* Span Timing & Action Summary */}
                           <span className="px-2 text-[9.5px] font-mono font-bold text-white truncate pointer-events-none drop-shadow">
-                            {shortTag} • {spanStart.toFixed(1)}s → {spanEnd.toFixed(1)}s ({kfs.length} cues)
+                            {shortTag} • {spanStart.toFixed(1)}s → {spanEnd.toFixed(1)}s (
+                            {kfs.length > 16 ? `${kfs.length} frames • 24 FPS Mocap` : `${kfs.length} cues`})
                           </span>
 
                           {/* Right Speed Handle */}
@@ -1304,8 +1413,24 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                         </div>
                       )}
 
-                      {/* Individual Draggable Shape-Coded Cue Nodes (Strictly Centered at Exact Time% with 24x24 Hit-Box) */}
-                      {kfs.map((kf) => {
+                      {/* Individual Draggable Shape-Coded Cue Nodes (Strictly Centered at Exact Time% with 24x24 Hit-Box; for dense 24-FPS mocap tracks >16 frames, renders balanced ~1s control anchors so diamonds don't overlap while 3D Stage plays all frames) */}
+                      {(() => {
+                        const maxVisibleCueAnchors = Math.max(12, Math.min(24, Math.ceil(duration)));
+                        const cueStride =
+                          kfs.length > 16 ? Math.max(1, Math.ceil(kfs.length / maxVisibleCueAnchors)) : 1;
+                        return kfs.filter((kf, kfIdx) => {
+                          if (kfs.length <= 16) return true;
+                          if (kfIdx === 0 || kfIdx === kfs.length - 1 || kfIdx % cueStride === 0) return true;
+                          if (
+                            selectedTimelineCue?.kind === 'actor-cue' &&
+                            selectedTimelineCue.actorId === act.id &&
+                            selectedTimelineCue.cueId === kf.id
+                          ) {
+                            return true;
+                          }
+                          return false;
+                        });
+                      })().map((kf) => {
                         const kfPct = Math.max(0, Math.min(100, (kf.time / duration) * 100));
                         const isAirborne = (kf.position.z ?? 0) > 2;
                         const isLocomotion = kf.gait === 'walk' || kf.gait === 'run' || kf.gait === 'sneak';
@@ -1321,6 +1446,11 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                             ? kf.gait
                             : `${kf.time.toFixed(1)}s`;
 
+                        const isCueSelected =
+                          selectedTimelineCue?.kind === 'actor-cue' &&
+                          selectedTimelineCue.actorId === act.id &&
+                          selectedTimelineCue.cueId === kf.id;
+
                         return (
                           <div
                             key={kf.id}
@@ -1331,6 +1461,9 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                               e.preventDefault();
                               timelineRef.current?.setPointerCapture(e.pointerId);
                               setSelectedActorId(act.id);
+                              const nextCueSel = { kind: 'actor-cue' as const, actorId: act.id, cueId: kf.id };
+                              setSelectedTimelineCue(nextCueSel);
+                              window.dispatchEvent(new CustomEvent('cmpvs:select-cue', { detail: nextCueSel }));
                               setCurrentTime(kf.time);
                               const rect = timelineRef.current?.getBoundingClientRect();
                               const clickedTime =
@@ -1344,6 +1477,15 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                                 grabOffsetSec: Math.abs(rawOffset) <= 0.12 ? rawOffset : 0,
                               });
                             }}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              removeActorKeyframe(act.id, kf.id);
+                              if (isCueSelected) {
+                                setSelectedTimelineCue(null);
+                                window.dispatchEvent(new CustomEvent('cmpvs:select-cue', { detail: null }));
+                              }
+                            }}
                             className={`absolute top-1/2 z-30 h-6 w-6 flex items-center justify-center cursor-ew-resize group pointer-events-auto transition-opacity ${
                               isSelected ? 'opacity-100' : 'opacity-85 hover:opacity-100'
                             }`}
@@ -1351,11 +1493,15 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                               left: `${kfPct}%`,
                               transform: 'translate(-50%, -50%)',
                             }}
-                            title={`[${shortTag}] ${act.name} Cue @ ${kf.time.toFixed(2)}s (${cueTag} | X:${Math.round(kf.position.x)}, Y:${Math.round(kf.position.y)}) — Drag left/right to retime`}
+                            title={`[${shortTag}] ${act.name} Cue @ ${kf.time.toFixed(2)}s (${cueTag} | X:${Math.round(kf.position.x)}, Y:${Math.round(kf.position.y)}) — Click & press Delete to remove • Right-click to delete • Drag left/right to retime`}
                           >
                             <div
                               className={`h-3.5 w-3.5 border-2 shadow-md transition-transform group-hover:scale-125 ${shapeClass} ${
-                                isSelected ? 'border-white scale-110 ring-1 ring-black/70' : 'border-white/85'
+                                isCueSelected
+                                  ? 'border-white ring-2 ring-rose-400 scale-125'
+                                  : isSelected
+                                  ? 'border-white scale-110 ring-1 ring-black/70'
+                                  : 'border-white/85'
                               }`}
                               style={{ backgroundColor: laneColor }}
                             />
@@ -1363,7 +1509,7 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                               className="absolute bottom-full left-1/2 -translate-x-1/2 mb-0.5 opacity-0 group-hover:opacity-100 transition-opacity rounded bg-[#090D16]/95 px-1.5 py-0.5 font-mono text-[9px] font-bold whitespace-nowrap pointer-events-none border shadow-lg z-40"
                               style={{ color: laneColor, borderColor: laneColor }}
                             >
-                              [{shortTag}] {act.name} • {cueTag} @ {kf.time.toFixed(2)}s (⇄ Drag)
+                              [{shortTag}] {act.name} • {cueTag} @ {kf.time.toFixed(2)}s (⇄ Drag • Del to remove)
                             </span>
                           </div>
                         );
@@ -1424,7 +1570,17 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
                   });
 
                   shot.actors.forEach((act) => {
-                    (act.trajectory.keyframes || []).forEach((kf) => {
+                    const actKfs = act.trajectory.keyframes || [];
+                    const pillStride = actKfs.length > 16 ? Math.max(1, Math.ceil(actKfs.length / 16)) : 1;
+                    actKfs.forEach((kf, kfIdx) => {
+                      if (
+                        actKfs.length > 16 &&
+                        kfIdx !== 0 &&
+                        kfIdx !== actKfs.length - 1 &&
+                        kfIdx % pillStride !== 0
+                      ) {
+                        return;
+                      }
                       liveCues.push({
                         id: `act_${act.id}_${kf.id}`,
                         time: kf.time,
@@ -1539,6 +1695,41 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
           </div>
         )}
       </div>
+
+      {isStageMocapOpen && (() => {
+        const existingActor =
+          shot.actors.find((a) => a.id === selectedActorId && (a.kind === 'human' || a.kind === 'character' || !a.kind)) ||
+          shot.actors.find((a) => a.kind === 'human' || a.kind === 'character' || !a.kind) ||
+          shot.actors[0];
+        const fallbackActor: Actor = {
+          id: 'actor-mocap-lead',
+          name: 'Mocap Character',
+          kind: 'human',
+          rigType: 'humanoid',
+          token: 'humanoid lead character',
+          actionDescription: 'standing',
+          color: '#38bdf8',
+          scale: 1.0,
+          trajectory: {
+            startTimeSeconds: 0,
+            startPosition: { x: 50, y: 50, z: 0 },
+            endPosition: { x: 50, y: 50, z: 0 },
+            keyframes: [],
+          },
+        };
+        const targetActor = existingActor || fallbackActor;
+        return (
+          <MocapStudioModal
+            isOpen={isStageMocapOpen}
+            actor={targetActor}
+            shotDurationSeconds={duration}
+            onClose={() => setIsStageMocapOpen(false)}
+            onApplyMocap={(payload: MocapStudioApplyPayload) => {
+              applyMocapStudioPayloadToShotStore(payload, targetActor);
+            }}
+          />
+        );
+      })()}
     </div>
   );
 };

@@ -97,7 +97,7 @@ export class SeedanceAdapter implements ModelCapabilityAdapter {
       }
     }
 
-    const positivePrompt = vfxNote ? `${base.positivePrompt} ${vfxNote}` : base.positivePrompt;
+    const positivePrompt = vfxNote ? `${base.positivePrompt}\n\n${vfxNote.trim()}` : base.positivePrompt;
 
     return {
       ...base,

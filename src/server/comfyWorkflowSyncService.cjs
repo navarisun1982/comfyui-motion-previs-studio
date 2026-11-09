@@ -493,6 +493,16 @@ function sanitizeComfyPromptBuffer(reqPath, buf) {
   }
 }
 
+function getMocapNlfService() {
+  try {
+    const resolved = require.resolve('./mocapNlfService.cjs');
+    delete require.cache[resolved];
+  } catch {
+    // ignore
+  }
+  return require('./mocapNlfService.cjs');
+}
+
 function comfyRequestDirect(options = {}) {
   const {
     path: reqPath = '/system_stats',
@@ -503,6 +513,56 @@ function comfyRequestDirect(options = {}) {
     timeoutMs = 15000,
     targetUrl = null,
   } = options;
+
+  if (
+    String(reqPath).startsWith('/__local_mocap_nlf') ||
+    String(reqPath).startsWith('/api/mocap-nlf')
+  ) {
+    const nlfService = getMocapNlfService();
+    const rawPathStr = String(reqPath);
+    const cleanPath = rawPathStr.split('?')[0];
+    if (cleanPath.endsWith('/status') || method === 'GET') {
+      const urlObj = new URL(rawPathStr, 'http://localhost');
+      const customDir = urlObj.searchParams.get('customModelDir') || undefined;
+      const status = nlfService.getMocapNlfStatus(customDir);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        text: JSON.stringify(status),
+        data: status,
+      });
+    }
+    let parsedPayload = {};
+    try {
+      if (body && typeof body === 'object' && !Buffer.isBuffer(body)) {
+        parsedPayload = body;
+      } else if (typeof body === 'string' && body.trim()) {
+        parsedPayload = JSON.parse(body);
+      } else if (Buffer.isBuffer(body)) {
+        parsedPayload = JSON.parse(body.toString('utf-8'));
+      }
+    } catch {
+      parsedPayload = {};
+    }
+    if (cleanPath.endsWith('/download')) {
+      const dlResult = nlfService.startNlfModelDownload(parsedPayload);
+      return Promise.resolve({
+        ok: Boolean(dlResult && dlResult.ok),
+        status: 200,
+        statusText: 'OK',
+        text: JSON.stringify(dlResult),
+        data: dlResult,
+      });
+    }
+    return nlfService.extractNlfSmpl3dFromFrames(parsedPayload).then((resData) => ({
+      ok: Boolean(resData && resData.ok),
+      status: resData && resData.ok ? 200 : 500,
+      statusText: resData && resData.ok ? 'OK' : 'Error',
+      text: JSON.stringify(resData),
+      data: resData,
+    }));
+  }
 
   const portsToTry = resolveComfyPortsToTry(targetUrl);
   const rawBodyBuf =
@@ -658,6 +718,15 @@ function comfyUploadImageDirect(options = {}) {
 }
 
 function forwardComfyRequest(req, res, forwardPath) {
+  if (
+    String(forwardPath).startsWith('/api/mocap-nlf') ||
+    String(forwardPath).startsWith('/__local_mocap_nlf')
+  ) {
+    const nlfService = getMocapNlfService();
+    if (nlfService.handleMocapNlfRequest(req, res)) {
+      return;
+    }
+  }
   // Buffer incoming request chunks so we can safely retry port 8000 if 8188 is offline
   const chunks = [];
   req.on('data', (chunk) => chunks.push(chunk));

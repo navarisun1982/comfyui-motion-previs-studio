@@ -111,7 +111,26 @@ export function inferSemanticEnvironmentBiome(
 
   const isDefaultStudioCategory = rawCat === 'interior-studio' || rawCat === 'studio';
 
+  const actorNamesText = (options.actors || [])
+    .map((a) => `${a.name || ''} ${a.token || ''}`)
+    .join(' ');
+  const combinedText = `${options.sceneDescription || ''} ${env?.promptDescription || ''} ${env?.name || ''} ${(env as any)?.nameAr || ''} ${env?.conceptImageName || ''} ${actorNamesText}`.toLowerCase();
+
   if (!isDefaultStudioCategory) {
+    if (
+      rawCat.includes('coastal') ||
+      rawCat.includes('beach') ||
+      rawCat.includes('ocean') ||
+      rawCat.includes('shore') ||
+      /(beach|coast|shore|shoreline|ocean|sea|seaside|شاطئ|شاطي|بحر|ساحل|محيط)/.test(combinedText)
+    ) {
+      return {
+        category: 'coastal-beach',
+        groundSurface: isDefaultGround ? 'sand-dunes' : rawGround,
+        skyColor: isDefaultSky ? '#0ea5e9' : rawSky,
+        fogColor: isDefaultSky ? '#0284c7' : rawFog,
+      };
+    }
     if (rawCat.includes('nature') || rawCat.includes('forest')) {
       return {
         category: 'nature',
@@ -160,7 +179,6 @@ export function inferSemanticEnvironmentBiome(
     };
   }
 
-  const combinedText = `${options.sceneDescription || ''} ${env?.promptDescription || ''} ${env?.name || ''} ${env?.conceptImageName || ''}`.toLowerCase();
   const isDefaultSoundstageDesc =
     combinedText.includes('soundstage studio') ||
     combinedText.includes('cyclorama floor') ||
@@ -168,6 +186,19 @@ export function inferSemanticEnvironmentBiome(
   const searchText = isDefaultSoundstageDesc
     ? `${options.sceneDescription || ''} ${env?.name || ''} ${env?.conceptImageName || ''}`.toLowerCase()
     : combinedText;
+
+  if (
+    /(beach|coast|shore|shoreline|ocean|sea|seaside|bay|شاطئ|شاطي|بحر|ساحل|محيط|امواج)/i.test(
+      searchText
+    )
+  ) {
+    return {
+      category: 'coastal-beach',
+      groundSurface: isDefaultGround ? 'sand-dunes' : rawGround,
+      skyColor: isDefaultSky ? '#0ea5e9' : rawSky,
+      fogColor: isDefaultSky ? '#0284c7' : rawFog,
+    };
+  }
 
   if (
     /\b(forest|woods|woodland|jungle|trees|canopy|pine|redwood|meadow|valley|mountain|mountains|cliff|peak|river|lake|waterfall|nature|grass|park|island|savanna|غابة|أشجار|شجر|جبل|جبال|وادي|نهر|بحيرة|طبيعة|حديقة)\b/i.test(
@@ -465,6 +496,79 @@ export function buildPerimeterEnvironment(
       wall.lookAt(0, 7, 0);
       envGroup.add(wall);
     }
+  } else if (
+    rawCat.includes('coastal') ||
+    rawCat.includes('beach') ||
+    rawCat.includes('ocean') ||
+    rawCat.includes('shore')
+  ) {
+    // Coastal Sandy Beach & Ocean Shoreline: Turquoise Ocean Horizon, Surf Foam Waves & Sandy Dunes (ZERO Pine Trees!)
+    const oceanWaterMat = new THREE.MeshStandardMaterial({
+      color: 0x0284c7,
+      roughness: 0.22,
+      metalness: 0.35,
+    });
+    const surfFoamMat = new THREE.MeshStandardMaterial({
+      color: 0xe0f2fe,
+      roughness: 0.55,
+      metalness: 0.05,
+    });
+    const coastalSandMat = new THREE.MeshStandardMaterial({
+      color: 0xd6b37c,
+      roughness: 0.94,
+      metalness: 0.02,
+    });
+    const seaStackMat = new THREE.MeshStandardMaterial({
+      color: 0x64748b,
+      roughness: 0.88,
+      metalness: 0.08,
+    });
+
+    // Distant Turquoise Ocean Water Horizon Plane
+    const oceanPlane = new THREE.Mesh(new THREE.PlaneGeometry(190, 80), oceanWaterMat);
+    oceanPlane.rotation.x = -Math.PI * 0.5;
+    oceanPlane.position.set(0, 0.06, -56);
+    envGroup.add(oceanPlane);
+
+    // Layered White Surf Foam Ribbons Along the Shoreline
+    const foamZCoords = [-18, -24, -31];
+    foamZCoords.forEach((fz, idx) => {
+      const foamRibbon = new THREE.Mesh(
+        new THREE.BoxGeometry(165, 0.12, 1.4 - idx * 0.25),
+        surfFoamMat
+      );
+      foamRibbon.position.set(0, 0.09, fz);
+      envGroup.add(foamRibbon);
+    });
+
+    // Gentle Warm Sandy Coastal Dunes on Flanks
+    for (let i = 0; i < 8; i++) {
+      const side = i % 2 === 0 ? -1 : 1;
+      const zOff = -10 + Math.floor(i / 2) * 18;
+      const dune = new THREE.Mesh(
+        new THREE.SphereGeometry(14, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.5),
+        coastalSandMat
+      );
+      dune.position.set(side * (48 + (i % 3) * 5), -2.2, zOff);
+      dune.scale.set(1.8, 0.22, 1.4);
+      envGroup.add(dune);
+    }
+
+    // Distant Coastal Sea-Stack Rock Outcrops at the Edges of the Bay
+    const seaStackCoords = [
+      { x: -52, z: -44, r: 5.5, h: 11 },
+      { x: 54, z: -42, r: 6.2, h: 13 },
+      { x: -64, z: -32, r: 4.5, h: 8 },
+      { x: 62, z: -30, r: 4.8, h: 9 },
+    ];
+    seaStackCoords.forEach((st) => {
+      const rock = new THREE.Mesh(
+        new THREE.CylinderGeometry(st.r * 0.65, st.r, st.h, 7),
+        seaStackMat
+      );
+      rock.position.set(st.x, st.h * 0.45, st.z);
+      envGroup.add(rock);
+    });
   } else if (rawCat.includes('nature') || rawCat.includes('forest')) {
     // Redwood Forest Clearing: Rolling Terrain Mounds & Towering Conifer Trees
     const hillMat = new THREE.MeshStandardMaterial({

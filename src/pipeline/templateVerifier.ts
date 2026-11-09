@@ -91,9 +91,16 @@ export function verifyBinding(api: ApiWorkflow, binding: TemplateBinding): Verif
     for (const o of binding.profiles[profile]) checkTarget(`profile "${profile}"`, o);
   }
 
-  // 5. Output node.
+  // 5. Output node & optional fallback output nodes.
   if (!(binding.output.node in binding.nodes)) {
     errors.push(`${t}: output node ${binding.output.node} is not listed in "nodes".`);
+  }
+  if (Array.isArray(binding.output.fallbackNodes)) {
+    for (const fbNode of binding.output.fallbackNodes) {
+      if (!(fbNode in binding.nodes)) {
+        errors.push(`${t}: fallback output node ${fbNode} is not listed in "nodes".`);
+      }
+    }
   }
 
   return { ok: errors.length === 0, errors };

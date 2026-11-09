@@ -426,6 +426,26 @@ export function openaiAuthPlugin(): Plugin {
       attachLocalWorkflowMiddleware(server.middlewares);
       attachAppUpdateMiddleware(server.middlewares);
       attachStudioStorageMiddleware(server.middlewares);
+      server.middlewares.use((req, res, next) => {
+        const rawUrl = req.url || '';
+        if (rawUrl.startsWith('/api/mocap-nlf') || rawUrl.startsWith('/__local_mocap_nlf')) {
+          try {
+            const resolved = require.resolve('./mocapNlfService.cjs');
+            delete require.cache[resolved];
+            const mocapNlfService = require('./mocapNlfService.cjs');
+            if (mocapNlfService.handleMocapNlfRequest(req, res)) {
+              return;
+            }
+          } catch (err: any) {
+            if (!res.headersSent) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: err.message }));
+            }
+            return;
+          }
+        }
+        next();
+      });
     },
     configureServer(server) {
       attachComfyMiddleware(server.middlewares);
@@ -553,6 +573,23 @@ export function openaiAuthPlugin(): Plugin {
             }
           });
           return;
+        }
+
+        if (rawUrl.startsWith('/api/mocap-nlf') || rawUrl.startsWith('/__local_mocap_nlf')) {
+          try {
+            const resolved = require.resolve('./mocapNlfService.cjs');
+            delete require.cache[resolved];
+            const mocapNlfService = require('./mocapNlfService.cjs');
+            if (mocapNlfService.handleMocapNlfRequest(req, res)) {
+              return;
+            }
+          } catch (err: any) {
+            if (!res.headersSent) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ ok: false, error: err.message }));
+            }
+            return;
+          }
         }
 
         next();

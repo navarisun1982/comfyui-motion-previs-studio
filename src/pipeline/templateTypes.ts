@@ -81,7 +81,12 @@ export const BindingSchema = z
       draft: z.array(ProfileOverrideSchema),
       final: z.array(ProfileOverrideSchema),
     }),
-    output: z.object({ node: NodeIdSchema }).strict(),
+    output: z
+      .object({
+        node: NodeIdSchema,
+        fallbackNodes: z.array(NodeIdSchema).optional(),
+      })
+      .strict(),
     /** Frame-count constraint of the engine, e.g. LTX needs 8n+1 pixel frames. */
     frameRule: z.enum(['8n+1', 'any']).default('any'),
     notes: z.array(z.string()).optional(),

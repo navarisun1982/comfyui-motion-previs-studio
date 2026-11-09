@@ -33,6 +33,12 @@ export interface BindValues {
   refImageDescriptions?: [string, string, string, string];
   icLora?: string;
   icLoraStrength?: number;
+  /** Optional explicit sampling steps override from Workflow Tuning Bar. */
+  steps?: number;
+  /** Optional first-pass structure scale (LTX: 0.5 | 0.75 | 1.0) or megapixels (MiniMax H3: 0.5 | 0.8 | 1.0). */
+  firstPassScale?: number;
+  /** Optional explicit character reference mode ('OFF' | 'ON') from Workflow Tuning Bar. */
+  referenceMode?: 'OFF' | 'ON';
   filenamePrefix: string;
   seedCount?: number;
   winner?: number;
@@ -81,6 +87,7 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
   const applied: AppliedBinding[] = [];
   const patchCtx: TimelinePatchContext = {
     mode: values.mode,
+    prompt: values.prompt,
     firstFrameFile: values.firstFrameFile,
     controlVideoFile: values.controlVideoFile,
     refImage1File: values.refImage1File,
@@ -88,6 +95,8 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
     refImage3File: values.refImage3File,
     refImage4File: values.refImage4File,
     refImageDescriptions: values.refImageDescriptions,
+    referenceMode: values.referenceMode,
+    controlStrength: values.icLoraStrength,
     durationSeconds: values.durationSeconds,
     frameRate: values.frameRate,
   };
@@ -111,7 +120,7 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
         }
       }
 
-      // Switch StubeliusH3DirectorV2 to Reference (Omni) mode when running in control mode
+      // Switch StubeliusH3DirectorV2 to Reference (Omni) mode when running in control mode (unless explicitly turned OFF)
       if (
         field === 'timeline' &&
         workflow[target.node]?.class_type === 'StubeliusH3DirectorV2' &&
@@ -119,7 +128,10 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
       ) {
         const nodeInputs = workflow[target.node].inputs;
         if ('mode' in nodeInputs) {
-          nodeInputs.mode = 'Reference (Omni) — up to 9 images, 3 videos, 3 audio';
+          nodeInputs.mode =
+            values.referenceMode === 'OFF'
+              ? 'First/Last Frame — zero, one, or two frame images'
+              : 'Reference (Omni) — up to 9 images, 3 videos, 3 audio';
         }
       }
 
@@ -217,6 +229,62 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
     }
     if (node.class_type === 'MiniMaxH3ReferenceToVideo' && node.inputs.ref_image_size === 'max') {
       node.inputs.ref_image_size = 'match';
+    }
+
+    // Apply optional Workflow Tuning Bar overrides (Steps, Control/LoRA Strength, Structure Scale / Megapixels)
+    if (typeof values.steps === 'number' && Number.isFinite(values.steps) && values.steps >= 1) {
+      if (
+        node.class_type === 'StubeliusLTXSetup' ||
+        node.class_type === 'StubeliusH3Setup' ||
+        node.class_type === 'BasicScheduler' ||
+        node.class_type === 'KSampler'
+      ) {
+        if ('steps' in node.inputs && !Array.isArray(node.inputs.steps)) {
+          node.inputs.steps = Math.round(values.steps);
+        }
+      }
+    }
+
+    if (
+      typeof values.firstPassScale === 'number' &&
+      Number.isFinite(values.firstPassScale) &&
+      values.firstPassScale > 0
+    ) {
+      if (node.class_type === 'StubeliusLTXSetup' && 'first_pass_scale' in node.inputs) {
+        node.inputs.first_pass_scale = values.firstPassScale;
+      } else if (
+        (node.class_type === 'StubeliusH3Setup' || node.class_type === 'ResolutionSelector') &&
+        'megapixels' in node.inputs
+      ) {
+        node.inputs.megapixels = values.firstPassScale;
+      }
+    }
+
+    if (
+      typeof values.icLoraStrength === 'number' &&
+      Number.isFinite(values.icLoraStrength)
+    ) {
+      if (node.class_type === 'StubeliusLTXModels' && 'ic_lora_strength' in node.inputs) {
+        node.inputs.ic_lora_strength = values.icLoraStrength;
+      } else if (node.class_type === 'StubeliusH3Setup' && 'speedup_lora_strength' in node.inputs) {
+        node.inputs.speedup_lora_strength = values.icLoraStrength;
+      } else if (node.class_type === 'Power Lora Loader (rgthree)') {
+        const l1 = node.inputs.lora_1;
+        if (l1 && typeof l1 === 'object' && !Array.isArray(l1)) {
+          (l1 as Record<string, unknown>).strength = values.icLoraStrength;
+        }
+      }
+    }
+
+    // 24GB VRAM Protection for long LTX-2.5 shots (> 6s): enable chunk_feed_forward and 512px VAE tile decode
+    // (stubelius_ltx_pipeline.py: 768 tile takes ~17GB for 5s; 512 tile drops VAE decode VRAM to ~8GB)
+    if (node.class_type === 'StubeliusLTXModels' && values.durationSeconds > 6) {
+      if ('chunk_feed_forward' in node.inputs) {
+        node.inputs.chunk_feed_forward = true;
+      }
+      if ('decode_tile_size' in node.inputs) {
+        node.inputs.decode_tile_size = 512;
+      }
     }
   }
 

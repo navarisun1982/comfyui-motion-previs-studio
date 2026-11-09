@@ -14,6 +14,8 @@ import {
   setRigOverlayVisible,
   POSE_PRESETS,
   HumanoidRig,
+  loadFbxTemplate,
+  instantiateMannequinRig,
 } from '../engine/kinematics';
 import { disposeObject3D } from './stage/stageGizmoHelpers';
 import {
@@ -327,12 +329,13 @@ export const Asset3DPreviewInspector: React.FC<Asset3DPreviewInspectorProps> = (
         });
         if (autoRes.rig) {
           activeRigRef.current = autoRes.rig;
+          applyPosePreset(autoRes.rig, 'neutral-stand');
         }
       } catch {
         // Ignore auto-rig fallback on static props
       }
 
-      if (animations && animations.length > 0) {
+      if (!activeRigRef.current && animations && animations.length > 0) {
         const mixer = new THREE.AnimationMixer(sceneRoot);
         mixer.clipAction(animations[0]).play();
         activeMixerRef.current = mixer;
@@ -345,7 +348,38 @@ export const Asset3DPreviewInspector: React.FC<Asset3DPreviewInspectorProps> = (
 
     const modelUri = asset.modelUrl || (asset.modelId ? `model://${asset.modelId}` : undefined);
 
-    if (modelUri) {
+    if (modelUri && /\.fbx(\?|$)/i.test(modelUri)) {
+      loadFbxTemplate(modelUri)
+        .then((tpl) => {
+          if (disposed) return;
+          const isFemale = /x-bot|female|actress|woman|girl/i.test(`${asset.name} ${modelUri}`);
+          const fbxRig = instantiateMannequinRig(tpl, {
+            height: 3.6,
+            tint: isFemale ? '#f472b6' : '#7dd3fc',
+          });
+          activeRigRef.current = fbxRig;
+          applyPosePreset(fbxRig, 'neutral-stand');
+          subjectHolder.add(fbxRig.root);
+          frameObjectInCamera(fbxRig.root);
+          setIsLoading(false);
+        })
+        .catch((err) => {
+          if (disposed) return;
+          console.warn('FBX preview load fallback to procedural mesh:', err);
+          const fallbackGroup = createSubjectMesh({
+            name: asset.name,
+            kind: asset.kind,
+            tokenPrompt: asset.tokenPrompt,
+            showLabels: false,
+          });
+          if (fallbackGroup.userData.rig) {
+            activeRigRef.current = fallbackGroup.userData.rig;
+          }
+          subjectHolder.add(fallbackGroup);
+          frameObjectInCamera(fallbackGroup);
+          setIsLoading(false);
+        });
+    } else if (modelUri) {
       loadGltfModel(modelUri)
         .then((res) => {
           if (disposed) return;

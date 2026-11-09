@@ -67,8 +67,18 @@ export interface HumanoidRig {
   restPositions: Map<HumanoidBone, THREE.Vector3>;
   /** Rest local rotations in rest T-pose */
   restRotations: Map<HumanoidBone, THREE.Quaternion>;
+  /** Full 67-bone Mixamo map (including Spine1, Spine2, LeftToeBase, RightToeBase, and 30 finger bones) */
+  mixamoBones?: Map<string, THREE.Bone>;
+  /** Rest local rotations for all Mixamo bones */
+  mixamoRestRotations?: Map<string, THREE.Quaternion>;
+  /** Rest character-space (root-relative) rotations for all Mixamo bones, used for exact basis change */
+  mixamoCharSpaceRestRotations?: Map<string, THREE.Quaternion>;
   /** Total height in stage units */
   height: number;
+  /** True when loaded from a Mixamo FBX mannequin rig */
+  isMannequinRig?: boolean;
+  /** True when instantiated from the 6,890-vertex parametric SMPL body template */
+  isSmplRig?: boolean;
 }
 
 /**

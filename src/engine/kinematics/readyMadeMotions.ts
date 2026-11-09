@@ -19,6 +19,7 @@ import { HumanoidRig } from './skeletonHierarchy';
 import { solveLimbIK, solveLookAt } from './twoBoneIKSolver';
 import { evaluateGait } from './gaitEngine';
 import { applyPosePreset } from './posePresets';
+import { evaluateMixamoClipOnRig } from './mixamoClipLibrary';
 import { evaluateUniversalKinematicProgram } from './universalKinematicSynthesizer';
 import {
   ObjectPoseCategory,
@@ -316,6 +317,78 @@ export const READY_MADE_MOTIONS: ReadyMadeMotionClip[] = [
     description: 'Alternating overhead hand reaches and high knee lifts while ascending vertically.',
     promptPhrase: 'reaches overhead with alternating hands and climbs upward',
     defaultDurationSec: 2.8,
+    travelsByDefault: false,
+    baseGait: 'none',
+  },
+  {
+    id: 'human-samba-dance',
+    name: 'Mixamo Samba Dance',
+    icon: '💃',
+    category: 'humanoid',
+    humanGroup: 'acting',
+    description: '52-bone Mixamo Studio motion-captured Samba dance with full finger, hip, and footwork articulation.',
+    promptPhrase: 'performs an energetic rhythmic samba dance with expressive arm and hip movement',
+    defaultDurationSec: 4.5,
+    travelsByDefault: false,
+    baseGait: 'none',
+  },
+  {
+    id: 'human-dialogue-gesture',
+    name: 'Mixamo Expressive Talk',
+    icon: '🗣️',
+    category: 'humanoid',
+    humanGroup: 'acting',
+    description: '52-bone Mixamo Studio motion-captured natural conversation with expressive hand gestures and weight shifts.',
+    promptPhrase: 'speaks expressively with natural hand gestures and organic posture shifts',
+    defaultDurationSec: 4.5,
+    travelsByDefault: false,
+    baseGait: 'none',
+  },
+  {
+    id: 'human-action-patrol',
+    name: 'Mixamo Tactical Patrol',
+    icon: '🕵️‍♂️',
+    category: 'humanoid',
+    humanGroup: 'combat',
+    description: '52-bone Mixamo Studio motion-captured alert tactical stance, crouched scan, and footwork.',
+    promptPhrase: 'moves in an alert tactical crouch while scanning the surroundings',
+    defaultDurationSec: 4.5,
+    travelsByDefault: false,
+    baseGait: 'none',
+  },
+  {
+    id: 'human-nod-agree',
+    name: 'Mixamo Nod (Agree)',
+    icon: '👍',
+    category: 'humanoid',
+    humanGroup: 'acting',
+    description: '52-bone Mixamo Studio motion-captured affirmative head nod and upper-body acknowledgment.',
+    promptPhrase: 'nods head affirmatively in agreement with natural posture',
+    defaultDurationSec: 2.2,
+    travelsByDefault: false,
+    baseGait: 'none',
+  },
+  {
+    id: 'human-head-shake-no',
+    name: 'Mixamo Head Shake (No)',
+    icon: '🙅',
+    category: 'humanoid',
+    humanGroup: 'acting',
+    description: '52-bone Mixamo Studio motion-captured head shake refusal and subtle shoulder turn.',
+    promptPhrase: 'shakes head side to side in refusal',
+    defaultDurationSec: 2.2,
+    travelsByDefault: false,
+    baseGait: 'none',
+  },
+  {
+    id: 'human-sad-dejected',
+    name: 'Mixamo Sad / Dejected',
+    icon: '😔',
+    category: 'humanoid',
+    humanGroup: 'acting',
+    description: '52-bone Mixamo Studio motion-captured dejected posture with lowered head and heavy breathing.',
+    promptPhrase: 'stands in a sad dejected posture with lowered head and slumped shoulders',
+    defaultDurationSec: 3.0,
     travelsByDefault: false,
     baseGait: 'none',
   },
@@ -1093,15 +1166,19 @@ export function compileReadyMadeMotionKeyframes(
     destX = THREE.MathUtils.clamp(options.targetPosition.x, 8, 92);
     destY = THREE.MathUtils.clamp(options.targetPosition.y, 8, 92);
   } else if (shouldTravel) {
-    // Travel distance scaled by clip speed and window duration
+    // Travel distance scaled by clip speed and window duration (synchronized 1:1 with Mixamo stride lengths)
     const speedFactor =
-      clip.id.includes('run') || clip.id.includes('gallop') || clip.id.includes('accel') || clip.id.includes('swoop')
+      clip.id.includes('gallop') || clip.id.includes('accel') || clip.id.includes('swoop')
         ? 11.5
+        : clip.id.includes('run')
+        ? 6.85
         : clip.id.includes('jump') || clip.id.includes('pounce')
         ? 9.0
+        : clip.id.includes('sneak')
+        ? 2.65
         : clip.id.includes('dodge') || clip.id.includes('hit') || clip.id.includes('back')
-        ? 5.5
-        : 7.5;
+        ? 3.8
+        : 4.16;
     const travelDist = Math.min(38, Math.max(8, dur * speedFactor));
 
     if (clip.id === 'human-dodge-weave') {
@@ -1161,14 +1238,18 @@ export function compileReadyMadeMotionKeyframes(
     const cycleU = i === numSamples ? 1.0 : rawCyclePos - cycleIdx;
     const smoothCycleU = cycleU * cycleU * (3 - 2 * cycleU);
 
+    const isContinuousLocomotion =
+      clip.baseGait === 'walk' || clip.baseGait === 'run' || clip.baseGait === 'sneak';
+    const progressInCycle = isContinuousLocomotion ? cycleU : smoothCycleU;
+
     // Stage floor progression segmented across `safeCycles` repetitions
     const cycStartX = startX + ((destX - startX) * cycleIdx) / safeCycles;
     const cycStartY = startY + ((destY - startY) * cycleIdx) / safeCycles;
     const cycEndX = startX + ((destX - startX) * (cycleIdx + 1)) / safeCycles;
     const cycEndY = startY + ((destY - startY) * (cycleIdx + 1)) / safeCycles;
 
-    let curX = cycStartX + (cycEndX - cycStartX) * smoothCycleU;
-    let curY = cycStartY + (cycEndY - cycStartY) * smoothCycleU;
+    let curX = cycStartX + (cycEndX - cycStartX) * progressInCycle;
+    let curY = cycStartY + (cycEndY - cycStartY) * progressInCycle;
     let curZ = startZ;
 
     let rotX = baseRot.x;
@@ -1426,7 +1507,8 @@ export function evaluateReadyMadeHumanoidClip(
   timeSeconds: number,
   clipProgress01?: number,
   isTravelingOnFloor?: boolean,
-  motionCycles?: number
+  motionCycles?: number,
+  floorSpeedUnitsPerSec?: number
 ): boolean {
   if (clipId && clipId.startsWith('universal-ik:')) {
     return evaluateUniversalKinematicProgram(rig, clipId, timeSeconds, clipProgress01, motionCycles);
@@ -1531,12 +1613,9 @@ export function evaluateReadyMadeHumanoidClip(
     return true;
   };
 
-  // Compute smooth acceleration/deceleration stride envelope when clipProgress01 is supplied
-  const computeLocomotionEnvelope = (prog?: number): number => {
-    if (prog === undefined) return 1.0;
-    const p = THREE.MathUtils.clamp(prog, 0, 1);
-    if (p < 0.12) return 0.35 + 0.65 * (p / 0.12);
-    if (p > 0.88) return 0.25 + 0.75 * ((1.0 - p) / 0.12);
+  // Keep stride envelope locked at 1.0 (100% full Mixamo stride amplitude) from frame 0 (t = 0.0s)
+  // so the legs never blend 65% into standing 'idle' during the first second while the floor moves at 100% speed.
+  const computeLocomotionEnvelope = (_prog?: number): number => {
     return 1.0;
   };
 
@@ -1552,18 +1631,36 @@ export function evaluateReadyMadeHumanoidClip(
 
   // Continuous locomotion clips delegate to evaluateGait with cycle-aware frequency/stride envelope
   if (clipId === 'human-walk-forward' || clipId === 'human-back-retreat') {
+    if (
+      clipProgress01 !== undefined &&
+      (clipProgress01 <= 0.001 || clipProgress01 >= 0.999) &&
+      floorSpeedUnitsPerSec !== undefined &&
+      floorSpeedUnitsPerSec < 0.25
+    ) {
+      evaluateGait(rig, timeSeconds, { gait: 'idle', speed: 0 });
+      return true;
+    }
     evaluateGait(rig, timeSeconds, {
       gait: 'walk',
-      speed: 1.5,
+      speed: floorSpeedUnitsPerSec && floorSpeedUnitsPerSec > 0.35 ? floorSpeedUnitsPerSec : 1.5,
       frequencyScale: safeCycles > 1 ? 1.0 + (safeCycles - 1) * 0.35 : 1.0,
       strideEnvelope: computeLocomotionEnvelope(safeCycles > 1 ? u : clipProgress01),
     });
     return true;
   }
   if (clipId === 'human-run-sprint') {
+    if (
+      clipProgress01 !== undefined &&
+      (clipProgress01 <= 0.001 || clipProgress01 >= 0.999) &&
+      floorSpeedUnitsPerSec !== undefined &&
+      floorSpeedUnitsPerSec < 0.25
+    ) {
+      evaluateGait(rig, timeSeconds, { gait: 'idle', speed: 0 });
+      return true;
+    }
     evaluateGait(rig, timeSeconds, {
       gait: 'run',
-      speed: 2.8,
+      speed: floorSpeedUnitsPerSec && floorSpeedUnitsPerSec > 0.35 ? floorSpeedUnitsPerSec : 2.8,
       frequencyScale: 1.05 * (safeCycles > 1 ? 1.0 + (safeCycles - 1) * 0.35 : 1.0),
       strideEnvelope: computeLocomotionEnvelope(safeCycles > 1 ? u : clipProgress01),
     });
@@ -1580,6 +1677,42 @@ export function evaluateReadyMadeHumanoidClip(
   }
   if (clipId === 'human-idle-breathe') {
     evaluateGait(rig, timeSeconds * (safeCycles > 1 ? safeCycles : 1), { gait: 'idle', speed: 0 });
+    return true;
+  }
+  if (clipId === 'human-samba-dance') {
+    evaluateMixamoClipOnRig(rig, 'samba_dance', timeSeconds, {
+      speedScale: safeCycles > 1 ? 1.0 + (safeCycles - 1) * 0.35 : 1.0,
+    });
+    return true;
+  }
+  if (clipId === 'human-dialogue-gesture') {
+    evaluateMixamoClipOnRig(rig, 'dialogue_gesture', timeSeconds, {
+      speedScale: safeCycles > 1 ? 1.0 + (safeCycles - 1) * 0.35 : 1.0,
+    });
+    return true;
+  }
+  if (clipId === 'human-action-patrol') {
+    evaluateMixamoClipOnRig(rig, 'action_look_around', timeSeconds, {
+      speedScale: safeCycles > 1 ? 1.0 + (safeCycles - 1) * 0.35 : 1.0,
+    });
+    return true;
+  }
+  if (clipId === 'human-nod-agree') {
+    evaluateMixamoClipOnRig(rig, 'agree', timeSeconds, {
+      speedScale: safeCycles > 1 ? 1.0 + (safeCycles - 1) * 0.35 : 1.0,
+    });
+    return true;
+  }
+  if (clipId === 'human-head-shake-no') {
+    evaluateMixamoClipOnRig(rig, 'headShake', timeSeconds, {
+      speedScale: safeCycles > 1 ? 1.0 + (safeCycles - 1) * 0.35 : 1.0,
+    });
+    return true;
+  }
+  if (clipId === 'human-sad-dejected') {
+    evaluateMixamoClipOnRig(rig, 'sad_pose', timeSeconds, {
+      speedScale: safeCycles > 1 ? 1.0 + (safeCycles - 1) * 0.35 : 1.0,
+    });
     return true;
   }
 

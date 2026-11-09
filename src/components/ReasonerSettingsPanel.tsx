@@ -57,6 +57,7 @@ import {
 import { GlbResourcesDirectory } from './GlbResourcesDirectory';
 import { CustomWorkflowConfigBar } from './CustomWorkflowConfigBar';
 import { StudioStorageSettingsCard } from './StudioStorageSettingsCard';
+import { MocapModelsManagerCard } from './MocapModelsManagerCard';
 
 type Status = { tone: 'ok' | 'err' | 'info'; text: string } | null;
 
@@ -625,6 +626,9 @@ export const ReasonerSettingsPanel: React.FC<{
             {/* Custom Workflow URL / .JSON Auto-Detector inside ComfyUI Tab */}
             <CustomWorkflowConfigBar />
           </div>
+
+          {/* 3D Mocap & Open-Weights Models Manager (NLF-Large 470.3 MB + Bundled Rig Assets) */}
+          <MocapModelsManagerCard />
         </div>
       )}
 
@@ -632,6 +636,7 @@ export const ReasonerSettingsPanel: React.FC<{
       {activeSettingsTab === 'storage' && (
         <div className="space-y-3 animate-in fade-in duration-150">
           <StudioStorageSettingsCard />
+          <MocapModelsManagerCard />
         </div>
       )}
 

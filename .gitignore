@@ -52,3 +52,12 @@ AGENTS.md
 # Local Studio Storage runtime directory & config
 studio_storage/
 studio-storage-config.json
+public/models/mediapipe/
+public/models/smpl_canonical.bin
+models/nlf/
+*.torchscript
+*.safetensors
+*.ckpt
+*.pth
+__pycache__/
+*.pyc

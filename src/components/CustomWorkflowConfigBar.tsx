@@ -48,6 +48,7 @@ interface CustomWorkflowConfigBarProps {
     choice: WorkflowChoiceItem,
     detected: AutoDetectedWorkflowResult | null
   ) => void;
+  children?: React.ReactNode;
 }
 
 export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = ({
@@ -55,6 +56,7 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
   engine = 'minimax-h3',
   onConfigChanged,
   onWorkflowChanged,
+  children,
 }) => {
   const [choices, setChoices] = useState<WorkflowChoiceItem[]>(() =>
     getWorkflowChoicesForEngine(engine)
@@ -368,28 +370,26 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
 
   return (
     <div
-      className={`rounded-xl border ${
+      className={`rounded-2xl border ${
         activeChoice.kind === 'custom'
           ? 'border-cyan-500/40 bg-cyan-950/15'
-          : 'border-indigo-500/25 bg-black/45'
-      } ${compact ? 'p-3' : 'p-3.5'} space-y-2.5 font-mono text-xs`}
+          : 'border-indigo-500/25 bg-[#080c18]/90'
+      } ${compact ? 'p-3.5' : 'p-4'} space-y-2.5 text-xs shadow-inner`}
     >
       {/* Row 1: Workflow Library Selector Dropdown (Built-in Curated + User URL Workflows) */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
         <div className="flex items-center gap-2 shrink-0">
-          <Globe className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
-          <span className="font-bold text-[11px] text-white uppercase tracking-wide">
-            {engine === 'ltx-2.5' ? 'LTX-2.5 Render Workflow:' : 'MiniMax H3 Render Workflow:'}
+          <div className="h-6 w-6 rounded-lg bg-cyan-500/15 border border-cyan-400/35 flex items-center justify-center text-cyan-300 shrink-0">
+            <Globe className="h-3.5 w-3.5" />
+          </div>
+          <span className="font-bold text-xs text-white tracking-wide">
+            {engine === 'ltx-2.5' ? 'LTX-2.5 Render Workflow' : 'MiniMax H3 Render Workflow'}
           </span>
-          <span
-            className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold border ${
-              activeChoice.kind === 'custom'
-                ? 'bg-cyan-500/20 border-cyan-400/40 text-cyan-200'
-                : 'bg-indigo-500/20 border-indigo-400/35 text-indigo-200'
-            }`}
-          >
-            {activeChoice.kind === 'custom' ? '🔗 URL Workflow' : '📦 Built-in Preset'}
-          </span>
+          {activeChoice.kind === 'custom' && (
+            <span className="rounded-md px-1.5 py-0.5 text-[9.5px] font-mono font-semibold border bg-cyan-500/20 border-cyan-400/40 text-cyan-200">
+              🔗 URL Workflow
+            </span>
+          )}
         </div>
 
         <div className="flex flex-1 items-center gap-2 min-w-0">
@@ -397,12 +397,12 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
             aria-label="Select Render Workflow"
             value={activeChoice.id}
             onChange={(e) => handleSelectWorkflow(e.target.value)}
-            className="flex-1 min-w-0 rounded-lg bg-[#090d16] border border-indigo-400/40 hover:border-cyan-400/60 px-2.5 py-1.5 text-[11px] font-semibold text-white focus:outline-none focus:border-cyan-400 cursor-pointer"
+            className="flex-1 min-w-0 rounded-xl bg-[#0d1222] border border-white/15 hover:border-cyan-400/60 px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-cyan-400 cursor-pointer shadow-inner"
           >
             <optgroup label={`📦 Curated Built-in ${engine === 'ltx-2.5' ? 'LTX-2.5' : 'MiniMax H3'} Workflows`}>
               {builtinChoices.map((wf) => (
                 <option key={wf.id} value={wf.id}>
-                  📦 {wf.label}
+                  {wf.label}
                 </option>
               ))}
             </optgroup>
@@ -422,7 +422,7 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
               type="button"
               onClick={handleRemoveActiveCustomWorkflow}
               title="Remove this custom URL workflow from the list"
-              className="flex items-center gap-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/30 border border-rose-400/35 px-2.5 py-1.5 text-[10px] font-bold text-rose-200 cursor-pointer shrink-0"
+              className="flex items-center gap-1 rounded-xl bg-rose-500/15 hover:bg-rose-500/30 border border-rose-400/35 px-2.5 py-2 text-[10.5px] font-bold text-rose-200 cursor-pointer shrink-0"
             >
               <Trash2 className="h-3 w-3 text-rose-400" />
               <span>Remove</span>
@@ -432,24 +432,24 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
       </div>
 
       {/* Active Workflow Summary Strip */}
-      <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-300 bg-black/35 rounded-lg px-2.5 py-1.5 border border-white/5">
-        <div className="truncate">
+      <div className="flex flex-col gap-2 pt-0.5">
+        <div className="text-[11px] text-slate-300 truncate">
           <span className="text-slate-400">Active Pipeline: </span>
-          <strong className="text-white">{activeChoice.shortLabel}</strong>
-          <span className="text-slate-400"> — {activeChoice.description}</span>
+          <strong className="text-white font-semibold">{activeChoice.shortLabel}</strong>
+          <span className="text-slate-400"> • {activeChoice.description}</span>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="rounded bg-emerald-500/15 border border-emerald-400/30 px-1.5 py-0.5 text-[9.5px] font-semibold text-emerald-300">
-            {comfySyncBadge}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/15 border border-emerald-400/35 px-2.5 py-1 text-[10.5px] font-semibold text-emerald-300">
+            <span>{comfySyncBadge}</span>
           </span>
-          <span className="text-[9.5px] text-indigo-300">
-            {builtinChoices.length} Built-in + {customChoices.length} Added via URL
+          <span className="inline-flex items-center gap-1 rounded-lg bg-indigo-500/15 border border-indigo-400/30 px-2.5 py-1 text-[10.5px] font-semibold text-indigo-200">
+            <span>› {builtinChoices.length} Built-in + {customChoices.length} Added via URL</span>
           </span>
         </div>
       </div>
 
       {/* Row 2: Add Workflow(s) by URL Input Bar (Always Accessible inside Render Panel) */}
-      <div className="space-y-2 pt-1 border-t border-white/10">
+      <div className="space-y-2 pt-1.5 border-t border-white/10">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5">
           <input
             type="text"
@@ -461,50 +461,48 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
                 handleAddFromUrl();
               }
             }}
-            placeholder={`Paste Civitai / GitHub / ComfyUI workflow URL (or comma-separated URLs) for ${
-              engine === 'ltx-2.5' ? 'LTX-2.5' : 'MiniMax H3'
-            }...`}
-            className="flex-1 rounded-lg bg-black/70 border border-white/15 px-2.5 py-1.5 text-[11px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+            placeholder="Paste Civitai / GitHub / ComfyUI workflow URL..."
+            className="flex-1 rounded-xl bg-[#050811] border border-white/15 px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400 shadow-inner"
           />
           <button
             type="button"
             onClick={() => handleAddFromUrl()}
             disabled={isLoadingUrl}
-            className="flex items-center justify-center gap-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-bold px-3 py-1.5 text-[10.5px] transition-all disabled:opacity-50 cursor-pointer shrink-0"
+            className="flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-cyan-500 hover:from-cyan-300 hover:to-cyan-400 text-black font-bold px-3.5 py-2 text-xs shadow-[0_0_15px_rgba(34,211,238,0.25)] transition-all disabled:opacity-50 cursor-pointer shrink-0"
             title="Fetch workflow JSON from Civitai/GitHub/local URL, validate nodes, and add to the workflow selector list"
           >
             {isLoadingUrl ? (
-              <RefreshCw className="h-3 w-3 animate-spin" />
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <Plus className="h-3.5 w-3.5 stroke-[2.5]" />
             )}
-            <span>{isLoadingUrl ? 'Adding...' : '+ Add Workflow URL'}</span>
+            <span>{isLoadingUrl ? 'Adding...' : 'Add Workflow URL'}</span>
           </button>
           <button
             type="button"
             onClick={handleSyncAllToComfy}
             disabled={isSyncingComfy}
-            className="flex items-center justify-center gap-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/35 px-2.5 py-1.5 text-[10.5px] font-semibold cursor-pointer shrink-0"
-            title="Sync all bundled default & custom workflows to your local ComfyUI (D:\\ComfyUI\\user\\default\\workflows)"
+            className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 border border-emerald-400/35 px-3 py-2 text-xs font-semibold cursor-pointer shrink-0 transition-colors"
+            title="Sync all bundled default & custom workflows to your local ComfyUI (D:\ComfyUI\user\default\workflows)"
           >
-            <RefreshCw className={`h-3 w-3 text-emerald-300 ${isSyncingComfy ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`h-3.5 w-3.5 text-emerald-300 ${isSyncingComfy ? 'animate-spin' : ''}`} />
             <span>{isSyncingComfy ? 'Syncing...' : 'Sync Workflows'}</span>
           </button>
           <button
             type="button"
             onClick={handleScanLocalComfy}
             disabled={isScanningLocal}
-            className="flex items-center justify-center gap-1.5 rounded-lg bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-400/35 px-2.5 py-1.5 text-[10.5px] font-semibold cursor-pointer shrink-0"
+            className="flex items-center justify-center gap-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-400/40 px-3 py-2 text-xs font-semibold cursor-pointer shrink-0 transition-colors"
             title="Scan saved workflows inside your local ComfyUI server (127.0.0.1:8188)"
           >
-            <FolderOpen className={`h-3 w-3 text-indigo-300 ${isScanningLocal ? 'animate-pulse' : ''}`} />
-            <span>{isScanningLocal ? 'Scanning...' : 'Scan Local ComfyUI'}</span>
+            <FolderOpen className={`h-3.5 w-3.5 text-purple-300 ${isScanningLocal ? 'animate-pulse' : ''}`} />
+            <span>{isScanningLocal ? 'Scanning...' : 'Scan Local'}</span>
           </button>
           <label
-            className="flex items-center justify-center gap-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-slate-200 border border-white/15 px-2.5 py-1.5 text-[10.5px] font-semibold cursor-pointer shrink-0"
+            className="flex items-center justify-center gap-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 border border-white/15 px-3 py-2 text-xs font-semibold cursor-pointer shrink-0 transition-colors"
             title="Or upload a local ComfyUI .json workflow file to add to the workflow list"
           >
-            <Upload className="h-3 w-3 text-cyan-300" />
+            <Upload className="h-3.5 w-3.5 text-slate-300" />
             <span>Upload .JSON</span>
             <input
               type="file"
@@ -516,10 +514,10 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
           <button
             type="button"
             onClick={() => setShowGuide((prev) => !prev)}
-            className="flex items-center justify-center gap-1 rounded-lg bg-white/5 hover:bg-white/10 text-cyan-300 border border-cyan-500/30 px-2 py-1.5 text-[10px] font-semibold cursor-pointer shrink-0"
+            className="flex items-center justify-center gap-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-200 border border-cyan-400/35 px-2.5 py-2 text-xs font-semibold cursor-pointer shrink-0 transition-colors"
             title="Show / hide step-by-step Workflow URL Guide"
           >
-            <HelpCircle className="h-3 w-3" />
+            <HelpCircle className="h-3.5 w-3.5 text-cyan-300" />
             <span>Guide</span>
           </button>
         </div>
@@ -753,6 +751,8 @@ export const CustomWorkflowConfigBar: React.FC<CustomWorkflowConfigBarProps> = (
             <span className="whitespace-pre-line">{errorText || statusText}</span>
           </div>
         )}
+
+        {children}
       </div>
     </div>
   );

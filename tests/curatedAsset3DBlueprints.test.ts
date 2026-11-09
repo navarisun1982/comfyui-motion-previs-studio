@@ -53,10 +53,10 @@ describe('Curated 200 Open .GLB Asset Library & External Catalogs Registry', () 
     }
   });
 
-  it('contains exactly 200 curated items with real Polyfork .GLB URLs and 2 Posable 19-bone IK/FK Director Rigs', () => {
-    expect(CURATED_3D_ASSETS.length).toBe(200);
+  it('contains 208 curated items with real Polyfork/bundled .GLB URLs and 2 Posable 19-bone IK/FK Director Rigs', () => {
+    expect(CURATED_3D_ASSETS.length).toBe(208);
 
-    const posableRigs = CURATED_3D_ASSETS.filter((a) => !a.modelUrl);
+    const posableRigs = CURATED_3D_ASSETS.filter((a) => a.modelUrl?.endsWith('.fbx'));
     expect(posableRigs.map((r) => r.id)).toEqual([
       'char-director-rig-male',
       'char-director-rig-female',
@@ -66,17 +66,19 @@ describe('Curated 200 Open .GLB Asset Library & External Catalogs Registry', () 
       expect(rig.category).toBe('character');
     }
 
-    const glbItems = CURATED_3D_ASSETS.filter((a) => Boolean(a.modelUrl));
-    expect(glbItems.length).toBe(198);
+    const glbItems = CURATED_3D_ASSETS.filter((a) => a.modelUrl?.endsWith('.glb'));
+    expect(glbItems.length).toBe(206);
 
     for (const item of glbItems) {
-      expect(item.modelUrl, `Item ${item.id} should have a valid Polyfork CDN .glb URL`).toMatch(
-        /^https:\/\/polyfork\.dev\/cdn\/[A-Za-z0-9_-]+\.glb$/
+      expect(item.modelUrl, `Item ${item.id} should have a valid Polyfork CDN or bundled .glb URL`).toMatch(
+        /^(https:\/\/polyfork\.dev\/cdn\/[A-Za-z0-9_-]+\.glb|\.?\/models\/[A-Za-z0-9_.-]+\.glb)$/
       );
       expect(
         item.conceptImageUrl,
-        `Item ${item.id} should have a valid Polyfork CDN hero.png thumbnail`
-      ).toMatch(/^https:\/\/polyfork\.dev\/files\/[A-Za-z0-9_-]+\/renders\/hero\.png/);
+        `Item ${item.id} should have a valid Polyfork CDN or bundled library thumbnail`
+      ).toMatch(
+        /^(https:\/\/polyfork\.dev\/files\/[A-Za-z0-9_-]+\/renders\/hero\.png|data:image\/svg\+xml|\.?\/images\/library\/[A-Za-z0-9_.-]+\.(jpg|png|svg))/
+      );
     }
 
     // Verify all 43 Polyfork Kits and 5 Sandflow Sand3D Datasets are registered
@@ -267,7 +269,10 @@ describe('Curated 200 Open .GLB Asset Library & External Catalogs Registry', () 
         `Asset "${asset.id}" (${asset.name}) is too colossal on stage (height=${modelSize.y.toFixed(2)})`
       ).toBeLessThanOrEqual(9.5);
 
-      const isHumanCharacter = asset.category === 'character' && asset.id !== 'char-robot-mecha';
+      const isHumanCharacter =
+        asset.category === 'character' &&
+        asset.id !== 'char-robot-mecha' &&
+        asset.id !== 'char-quaternius-robot-expressive';
       if (isHumanCharacter) {
         expect(
           stageGroup.userData.rig,

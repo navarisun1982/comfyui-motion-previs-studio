@@ -12,6 +12,7 @@ import {
   syncActiveEngineWorkflowToRegistry,
   validateWorkflowForStudioRender,
   ensure3DWorkflowsSyncedToComfyUI,
+  getWorkflowArchitectureProfile,
 } from '../src/pipeline/customWorkflowResolver';
 import { bindTemplate } from '../src/pipeline/templateBinder';
 import { installMemoryStorage } from './helpers/memoryStorage';
@@ -293,6 +294,13 @@ describe('customWorkflowResolver', () => {
         selectActiveWorkflowForEngine(engine, choice.id);
         const synced = syncActiveEngineWorkflowToRegistry(engine);
         expect(synced.registered, `Registry entry for ${choice.id}`).not.toBeNull();
+        const archProfile = getWorkflowArchitectureProfile(choice.id, engine);
+        expect(archProfile.primarySaveNodeId).toBe(synced.registered!.binding.output.node);
+        expect(archProfile.fallbackSaveNodeIds.length).toBeGreaterThan(0);
+        expect(archProfile.controlInputNodeLabel.length).toBeGreaterThan(5);
+        expect(['clay', 'rgb', 'depth', 'openpose', 'id-mask']).toContain(
+          archProfile.recommendedPass
+        );
         const bound = bindTemplate(synced.registered!.api, synced.registered!.binding, {
           mode: 'control',
           profile: choice.forcedProfile || 'final',
