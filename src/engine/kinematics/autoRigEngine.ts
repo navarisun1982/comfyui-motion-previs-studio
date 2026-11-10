@@ -1282,18 +1282,15 @@ export function createRigVisualOverlay(rig: HumanoidRig, visible = false): THREE
   overlayGroup.name = '__auto_rig_skeleton_helper__';
   overlayGroup.visible = visible;
 
-  const jointGeo = new THREE.SphereGeometry(Math.max(0.035, rig.height * 0.014), 10, 10);
-  const rootJointMat = new THREE.MeshBasicMaterial({
-    color: 0xf59e0b,
+  const baseRadius = Math.max(0.032, rig.height * 0.013);
+  const jointGeo = new THREE.SphereGeometry(baseRadius, 12, 12);
+  const haloGeo = new THREE.SphereGeometry(baseRadius * 1.45, 14, 14);
+  const haloMat = new THREE.MeshBasicMaterial({
+    color: 0x00ffff,
     depthTest: false,
     transparent: true,
-    opacity: 0.95,
-  });
-  const limbJointMat = new THREE.MeshBasicMaterial({
-    color: 0x38bdf8,
-    depthTest: false,
-    transparent: true,
-    opacity: 0.9,
+    opacity: 0.42,
+    wireframe: true,
   });
 
   // Attach small joint spheres directly to each bone so they follow all FK/IK motion automatically
@@ -1302,13 +1299,37 @@ export function createRigVisualOverlay(rig: HumanoidRig, visible = false): THREE
     if (existingSphere) bone.remove(existingSphere);
 
     const isCore = boneName === 'Hips' || boneName === 'Chest' || boneName === 'Head';
-    const sphere = new THREE.Mesh(jointGeo, isCore ? rootJointMat : limbJointMat);
+    const baseColorHex = isCore ? 0xf59e0b : 0x38bdf8;
+    const baseOpacity = isCore ? 0.95 : 0.9;
+    const sphereMat = new THREE.MeshBasicMaterial({
+      color: baseColorHex,
+      depthTest: false,
+      transparent: true,
+      opacity: baseOpacity,
+    });
+    const sphere = new THREE.Mesh(jointGeo, sphereMat);
     sphere.name = '__bone_joint_sphere__';
-    sphere.userData = { isBoneJointSphere: true, boneName };
+    sphere.userData = {
+      isBoneJointSphere: true,
+      boneName,
+      baseColorHex,
+      baseOpacity,
+    };
     sphere.renderOrder = 999;
     sphere.visible = visible;
     sphere.layers.enable(0);
     sphere.layers.enable(1); // Editor gizmo layer 1 on stage + layer 0 in 3D Studio preview
+
+    // Outer highlight halo ring shown when this joint is clicked/selected
+    const halo = new THREE.Mesh(haloGeo, haloMat);
+    halo.name = '__bone_joint_halo__';
+    halo.renderOrder = 1000;
+    halo.visible = false;
+    halo.raycast = () => {};
+    halo.layers.enable(0);
+    halo.layers.enable(1);
+    sphere.add(halo);
+
     bone.add(sphere);
   }
 
@@ -1377,6 +1398,37 @@ export function setRigOverlayVisible(rootGroup: THREE.Object3D, visible: boolean
       }
       if (typeof child.userData?.updateLines === 'function') {
         child.userData.updateLines();
+      }
+    }
+  });
+}
+
+/**
+ * Highlights the currently selected 3D joint sphere (`__bone_joint_sphere__`) in the viewport
+ * with a bright neon-gold core, larger scale, and cyan wireframe halo, while restoring unselected joints.
+ */
+export function highlightRigJointSphere(
+  rootGroup: THREE.Object3D | null | undefined,
+  selectedBone: string | null | undefined
+): void {
+  if (!rootGroup) return;
+  rootGroup.traverse((child) => {
+    if (child.name === '__bone_joint_sphere__' && (child as THREE.Mesh).isMesh) {
+      const mesh = child as THREE.Mesh;
+      const mat = mesh.material as THREE.MeshBasicMaterial | undefined;
+      const isSelected = Boolean(selectedBone && mesh.userData?.boneName === selectedBone);
+      const baseColorHex = mesh.userData?.baseColorHex ?? 0x38bdf8;
+      const baseOpacity = mesh.userData?.baseOpacity ?? 0.9;
+
+      if (mat && mat.color) {
+        mat.color.setHex(isSelected ? 0xfef08a : baseColorHex);
+        mat.opacity = isSelected ? 1.0 : baseOpacity;
+      }
+      mesh.scale.setScalar(isSelected ? 1.65 : 1.0);
+
+      const halo = mesh.getObjectByName('__bone_joint_halo__');
+      if (halo) {
+        halo.visible = isSelected && mesh.visible;
       }
     }
   });

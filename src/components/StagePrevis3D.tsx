@@ -48,6 +48,7 @@ import {
   evaluateReadyMadeObjectClip,
   getReadyMadeMotionsForCategory,
   setRigOverlayVisible,
+  highlightRigJointSphere,
   evaluateUnifiedHumanoidFrame,
 } from '../engine/kinematics';
 import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
@@ -1462,6 +1463,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
             }
           }
         });
+
+        // Highlight any auto-rigged joint spheres on the actor mesh when a bone is selected
+        highlightRigJointSphere(actorMesh, selectedBoneRef.current);
 
         // Position and scale 3D Transform Gizmo at the actively selected bone for humanoids,
         // or at the Actor Root base when no individual bone joint disc is selected!

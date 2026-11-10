@@ -28,6 +28,7 @@ import { loadGltfModel } from '../engine/gltfModelLoader';
 import {
   autoRigGltfScene,
   setRigOverlayVisible,
+  highlightRigJointSphere,
   AutoRigType,
   AutoRigResult,
   RigLandmarks,
@@ -439,6 +440,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
             if (hitBone) {
               draggingPreviewBoneRef.current = hitBone;
               setSelectedPreviewBone(hitBone);
+              highlightRigJointSphere(activeScene, hitBone);
               setShowBonePoseEditor(true);
               setPreviewMotion('bind');
               setAutoSpin(false);
@@ -675,12 +677,13 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     return () => window.clearTimeout(timer);
   }, [customLandmarks]);
 
-  // Toggle bone overlay visibility on already-mounted mesh
+  // Toggle bone overlay visibility & selected joint highlight on already-mounted mesh
   useEffect(() => {
     const activeScene = loadedSceneRef.current;
     if (!activeScene) return;
     setRigOverlayVisible(activeScene, showBones, true);
-  }, [showBones]);
+    highlightRigJointSphere(activeScene, showBones ? selectedPreviewBone : null);
+  }, [showBones, selectedPreviewBone, showBonePoseEditor, rigInfo]);
 
   // Toggle wireframe on already-mounted mesh
   useEffect(() => {
@@ -1712,56 +1715,66 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
           {/* RIGHT COLUMN (7 Cols): Interactive 3D .GLB Viewport & Export Bar */}
           <div className="lg:col-span-7 flex flex-col bg-[#080a10] relative min-h-0 overflow-hidden">
-            {/* Top Viewport Overlay Badges & Controls */}
-            <div className="absolute top-3 left-3 right-3 z-10 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
-              <div className="flex flex-wrap items-center gap-1.5 pointer-events-auto">
+            {/* Top Viewport Overlay Badges & Controls (Ultra-compact micro-pills so they never cover the 3D character/model) */}
+            <div className="absolute top-1.5 left-2 right-2 z-10 flex flex-wrap items-center justify-between gap-1 pointer-events-none">
+              <div className="flex flex-wrap items-center gap-1 pointer-events-auto">
                 {generatedResult ? (
                   <>
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[11px] font-mono font-bold">
-                      ✓ .GLB Ready • {(generatedResult.sizeBytes / (1024 * 1024)).toFixed(2)} MB
+                    <span
+                      className="px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 text-[8.5px] leading-tight font-mono font-bold"
+                      title={`GLB Ready • ${(generatedResult.sizeBytes / (1024 * 1024)).toFixed(2)} MB`}
+                    >
+                      ✓ GLB {(generatedResult.sizeBytes / (1024 * 1024)).toFixed(1)}MB
                     </span>
                     <span
-                      className={`px-2.5 py-1 rounded-lg border text-[10.5px] font-mono ${
+                      className={`px-1.5 py-0.5 rounded border text-[8.5px] leading-tight font-mono ${
                         generatedResult.triangleCount > 250000
                           ? 'bg-amber-500/20 border-amber-400/50 text-amber-200 font-semibold'
                           : 'bg-black/75 border-white/15 text-slate-200'
                       }`}
-                      title={
-                        generatedResult.triangleCount > 250000
-                          ? 'High-density mesh (>250k triangles)'
-                          : 'Mesh vertex and triangle count'
-                      }
+                      title={`${generatedResult.vertexCount.toLocaleString()} vertices • ${generatedResult.triangleCount.toLocaleString()} triangles`}
                     >
                       {generatedResult.triangleCount > 250000 ? '⚠️ ' : ''}
-                      {generatedResult.vertexCount.toLocaleString()} verts •{' '}
-                      {generatedResult.triangleCount.toLocaleString()} tris
+                      {generatedResult.vertexCount.toLocaleString()}v •{' '}
+                      {generatedResult.triangleCount.toLocaleString()}t
                     </span>
                     {rigInfo && (
-                      <span className="px-2.5 py-1 rounded-lg bg-indigo-500/25 border border-indigo-400/40 text-indigo-200 text-[10.5px] font-mono font-semibold">
+                      <span
+                        className="px-1.5 py-0.5 rounded bg-indigo-500/25 border border-indigo-400/40 text-indigo-200 text-[8.5px] leading-tight font-mono font-semibold"
+                        title={
+                          rigInfo.rigType === 'humanoid'
+                            ? `Humanoid Rig (${rigInfo.boneCount} Bones • ${rigInfo.landmarks.detectedStance?.toUpperCase() || 'AUTO'})`
+                            : rigInfo.rigType === 'quadruped'
+                              ? `Quadruped Rig (${rigInfo.boneCount} Bones)`
+                              : rigInfo.rigType === 'spine_flex'
+                                ? `Flex Spine Rig (${rigInfo.boneCount} Bones)`
+                                : 'Rigid Prop Pivot'
+                        }
+                      >
                         🦴{' '}
                         {rigInfo.rigType === 'humanoid'
-                          ? `Humanoid Rig (${rigInfo.boneCount} Bones • ${rigInfo.landmarks.detectedStance?.toUpperCase() || 'AUTO'})`
+                          ? `Humanoid (${rigInfo.boneCount}B)`
                           : rigInfo.rigType === 'quadruped'
-                            ? `Quadruped Rig (${rigInfo.boneCount} Bones)`
+                            ? `Quadruped (${rigInfo.boneCount}B)`
                             : rigInfo.rigType === 'spine_flex'
-                              ? `Flex Spine Rig (${rigInfo.boneCount} Bones)`
-                              : 'Rigid Prop Pivot'}
+                              ? `Flex Spine (${rigInfo.boneCount}B)`
+                              : 'Rigid Prop'}
                       </span>
                     )}
                   </>
                 ) : (
-                  <span className="px-2.5 py-1 rounded-lg bg-black/70 border border-white/10 text-slate-400 text-[11px] font-mono">
+                  <span className="px-1.5 py-0.5 rounded bg-black/70 border border-white/10 text-slate-400 text-[9px] leading-tight font-mono">
                     3D .GLB Preview Stage (Drag to Orbit • Scroll to Zoom)
                   </span>
                 )}
               </div>
 
-              <div className="flex items-center gap-1.5 pointer-events-auto">
+              <div className="flex items-center gap-1 pointer-events-auto">
                 {generatedResult && rigInfo && rigInfo.boneCount > 0 && (
                   <button
                     type="button"
                     onClick={() => setShowBones((v) => !v)}
-                    className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10.5px] font-mono font-semibold cursor-pointer ${showBones
+                    className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[8.5px] leading-tight font-mono font-semibold cursor-pointer ${showBones
                         ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
                         : 'bg-black/70 border-white/15 text-slate-400 hover:text-white'
                       }`}
@@ -1773,23 +1786,23 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                 <button
                   type="button"
                   onClick={() => setAutoSpin((v) => !v)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10.5px] font-mono font-semibold cursor-pointer ${autoSpin
+                  className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[8.5px] leading-tight font-mono font-semibold cursor-pointer ${autoSpin
                       ? 'bg-cyan-500/20 border-cyan-400/40 text-cyan-200'
                       : 'bg-black/70 border-white/15 text-slate-400 hover:text-white'
                     }`}
                 >
-                  <RotateCw className="h-3 w-3" />
+                  <RotateCw className="h-2.5 w-2.5" />
                   <span>Turntable</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsWireframe((v) => !v)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[10.5px] font-mono font-semibold cursor-pointer ${isWireframe
+                  className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[8.5px] leading-tight font-mono font-semibold cursor-pointer ${isWireframe
                       ? 'bg-amber-500/20 border-amber-400/40 text-amber-200'
                       : 'bg-black/70 border-white/15 text-slate-400 hover:text-white'
                     }`}
                 >
-                  <Box className="h-3 w-3" />
+                  <Box className="h-2.5 w-2.5" />
                   <span>Wireframe</span>
                 </button>
               </div>
@@ -1994,9 +2007,15 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                 {showBonePoseEditor && rigInfo && rigInfo.rigType !== 'rigid_prop' && (
                   <div className="rounded-lg border border-indigo-500/35 bg-black/65 p-2.5 space-y-2 text-[10px] font-mono">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-indigo-300 font-bold">
-                        🦴 Interactive Bone Pose &amp; Rotation (Click any 3D joint sphere in viewport or pick bone below)
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-indigo-300 font-bold">🦴 Bone Pose</span>
+                        <span
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-indigo-500/20 border border-indigo-400/40 text-[9px] text-indigo-200 font-semibold"
+                          title="Click any 3D joint sphere in viewport or pick bone below"
+                        >
+                          🖱️ Click
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => setCustomBonePose({})}
