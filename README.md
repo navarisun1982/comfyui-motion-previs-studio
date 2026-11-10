@@ -89,6 +89,9 @@ flowchart LR
 ## ✨ 13 Powerhouse Features
 
 ### 1. 🧊 ComfyUI Image-to-3D & Text-to-3D `.GLB` Studio + Auto-Rigging
+
+![ComfyUI Image-to-3D & Text-to-3D .GLB Studio + Auto-Rigging](docs/screenshots/feat-01-comfy-3d-glb-studio.jpg)
+
 **How it helps you:** Turn any 2D concept picture or text idea into a textured, posable, animated 3D `.GLB` character or prop right inside the app—powered by your local ComfyUI server.
 - **🖼️ Image-to-3D Mode**: Upload any PNG/JPG/WebP character or object image. ComfyUI removes the background, estimates 3D depth, reconstructs a textured `.GLB` mesh, and links your image as `<picture 1>` for final video rendering.
 - **✍️ Text-to-3D Mode**: Type a description of any character, creature, or prop. ComfyUI first generates a clean studio concept image and immediately converts it into a 3D `.GLB` model.
