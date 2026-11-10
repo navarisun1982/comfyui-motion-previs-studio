@@ -18,6 +18,7 @@ import {
   Lock,
   Plus,
   Square,
+  Bone,
 } from 'lucide-react';
 import { ReasonerSettingsPanel } from './ReasonerSettingsPanel';
 import { BundledWorkflowsModal } from './BundledWorkflowsModal';
@@ -1774,36 +1775,39 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowBones((v) => !v)}
-                    className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[8.5px] leading-tight font-mono font-semibold cursor-pointer ${showBones
-                        ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
-                        : 'bg-black/70 border-white/15 text-slate-400 hover:text-white'
+                    className={`h-5 w-5 flex items-center justify-center rounded border cursor-pointer transition-colors ${showBones
+                        ? 'bg-emerald-500/25 border-emerald-400/60 text-emerald-200'
+                        : 'bg-black/75 border-white/15 text-slate-400 hover:text-white'
                       }`}
-                    title="Show or hide 3D skeleton bones & joint markers inside the mesh"
+                    title={showBones ? 'Bones ON (Click to hide 3D skeleton)' : 'Bones OFF (Click to show 3D skeleton)'}
+                    aria-label="Toggle 3D Skeleton Bones"
                   >
-                    <span>🦴 {showBones ? 'Bones ON' : 'Bones OFF'}</span>
+                    <Bone className="h-3 w-3" />
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={() => setAutoSpin((v) => !v)}
-                  className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[8.5px] leading-tight font-mono font-semibold cursor-pointer ${autoSpin
-                      ? 'bg-cyan-500/20 border-cyan-400/40 text-cyan-200'
-                      : 'bg-black/70 border-white/15 text-slate-400 hover:text-white'
+                  className={`h-5 w-5 flex items-center justify-center rounded border cursor-pointer transition-colors ${autoSpin
+                      ? 'bg-cyan-500/25 border-cyan-400/60 text-cyan-200'
+                      : 'bg-black/75 border-white/15 text-slate-400 hover:text-white'
                     }`}
+                  title={autoSpin ? 'Turntable Auto-Spin ON' : 'Turntable Auto-Spin OFF'}
+                  aria-label="Toggle Turntable Auto-Spin"
                 >
-                  <RotateCw className="h-2.5 w-2.5" />
-                  <span>Turntable</span>
+                  <RotateCw className="h-3 w-3" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsWireframe((v) => !v)}
-                  className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded border text-[8.5px] leading-tight font-mono font-semibold cursor-pointer ${isWireframe
-                      ? 'bg-amber-500/20 border-amber-400/40 text-amber-200'
-                      : 'bg-black/70 border-white/15 text-slate-400 hover:text-white'
+                  className={`h-5 w-5 flex items-center justify-center rounded border cursor-pointer transition-colors ${isWireframe
+                      ? 'bg-amber-500/25 border-amber-400/60 text-amber-200'
+                      : 'bg-black/75 border-white/15 text-slate-400 hover:text-white'
                     }`}
+                  title={isWireframe ? 'Wireframe ON' : 'Wireframe OFF'}
+                  aria-label="Toggle Wireframe"
                 >
-                  <Box className="h-2.5 w-2.5" />
-                  <span>Wireframe</span>
+                  <Box className="h-3 w-3" />
                 </button>
               </div>
             </div>
