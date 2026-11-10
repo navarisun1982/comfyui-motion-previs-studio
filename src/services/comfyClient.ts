@@ -806,6 +806,59 @@ export class ComfyClient {
     return res.data[promptId] || null;
   }
 
+  async getRecentHistory(maxItems = 15): Promise<Record<string, Record<string, unknown>> | null> {
+    const res = await this.requestComfy<Record<string, Record<string, unknown>>>(`/history?max_items=${maxItems}`, {
+      timeoutMs: 8000,
+    });
+    if (!res.ok || !res.data || typeof res.data !== 'object') return null;
+    return res.data;
+  }
+
+  async fetchBinaryFile(filename: string, subfolder = '', type = 'output'): Promise<ArrayBuffer | null> {
+    const params = new URLSearchParams({
+      filename,
+      subfolder,
+      type,
+    });
+    const relViewPath = `/view?${params.toString()}`;
+
+    // Channel 1: Electron IPC Bridge binary fetch
+    const bridge = this.getElectronBridge();
+    if (bridge?.request) {
+      try {
+        const ipcRes = await bridge.request({
+          path: relViewPath,
+          method: 'GET',
+          responseType: 'base64',
+          timeoutMs: 60000,
+          targetUrl: this.targetServerUrl,
+        });
+        if (ipcRes && ipcRes.ok && ipcRes.base64) {
+          const bytes = base64ToUint8Array(ipcRes.base64);
+          return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        }
+      } catch {
+        // Fall through to HTTP candidate loop
+      }
+    }
+
+    // Channel 2 & 3: HTTP candidate loop (prioritize direct targetServerUrl / 8188 as well as proxy)
+    const candidates = Array.from(
+      new Set([this.targetServerUrl, 'http://127.0.0.1:8188', ...this.getCandidateEndpoints()].filter(Boolean))
+    );
+    for (const candidate of candidates) {
+      try {
+        const res = await fetch(`${candidate}${relViewPath}`);
+        if (!res.ok) continue;
+        return await res.arrayBuffer();
+      } catch {
+        // try next candidate
+      }
+    }
+
+    return null;
+  }
+
   async fetchLatestCompletedOutput(maxItems = 15): Promise<{
     promptId: string;
     filename: string;

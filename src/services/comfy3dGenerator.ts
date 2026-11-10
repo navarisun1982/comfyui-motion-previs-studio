@@ -697,25 +697,31 @@ export async function generate3DGlbInComfy(
 
   // Retrieve the generated .GLB file (and for Text-to-3D, the generated concept image from Node 333)
   options.onProgress?.('Fetching generated .GLB 3D mesh from ComfyUI...');
-  const historyEntry = (await defaultComfyClient.getPromptHistory(promptId)) as Record<
-    string,
-    any
-  > | null;
-  const extracted = historyEntry ? extractGlbOutputFromHistory(historyEntry, outputNodeIds) : null;
+  let historyEntry: Record<string, any> | null = null;
+  let extracted: { filename: string; subfolder: string; type: 'output' | 'temp'; rawPath?: string } | null = null;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    historyEntry = (await defaultComfyClient.getPromptHistory(promptId)) as Record<
+      string,
+      any
+    > | null;
+    extracted = historyEntry ? extractGlbOutputFromHistory(historyEntry, outputNodeIds) : null;
+    if (extracted) break;
+    await new Promise((r) => setTimeout(r, 350));
+  }
 
   let generatedConceptImageUrl: string | undefined;
   if (mode === 'text-to-3d' && historyEntry) {
     const previewImg = extractPreviewImageFromHistory(historyEntry, ['333', '302']);
     if (previewImg) {
       try {
-        const imgViewUrl = defaultComfyClient.getViewUrl(
+        const imgBuf = await defaultComfyClient.fetchBinaryFile(
           previewImg.filename,
           previewImg.subfolder,
           previewImg.type
         );
-        const imgRes = await fetch(imgViewUrl);
-        if (imgRes.ok) {
-          const imgBlob = await imgRes.blob();
+        if (imgBuf) {
+          const imgBlob = new Blob([imgBuf], { type: 'image/png' });
           generatedConceptImageUrl = await blobToDataUrl(imgBlob);
         }
       } catch {
@@ -730,14 +736,12 @@ export async function generate3DGlbInComfy(
 
   if (extracted && !extracted.rawPath) {
     try {
-      const viewUrl = defaultComfyClient.getViewUrl(
+      glbBuffer = await defaultComfyClient.fetchBinaryFile(
         extracted.filename,
         extracted.subfolder,
         extracted.type
       );
-      const res = await fetch(viewUrl);
-      if (res.ok) {
-        glbBuffer = await res.arrayBuffer();
+      if (glbBuffer) {
         diskPath = `D:\\ComfyUI\\${extracted.type}\\${
           extracted.subfolder ? `${extracted.subfolder}\\` : ''
         }${extracted.filename}`;
@@ -822,4 +826,134 @@ export async function generate3DGlbInComfy(
       ? { x: loaded.size.x, y: loaded.size.y, z: loaded.size.z }
       : { x: 1, y: 1.8, z: 1 },
   };
+}
+
+/**
+ * Fetches the latest completed 3D `.GLB` output from ComfyUI `/history` so that if a user
+ * executed a 3D workflow in ComfyUI (or if the studio window reloaded/reopened after completion),
+ * the generated `.GLB` mesh and its reference image load directly into Comfy 3D Studio.
+ */
+export async function fetchLatestCompleted3DGlbFromComfyHistory(): Promise<{
+  promptId: string;
+  result: Comfy3DGenerationResult;
+  actorName?: string;
+  referenceImageUrl?: string;
+  textPrompt?: string;
+} | null> {
+  try {
+    const historyMap = await defaultComfyClient.getRecentHistory(15);
+    if (!historyMap) return null;
+
+    const entries = Object.entries(historyMap).sort((a, b) => {
+      const qa = Array.isArray((a[1] as any)?.prompt) ? Number((a[1] as any).prompt[0] ?? 0) : 0;
+      const qb = Array.isArray((b[1] as any)?.prompt) ? Number((b[1] as any).prompt[0] ?? 0) : 0;
+      return qb - qa;
+    });
+
+    for (const [promptId, rawEntry] of entries) {
+      const entry = rawEntry as Record<string, any>;
+      const extracted = extractGlbOutputFromHistory(entry, ['322']);
+      if (!extracted) continue;
+
+      const glbBuffer = await defaultComfyClient.fetchBinaryFile(
+        extracted.filename,
+        extracted.subfolder,
+        extracted.type
+      );
+      if (!glbBuffer || glbBuffer.byteLength === 0) continue;
+
+      const promptGraph = Array.isArray(entry.prompt) ? (entry.prompt[2] as Record<string, any>) : undefined;
+      const rawPrefix = String(promptGraph?.['322']?.inputs?.filename_prefix || extracted.filename)
+        .replace(/^3d[\\/]/i, '')
+        .replace(/\.(glb|gltf)$/i, '')
+        .replace(/_\d+$/g, '')
+        .replace(/[_-]+/g, ' ')
+        .trim();
+      const actorName = rawPrefix
+        ? rawPrefix.charAt(0).toUpperCase() + rawPrefix.slice(1)
+        : 'Hero Character';
+
+      const isTextTo3d = Boolean(promptGraph?.['327']?.inputs?.text);
+      const textPrompt = isTextTo3d ? String(promptGraph?.['327']?.inputs?.text || '') : undefined;
+
+      let referenceImageUrl: string | undefined;
+      if (isTextTo3d) {
+        const previewImg = extractPreviewImageFromHistory(entry, ['333', '302']);
+        if (previewImg) {
+          const imgBuf = await defaultComfyClient.fetchBinaryFile(
+            previewImg.filename,
+            previewImg.subfolder,
+            previewImg.type
+          );
+          if (imgBuf) {
+            referenceImageUrl = await blobToDataUrl(new Blob([imgBuf], { type: 'image/png' }));
+          }
+        }
+      } else {
+        const inputImgName = promptGraph?.['122']?.inputs?.image;
+        if (typeof inputImgName === 'string' && inputImgName.trim()) {
+          const imgBuf = await defaultComfyClient.fetchBinaryFile(inputImgName.trim(), '', 'input');
+          if (imgBuf) {
+            referenceImageUrl = await blobToDataUrl(new Blob([imgBuf], { type: 'image/png' }));
+          }
+        }
+      }
+
+      const glbFile = new File([glbBuffer], extracted.filename, { type: 'model/gltf-binary' });
+      const registered = await registerModelFile(glbFile);
+      const loaded = await loadGltfModel(registered.blobUrl);
+
+      let vertexCount = 0;
+      let triangleCount = 0;
+      if (loaded?.scene) {
+        loaded.scene.traverse((obj) => {
+          if ((obj as THREE.Mesh).isMesh) {
+            const geom = (obj as THREE.Mesh).geometry;
+            if (geom) {
+              const posAttr = geom.getAttribute('position');
+              if (posAttr) vertexCount += posAttr.count;
+              if (geom.index) {
+                triangleCount += Math.floor(geom.index.count / 3);
+              } else if (posAttr) {
+                triangleCount += Math.floor(posAttr.count / 3);
+              }
+            }
+          }
+        });
+      }
+
+      const diskPath = `D:\\ComfyUI\\${extracted.type}\\${
+        extracted.subfolder ? `${extracted.subfolder}\\` : ''
+      }${extracted.filename}`;
+
+      return {
+        promptId,
+        actorName,
+        referenceImageUrl,
+        textPrompt,
+        result: {
+          modelId: registered.modelId,
+          modelUri: `model://${registered.modelId}`,
+          blobUrl: registered.blobUrl,
+          glbFile,
+          filename: extracted.filename,
+          diskPath,
+          vertexCount,
+          triangleCount,
+          sizeBytes: glbBuffer.byteLength,
+          engineUsed: promptGraph?.['40'] ? 'trellis2' : 'pixal3d',
+          qualityUsed: promptGraph?.['285'] ? 'full_pbr' : 'fast_vertex',
+          generationModeUsed: isTextTo3d ? 'text-to-3d' : 'image-to-3d',
+          generatedConceptImageUrl: isTextTo3d ? referenceImageUrl : undefined,
+          bboxSize: loaded?.size
+            ? { x: loaded.size.x, y: loaded.size.y, z: loaded.size.z }
+            : { x: 1, y: 1.8, z: 1 },
+        },
+      };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }

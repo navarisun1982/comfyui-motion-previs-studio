@@ -49,6 +49,7 @@ import {
   format3DStudioTextPrompt,
   generate3DGlbInComfy,
   cancelActive3DGeneration,
+  fetchLatestCompleted3DGlbFromComfyHistory,
 } from '../services/comfy3dGenerator';
 import {
   ensure3DWorkflowsSyncedToComfyUI,
@@ -807,8 +808,66 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     return () => window.removeEventListener('cmpvs:preview-glb-in-3d-studio', onPreviewGlb);
   }, []);
 
+  const userClearedPreviewRef = useRef<boolean>(false);
+  const [isRecoveringLatest, setIsRecoveringLatest] = useState<boolean>(false);
+
+  const handleLoadLatestFromComfy = async (silent = false) => {
+    setIsRecoveringLatest(true);
+    if (!silent) {
+      setGenerationError(null);
+    }
+    try {
+      const recovered = await fetchLatestCompleted3DGlbFromComfyHistory();
+      if (!recovered) {
+        if (!silent) {
+          setGenerationError('No completed 3D .GLB render found in recent ComfyUI history.');
+        }
+        return;
+      }
+      userClearedPreviewRef.current = false;
+      setGeneratedResult(recovered.result);
+      if (recovered.actorName) {
+        setActorName((prev) =>
+          !prev || prev === 'Hero Character' || isUuidOrNoiseName(prev) ? recovered.actorName! : prev
+        );
+      }
+      if (recovered.referenceImageUrl) {
+        setReferenceImageUrl((prev) => prev || recovered.referenceImageUrl!);
+      }
+      if (recovered.textPrompt) {
+        setTextPrompt((prev) => prev || recovered.textPrompt!);
+      }
+      saveGeneratedGlbToLibrary({
+        modelId: recovered.result.modelId,
+        blobUrl: recovered.result.blobUrl,
+        name: recovered.actorName || actorName || 'Hero Character',
+        actorCategory,
+        sizeBytes: recovered.result.sizeBytes,
+        conceptImageUrl: recovered.referenceImageUrl || referenceImageUrl || undefined,
+        rigType,
+        rigLandmarks: customLandmarks || undefined,
+        showBones,
+        engineUsed: recovered.result.engineUsed,
+      });
+    } catch (err: any) {
+      if (!silent) {
+        setGenerationError(err?.message || 'Could not load latest .GLB from ComfyUI.');
+      }
+    } finally {
+      setIsRecoveringLatest(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen || generatedResult || isGenerating || userClearedPreviewRef.current || initialPrompt) {
+      return;
+    }
+    void handleLoadLatestFromComfy(true);
+  }, [isOpen]);
+
   // Reset Studio to start a brand-new 3D object
   const handleStartNew3DObject = () => {
+    userClearedPreviewRef.current = true;
     setGeneratedResult(null);
     setPreviewUnlocked(false);
     setRigInfo(null);
@@ -1126,6 +1185,22 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2 ml-auto">
+              {/* Recover / Load Latest Completed .GLB from ComfyUI History */}
+              <button
+                type="button"
+                disabled={isRecoveringLatest || isGenerating}
+                onClick={() => handleLoadLatestFromComfy(false)}
+                className="flex items-center gap-1.5 text-[11px] font-mono font-semibold text-emerald-200 hover:text-white bg-emerald-500/15 hover:bg-emerald-500/25 px-2.5 py-1.5 rounded-lg border border-emerald-400/40 transition-all cursor-pointer disabled:opacity-50"
+                title="Load the most recently completed 3D .GLB render directly from ComfyUI history"
+              >
+                {isRecoveringLatest ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-300" />
+                ) : (
+                  <RotateCw className="h-3.5 w-3.5 text-emerald-300" />
+                )}
+                <span>Load Latest .GLB</span>
+              </button>
+
               {/* Download All Bundled ComfyUI Workflows Button */}
               <button
                 type="button"
