@@ -136,8 +136,26 @@ function regularizeSmplStudioMannequinTemplate(template: SmplCanonicalTemplate):
     const z = v_template[base + 2];
     const ax = Math.abs(x);
 
+    const wBase = i * 4;
+    let w0 = 0;
+    let w1 = 0;
+    let w2 = 0;
+    let otherIdx = 3;
+    let otherW = 0;
+    for (let k = 0; k < 4; k++) {
+      const idx = skinIndices[wBase + k];
+      const w = skinWeights[wBase + k];
+      if (idx === 0) w0 += w;
+      else if (idx === 1) w1 += w;
+      else if (idx === 2) w2 += w;
+      else if (w > otherW) {
+        otherIdx = idx;
+        otherW = w;
+      }
+    }
+
     // 1. Anterior lower-abdomen overhang + waistband crease + groin pouch contour regularization
-    if (z > 0.04 && y >= -0.40 && y <= 0.02 && ax < 0.165) {
+    if (z > 0.005 && y >= -0.445 && y <= 0.02 && ax < 0.165) {
       const wx = Math.pow(Math.cos(Math.min(1, ax / 0.165) * Math.PI * 0.5), 1.5);
       if (y >= -0.28) {
         const ty = Math.max(0, Math.min(1, (y - -0.28) / 0.30));
@@ -149,69 +167,51 @@ function regularizeSmplStudioMannequinTemplate(template: SmplCanonicalTemplate):
       }
       if (y <= -0.24) {
         const curZ = v_template[base + 2];
-        const ty = Math.max(0, Math.min(1, (-0.25 - y) / 0.14));
-        const wxGroin = Math.pow(Math.cos(Math.min(1, ax / 0.095) * Math.PI * 0.5), 1.3);
-        const wyGroin = smoothstepRange(-0.24, -0.29, y);
+        const ty = Math.max(0, Math.min(1, (-0.25 - y) / 0.175));
+        const wxGroin = Math.pow(Math.cos(Math.min(1, ax / 0.105) * Math.PI * 0.5), 1.25);
+        const wyGroin = smoothstepRange(-0.24, -0.285, y) * (1 - smoothstepRange(-0.43, -0.445, y));
         const zCap =
-          (0.136 - 0.044 * Math.pow(ty, 1.15)) *
+          (0.136 - 0.082 * Math.pow(ty, 1.1)) *
           Math.cos(Math.min(1, ax / 0.16) * Math.PI * 0.42);
         if (curZ > zCap) {
-          v_template[base + 2] = curZ - (curZ - zCap) * 0.92 * wxGroin * wyGroin;
+          v_template[base + 2] = curZ - (curZ - zCap) * 0.94 * wxGroin * wyGroin;
         }
       }
     }
 
-    // 2. Lift the low-hanging midline crotch seam closer to the hip pivot axis (`J_hip.y = -0.314m`)
-    if (y >= -0.40 && y <= -0.31 && ax < 0.065 && z >= -0.04) {
-      const wxArch = Math.pow(Math.cos(Math.min(1, ax / 0.065) * Math.PI * 0.5), 1.4);
-      const wyArch = smoothstepRange(-0.31, -0.38, y);
-      v_template[base + 1] = y + 0.024 * wxArch * wyArch;
+    // 2. Lift the low-hanging midline crotch pouch (`y \in [-0.445, -0.31]`, where `wHips > 0.03`)
+    //    up into a clean, high studio-mannequin pelvic arch (`yArchTarget \approx -0.362m`) so nothing
+    //    hangs down between the thighs.
+    if (y >= -0.445 && y <= -0.31 && ax < 0.075 && z >= -0.06) {
+      const wxArch = Math.pow(Math.cos(Math.min(1, ax / 0.075) * Math.PI * 0.5), 1.25);
+      const wPelvis = smoothstepRange(0.025, 0.16, w0);
+      const yArchTarget = -0.358 - 0.22 * ax;
+      if (y < yArchTarget && wPelvis > 0) {
+        const liftStrength = 0.88 * wxArch * wPelvis;
+        v_template[base + 1] = y + (yArchTarget - y) * liftStrength;
+      } else {
+        const wyArch = smoothstepRange(-0.31, -0.36, y) * (1 - smoothstepRange(-0.41, -0.445, y));
+        v_template[base + 1] = y + 0.018 * wxArch * wyArch * wPelvis;
+      }
     }
 
-    // 3. Smooth groin LBS skin-weight gradient between Hips (0), LeftUpLeg (1), and RightUpLeg (2)
-    if (y >= -0.41 && y <= -0.26 && ax < 0.092 && z >= -0.04) {
-      const wxWeight = 1 - smoothstepRange(0.035, 0.092, ax);
-      const wyWeight = smoothstepRange(-0.26, -0.34, y) * (1 - smoothstepRange(-0.39, -0.41, y));
-      const wzWeight = smoothstepRange(-0.04, 0.03, z);
-      const blendW = 0.72 * wxWeight * wyWeight * wzWeight;
-
-      if (blendW > 1e-3) {
-        const wBase = i * 4;
-        let w0 = 0;
-        let w1 = 0;
-        let w2 = 0;
-        let otherIdx = 3;
-        let otherW = 0;
-
-        for (let k = 0; k < 4; k++) {
-          const idx = skinIndices[wBase + k];
-          const w = skinWeights[wBase + k];
-          if (idx === 0) w0 += w;
-          else if (idx === 1) w1 += w;
-          else if (idx === 2) w2 += w;
-          else if (w > otherW) {
-            otherIdx = idx;
-            otherW = w;
-          }
-        }
-
-        const pelvicSum = w0 + w1 + w2;
-        if (pelvicSum > 0.5) {
-          // Smooth analytical target weights across the pelvis-to-thigh arch
-          const targetHipsFrac = 0.42 - 0.14 * smoothstepRange(-0.28, -0.37, y);
-          const legTotal = Math.max(0, 1.0 - targetHipsFrac);
-          const leftShare = 1.0 / (1.0 + Math.exp(-x / 0.028));
-          const t0 = pelvicSum * targetHipsFrac;
-          const t1 = pelvicSum * legTotal * leftShare;
-          const t2 = pelvicSum * legTotal * (1.0 - leftShare);
-
-          const nw0 = w0 + (t0 - w0) * blendW;
-          const nw1 = w1 + (t1 - w1) * blendW;
-          const nw2 = w2 + (t2 - w2) * blendW;
-          const total = Math.max(1e-6, nw0 + nw1 + nw2 + otherW);
-
+    // 3. Clean LBS skin-weight regularization on the lower crotch (`y < -0.36`):
+    //    Prevent sub-arch inner-thigh vertices from being dragged toward the midline by excess `Hips` weight
+    if (y >= -0.445 && y <= -0.355 && ax < 0.085 && z >= -0.05) {
+      const pelvicSum = w0 + w1 + w2;
+      if (pelvicSum > 0.5 && w0 > 0.12) {
+        const tSub = smoothstepRange(-0.355, -0.415, y);
+        const maxHipsFrac = 0.32 * (1 - 0.75 * tSub);
+        const curHipsFrac = w0 / pelvicSum;
+        if (curHipsFrac > maxHipsFrac) {
+          const newW0 = pelvicSum * maxHipsFrac;
+          const legTotal = pelvicSum - newW0;
+          const leftShare = 1.0 / (1.0 + Math.exp(-x / 0.022));
+          const nw1 = legTotal * leftShare;
+          const nw2 = legTotal * (1.0 - leftShare);
+          const total = Math.max(1e-6, newW0 + nw1 + nw2 + otherW);
           skinIndices[wBase] = 0;
-          skinWeights[wBase] = nw0 / total;
+          skinWeights[wBase] = newW0 / total;
           skinIndices[wBase + 1] = 1;
           skinWeights[wBase + 1] = nw1 / total;
           skinIndices[wBase + 2] = 2;
@@ -223,17 +223,17 @@ function regularizeSmplStudioMannequinTemplate(template: SmplCanonicalTemplate):
     }
   }
 
-  // 4. Two-pass local Laplacian mesh smoothing across the anterior pelvis/groin seam
+  // 4. Three-pass local Laplacian mesh smoothing across the anterior pelvis/groin seam
   const mask = new Float32Array(numVertices);
   for (let i = 0; i < numVertices; i++) {
     const x = v_template[i * 3];
     const y = v_template[i * 3 + 1];
     const z = v_template[i * 3 + 2];
     const ax = Math.abs(x);
-    if (z > -0.04 && y >= -0.41 && y <= -0.20 && ax < 0.12) {
-      const wx = 1 - smoothstepRange(0.05, 0.12, ax);
-      const wy = smoothstepRange(-0.41, -0.37, y) * (1 - smoothstepRange(-0.25, -0.20, y));
-      const wz = smoothstepRange(-0.04, 0.02, z);
+    if (z > -0.06 && y >= -0.445 && y <= -0.20 && ax < 0.125) {
+      const wx = 1 - smoothstepRange(0.055, 0.125, ax);
+      const wy = smoothstepRange(-0.445, -0.40, y) * (1 - smoothstepRange(-0.25, -0.20, y));
+      const wz = smoothstepRange(-0.06, 0.01, z);
       mask[i] = wx * wy * wz;
     }
   }
@@ -241,7 +241,7 @@ function regularizeSmplStudioMannequinTemplate(template: SmplCanonicalTemplate):
   const sumPos = new Float32Array(numVertices * 3);
   const deg = new Uint16Array(numVertices);
   const faceIndexCount = faces.length;
-  for (let pass = 0; pass < 2; pass++) {
+  for (let pass = 0; pass < 3; pass++) {
     sumPos.fill(0);
     deg.fill(0);
     for (let f = 0; f < faceIndexCount; f += 3) {
@@ -269,7 +269,7 @@ function regularizeSmplStudioMannequinTemplate(template: SmplCanonicalTemplate):
       }
     }
     for (let i = 0; i < numVertices; i++) {
-      const m = mask[i] * 0.45;
+      const m = mask[i] * 0.5;
       if (m > 0 && deg[i] > 0) {
         const inv = 1.0 / deg[i];
         const i3 = i * 3;

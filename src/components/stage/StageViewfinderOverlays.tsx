@@ -72,10 +72,11 @@ export const StageViewfinderOverlays: React.FC<StageViewfinderOverlaysProps> = (
   actors,
   showRuleOfThirds,
 }) => {
+  const hasActiveVfxPlate = Boolean(vfxReference?.enabled && vfxReference?.videoUrl);
   return (
     <>
       {/* Active Reference Mode Watermark in Viewfinder */}
-      {vfxReference?.enabled && (
+      {hasActiveVfxPlate && vfxReference && (
         <div
           className={`absolute top-3 right-3 z-10 flex items-center gap-1.5 rounded-lg backdrop-blur px-2.5 py-1 font-mono text-[10px] border shadow-lg ${
             vfxReference.referenceMode === 'actor-motion'
@@ -101,7 +102,7 @@ export const StageViewfinderOverlays: React.FC<StageViewfinderOverlaysProps> = (
       )}
 
       {/* Actor Choreography Brackets in Viewfinder when in Actor Motion Mode */}
-      {vfxReference?.enabled && vfxReference.referenceMode === 'actor-motion' && (
+      {hasActiveVfxPlate && vfxReference?.referenceMode === 'actor-motion' && (
         <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-around px-8">
           {actors.map((actor, idx) => (
             <div key={actor.id} className="flex flex-col items-center gap-1 opacity-80">
@@ -119,7 +120,7 @@ export const StageViewfinderOverlays: React.FC<StageViewfinderOverlaysProps> = (
       )}
 
       {/* Camera Only Mode Callout */}
-      {vfxReference?.enabled && vfxReference.referenceMode === 'camera-only' && (
+      {hasActiveVfxPlate && vfxReference?.referenceMode === 'camera-only' && (
         <div className="absolute inset-x-0 bottom-4 z-10 flex justify-center pointer-events-none">
           <span className="bg-amber-950/80 text-amber-300 border border-amber-500/40 font-mono text-[9px] px-2.5 py-1 rounded-full uppercase tracking-wider shadow-lg">
             📷 CAMERA FLIGHT ISOLATED • SUBJECTS WILL BE NEWLY GENERATED

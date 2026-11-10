@@ -3020,7 +3020,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         motionRetention: 0.65,
         trimStartSeconds: 0,
         trimEndSeconds: shot.durationSeconds,
-        enabled: true,
+        enabled: Boolean(updates.videoUrl),
       };
       const vfxReference = { ...current, ...updates };
       const updated: ShotSpec = { ...shot, vfxReference };
