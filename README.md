@@ -111,6 +111,9 @@ flowchart LR
 ---
 
 ### 3. 🦴 Interactive Bone Posing (`FK/IK`) & Prop-to-Hand Socketing
+
+![Interactive Bone Posing (FK/IK) & Prop-to-Hand Socketing](docs/screenshots/feat-03-bone-posing-socketing.jpg)
+
 **How it helps you:** Dial in custom poses by hand or put a sword, lantern, or camera prop directly into a character's hand so they carry it naturally while walking or fighting.
 - **Direct 3D Bone Manipulation (`Pose Bones`)**: Click any joint on a character (`Shoulder`, `Elbow`, `Wrist`, `Hip`, `Knee`, `Head`, `Spine`) and rotate it directly in the 3D viewport.
 - **1-Click Bone Socketing**: Attach any 3D prop in your scene to a character's `Right Hand`, `Left Hand`, `Head`, or `Chest/Spine`—the prop automatically follows the character's hand or body through every animation frame.
