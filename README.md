@@ -1,20 +1,49 @@
 <p align="center">
-  <img src="docs/screenshots/github-banner.png" alt="ComfyUI Motion Previs Studio — Previsualize 3D Scenes for AI Filmmaking" width="100%" />
+  <img src="docs/screenshots/github-banner.png" alt="ComfyUI Motion Previs Studio — Direct the Shot, Not the Prompt" width="100%" />
 </p>
 
-# ComfyUI Motion Previs Studio — Cinematic Command Center 2026
+<h1 align="center">🎬 ComfyUI Motion Previs Studio</h1>
+<p align="center">
+  <strong>"Direct the Shot, Not the Prompt."</strong><br/>
+  <em>The Open-Source 3D Previsualization, Motion Capture & Camera Blocking Studio for AI Filmmaking in ComfyUI</em>
+</p>
 
-> **"Direct the Shot, Not the Prompt."**  
-> Built as a replacement for **Higgsfield 3D-Jutsu** — an open-source, local-first 3D camera, character, and lighting previsualization studio for AI video workflows.  
-> Includes built-in interactive demo scenes, **ComfyUI 3D `.GLB` Generation (Image-to-3D & Text-to-3D)**, **Automatic Bone Rigging**, and **5 Bundled Ready-Made ComfyUI Workflows**.
+<p align="center">
+  <img src="https://img.shields.io/badge/ComfyUI-Live_Bridge_&_7_Workflows-10b981?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyTDMgN3YxMGw5IDUgOS01VjdMMTIgMnAiLz48L3N2Zz4=" alt="ComfyUI Live Bridge" />
+  <img src="https://img.shields.io/badge/Video_Engines-LTX--2_19B_%7C_LTX--2.5_%7C_MiniMax_H3-6366f1?style=for-the-badge" alt="Video Engines" />
+  <img src="https://img.shields.io/badge/3D_Mocap-NLF_SMPL_6890v_%26_Mixamo-f59e0b?style=for-the-badge" alt="3D Mocap" />
+  <img src="https://img.shields.io/badge/3D_GLB_Studio-Pixal3D_%7C_TRELLIS.2_%7C_Hunyuan3D-ec4899?style=for-the-badge" alt="3D GLB Studio" />
+  <img src="https://img.shields.io/badge/Tests-468_Passing-22c55e?style=for-the-badge" alt="Tests Passing" />
+  <img src="https://img.shields.io/badge/License-MIT-38bdf8?style=for-the-badge" alt="MIT License" />
+</p>
 
-**ComfyUI Motion Previs Studio** is a real-time **3D Motion Previsualization & Camera Blocking Studio** designed for filmmakers, VFX supervisors, and AI video directors. Instead of guessing text prompts for camera movement, character blocking, and lens framing, you generate or import rigged 3D `.GLB` characters and objects via **ComfyUI**, direct actors, cameras, sets, and lights inside an interactive 3D soundstage — and export deterministic **24fps MP4 previs**, **OpenPose skeletal passes**, **Depth maps**, **4×4 camera matrices**, and **ComfyUI workflow bundles** for **LTX-2.5 (22B Distilled INT8)**, **MiniMax H3**, **Seedance**, and **any video model that accepts video reference**.
+<p align="center">
+  <a href="#-why-comfyui-motion-previs-studio-stop-burning-time--credits">💡 Why This Studio?</a> •
+  <a href="#-live-studio-demo-video">🎬 Demo Video</a> •
+  <a href="#-13-powerhouse-features">✨ 13 Key Features</a> •
+  <a href="#-7-bundled-ready-made-comfyui-workflows">📦 7 ComfyUI Workflows</a> •
+  <a href="#-visual-feature-tour--screenshots">📸 Screenshots</a> •
+  <a href="#️-1-click-installation--quick-start">🚀 Quick Start</a>
+</p>
 
-- 🧊 **Real 3D `.GLB` Generation Powered by ComfyUI (Image-to-3D & Text-to-3D)**: Generate authentic textured 3D `.GLB` characters, creatures, and props directly on your local ComfyUI server (`http://127.0.0.1:8188`) using **Pixal3D INT8**, **TRELLIS.2 INT8**, **BiRefNet**, **MoGe FoV Depth**, and **Z-Image Turbo (Qwen-3-4B + Flux VAE)** — with automatic bone rigging, persistent IndexedDB & disk library storage (`D:\ComfyUI\output\3d\`), and `<picture 1>` reference sync.
-- 🎥 **Camera-POV Frustum Visibility Engine (`povVisibilityEngine.ts`)**: Prompts automatically describe **only** the characters, props, and objects that actually appear inside the active 3D Camera Viewfinder (`[0, Duration]`), including exact entry/exit timestamps (`enters frame at 1.2s`, `exits frame at 2.8s`) while completely excluding off-camera stage elements.
-- 🧬 **Universal Previs-to-Reality Entity Instantiation**: Treats `<Video 1>` strictly as a 3D spatial and camera-path blueprint (`weak_reference`) while instantiating every visible character, prop, natural element, and environment from `<picture 1>`–`<picture 4>` as a living, three-dimensional real-world entity (`fully_preserved`) with organic secondary motion rather than texture-wrapped 3D proxy geometry.
-- 🧠 **Local & Cloud AI Directing Assistants**: Connect local **Ollama** / **LM Studio** models or **Google Gemini** / **OpenAI** from the in-app Settings panel for natural-language character choreography, camera blocking, and official model-specific prompt compilation (**LTX-2.5**, **MiniMax H3 Ref2VA**, **Seedance 2.0**).
-- 🤸 **Universal 6-Effector IK Synthesizer & Multi-Subject Cue Swimlanes**: Direct any arbitrary single or multi-step movement in English or Arabic (`crawl on ground then stand up`, `kneel`, `push`, `climb`, `swim`, `clap`, etc.) with smart **`Direct` / `(Replay)`** state detection, **`+ Chain`** cumulative motion continuation, **Drag-and-Drop Cue Retiming & Speed Stretch Bars**, **Pacing Curves (`Linear`, `Smooth`, `Burst ⚡`, `Ramp ↗`)**, and color/shape-coded multi-character timeline swimlanes.
+---
+
+## 💡 Why ComfyUI Motion Previs Studio? (Stop Burning Time & Credits)
+
+### The Problem with AI Video Today
+Directing AI video by typing text prompts alone is like directing a movie blindfolded. Creators routinely spend **hours of waiting** and burn **hundreds of GPU hours or paid API credits** re-rolling the same prompt 30 times just to get:
+- A camera to orbit smoothly around a subject instead of drifting away.
+- Two characters to walk past each other without merging or teleporting.
+- An actor to enter the frame at the exact 2-second mark, stop, and perform a specific action.
+
+### How Our Studio Solves It Practically
+**ComfyUI Motion Previs Studio** lets you **build, direct, and preview your entire shot in a real-time 3D stage at 60 FPS — costing $0 in credits and 0 seconds of rendering wait time.**
+
+1. **Stage Your Scene in Seconds**: Pick from **200+ built-in 3D characters, props, and environments**, generate new 3D `.GLB` models from an image or text prompt, or extract **real 3D human motion & camera movement directly from any video**.
+2. **Direct Timing & Camera Like a Filmmaker**: Apply ready-made animations (`Walk`, `Run`, `Fight`, `Sit`, `Crawl`), drag cues on a 24fps timeline, and frame your shot through real cinema lenses (`14mm` to `135mm`).
+3. **Render Once with 100% Confidence**: When your 3D preview looks right, click **Render in ComfyUI**. The studio automatically exports the exact control pass (`Clay`, `RGB`, `Depth`, or `OpenPose`), binds your reference images, compiles a camera-accurate prompt, and renders the final AI video on the very first try.
+
+> 🔧 **Tech Under the Hood:** *Built with React 19, TypeScript, Three.js WebGL2, Zustand, Zod-validated `ShotSpec` schemas, `mp4-muxer` hardware-accelerated encoding, and a direct WebSocket/REST bridge to local ComfyUI.*
 
 ---
 
@@ -22,115 +51,218 @@
 
 [![ComfyUI Motion Previs Studio — Full Demo Video](docs/demo/Comfy-AI-Director-Preview.gif)](https://github.com/navarisun1982/comfyui-motion-previs-studio/raw/master/docs/demo/Comfy-AI-Director-Demo.mp4)
 
-> ▶️ **[Click here or click the preview above to watch / download the full 1080p HD Demo Video (`Comfy-AI-Director-Demo.mp4`)](https://github.com/navarisun1982/comfyui-motion-previs-studio/raw/master/docs/demo/Comfy-AI-Director-Demo.mp4)** *(also available inside the repo at [`docs/demo/Comfy-AI-Director-Demo.mp4`](docs/demo/Comfy-AI-Director-Demo.mp4))*.
+---
+
+## 🧭 End-to-End Production Pipeline
+
+```mermaid
+flowchart LR
+    subgraph Input["1. Build or Capture 3D Scene"]
+        A1["🏛️ 200+ 3D Asset Library\n& Ready-Made Motion Clips"]
+        A2["🕺 3D Video Mocap Studio\n(Real SMPL 6,890v or Mixamo Y-Bot)"]
+        A3["🧊 ComfyUI Image/Text-to-3D\n(.GLB + Auto Bone Rigging)"]
+    end
+
+    subgraph Stage["2. Direct on the 3D Stage (0 Credits)"]
+        B1["🎥 Dual 3D Viewports\n& Cinema Lenses (14mm–135mm)"]
+        B2["🎞️ 24fps Cue Swimlanes\nSpeed Stretch & +Chain"]
+        B3["🤸 Bilingual Text-to-Motion\n6-Effector IK Synthesizer"]
+    end
+
+    subgraph Export["3. Smart Multi-Pass & Prompt Engine"]
+        C1["🎨 4-Channel 24fps MP4\n(Clay / RGB / Depth / OpenPose)"]
+        C2["👁️ Camera-POV Frustum\nVisibility Prompt Compiler"]
+        C3["🧠 Workflow Output Registry\n& Channel Auto-Advisor"]
+    end
+
+    subgraph Render["4. Final ComfyUI Generation"]
+        D1["⚡ LTX-2 19B IC-LoRA Union\n& LTX-2.5 22B"]
+        D2["🎬 MiniMax H3 Ref2VA\n& Stubelius Ultimate"]
+        D3["🖥️ Side-by-Side Sync Player\n(3D Previs vs Final Render)"]
+    end
+
+    Input --> Stage --> Export --> Render
+```
 
 ---
 
-## 🧊 ComfyUI 3D `.GLB` Studio (Image-to-3D & Text-to-3D) + Auto-Rigging
+## ✨ 13 Powerhouse Features
 
-Open **3D Asset Library → ✨ Concept-to-3D Studio** (or **✍️ Text-to-3D (.GLB)**) to launch the **ComfyUI 3D Character & Object Studio (`.GLB`)**:
+### 1. 🏛️ 200+ Built-In 3D Asset Library & Custom `.GLB` Collection
+**How it helps you:** You never have to start from an empty screen or hunt for 3D models online. Open the library and populate a complete movie scene in seconds.
+- **200+ Curated 3D Models**: Browse ready-to-use characters, articulated mannequins, cars, motorcycles, creatures, trees, buildings, furniture, weapons, and stage props organized by category.
+- **Personal `⭐ My Uploads & AI` Vault**: Import your own `.GLB` or `.FBX` files from disk or save models generated by ComfyUI—automatically stored in your browser and synced with your local `ComfyUI/output/3d/` folder.
+- **1-Click Stage Spawn**: Drop any character or prop onto the 3D floor, swap models at any time, and attach a `<picture>` reference photo for AI video styling.
 
-### 1. Mutually Exclusive 3D Creation Modes
-- **🖼️ Image-to-3D Mode (Workflow `#aa77013b-18f1-4679-9678-6d455d3536c5`)**:
-  - Upload any PNG, JPG, or WebP concept image (no text prompt needed).
-  - **BiRefNet** automatically removes the background, **MoGe** estimates camera FoV & depth, and **Pixal3D INT8** or **TRELLIS.2 INT8** reconstructs a textured 3D `.GLB` mesh (`Fast Vertex-Color` or `Full PBR UV-Baked` at `1024px`–`4096px`).
-  - Your uploaded image is automatically linked as the character's `<picture 1>` reference image for MiniMax H3 video rendering.
-- **✍️ Text-to-3D Mode (Workflow `#e7a9555b-5121-42bd-8bc4-a36e6eb34fc7`)**:
-  - Enter a text description of any 3D object, character, or creature (no image upload needed).
-  - **Stage 1 (2D Studio Concept Synthesis)**: **Z-Image Turbo FP8** + **Qwen-3-4B (`lumina2`)** + **Flux VAE** + **AuraFlow (8 steps)** synthesizes an isolated three-quarter studio concept image (`Node 333`).
-  - **Stage 2 (3D `.GLB` Reconstruction)**: Feeds the generated image directly into **BiRefNet → MoGe → Pixal3D / TRELLIS.2** (`Node 322`) to produce a rigged 3D `.GLB` model and saves the generated 2D concept image as its library thumbnail and `<picture 1>` reference.
-- **Live Stage & Step Progress Announcer**: Real-time WebSocket & `/history` step tracking (`step / maxSteps`, active ComfyUI node stage banner, and elapsed timer) from start to finish.
-- **Persistent 3D Asset Library & Auto-Discovery**:
-  - Every generated `.GLB` is automatically saved into **3D Asset Library → ⭐ My Uploads & AI** (persisted in IndexedDB `modelStorage` + disk) and automatically imports any `.GLB` files found in `D:\ComfyUI\output\3d\`.
-  - **Locked Mesh Integrity**: Once a 3D `.GLB` object is created, its mesh and creation inputs are locked so it never accidentally resets or mutates — while remaining fully positionable, scalable, rotatable, and animatable on the 3D stage.
-
-### 2. 🦴 Automatic Bone Rigging (`autoRigEngine.ts`) & Silhouette Joint Tuner
-Every generated or uploaded `.GLB` mesh is automatically analyzed and rigged in real time:
-- **4 Intelligent Rig Archetypes**:
-  - `🧍 Humanoid (19-Bone)`: Full biped skeleton (`Hips`, `Spine`, `Chest`, `Neck`, `Head`, `Left/Right Shoulder`, `Arm`, `ForeArm`, `Hand`, `UpLeg`, `Leg`, `Foot`, `ToeBase`) with automatic **A-Pose / T-Pose** silhouette landmark detection (`analyzeHumanoidSilhouette`).
-  - `🐾 Quadruped (4-Leg Animal)`: Multi-bone spine, neck, head, tail, and 4 articulated leg chains (`FrontLeft`, `FrontRight`, `BackLeft`, `BackRight`) for animals and creatures.
-  - `🐍 Flex Spine`: Multi-segment flexible spine rig for snakes, worms, tentacles, and elongated props.
-  - `📦 Rigid Prop`: Grounded pivot rig for vehicles, weapons, furniture, and architectural objects.
-- **Interactive Joint Landmark Fine-Tuner (`🎯 Adjust Joint Landmarks`)**: Symmetrical L/R sliders for `Shoulder Height`, `Shoulder Width`, `Wrist Span X/Y`, `Hips / Groin Y`, and `Leg Stance X` with live `🦴 Bones ON/OFF` X-ray overlay and 1-click motion testing (`Bind Pose`, `Idle`, `Walk / Trot`, `Run / Gallop`, `Wave / Stalk`, `Fight / Pounce`).
-- **60 FPS SkinnedMesh Performance**: Single-pass auto-rigging with pre-allocated bone world-position buffers and zero per-frame bounding-box thrashing.
+> 🔧 **Tech Under the Hood:** *Three.js `GLTFLoader` & `FBXLoader`, persistent IndexedDB `modelStorage` vault, and automatic local filesystem discovery (`D:\ComfyUI\output\3d\`).*
 
 ---
 
-## 📥 Bundled Ready-Made ComfyUI Workflows Pack (Download & Use in Your Own ComfyUI)
+### 2. 🏃 20+ Ready-Made Motion Clips & Realistic Human Gait Engine
+**How it helps you:** Animate characters like a pro with zero 3D animation experience. Pick a movement from a visual menu and watch your character perform it immediately with realistic human weight and balance.
+- **3 Organized Motion Categories**:
+  - **Move / Jump**: `Walk Forward`, `Run / Sprint`, `Jump / Leap`, `Sneak / Stealth`, `Back Up / Retreat`, `Crawl (Prone)`, `Climb / Scale`.
+  - **Fight / Action**: `Sword Slash`, `Dodge / Roll`, `Martial Combo`, `Aim & Fire`, `Push / Shove`, `Fall / Collapse`.
+  - **Act / Emote**: `Wave / Greet`, `Talk / Dialogue`, `Sit Down`, `Stand Up / Rise`, `Kneel / Bow`, `Heroic Taunt`, `Victory Cheer`, `Look Around`.
+- **Smart Floor Travel vs. In-Place (`Auto / Move / Spot`)**: Let walking/running characters automatically travel along their floor path, or lock them in one spot.
+- **Action Cycles (`1x`–`5x`) & Body Facing**: Choose exactly how many times a gesture repeats across the shot so movements never loop robotically, and set facing angles (`Face Cam`, `3/4 Left`, `Profile`, `OTS Back`).
 
-All **5 official ComfyUI workflows** powering this studio are bundled directly inside the app and repository under [`workflows/templates/`](workflows/templates/). Click the **`📥 Workflows Pack`** button inside either the **ComfyUI 3D Studio** header or the **Render, Prompt & Export Studio** header to download any workflow (both drag-and-drop **ComfyUI UI `.json`** and **API `.api.json`**) or **Download All Workflows** in one click:
+> 🔧 **Tech Under the Hood:** *Biomechanical Gait Engine (`gaitEngine.ts`) featuring asymmetric stance/swing timing (`60/40` walk, `38/62` run), heel-strike to toe-off foot roll (`createFootRollController`), contrapposto pelvic sway, spine counter-torsion, and `solveLookAt` horizon head stabilization.*
 
-| # | Workflow Name | Hash / ID | ComfyUI UI Workflow (Drag & Drop) | API Execution Graph | Models Used |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **1** | **🖼️ Image-to-3D `.GLB` Reconstruction** | `#aa77013b-18f1-4679-9678-6d455d3536c5` | [`ComfyUI_Image_to_3D_GLB_Workflow.json`](workflows/templates/ComfyUI_Image_to_3D_GLB_Workflow.json) | [`comfy_image_to_3d_glb.api.json`](workflows/templates/comfy_image_to_3d_glb.api.json) | Pixal3D INT8, TRELLIS.2 INT8, BiRefNet, MoGe v1, DINOv3 |
-| **2** | **✍️ Text-to-3D `.GLB` Studio Generator** | `#e7a9555b-5121-42bd-8bc4-a36e6eb34fc7` | [`ComfyUI_Text_to_3D_GLB_Workflow.json`](workflows/templates/ComfyUI_Text_to_3D_GLB_Workflow.json) | [`comfy_text_to_3d_glb.api.json`](workflows/templates/comfy_text_to_3d_glb.api.json) | Z-Image Turbo FP8, Qwen-3-4B, Flux VAE, BiRefNet, Pixal3D / TRELLIS.2 |
-| **3** | **🎬 MiniMax H3 Multi-Subject Ref2VA** | `MiniMax-H3-Ref2VA` | [`MiniMax_H3_Ref2VA_ComfyUI_Workflow.json`](workflows/templates/MiniMax_H3_Ref2VA_ComfyUI_Workflow.json) | [`minimax_h3_ref2va.api.json`](workflows/templates/minimax_h3_ref2va.api.json) | MiniMax H3 Ref2VA INT8, SolAttn, 8-Step Turbo LoRA, RIFE 60fps |
-| **4** | **🎥 MiniMax H3 Stubelius Ultimate Director** | `Stubelius-Ultimate-H3` | [`Stubelius_Ultimate_H3.json`](workflows/templates/Stubelius_Ultimate_H3.json) | [`h3_stubelius.api.json`](workflows/templates/h3_stubelius.api.json) | MiniMax H3 Ref2VA & FL2VA, Qwen3-VL 32B, Video + Audio VAE |
-| **5** | **⚡ LTX-2.5 22B Distilled INT8 VFX** | `LTX-2.5-22B-INT8` | — | [`ltx25_stubelius.api.json`](workflows/templates/ltx25_stubelius.api.json) | LTX-2.5 22B Distilled INT8, T5-XXL FP8 |
+---
+
+### 3. 🎞️ 24fps Multi-Track Cue Timeline, Speed Stretching & `+ Chain` Directing
+**How it helps you:** Control *when* every action happens and *how fast* it plays using simple drag-and-drop bars—just like editing clips in a video editor.
+- **Color-Coded Character & Camera Swimlanes**: Every actor on stage gets their own timeline track with distinct icons for movement (`◆`), acting (`●`), and jumping (`▱`), alongside a dedicated `[CAM]` camera track.
+- **Drag-and-Drop Retiming & Speed Stretch Handles**: Drag a cue left or right to change its start time, or grab the edges of a cue bar to stretch/compress the action speed.
+- **1-Click Pacing Curves**: Change the energy of any movement with `Linear`, `Smooth`, `Burst ⚡` (explosive start), or `Ramp ↗` (gradual build-up).
+- **`+ Chain` Sequential Actions**: Click **`+ Chain`** to add a second or third action right where the previous one finished (e.g., *walk to center → kneel down → look around*) without resetting the character.
+
+> 🔧 **Tech Under the Hood:** *Deterministic 24fps multi-subject keyframe evaluator (`trajectoryMath.ts`), non-linear time-warping easing curves, and stateful pose/position handoff chaining.*
+
+---
+
+### 4. 🤸 Bilingual Text-to-Motion AI Director (English & Arabic)
+**How it helps you:** Need a custom action that isn't in the preset buttons? Type any movement in plain **English or Arabic**—including multi-step instructions—and watch the character act it out on the 3D stage.
+- **Natural Multi-Step Choreography**: Type phrases like *"crawl on the ground then stand up"*, *"walk right then sit down"*, or *"رجل يزحف على الأرض ثم يقوم"* and click **Direct**.
+- **Full-Body Coordination**: The engine coordinates all 6 body zones (hips, spine, both hands, both feet, and head gaze) simultaneously so characters bend, reach, kneel, or climb naturally.
+- **Works Offline or with Local/Cloud LLMs**: Runs instantly out-of-the-box using our built-in kinematic parser, and can optionally connect to local **Ollama** (`deepseek-r1`, `qwen2.5`, `llama3.3`), **Google Gemini**, or **OpenAI** for open-ended choreography.
+
+> 🔧 **Tech Under the Hood:** *Analytical 2-Bone Inverse Kinematics solver (`ikSolver.ts`) + Universal 6-Effector IK Motion Synthesizer (`universalMotionSynthesizer.ts`) + bilingual LLM kinematic program generator (`aiActingDirector.ts`).*
+
+---
+
+### 5. 🦴 Interactive Bone Posing (`FK/IK`) & Prop-to-Hand Socketing
+**How it helps you:** Dial in custom poses by hand or put a sword, lantern, or camera prop directly into a character's hand so they carry it naturally while walking or fighting.
+- **Direct 3D Bone Manipulation (`Pose Bones`)**: Click any joint on a character (`Shoulder`, `Elbow`, `Wrist`, `Hip`, `Knee`, `Head`, `Spine`) and rotate it directly in the 3D viewport.
+- **1-Click Bone Socketing**: Attach any 3D prop in your scene to a character's `Right Hand`, `Left Hand`, `Head`, or `Chest/Spine`—the prop automatically follows the character's hand or body through every animation frame.
+
+> 🔧 **Tech Under the Hood:** *Interactive Three.js `TransformControls` joint rotation overrides and real-time skeletal world-matrix bone socket parenting.*
+
+---
+
+### 6. 🕺 3D Video Mocap & Camera Tracking Studio (`Real SMPL Body` vs. `Mixamo Y-Bot`)
+**How it helps you:** Have a real-life video clip with great acting or camera movement? Upload any RGB video (up to 30 seconds) and convert the people, camera motion, and surrounding buildings into an editable 3D scene on your stage.
+- **Multi-Person 3D Motion Capture (`1..N` Actors)**: Automatically detects and tracks multiple people moving in 3D depth space—even when they cross paths.
+- **User Choice of 3D Character Mesh**:
+  - **🧬 Real SMPL Body (`6,890 Vertices`)**: Reconstructs realistic 3D human body meshes shaped to match each person's real-world height, shoulder breadth, chest/waist/hip proportions, and body build (`slim`, `average`, `athletic`, `stocky`, `heavy`) from the video.
+  - **🤖 Mixamo Y-Bot (`1:1 Natural`)**: Retargets the extracted 3D motion onto the classic Mixamo Y-Bot mannequin while keeping its clean, natural 1:1 proportions with zero stretching or distortion.
+- **3D Camera Tracking & Scene Reconstruction**: Extracts the video's camera focal length (`mm`) and 6-DoF movement (`pan`, `tilt`, `dolly`, `truck`) plus nearby 3D architectural blocks.
+
+> 🔧 **Tech Under the Hood:** *Local GPU `NLF-Large` (`nlf_l_multi_0.3.2.torchscript`) 3D SMPL-24 extractor (`scripts/mocap_nlf_extractor.py`), auto-generated 6,890-vertex / 13,776-face PCA shape blendshape skinning engine (`smplMannequinLoader.ts`), MediaPipe 33-landmark 3D fallback, and 6-DoF Camera Odometry.*
+
+---
+
+### 7. 🧊 ComfyUI Image-to-3D & Text-to-3D `.GLB` Studio + Auto-Rigging
+**How it helps you:** Turn any 2D concept picture or text idea into a textured, posable, animated 3D `.GLB` character or prop right inside the app—powered by your local ComfyUI server.
+- **🖼️ Image-to-3D Mode**: Upload any PNG/JPG/WebP character or object image. ComfyUI removes the background, estimates 3D depth, reconstructs a textured `.GLB` mesh, and links your image as `<picture 1>` for final video rendering.
+- **✍️ Text-to-3D Mode**: Type a description of any character, creature, or prop. ComfyUI first generates a clean studio concept image and immediately converts it into a 3D `.GLB` model.
+- **🦴 Instant Automatic Bone Rigging (`4 Archetypes`)**: Every generated or uploaded `.GLB` is automatically rigged at 60 FPS as a **`🧍 Humanoid (19-Bone)`**, **`🐾 Quadruped (4-Leg Animal)`**, **`🐍 Flexible Spine`**, or **`📦 Rigid Prop`**, complete with an interactive **Joint Landmark Fine-Tuner** and X-ray bone preview.
+
+> 🔧 **Tech Under the Hood:** *ComfyUI workflows `#aa77013b` & `#e7a9555b` (`Pixal3D INT8`, `TRELLIS.2 INT8`, `Hunyuan3D-2.1 PBR`, `Z-Image Turbo FP8`, `Qwen-3-4B`, `BiRefNet`, `MoGe Depth`) + silhouette-aware `SkinnedMesh` auto-rigger (`autoRigEngine.ts`).*
+
+---
+
+### 8. 🎥 Dual 3D Viewports, Cinema Lenses & Live Top-View Radar
+**How it helps you:** See both the "behind-the-scenes" set and the exact camera shot at the same time, so you never have to guess how lens focal length or camera angles will look.
+- **Left Viewport (`3D Soundstage`)**: Free-orbit director's view showing the whole room, lighting cones, camera rig, and floor paths.
+- **Right Viewport (`Camera Viewfinder`)**: Locked to your exact output aspect ratio (`16:9`, `2.39:1 Anamorphic`, `9:16 Vertical`, `1:1`), lens focal length (`14mm` Ultra-Wide to `135mm` Telephoto Close-Up), aperture (`f/1.4`–`f/22`), and Dutch roll (`-45°` to `+45°`).
+- **Dynamic Camera Moves & 2D Top-View Radar**: Choose `Static`, `Dolly In`, `Pull Back`, `Track L/R`, `Orbit CW/CCW`, `Spiral Orbit`, `Crane Arc`, `FPV Dive`, `Steadicam Follow`, or `Whip Pan` and preview the curved path live on the 2D radar map.
+
+> 🔧 **Tech Under the Hood:** *Synchronized dual-pass Three.js WebGL2 rendering, real sensor/focal-length FoV math, and `evaluateLiveCameraStageState` orbital/pan trajectory evaluation.*
+
+---
+
+### 9. 🌆 1-Click 3D Environments & Three-Point Studio Lighting
+**How it helps you:** Place your characters inside a rich 3D architectural set and light them cinematically in seconds without building environments from scratch.
+- **Ready-Made 3D Soundstages**: Switch instantly between `Cyberpunk Alleyway`, `Ancient Temple Ruins`, `Warm Candlelit Rooftop Terrace`, `Sci-Fi Corridor`, and `Film Studio Cyc Wall`, or upload a `<picture 4>` background reference image.
+- **Interactive 3D Lighting Rig**: Position and aim `Key`, `Fill`, `Rim`, and `Practical` 3D light gizmos with live controls for brightness, color warmth, cone angle, atmospheric fog, and real-time shadows.
+
+> 🔧 **Tech Under the Hood:** *Procedural PBR environment generator (`environmentBuilder.ts`), shadow-mapped `SpotLight` / `DirectionalLight` rigs, and volumetric fog shaders.*
+
+---
+
+### 10. 🎨 4-Channel Previs Renderer (`Clay`, `RGB`, `Depth`, `OpenPose`) & Smart Workflow Advisor
+**How it helps you:** Different ComfyUI video workflows work best with different types of guide videos. The studio renders all 4 industry-standard control passes and automatically picks the right one for your chosen workflow.
+- **4 Real-Time & Offline 24fps Render Channels**:
+  - **🗿 Clay (Neutral Grey Previs)**: Renders characters and buildings in clean studio clay so **LTX-2 IC-LoRA** captures pure 3D motion and lighting while taking 100% of its colors from your prompt and `<picture 1>` reference (with zero grey color bleed).
+  - **🎨 RGB (Color-Coded Motion)**: Distinct limb and subject color encoding for motion-transfer workflows.
+  - **🌫️ Depth (Normalized Z-Buffer)**: Smooth near-to-far depth maps for 3D structure conditioning.
+  - **🦴 OpenPose (18-Joint Skeleton)**: High-contrast skeletal pose pass on pure black for ControlNet Pose.
+- **Smart Workflow Advisor & Auto-Switch**: Automatically knows the output node (`SaveVideo`, `VHS_VideoCombine`, `SaveGLB`, `Hy3DExportMesh`) and ideal render channel for every bundled or custom workflow, offering 1-click **`Switch to Recommended`** and automatic channel switching.
+
+> 🔧 **Tech Under the Hood:** *Hardware-accelerated `mp4-muxer` offline renderer (`offlinePrevisRenderer.ts`), deterministic `workflowOutputRegistry.ts` graph inspector, and adaptive `LTXVAddGuide` IC-LoRA control strength calibration (`0.65` in Clay mode).*
+
+---
+
+### 11. 👁️ Camera-POV Smart Prompt Compiler
+**How it helps you:** Most prompt tools describe everything on the stage—even objects hidden behind the camera, which confuses AI video models. Our studio checks the actual Camera Viewfinder and only describes what the camera truly sees.
+- **Exact Entry & Exit Timestamps**: Automatically detects when each character or prop enters or leaves the camera frame (e.g., *"Lead Actor enters frame at 1.2s and exits at 2.8s"*) and leaves off-screen objects out of the prompt completely.
+- **Tailored for Each Video Model**: Formats prompts specifically for **LTX-2 / LTX-2.5** (flowing cinematic T5 paragraph), **MiniMax H3 Ref2VA** (`<Video 1>` + `<picture 1>`–`<picture 4>` subject definitions), and **Seedance 2.0** (`@Video1` + `@Image1` multimodal tags).
+
+> 🔧 **Tech Under the Hood:** *25-sample 3D `PerspectiveCamera` frustum bounding-sphere visibility engine (`povVisibilityEngine.ts`) and multi-engine adapter compilers (`ltxAdapter.ts`, `minimaxAdapter.ts`, `seedanceAdapter.ts`).*
+
+---
+
+### 12. ⚡ Live ComfyUI Rendering & Side-by-Side Sync Comparison Player
+**How it helps you:** Send your 3D preview and reference photos straight to ComfyUI with a single button click, watch live progress, and compare your 3D blocking against the final AI video side-by-side.
+- **Zero Manual File Shuffling**: Automatically uploads your rendered 24fps Previs MP4 and up to **4 Reference Images (`<picture 1>`–`<picture 4>`)** directly into the right ComfyUI nodes.
+- **In-App `Side-by-Side Sync` Player**: Play your **3D Previs MP4** and the **Final ComfyUI Render** locked together frame-by-frame to verify motion accuracy, or compare shot revisions in **Director Diff**.
+
+> 🔧 **Tech Under the Hood:** *Schema-verified ComfyUI API graph binder (`templateLoader.ts`), live WebSocket + HTTP `/history` execution tracker, and zero-CORS loopback proxy (`127.0.0.1:51731`).*
+
+---
+
+### 13. 📖 Multi-Scene Shot Bible, Interactive Demos & Dedicated Local Studio Storage
+**How it helps you:** Plan a single shot or a full multi-scene short film, learn the studio in minutes with pre-built interactive scenes, and keep all your generated files organized on your own hard drive.
+- **Shot Bible & Built-In Learning Scenes**: Switch between scenes and shots, duplicate setups, maintain character continuity across cuts, or load built-in demo scenes with one click.
+- **Dedicated `studio_storage/` Disk Folder**: Every generated `.GLB` asset, ComfyUI video render, Previs MP4 export, and custom workflow is neatly saved to your local disk (`studio_storage/` or any custom folder you choose in `⚙ Settings`).
+
+> 🔧 **Tech Under the Hood:** *Zustand stores (`useShotStore`, `useHistoryStore`, `useComfyStore`, `useAssetLibraryStore`) with undo/redo history and local disk storage middleware.*
+
+---
+
+## 📦 7 Bundled Ready-Made ComfyUI Workflows
+
+All **7 production-tested ComfyUI workflows** powering this studio are included inside [`workflows/templates/`](workflows/templates/). Click **`📥 Workflows Pack`** inside the app header to download any workflow (both drag-and-drop **ComfyUI UI `.json`** and **API `.api.json`**) or **Download All Workflows** in one click:
+
+| # | Workflow Name | Category | Recommended Previs Channel | ComfyUI UI Workflow (Drag & Drop) | API Execution Graph | Core Models Used |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **1** | **⚡ LTX-2 19B IC-LoRA Union Control (`v4.2`)** | Video VFX | `🗿 Clay` *(Auto-tuned `0.65`)* | [`ComfyUI_LTX2_ICLoRA_Union_Control_Workflow.json`](workflows/templates/ComfyUI_LTX2_ICLoRA_Union_Control_Workflow.json) | [`ltx2_iclora_union_control.api.json`](workflows/templates/ltx2_iclora_union_control.api.json) | LTX-2 19B Distilled FP8, Union IC-LoRA, Gemma-3 12B, LTXV Audio VAE |
+| **2** | **🎬 MiniMax H3 Multi-Subject Ref2VA** | Video + Audio | `🎨 RGB` | [`MiniMax_H3_Ref2VA_ComfyUI_Workflow.json`](workflows/templates/MiniMax_H3_Ref2VA_ComfyUI_Workflow.json) | [`minimax_h3_ref2va.api.json`](workflows/templates/minimax_h3_ref2va.api.json) | MiniMax H3 Ref2VA INT8, SolAttn, 8-Step Turbo LoRA, RIFE 60fps |
+| **3** | **🎥 MiniMax H3 Stubelius Ultimate Director** | Video + Audio | `🎨 RGB` | [`Stubelius_Ultimate_H3.json`](workflows/templates/Stubelius_Ultimate_H3.json) | [`h3_stubelius.api.json`](workflows/templates/h3_stubelius.api.json) | MiniMax H3 Ref2VA & FL2VA, Qwen3-VL 32B, Video + Audio VAE |
+| **4** | **🎞️ LTX-2.5 22B Distilled INT8 VFX** | Video VFX | `🎨 RGB` / `🌫️ Depth` | — | [`ltx25_stubelius.api.json`](workflows/templates/ltx25_stubelius.api.json) | LTX-2.5 22B Distilled INT8, T5-XXL FP8 |
+| **5** | **🖼️ Image-to-3D `.GLB` Reconstruction** | 3D `.GLB` | — | [`ComfyUI_Image_to_3D_GLB_Workflow.json`](workflows/templates/ComfyUI_Image_to_3D_GLB_Workflow.json) | [`comfy_image_to_3d_glb.api.json`](workflows/templates/comfy_image_to_3d_glb.api.json) | Pixal3D INT8, TRELLIS.2 INT8, BiRefNet, MoGe v1, DINOv3 |
+| **6** | **✍️ Text-to-3D `.GLB` Studio Generator** | 3D `.GLB` | — | [`ComfyUI_Text_to_3D_GLB_Workflow.json`](workflows/templates/ComfyUI_Text_to_3D_GLB_Workflow.json) | [`comfy_text_to_3d_glb.api.json`](workflows/templates/comfy_text_to_3d_glb.api.json) | Z-Image Turbo FP8, Qwen-3-4B, Flux VAE, BiRefNet, Pixal3D / TRELLIS.2 |
+| **7** | **🛡️ Hunyuan3D-2.1 Normal & PBR `.GLB`** | 3D `.GLB` | — | [`ComfyUI_Hunyuan3D_21_GLB_Workflow.json`](workflows/templates/ComfyUI_Hunyuan3D_21_GLB_Workflow.json) | [`comfy_hunyuan3d_21_glb.api.json`](workflows/templates/comfy_hunyuan3d_21_glb.api.json) | Hunyuan3D-DiT-v2-1 FP16, Hy3D Paint PBR Multi-View, BiRefNet |
 
 ---
 
 ## 📸 Visual Feature Tour & Screenshots
 
-### 1. Full Studio Workspace — Dual 3D Viewports & 24fps Timeline
+### 1. Full Studio Workspace — Dual 3D Viewports & 24fps Cue Timeline
 ![Full Studio Workspace](docs/screenshots/01-studio-workspace.png)
-- **Left Sidebar (`Shot Bible`)**: Multi-scene, multi-shot storyboard manager with instant scene switching, shot duplication, continuity propagation, and built-in demo scenes for learning.
-- **Center Dual-Viewport Stage (`3D Soundstage` + `Camera Viewfinder`)**:
-  - **Left Viewport (`3D Soundstage`)**: Free-orbit director's perspective showing the 3D set, volumetric lighting cones, compact camera frustum rig, motion paths, and actor transform gizmos.
-  - **Right Viewport (`Camera Viewfinder`)**: Live through-the-lens render locked to your chosen aspect ratio (`16:9`, `2.39:1`, `9:16`, `1:1`), focal length (`14mm`–`135mm`), and depth-of-field aperture (`f/1.4`–`f/22`).
-- **Bottom Transport & Multi-Subject Cue Swimlanes**: Frame-accurate `24fps` timeline with staggered, color- and shape-coded **Cue Swimlanes** per character (`◆` locomotion, `●` acting/pose, `▱` airborne/jump) plus a dedicated `[CAM]` camera cue lane, interactive **Drag-and-Drop Cue Retiming**, **Cue Span Speed Stretch Handles** (drag bar edges to speed up or slow down an entire action), and **1-Click Motion Pacing Curves (`Linear`, `Smooth`, `Burst ⚡`, `Ramp ↗`)**.
 
-### 2. 3D Character Control Panel, Universal IK Synthesizer & Biomechanical Gait Engine
+### 2. 3D Character Control Panel, Motion Clips & Bilingual AI Motion Director
 ![3D Character Control Panel](docs/screenshots/02-character-control-panel.png)
-- **Biomechanical Human Locomotion (`gaitEngine.ts`)**: Anatomically grounded walking and running with asymmetric stance/swing timing (`60/40` walk, `38/62` run), **heel-strike → flat-foot → toe-off** ankle roll (`createFootRollController`), natural bent-elbow arm swing (`24°–38°` walk, `~90°` athletic pump in run), contrapposto pelvic sway/roll, `Spine`+`Chest` counter-torsion, `solveLookAt` horizon head stabilization, and smooth acceleration/deceleration stride envelopes.
-- **Ready-Made Motion Studio & Ground/Transitional Clips**: One-click procedural biomechanical animations across **Move / Jump** (`Walk Forward`, `Run / Sprint`, `Jump / Leap`, `Sneak / Stealth`, `Back Up / Retreat`, `Crawl (Prone)`, `Climb / Scale`), **Fight / Action** (`Sword Slash`, `Dodge / Roll`, `Martial Combo`, `Aim & Fire`, `Push / Shove`, `Fall / Collapse`), and **Act / Emote** (`Wave / Greet`, `Heroic Taunt`, `Look Around`, `Victory Cheer`, `Talk / Dialogue`, `Sit Down`, `Stand Up / Rise`, `Kneel / Bow`).
-- **Auto / Move / Spot Execution Modes & Action Cycles (`1x`–`5x`)**: Automatically calculate floor travel paths or lock actions in-place, define exact **Action Cycles (`1x`–`5x`)** across the shot duration so gestures play naturally without robotic looping, and dial in **Facing Direction (`Body Yaw`)** (`Face Cam`, `3/4 Left`, `Profile`, `OTS Back`).
-- **Universal 6-Effector IK Synthesizer (`universalMotionSynthesizer.ts`) & Chained AI Directing**:
-  - **Open-Ended Bilingual Choreography (English & Arabic)**: Understands both single-beat and multi-step sequential prompts (`"then"`, `"after that"`, `"ثم"`, `"وبعدها"`, e.g. `"رجلا يزحف علي الارض ثم يقوم"` or `"walk to right, then sit down"`), synthesizing analytical 2-bone IK trajectories (`pelvis + spine + 2 hands + 2 feet + head look-at`) for any described human movement — with optional live LLM upgrade via `generateUniversalKinematicProgramFromPrompt`.
-  - **Smart `Direct` / `(Replay)` State + `+ Chain` Cumulative Directing**: Automatically marks compiled prompts as **`✓ Directed (Replay)`**, unlocks **`+ Chain`** when you type a new action so the character seamlessly continues from their previous ending position and timestamp (auto-extending shot duration if at the end), and provides a full **`Clear` (`resetActorMotion`)** option to cancel all motion, rewind to `0.0s`, and start fresh.
-  - **Interactive Cue Ribbon & Speed Shaper**: Drag individual cue nodes or stretch/compress the colored cue span bar right inside the character card to change movement speed and apply `Linear`, `Smooth`, `Burst ⚡`, or `Ramp ↗` pacing curves.
-- **ComfyUI Reference Image Sync (`<picture 1>`–`<picture 3>`) & `.GLB` Rigging**:
-  - Upload a **ComfyUI Reference Image** directly on any character, vehicle, or prop in Directing Mode (or auto-populate it from ComfyUI 3D `.GLB` generation) — automatically synced to the Render & Export Studio with zero re-uploading.
-  - Interactive **FK/IK Bone Manipulation** right in the 3D viewport (`Pose Bones` mode) + **Socket to Character Bone** (attach props like swords, lanterns, or relics directly to `Right Hand`, `Left Hand`, `Head`, or `Spine`).
 
-### 3. Camera & Lens Optics Deck — Close-Ups, OTS & Live Top-View Radar Sync
+### 3. Camera & Lens Optics Deck — Real Focal Lengths & Live Top-View Radar
 ![Camera & Lens Optics Deck](docs/screenshots/03-camera-optics-deck.png)
-- **True Cinema Lenses & Sensor Profiles**: `14mm` Ultra-Wide through `85mm` Portrait and `135mm` Telephoto Close-Up with adaptive eye-level target framing (`Close-Up`, `Extreme Close-Up`, `Medium Close-Up`, `Medium`, `Wide`), camera roll/Dutch tilt (`-45°` to `+45°`), and path smoothing.
-- **Dynamic Camera Trajectories & Live Top-View Radar (`evaluateLiveCameraStageState`)**: `Static`, `Dolly In`, `Pull Back`, `Track Left/Right`, `Orbit Clockwise/Counter-Clockwise`, `Spiral Orbit In`, `Crane Arc`, `FPV Dive`, `Steadicam Follow`, `Pan Left/Right`, and `Whip Pan` — all synchronized live in both the 3D viewports and the 2D **Top-View Radar** (including curved orbital arcs, pan aim sweeps, and subject-tracking lock).
 
-### 4. 3D Set & Environment Builder + Multi-Light Studio Rig
+### 4. 3D Soundstage Environments & Three-Point Studio Lighting
 ![Set & Lighting Studio](docs/screenshots/04-environment-and-lighting.png)
-- **Procedural 3D Environments**: Instant architectural soundstages (`Cyberpunk Alleyway`, `Ancient Temple Ruins`, `Warm Candlelit Rooftop Terrace`, `Sci-Fi Corridor`, `Film Studio Cyc Wall`) with grounded hero props, atmospheric fog, and **Set / Background Reference Image (`<picture 4>`)** upload for ComfyUI video generation.
-- **Three-Point + Practical Studio Lighting**: Interactive 3D light gizmos (`Key`, `Fill`, `Rim`, `Practical`) with real-time intensity, color temperature, cone angle, and shadow control.
 
-### 5. Previs Render & Multi-Pass Export Deck
+### 5. Multi-Pass Previs Render (`Clay` / `RGB` / `Depth` / `OpenPose`) & Live ComfyUI Bridge
 ![Previs Render & Export Deck](docs/screenshots/05-previs-export-deck.png)
-- **Offline Hardware-Accelerated 24fps Renderer**: Exports frame-accurate `.mp4` (via `mp4-muxer`) for **Composite Previs**, **Clean Beauty**, **OpenPose 18-Joint Skeletons**, **Normalized Depth Maps**, and **Subject Alpha Masks**.
-- **Deterministic ComfyUI & Video Reference Bundles**: Exports `.zip` or JSON bundles containing your rendered control passes, `4×4` camera extrinsic matrices, compiled engine prompts, and verified ComfyUI API graphs for **LTX-2.5**, **MiniMax H3**, **Seedance**, and **any video model that accepts video reference**.
-
-### 6. ⚡ Direct ComfyUI Live API Bridge, Camera-POV Prompt Engine & In-App Video Rendering
-- **One-Click `Render in ComfyUI` (`MiniMax H3 Ref2VA` & `LTX-2.5 22B`)**: Directly executes **MiniMax H3 Ref2VA (`SolAttn` + `8-Step Turbo LoRA @ 0.7`)** or **LTX-2.5 22B Distilled INT8** on your local ComfyUI server (`http://127.0.0.1:8188`) without manually exporting or importing files.
-- **Automatic Previs MP4 + 4 Reference Image Binding**:
-  - Renders and uploads your 24fps 3D RGB Previs MP4 directly into **Node `638` (`<Video 1>`)** (or LTX-2.5 **Node `285`**) as the camera & spatial blocking blueprint.
-  - Synchronizes up to **4 Object, Character & Set Reference Images (`<picture 1>`–`<picture 4>`, Nodes `137` / `139` / `144` / `151`)** uploaded in Directing Mode, generated in ComfyUI 3D Studio, or selected in Render Mode — and automatically binds the primary reference image into **LTX-2.5 Node `269`** as well.
-- **Camera-POV Frustum Filtering & Official Model-Specific Prompt Architecture**:
-  - **Viewport-Accurate Frustum Culling (`povVisibilityEngine.ts`)**: Evaluates the exact 3D `PerspectiveCamera` frustum (`fov`, aspect ratio, camera roll, and bounding spheres) across 25 timeline samples so compiled prompts only include subjects actually visible in the Camera Viewfinder (`VISIBLE_THROUGHOUT`, `ENTERS_FRAME`, `EXITS_FRAME`, `PASSES_THROUGH`), omitting off-screen stage objects.
-  - **Previs-to-Reality Semantic Instantiation**: Explicitly instructs video models to use `<Video 1>` solely for 3D camera trajectory, perspective, and spatial placement (`weak_reference`), while instantiating `<picture 1>`–`<picture 4>` as authentic, living real-world entities (`fully_preserved`) with natural secondary motion instead of painting or texture-wrapping simplified 3D proxy meshes.
-  - **Model-Tailored Prompt Syntax**: Compiles dedicated prompt structures tailored to official documentation for **MiniMax H3 Ref2VA** (`subject_definitions` + `retention_analysis` + `[Shot 1]` temporal beats), **LTX-2.5** (single flowing present-tense cinematic paragraph for `T5-XXL`), and **Seedance 2.0** (`@Video1` + `@Image1`–`@Image4` multimodal tags).
-- **In-App `Final Render` & `Side-by-Side Sync` Player**:
-  - Streams live node-by-node execution progress over WebSocket (with automatic HTTP `/history` fallback) and loads the finished **60fps MP4+Audio (`Node 145`)** directly inside the studio viewport.
-  - Compare your **3D Previs MP4** side-by-side in frame-accurate sync with the **Final ComfyUI Render**, download the final `.mp4` in one click, or inspect the exact disk path (`D:\ComfyUI\output\...`).
-- **Zero-CORS Local Proxy & Live GPU Status**: Built-in loopback proxy (`127.0.0.1:51731` in Electron + `/api/comfy` in Vite) and live ComfyUI connection card in **`⚙ Settings`** + top navbar `● Comfy` status indicator showing your active GPU and VRAM.
 
 ---
 
-## 🛠️ Installation & Setup Guide
+## 🛠️ 1-Click Installation & Quick Start
 
 ### Prerequisites
 - **OS**: Windows 10 / 11, macOS, or Linux
 - **Node.js**: `v20.x` or `v22.x` LTS (includes `npm`)
-- **Git**: For cloning and version control
-- *(Optional)* **ComfyUI** running locally at `http://127.0.0.1:8188` for live 3D `.GLB` generation (`#aa77013b` & `#e7a9555b`) and live video generation (the 3D Previs Studio and MP4/ControlNet Pass Exporters run 100% locally in WebGL without requiring ComfyUI to be online).
+- *(Optional)* **ComfyUI** running locally at `http://127.0.0.1:8188` for live 3D `.GLB` generation, NLF 3D SMPL video mocap, and live video rendering. *(The 3D Previs Stage, 200+ Asset Library, Motion Clips, and 24fps MP4/ControlNet Exporters work 100% locally in your browser/desktop app even when ComfyUI is offline!)*
 
 ### 1. Clone the Repository
 ```bash
@@ -139,10 +271,10 @@ cd comfyui-motion-previs-studio
 ```
 
 ### 2. ⚡ One-Click Launch on Windows (`start_studio.bat` / `run.bat`)
-On Windows, you do not even need to open a terminal — simply **double-click [`start_studio.bat`](start_studio.bat)** (for Browser Mode) or **[`run.bat`](run.bat)** (for Native Electron Desktop Window):
-- **Auto-Installs Dependencies**: Automatically runs `npm install` on first launch if `node_modules` is not yet installed.
-- **Branded Studio Logo Icon (`Assets/logo.ico`)**: Automatically applies our official 3D Node-Cube icon (`Assets/logo.ico`) to the launcher console window & taskbar, and creates a branded **`ComfyUI Motion Previs Studio`** shortcut carrying our logo on your **Windows Desktop** and inside the project folder (you can also run **[`create_desktop_shortcut.bat`](create_desktop_shortcut.bat)** at any time to recreate the branded shortcut).
-- **Auto-Opens Studio**: Starts the local server and opens **`http://127.0.0.1:5173`** (or launches the native Electron Desktop app when using `run.bat` or `start_studio.bat --desktop`).
+On Windows, simply **double-click [`start_studio.bat`](start_studio.bat)** (for Browser Mode) or **[`run.bat`](run.bat)** (for the Native Electron Desktop App):
+- Automatically runs `npm install` on first launch if needed.
+- Applies our branded 3D studio icon (`Assets/logo.ico`) and creates a desktop shortcut.
+- Starts the studio server and opens **`http://127.0.0.1:5173`** (or launches the native desktop window).
 
 ### 3. Manual CLI Setup (Windows / macOS / Linux)
 ```bash
@@ -152,39 +284,27 @@ npm install
 # Run in Browser Mode (http://localhost:5173)
 npm run dev
 
-# Or run as a Native Desktop App (Electron)
+# Or launch as a Native Desktop App (Electron)
 npm run desktop
 ```
-Or if you already ran `npm run build`:
-```bash
-npm run start:desktop
-```
 
-### 4. Configure AI Directing & Prompt Polish Providers (Local Ollama, Google Gemini, OpenAI)
-Click the **Settings (`⚙ Settings`)** button in the top-right header bar to configure optional AI directing & prompt-polishing providers:
+### 4. Optional AI Directing Providers (`⚙ Settings`)
+Open **`⚙ Settings`** in the top header bar to connect optional local or cloud LLMs for natural-language choreography and prompt polishing:
 
-| Provider Mode | Supported Models | Capabilities Unlocked |
+| Provider Mode | Supported Models | What It Unlocks |
 | :--- | :--- | :--- |
-| **Local (`Ollama` / Local Endpoint)** | `deepseek-r1`, `qwen2.5`, `llama3.3` (`http://localhost:11434`) | **100% local & private** natural-language character choreography, stage blocking, and video prompt polishing. |
-| **Google Gemini** | `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash` | High-speed spatial stage blocking and engine-specific video prompt directing. |
-| **OpenAI** | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, `o3-mini` | Natural-language acting direction and cinematic prompt compilation. |
-
-> **Note**: All **3D `.GLB` model generation (Image-to-3D & Text-to-3D)** is performed by your local **ComfyUI** server (`#aa77013b` & `#e7a9555b`). All motion presets, Action Cycles (`1x`–`5x`), automatic 3D `.GLB` bone rigging, camera optics, lighting, and offline MP4/OpenPose/Depth rendering work **out of the box with zero API keys required**.
-
-### 5. Connect Local ComfyUI Server (3D `.GLB` Studio & Video Rendering)
-
-1. Ensure ComfyUI is running at `http://127.0.0.1:8188` and verify the green **`● Comfy`** pill in the studio's top header bar.
-2. Click **`📥 Workflows Pack`** in the **ComfyUI 3D Studio** or **Render, Prompt & Export Studio** to download all 5 ready-made ComfyUI workflows (`ComfyUI_Image_to_3D_GLB_Workflow.json`, `ComfyUI_Text_to_3D_GLB_Workflow.json`, `MiniMax_H3_Ref2VA_ComfyUI_Workflow.json`, `Stubelius_Ultimate_H3.json`, `ltx25_stubelius.api.json`) if you want to inspect or customize them in your ComfyUI browser tab.
-3. For **MiniMax H3 Video Rendering**, download the official MiniMax H3 weights from **[🤗 Comfy-Org/MiniMax-H3 on Hugging Face](https://huggingface.co/Comfy-Org/MiniMax-H3)** into `ComfyUI/models/` (`diffusion_models`, `text_encoders`, `loras`, `vae`).
+| **Local (`Ollama` / Local Endpoint)** | `deepseek-r1`, `qwen2.5`, `llama3.3` (`http://localhost:11434`) | **100% free, local & private** bilingual character choreography and prompt directing. |
+| **Google Gemini** | `gemini-2.5-pro`, `gemini-2.5-flash`, `gemini-2.0-flash` | High-speed spatial stage blocking and engine-specific video prompt compilation. |
+| **OpenAI** | `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, `o3-mini` | Natural-language acting direction and cinematic prompt refinement. |
 
 ---
 
-## 🧪 Verification, Type-Checking & Tests
+## 🧪 Verification, Type-Checking & Automated Tests
 
-Run the automated Vitest suite and production TypeScript + Vite build:
+Run the full **468-test Vitest suite** and production TypeScript + Vite build:
 
 ```bash
-# Run unit & component tests
+# Run all 56 test suites (468 unit & integration tests)
 npm test
 
 # Run full TypeScript check + production bundle build
@@ -197,43 +317,44 @@ npm run build
 
 ```text
 ├── docs/
-│   ├── demo/                 # Full 1080p studio demo video & inline animated preview
-│   ├── screenshots/          # Feature tour screenshots for GitHub README
+│   ├── demo/                 # Full 1080p studio demo video & animated preview
+│   ├── screenshots/          # Visual feature tour screenshots
 │   └── ARCHITECTURE.md       # System architecture & data flow
 ├── public/
-│   └── models/               # Rigged humanoid skeletal meshes (x-bot / y-bot)
+│   ├── images/               # Studio UI icons & hero thumbnails
+│   └── models/               # Rigged 3D humanoid & creature meshes (.glb / .fbx)
+├── scripts/
+│   └── mocap_nlf_extractor.py# Local GPU NLF-Large 3D SMPL-24 multi-person extractor
 ├── src/
-│   ├── adapters/             # Engine prompt & config adapters (LTX-2.5, MiniMax H3, Seedance)
+│   ├── adapters/             # Engine prompt & config adapters (LTX-2/2.5, MiniMax H3, Seedance)
 │   ├── components/           # 2026 Cinematic Command Center UI
-│   │   ├── AIGenerator3D.tsx         # ComfyUI Image-to-3D (#aa77013b) & Text-to-3D (#e7a9555b) .GLB Studio
-│   │   ├── BundledWorkflowsModal.tsx # One-click downloader for all 5 bundled ComfyUI workflows
-│   │   ├── AssetLibraryModal.tsx     # 200+ Curated 3D Assets + Custom ComfyUI .GLB Library
-│   │   ├── ShotBible.tsx             # Multi-scene storyboard manager with built-in learning demo
+│   │   ├── MocapStudioModal.tsx      # 3D Video Mocap Studio (Real SMPL 6,890v vs Mixamo Y-Bot)
+│   │   ├── AIGenerator3D.tsx         # ComfyUI Image-to-3D & Text-to-3D .GLB Studio + Auto-Rigger
+│   │   ├── BundledWorkflowsModal.tsx # 1-Click downloader for all 7 bundled ComfyUI workflows
+│   │   ├── AssetLibraryModal.tsx     # 200+ Curated 3D Assets + Custom .GLB Vault
 │   │   ├── StagePrevis3D.tsx         # Dual-viewport Three.js soundstage & camera viewfinder
-│   │   ├── MotionPrevisStage.tsx     # Transport bar, multi-subject Cue swimlanes & drag-and-drop retiming
-│   │   ├── PrevisParametersDeck.tsx  # Right-hand inspector (Actors, Camera, Set, Lights, Render)
-│   │   ├── CharacterControlCard.tsx  # Modular 3D Character, AI Motion Director & Cue Ribbon Panel
-│   │   └── PrevisExportDeck.tsx      # 24fps MP4, ControlNet pass & ComfyUI video renderer
+│   │   ├── MotionPrevisStage.tsx     # 24fps transport bar, Cue swimlanes & speed stretching
+│   │   ├── CharacterControlCard.tsx  # Motion clips, Bilingual IK Director & Cue Ribbon
+│   │   ├── PrevisExportDeck.tsx      # 4-Channel MP4 exporter, Workflow Advisor & ComfyUI Bridge
+│   │   ├── ShotBible.tsx             # Multi-scene storyboard manager & built-in learning demos
+│   │   └── DirectorDiffModal.tsx     # Side-by-side shot revision & video diff inspector
 │   ├── engine/
-│   │   ├── kinematics/       # Auto-rigging engine, biomechanical gait, 2-bone IK & Universal 6-Effector IK Synthesizer
-│   │   ├── staging/          # 3D environment builder & subject mesh factory
-│   │   ├── trajectoryMath.ts         # Live camera & actor trajectory interpolation + Top-View Radar evaluator
-│   │   ├── povVisibilityEngine.ts    # 3D Camera-POV frustum visibility & entry/exit timestamp analyzer
-│   │   ├── promptCompiler.ts         # Official model-specific compilers (LTX-2.5, MiniMax H3, Seedance 2.0)
-│   │   └── offlinePrevisRenderer.ts  # Deterministic multi-pass MP4 muxer pipeline
-│   ├── services/
-│   │   ├── aiActingDirector.ts       # Bilingual acting cue & Universal IK program LLM generator
-│   │   ├── comfy3dGenerator.ts       # Live ComfyUI Image-to-3D & Text-to-3D .GLB pipeline
-│   │   ├── bundledWorkflowsCatalog.ts# Catalog & downloader for all bundled ComfyUI workflows
-│   │   └── modelStorage.ts           # Persistent IndexedDB & disk .GLB model storage
-│   ├── stores/               # Zustand stores (useShotStore, useHistoryStore, useAssetLibraryStore)
+│   │   ├── kinematics/               # SMPL 6,890v loader, Mixamo loader, Auto-Rigger, Gait & 6-Effector IK
+│   │   ├── staging/                  # Procedural 3D environments & subject mesh factory
+│   │   ├── vfx/                      # Video mocap analyzer, 6-DoF camera tracker & scene reconstructor
+│   │   ├── workflowOutputRegistry.ts # Deterministic ComfyUI output node & channel advisor registry
+│   │   ├── povVisibilityEngine.ts    # 3D Camera-POV frustum visibility & timestamp analyzer
+│   │   ├── promptCompiler.ts         # Official model-specific prompt compilers
+│   │   └── offlinePrevisRenderer.ts  # Hardware-accelerated 4-channel 24fps MP4 renderer
+│   ├── services/             # ComfyUI REST/WS client, 3D generator, storage & LLM directors
+│   ├── stores/               # Zustand stores (useShotStore, useHistoryStore, useComfyStore)
 │   └── types/                # Canonical Zod-validated ShotSpec schemas
 └── workflows/
-    └── templates/            # Bundled ComfyUI UI (.json) & API (.api.json) workflows (3D & Video)
+    └── templates/            # 7 Bundled ComfyUI UI (.json) & API (.api.json) workflows + bindings
 ```
 
 ---
 
 ## 📄 License
 
-Released as Open Source.
+Released under the **MIT License**.
