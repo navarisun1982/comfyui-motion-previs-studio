@@ -42,7 +42,7 @@ import { ValidationReport, CompiledPromptBundle } from '../adapters/types';
 import { logger } from './useLogStore';
 import { interpolateTrajectoryPosition, recordTrajectoryPoseAtTime } from '../engine/trajectoryMath';
 import { decomposeDirectorialMotion, compileMotionPlan, compileReadyMadeMotionKeyframes, matchReadyMadeMotionFromPrompt } from '../engine/kinematics';
-import { STORAGE_KEYS, safeGetItem, safeSetItem, sanitizeShotForStorage } from '../services/storage';
+import { STORAGE_KEYS, safeGetItem, safeSetItem, sanitizeShotForStorage, compactShotForLocalStorage } from '../services/storage';
 import {
   resolveCoherentSceneDescription,
   resolveCoherentLighting,
@@ -50,7 +50,7 @@ import {
   PRESET_LIGHT_NAMES,
 } from '../engine/promptCompiler';
 import { toPersistentModelUri, offloadLargeImageToIndexedDB, resolveOffloadedImage, resolveOffloadedImageSync } from '../services/modelStorage';
-import { saveProjectToStudioStorage } from '../services/studioStorageClient';
+import { saveProjectToStudioStorage, loadProjectFromStudioStorage } from '../services/studioStorageClient';
 import { resolvePolyforkGlbUrl } from '../data/externalCatalogsRegistry';
 
 export type PrevisRendererFn = (
@@ -286,18 +286,7 @@ export const flushShotsPersistence = () => {
   if (!safeSetItem(STORAGE_KEYS.SHOTS_CACHE, sanitized)) {
     const compact: Record<string, ShotSpec> = {};
     for (const [id, s] of Object.entries(sanitized)) {
-      compact[id] = {
-        ...s,
-        actors: s.actors.map((a) =>
-          a.conceptImageUrl && a.conceptImageUrl.length > 80_000
-            ? { ...a, conceptImageUrl: undefined }
-            : a
-        ),
-        environment:
-          s.environment?.conceptImageUrl && s.environment.conceptImageUrl.length > 80_000
-            ? { ...s.environment, conceptImageUrl: undefined }
-            : s.environment,
-      };
+      compact[id] = compactShotForLocalStorage(s);
     }
     safeSetItem(STORAGE_KEYS.SHOTS_CACHE, compact);
   }
@@ -342,7 +331,315 @@ function healPoseHandedness(pose?: ActorPose): ActorPose | undefined {
   };
 }
 
+function countShotTotalKeyframes(shot?: ShotSpec | null): number {
+  if (!shot || !Array.isArray(shot.actors)) return 0;
+  return shot.actors.reduce((acc, a) => acc + (a?.trajectory?.keyframes?.length || 0), 0);
+}
+
+function isBuiltInFallbackShotSpec(shot?: ShotSpec | null): boolean {
+  if (!shot || !Array.isArray(shot.actors)) return true;
+  if (countShotTotalKeyframes(shot) > 40) return false;
+  const firstId = shot.actors[0]?.id || '';
+  const firstToken = shot.actors[0]?.token || '';
+  return (
+    firstId === 'actor-1' ||
+    firstId === 'actor-kael-lead' ||
+    /lone traveler|cyberpunk operative in a rain-slicked/i.test(firstToken)
+  );
+}
+
+function healLoadedShotSpec(rawShot: ShotSpec): ShotSpec {
+  const s: ShotSpec = { ...rawShot };
+  if (!s.environment) {
+    s.environment = { ...CINEMATIC_ENVIRONMENT_PRESETS[0].spec };
+  } else {
+    s.environment = { ...s.environment };
+    const envText = `${s.environment.name || ''} ${s.environment.promptDescription || ''}`;
+    if (s.environment.category === 'nature' && /\b(beach|coastal|ocean|shoreline|seaside)\b/i.test(envText)) {
+      s.environment.category = 'coastal-beach';
+    }
+  }
+  if (s.environment?.conceptImageUrl?.startsWith('refimg://')) {
+    const syncEnvImg = resolveOffloadedImageSync(s.environment.conceptImageUrl);
+    if (syncEnvImg) s.environment = { ...s.environment, conceptImageUrl: syncEnvImg };
+  }
+  if (Array.isArray(s.actors)) {
+    const hasMocapPerson = s.actors.some((a) => a.id.startsWith('mocap-person-'));
+    const humanIndices = s.actors
+      .map((a, idx) => (!a.kind || a.kind === 'human' || a.kind === 'character' ? idx : -1))
+      .filter((idx) => idx >= 0);
+    const needsPairRecenter =
+      hasMocapPerson &&
+      humanIndices.length >= 2 &&
+      Math.abs(
+        (s.actors[humanIndices[1]]?.trajectory?.startPosition?.x ?? 50) -
+          (s.actors[humanIndices[0]]?.trajectory?.startPosition?.x ?? 50)
+      ) > 12;
+
+    s.actors = s.actors.map((a, idx) => {
+      let nextActor: Actor = {
+        ...a,
+        pose: healPoseHandedness(a.pose),
+        trajectory: a.trajectory
+          ? {
+              ...a.trajectory,
+              keyframes: a.trajectory.keyframes?.map((kf) => ({
+                ...kf,
+                pose: healPoseHandedness(kf.pose),
+              })),
+            }
+          : a.trajectory,
+      };
+
+      // Linearize legacy S-curve (smoothCycleU) locomotion keyframes so continuous walking/running
+      // starts at steady Mixamo stride velocity from t = 0.0s without first-second foot sliding.
+      if (
+        nextActor.trajectory?.keyframes &&
+        nextActor.trajectory.keyframes.length >= 2 &&
+        !nextActor.trajectory.keyframes.some((kf) => kf.pose && Object.keys(kf.pose).length > 0)
+      ) {
+        const clipId = nextActor.motionClip || '';
+        const gaitMode = nextActor.gait || 'none';
+        const isContinuousLocomotion =
+          gaitMode === 'walk' ||
+          gaitMode === 'run' ||
+          clipId === 'human-walk-forward' ||
+          clipId === 'human-run-sprint' ||
+          clipId === 'human-sneak-prowl' ||
+          clipId === 'animal-walk-trot' ||
+          clipId === 'animal-gallop-run';
+        if (isContinuousLocomotion) {
+          const kfs = nextActor.trajectory.keyframes;
+          const firstKf = kfs[0];
+          const lastKf = kfs[kfs.length - 1];
+          const spanDur = Math.max(0.001, lastKf.time - firstKf.time);
+          nextActor = {
+            ...nextActor,
+            trajectory: {
+              ...nextActor.trajectory,
+              keyframes: kfs.map((kf, kfIdx) => {
+                if (kfIdx === 0 || kfIdx === kfs.length - 1) return kf;
+                const alpha = Math.max(0, Math.min(1, (kf.time - firstKf.time) / spanDur));
+                return {
+                  ...kf,
+                  position: {
+                    x: Number(
+                      (firstKf.position.x + (lastKf.position.x - firstKf.position.x) * alpha).toFixed(2)
+                    ),
+                    y: Number(
+                      (firstKf.position.y + (lastKf.position.y - firstKf.position.y) * alpha).toFixed(2)
+                    ),
+                  },
+                };
+              }),
+            },
+          };
+        }
+      }
+
+      if (needsPairRecenter && humanIndices.includes(idx) && nextActor.trajectory) {
+        const pairRank = humanIndices.indexOf(idx);
+        const targetStartX = Math.round(50 + (pairRank - (humanIndices.length - 1) * 0.5) * 6);
+        const dx = targetStartX - nextActor.trajectory.startPosition.x;
+        nextActor = {
+          ...nextActor,
+          trajectory: {
+            ...nextActor.trajectory,
+            startPosition: {
+              ...nextActor.trajectory.startPosition,
+              x: targetStartX,
+            },
+            endPosition: {
+              ...nextActor.trajectory.endPosition,
+              x: Math.max(20, Math.min(80, Math.round(nextActor.trajectory.endPosition.x + dx))),
+            },
+            keyframes: nextActor.trajectory.keyframes?.map((kf) => ({
+              ...kf,
+              position: {
+                ...kf.position,
+                x: Math.max(20, Math.min(80, Number((kf.position.x + dx).toFixed(2)))),
+              },
+            })),
+          },
+        };
+      }
+
+      const hasMocapKeyframes = Boolean(
+        nextActor.trajectory?.keyframes?.some(
+          (kf) =>
+            kf.pose?.charSpaceRotations !== undefined ||
+            kf.pose?.anatomicalIk !== undefined ||
+            Boolean(kf.pose && Object.keys(kf.pose.rotations || {}).length > 0)
+        )
+      );
+      if (
+        nextActor.kind === 'human' &&
+        hasMocapKeyframes &&
+        !/kael|ronin/i.test(`${nextActor.name} ${nextActor.token || ''}`) &&
+        (nextActor.partGraph || nextActor.sculpt)
+      ) {
+        nextActor = { ...nextActor, partGraph: undefined, sculpt: undefined };
+      }
+
+      if (
+        nextActor.conceptImageUrl &&
+        /raw\.githubusercontent\.com\/lucas-martinic\/polyfork-catalog|images\.unsplash\.com|images\/library\/mixamo-/i.test(
+          nextActor.conceptImageUrl
+        )
+      ) {
+        return { ...nextActor, conceptImageUrl: undefined, conceptImageName: undefined };
+      }
+      if (nextActor.conceptImageUrl?.startsWith('refimg://')) {
+        const syncImg = resolveOffloadedImageSync(nextActor.conceptImageUrl);
+        if (syncImg) return { ...nextActor, conceptImageUrl: syncImg };
+      }
+      return nextActor;
+    });
+
+    if (needsPairRecenter && s.camera?.movement) {
+      s.camera = {
+        ...s.camera,
+        movement: {
+          ...s.camera.movement,
+          type: s.camera.movement.type === 'pan-left' ? 'dolly-in' : s.camera.movement.type,
+          startPosition: { x: 50, y: 80, z: 22 },
+          endPosition: { x: 50, y: 68, z: 22 },
+          targetLookAt: { x: 50, y: 50 },
+        },
+      };
+    }
+
+    s.sceneDescription = resolveCoherentSceneDescription(s);
+    s.lighting = {
+      ...s.lighting,
+      ...resolveCoherentLighting(s),
+      contrast: resolveCoherentLighting(s).contrast as ShotSpec['lighting']['contrast'],
+    };
+    if (s.customPositivePrompts) {
+      const cleanedCustom: Record<string, string> = {};
+      for (const [eng, text] of Object.entries(s.customPositivePrompts)) {
+        if (isCustomPromptCoherentWithShot(text, s)) {
+          cleanedCustom[eng] = text;
+        }
+      }
+      s.customPositivePrompts = cleanedCustom;
+    }
+  }
+  return s;
+}
+
+const scheduleStartupHydration = () => {
+  if (typeof window === 'undefined') return;
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+  if (ua.includes('jsdom') || ua.includes('Node.js')) return;
+
+  setTimeout(async () => {
+    try {
+      const disk = await loadProjectFromStudioStorage();
+      const state = useShotStore.getState();
+      const nextShots: Record<string, ShotSpec> = { ...state.shotsById };
+      let changedFromDisk = false;
+
+      if (disk?.shotsById && typeof disk.shotsById === 'object') {
+        for (const [id, rawDiskShot] of Object.entries(disk.shotsById)) {
+          if (!rawDiskShot || typeof rawDiskShot !== 'object') continue;
+          const diskShot = healLoadedShotSpec(rawDiskShot as ShotSpec);
+          const localShot = nextShots[id];
+          const diskKfs = countShotTotalKeyframes(diskShot);
+          const localKfs = countShotTotalKeyframes(localShot);
+          const shouldAdoptDisk =
+            !localShot ||
+            (isBuiltInFallbackShotSpec(localShot) && !isBuiltInFallbackShotSpec(diskShot)) ||
+            diskKfs > localKfs ||
+            (!isBuiltInFallbackShotSpec(diskShot) && (diskShot.timestamp || 0) > (localShot.timestamp || 0));
+
+          if (shouldAdoptDisk) {
+            nextShots[id] = diskShot;
+            changedFromDisk = true;
+          }
+        }
+      }
+
+      // Resolve any IndexedDB refimg:// URLs across all loaded shots
+      let changedFromImages = false;
+      for (const [id, s] of Object.entries(nextShots)) {
+        if (!s) continue;
+        let shotChanged = false;
+        let nextEnv = s.environment;
+        if (nextEnv?.conceptImageUrl?.startsWith('refimg://')) {
+          const resolved = await resolveOffloadedImage(nextEnv.conceptImageUrl);
+          if (resolved) {
+            nextEnv = { ...nextEnv, conceptImageUrl: resolved };
+            shotChanged = true;
+          }
+        }
+        const nextActors = await Promise.all(
+          (s.actors || []).map(async (a) => {
+            if (a.conceptImageUrl?.startsWith('refimg://')) {
+              const resolved = await resolveOffloadedImage(a.conceptImageUrl);
+              if (resolved) {
+                shotChanged = true;
+                return { ...a, conceptImageUrl: resolved };
+              }
+            }
+            return a;
+          })
+        );
+        if (shotChanged) {
+          changedFromImages = true;
+          nextShots[id] = { ...s, actors: nextActors, environment: nextEnv };
+        }
+      }
+
+      if (changedFromDisk || changedFromImages) {
+        const activeId = useShotStore.getState().shot.id;
+        const activeNext = nextShots[activeId] || useShotStore.getState().shot;
+        const adapter = getAdapter(activeNext.targetModel);
+        const validation = adapter.validate(activeNext);
+        const compiledPrompt = adapter.compilePrompt(activeNext);
+        useShotStore.setState({
+          shotsById: nextShots,
+          shot: activeNext,
+          selectedActorId: activeNext.actors[0]?.id,
+          validation,
+          compiledPrompt,
+        });
+        safeSetItem(DEMO_VERSION_STORAGE_KEY, BUILTIN_DEMO_VERSION);
+        const compactMap: Record<string, ShotSpec> = {};
+        for (const [id, s] of Object.entries(nextShots)) {
+          compactMap[id] = compactShotForLocalStorage(sanitizeShotForStorage(s));
+        }
+        safeSetItem(STORAGE_KEYS.SHOTS_CACHE, compactMap);
+      }
+
+      if (disk?.castPool && Array.isArray(disk.castPool) && disk.castPool.length > 0) {
+        const currentPool = useShotStore.getState().sceneCastPool;
+        const mergedPool = [...currentPool];
+        for (const actor of disk.castPool as Actor[]) {
+          if (actor?.id && !mergedPool.some((p) => p.id === actor.id)) {
+            mergedPool.unshift(actor);
+          }
+        }
+        if (mergedPool.length !== currentPool.length) {
+          useShotStore.setState({ sceneCastPool: mergedPool });
+        }
+      }
+
+      if (disk?.scenes && Array.isArray(disk.scenes) && disk.scenes.length > 0) {
+        window.dispatchEvent(
+          new CustomEvent('studio-storage:project-restored', {
+            detail: { scenes: disk.scenes },
+          })
+        );
+      }
+    } catch {
+      // ignore startup disk hydration errors in offline/test environments
+    }
+  }, 80);
+};
+
 const loadCachedShots = (): Record<string, ShotSpec> => {
+  scheduleStartupHydration();
   const savedVer = safeGetItem<string | null>(DEMO_VERSION_STORAGE_KEY, null);
   if (savedVer !== BUILTIN_DEMO_VERSION) {
     return {};
@@ -352,227 +649,7 @@ const loadCachedShots = (): Record<string, ShotSpec> => {
     for (const key of Object.keys(parsed)) {
       const s = parsed[key];
       if (!s) continue;
-      if (!s.environment) {
-        s.environment = { ...CINEMATIC_ENVIRONMENT_PRESETS[0].spec };
-      } else {
-        s.environment = { ...s.environment };
-        const envText = `${s.environment.name || ''} ${s.environment.promptDescription || ''}`;
-        if (s.environment.category === 'nature' && /\b(beach|coastal|ocean|shoreline|seaside)\b/i.test(envText)) {
-          s.environment.category = 'coastal-beach';
-        }
-      }
-      if (s.environment?.conceptImageUrl?.startsWith('refimg://')) {
-        const syncEnvImg = resolveOffloadedImageSync(s.environment.conceptImageUrl);
-        if (syncEnvImg) s.environment = { ...s.environment, conceptImageUrl: syncEnvImg };
-      }
-      if (Array.isArray(s.actors)) {
-        const hasMocapPerson = s.actors.some((a) => a.id.startsWith('mocap-person-'));
-        const humanIndices = s.actors
-          .map((a, idx) => (!a.kind || a.kind === 'human' || a.kind === 'character' ? idx : -1))
-          .filter((idx) => idx >= 0);
-        const needsPairRecenter =
-          hasMocapPerson &&
-          humanIndices.length >= 2 &&
-          Math.abs(
-            (s.actors[humanIndices[1]]?.trajectory?.startPosition?.x ?? 50) -
-              (s.actors[humanIndices[0]]?.trajectory?.startPosition?.x ?? 50)
-          ) > 12;
-
-        s.actors = s.actors.map((a, idx) => {
-          let nextActor: Actor = {
-            ...a,
-            pose: healPoseHandedness(a.pose),
-            trajectory: a.trajectory
-              ? {
-                  ...a.trajectory,
-                  keyframes: a.trajectory.keyframes?.map((kf) => ({
-                    ...kf,
-                    pose: healPoseHandedness(kf.pose),
-                  })),
-                }
-              : a.trajectory,
-          };
-
-          // Linearize legacy S-curve (smoothCycleU) locomotion keyframes so continuous walking/running
-          // starts at steady Mixamo stride velocity from t = 0.0s without first-second foot sliding.
-          if (
-            nextActor.trajectory?.keyframes &&
-            nextActor.trajectory.keyframes.length >= 2 &&
-            !nextActor.trajectory.keyframes.some((kf) => kf.pose && Object.keys(kf.pose).length > 0)
-          ) {
-            const clipId = nextActor.motionClip || '';
-            const gaitMode = nextActor.gait || 'none';
-            const isContinuousLocomotion =
-              gaitMode === 'walk' ||
-              gaitMode === 'run' ||
-              clipId === 'human-walk-forward' ||
-              clipId === 'human-run-sprint' ||
-              clipId === 'human-sneak-prowl' ||
-              clipId === 'animal-walk-trot' ||
-              clipId === 'animal-gallop-run';
-            if (isContinuousLocomotion) {
-              const kfs = nextActor.trajectory.keyframes;
-              const firstKf = kfs[0];
-              const lastKf = kfs[kfs.length - 1];
-              const spanDur = Math.max(0.001, lastKf.time - firstKf.time);
-              nextActor = {
-                ...nextActor,
-                trajectory: {
-                  ...nextActor.trajectory,
-                  keyframes: kfs.map((kf, kfIdx) => {
-                    if (kfIdx === 0 || kfIdx === kfs.length - 1) return kf;
-                    const alpha = Math.max(0, Math.min(1, (kf.time - firstKf.time) / spanDur));
-                    return {
-                      ...kf,
-                      position: {
-                        x: Number(
-                          (firstKf.position.x + (lastKf.position.x - firstKf.position.x) * alpha).toFixed(2)
-                        ),
-                        y: Number(
-                          (firstKf.position.y + (lastKf.position.y - firstKf.position.y) * alpha).toFixed(2)
-                        ),
-                      },
-                    };
-                  }),
-                },
-              };
-            }
-          }
-
-          if (needsPairRecenter && humanIndices.includes(idx) && nextActor.trajectory) {
-            const pairRank = humanIndices.indexOf(idx);
-            const targetStartX = Math.round(50 + (pairRank - (humanIndices.length - 1) * 0.5) * 6);
-            const dx = targetStartX - nextActor.trajectory.startPosition.x;
-            nextActor = {
-              ...nextActor,
-              trajectory: {
-                ...nextActor.trajectory,
-                startPosition: {
-                  ...nextActor.trajectory.startPosition,
-                  x: targetStartX,
-                },
-                endPosition: {
-                  ...nextActor.trajectory.endPosition,
-                  x: Math.max(20, Math.min(80, Math.round(nextActor.trajectory.endPosition.x + dx))),
-                },
-                keyframes: nextActor.trajectory.keyframes?.map((kf) => ({
-                  ...kf,
-                  position: {
-                    ...kf.position,
-                    x: Math.max(20, Math.min(80, Number((kf.position.x + dx).toFixed(2)))),
-                  },
-                })),
-              },
-            };
-          }
-
-          // If a cached human actor was repurposed via Mocap Studio (e.g. `actor-kael-lead` renamed to "Man"),
-          // strip any leftover preset `partGraph` / `sculpt` (such as Kael's cyan plasma katana).
-          const hasMocapKeyframes = Boolean(
-            nextActor.trajectory?.keyframes?.some(
-              (kf) =>
-                kf.pose?.charSpaceRotations !== undefined ||
-                kf.pose?.anatomicalIk !== undefined ||
-                Boolean(kf.pose && Object.keys(kf.pose.rotations || {}).length > 0)
-            )
-          );
-          if (
-            nextActor.kind === 'human' &&
-            hasMocapKeyframes &&
-            !/kael|ronin/i.test(`${nextActor.name} ${nextActor.token || ''}`) &&
-            (nextActor.partGraph || nextActor.sculpt)
-          ) {
-            nextActor = { ...nextActor, partGraph: undefined, sculpt: undefined };
-          }
-
-          // Never treat 3D catalog preview thumbnails as user-uploaded ComfyUI reference images
-          if (
-            nextActor.conceptImageUrl &&
-            /raw\.githubusercontent\.com\/lucas-martinic\/polyfork-catalog|images\.unsplash\.com|images\/library\/mixamo-/i.test(
-              nextActor.conceptImageUrl
-            )
-          ) {
-            return { ...nextActor, conceptImageUrl: undefined, conceptImageName: undefined };
-          }
-          if (nextActor.conceptImageUrl?.startsWith('refimg://')) {
-            const syncImg = resolveOffloadedImageSync(nextActor.conceptImageUrl);
-            if (syncImg) return { ...nextActor, conceptImageUrl: syncImg };
-          }
-          return nextActor;
-        });
-
-        if (needsPairRecenter && s.camera?.movement) {
-          s.camera = {
-            ...s.camera,
-            movement: {
-              ...s.camera.movement,
-              type: s.camera.movement.type === 'pan-left' ? 'dolly-in' : s.camera.movement.type,
-              startPosition: { x: 50, y: 80, z: 22 },
-              endPosition: { x: 50, y: 68, z: 22 },
-              targetLookAt: { x: 50, y: 50 },
-            },
-          };
-        }
-
-        // Purge any orphaned preset narrative, orphaned preset lights, or stale custom prompts on load
-        s.sceneDescription = resolveCoherentSceneDescription(s);
-        s.lighting = {
-          ...s.lighting,
-          ...resolveCoherentLighting(s),
-          contrast: resolveCoherentLighting(s).contrast as ShotSpec['lighting']['contrast'],
-        };
-        if (s.customPositivePrompts) {
-          const cleanedCustom: Record<string, string> = {};
-          for (const [eng, text] of Object.entries(s.customPositivePrompts)) {
-            if (isCustomPromptCoherentWithShot(text, s)) {
-              cleanedCustom[eng] = text;
-            }
-          }
-          s.customPositivePrompts = cleanedCustom;
-        }
-      }
-    }
-    if (typeof window !== 'undefined') {
-      setTimeout(async () => {
-        let changed = false;
-        const state = useShotStore.getState();
-        const nextShots: Record<string, ShotSpec> = { ...state.shotsById };
-        for (const [id, s] of Object.entries(nextShots)) {
-          if (!s) continue;
-          let shotChanged = false;
-          let nextEnv = s.environment;
-          if (nextEnv?.conceptImageUrl?.startsWith('refimg://')) {
-            const resolved = await resolveOffloadedImage(nextEnv.conceptImageUrl);
-            if (resolved) {
-              nextEnv = { ...nextEnv, conceptImageUrl: resolved };
-              shotChanged = true;
-            }
-          }
-          const nextActors = await Promise.all(
-            (s.actors || []).map(async (a) => {
-              if (a.conceptImageUrl?.startsWith('refimg://')) {
-                const resolved = await resolveOffloadedImage(a.conceptImageUrl);
-                if (resolved) {
-                  shotChanged = true;
-                  return { ...a, conceptImageUrl: resolved };
-                }
-              }
-              return a;
-            })
-          );
-          if (shotChanged) {
-            changed = true;
-            nextShots[id] = { ...s, actors: nextActors, environment: nextEnv };
-          }
-        }
-        if (changed) {
-          const activeId = useShotStore.getState().shot.id;
-          useShotStore.setState({
-            shotsById: nextShots,
-            shot: nextShots[activeId] || useShotStore.getState().shot,
-          });
-        }
-      }, 120);
+      parsed[key] = healLoadedShotSpec(s);
     }
     return parsed;
   }

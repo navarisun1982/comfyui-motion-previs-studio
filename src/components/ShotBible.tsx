@@ -1261,10 +1261,11 @@ const loadSavedScenes = (): SceneItem[] => {
       return parsed.map((scene: SceneItem) => ({
         ...scene,
         shots: (scene.shots || []).map((sh) => {
-          const num = parseInt(sh.duration, 10);
+          const num = parseFloat(sh.duration);
+          const cleanNum = Number.isFinite(num) ? Math.round(num * 10) / 10 : 0;
           return {
             ...sh,
-            duration: (!num || num > 15 || num < 1) ? '4s' : `${num}s`,
+            duration: (!cleanNum || cleanNum > 120 || cleanNum < 1) ? '4s' : `${cleanNum}s`,
           };
         }),
       }));
@@ -1345,7 +1346,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
       current.actors[0]?.id === 'actor-1' &&
       current.actors[0]?.token === 'a lone traveler in a weathered jacket'
     ) {
-      const built = { ...buildDefaultShotSpec(firstShotItem), name: firstShotItem.code };
+      const built = { ...buildDefaultShotSpec(firstShotItem), name: firstShotItem.code, timestamp: 0 };
       useShotStore.getState().loadShot(built);
       if (onSelectShot) {
         onSelectShot(firstShotItem.id, firstShotItem.code, firstScene.name);

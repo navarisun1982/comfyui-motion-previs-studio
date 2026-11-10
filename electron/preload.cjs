@@ -9,5 +9,7 @@ contextBridge.exposeInMainWorld('electronComfyBridge', {
   fetchRemoteWorkflow: (url) => ipcRenderer.invoke('comfy:fetch-remote-workflow', url),
   checkAppUpdate: (options) => ipcRenderer.invoke('app-update:check', options),
   applyAppUpdate: () => ipcRenderer.invoke('app-update:apply'),
+  loadStudioProject: () => ipcRenderer.invoke('studio-storage:load-project'),
+  saveStudioProject: (payload) => ipcRenderer.invoke('studio-storage:save-project', payload),
 });
 

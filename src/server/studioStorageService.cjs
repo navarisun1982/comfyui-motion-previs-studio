@@ -228,6 +228,30 @@ function sanitizeFileId(rawId) {
     .slice(0, 120);
 }
 
+function countShotKeyframes(shotSpec) {
+  if (!shotSpec || !Array.isArray(shotSpec.actors)) return 0;
+  let total = 0;
+  for (const actor of shotSpec.actors) {
+    const kfs = actor && actor.trajectory && Array.isArray(actor.trajectory.keyframes)
+      ? actor.trajectory.keyframes.length
+      : 0;
+    total += kfs;
+  }
+  return total;
+}
+
+function isBuiltInDefaultFallbackShot(shotSpec) {
+  if (!shotSpec || !Array.isArray(shotSpec.actors)) return true;
+  if (countShotKeyframes(shotSpec) > 40) return false;
+  const firstToken = (shotSpec.actors[0] && shotSpec.actors[0].token) || '';
+  const firstId = (shotSpec.actors[0] && shotSpec.actors[0].id) || '';
+  return (
+    firstId === 'actor-1' ||
+    firstId === 'actor-kael-lead' ||
+    /lone traveler|cyberpunk operative in a rain-slicked/i.test(firstToken)
+  );
+}
+
 function saveProjectToDisk(payload) {
   const cfg = readStorageConfig();
   const { storageDir, subfolders } = ensureStorageDirectories(cfg.storageDir);
@@ -251,22 +275,41 @@ function saveProjectToDisk(payload) {
   }
 
   if (payload && payload.shotsById && typeof payload.shotsById === 'object') {
-    fs.writeFileSync(
-      path.join(subfolders.scenes, 'shots_cache.json'),
-      JSON.stringify(payload.shotsById, null, 2),
-      'utf-8'
-    );
     const shotsDir = path.join(subfolders.scenes, 'shots');
     fs.mkdirSync(shotsDir, { recursive: true });
-    for (const [shotId, shotSpec] of Object.entries(payload.shotsById)) {
+    const mergedShotsById = { ...payload.shotsById };
+
+    for (const [shotId, shotSpec] of Object.entries(mergedShotsById)) {
       if (!shotSpec || typeof shotSpec !== 'object') continue;
       const safeShotFile = `${sanitizeFileId(shotId)}.json`;
+      const shotFilePath = path.join(shotsDir, safeShotFile);
+
+      // Protect existing Mocap/custom shots on disk (>40 keyframes) from being accidentally
+      // overwritten by an uninitialized built-in default fallback shot during startup.
+      if (!payload.allowOverwriteMocap && fs.existsSync(shotFilePath) && isBuiltInDefaultFallbackShot(shotSpec)) {
+        try {
+          const existingDiskShot = JSON.parse(fs.readFileSync(shotFilePath, 'utf-8'));
+          if (existingDiskShot && countShotKeyframes(existingDiskShot) > 40) {
+            mergedShotsById[shotId] = existingDiskShot;
+            continue;
+          }
+        } catch {
+          // ignore read error
+        }
+      }
+
       fs.writeFileSync(
-        path.join(shotsDir, safeShotFile),
+        shotFilePath,
         JSON.stringify(shotSpec, null, 2),
         'utf-8'
       );
     }
+
+    fs.writeFileSync(
+      path.join(subfolders.scenes, 'shots_cache.json'),
+      JSON.stringify(mergedShotsById, null, 2),
+      'utf-8'
+    );
   }
 
   writeStorageConfig({ storageDir, lastSyncedAt: now });
@@ -278,6 +321,7 @@ function loadProjectFromDisk() {
   const { subfolders } = ensureStorageDirectories(cfg.storageDir);
   const scenesFile = path.join(subfolders.scenes, 'project_scenes.json');
   const shotsFile = path.join(subfolders.scenes, 'shots_cache.json');
+  const shotsDir = path.join(subfolders.scenes, 'shots');
 
   let scenes = null;
   let castPool = null;
@@ -310,9 +354,39 @@ function loadProjectFromDisk() {
     }
   }
 
+  if (fs.existsSync(shotsDir)) {
+    try {
+      const entries = fs.readdirSync(shotsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        const lower = entry.name.toLowerCase();
+        if (!lower.endsWith('.json') || lower.endsWith('.backup.json')) continue;
+        const fullPath = path.join(shotsDir, entry.name);
+        try {
+          const singleShot = JSON.parse(fs.readFileSync(fullPath, 'utf-8'));
+          if (singleShot && typeof singleShot === 'object' && typeof singleShot.id === 'string') {
+            if (!shotsById) shotsById = {};
+            const existing = shotsById[singleShot.id];
+            if (
+              !existing ||
+              countShotKeyframes(singleShot) > countShotKeyframes(existing) ||
+              (singleShot.timestamp || 0) > (existing.timestamp || 0)
+            ) {
+              shotsById[singleShot.id] = singleShot;
+            }
+          }
+        } catch {
+          // ignore malformed shot file
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return {
     ok: true,
-    hasSavedProject: Boolean(scenes && scenes.length > 0),
+    hasSavedProject: Boolean((scenes && scenes.length > 0) || (shotsById && Object.keys(shotsById).length > 0)),
     scenes,
     shotsById,
     castPool,

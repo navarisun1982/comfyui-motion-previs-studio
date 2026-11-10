@@ -123,6 +123,17 @@ export async function saveProjectToStudioStorage(
 ): Promise<StudioStorageStatus | null> {
   if (!isLiveBrowserEnvironment()) return null;
   try {
+    const bridge = typeof window !== 'undefined' ? (window as any).electronComfyBridge : null;
+    if (bridge && typeof bridge.saveStudioProject === 'function') {
+      const ipcResult = await bridge.saveStudioProject(payload);
+      if (ipcResult && ipcResult.ok) {
+        return ipcResult as StudioStorageStatus;
+      }
+    }
+  } catch {
+    // Fall back to HTTP below
+  }
+  try {
     const base = resolveStudioStorageApiBase();
     const res = await fetch(`${base}/api/studio-storage/save-project`, {
       method: 'POST',
@@ -138,6 +149,17 @@ export async function saveProjectToStudioStorage(
 
 export async function loadProjectFromStudioStorage(): Promise<StudioProjectDiskLoadResult | null> {
   if (!isLiveBrowserEnvironment()) return null;
+  try {
+    const bridge = typeof window !== 'undefined' ? (window as any).electronComfyBridge : null;
+    if (bridge && typeof bridge.loadStudioProject === 'function') {
+      const ipcResult = await bridge.loadStudioProject();
+      if (ipcResult && ipcResult.ok) {
+        return ipcResult as StudioProjectDiskLoadResult;
+      }
+    }
+  } catch {
+    // Fall back to HTTP below
+  }
   try {
     const base = resolveStudioStorageApiBase();
     const res = await fetch(`${base}/api/studio-storage/load-project`, {

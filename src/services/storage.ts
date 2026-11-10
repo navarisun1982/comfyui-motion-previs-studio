@@ -141,6 +141,58 @@ export function sanitizeShotForStorage(shot: ShotSpec): ShotSpec {
 }
 
 /**
+ * Compacts a ShotSpec specifically for browser localStorage (which has a strict 5MB quota)
+ * when the full shots cache exceeds localStorage capacity. Disk persistence via
+ * `studio_storage/scenes/shots_cache.json` always stores the full uncompacted data.
+ */
+export function compactShotForLocalStorage(shot: ShotSpec): ShotSpec {
+  const round4 = (n: number) => Math.round(n * 10000) / 10000;
+  const roundQuatMap = (
+    map?: Record<string, [number, number, number, number]>
+  ): Record<string, [number, number, number, number]> | undefined => {
+    if (!map) return undefined;
+    const out: Record<string, [number, number, number, number]> = {};
+    for (const [k, q] of Object.entries(map)) {
+      if (Array.isArray(q) && q.length === 4) {
+        out[k] = [round4(q[0]), round4(q[1]), round4(q[2]), round4(q[3])];
+      }
+    }
+    return out;
+  };
+
+  return {
+    ...shot,
+    actors: (shot.actors || []).map((a) => ({
+      ...a,
+      conceptImageUrl:
+        a.conceptImageUrl && a.conceptImageUrl.length > 80_000 ? undefined : a.conceptImageUrl,
+      trajectory: a.trajectory
+        ? {
+            ...a.trajectory,
+            keyframes: a.trajectory.keyframes?.map((kf) => {
+              if (!kf.pose) return kf;
+              const nextPose: NonNullable<typeof kf.pose> & { worldLandmarks33?: unknown } = {
+                ...kf.pose,
+                rotations: roundQuatMap(kf.pose.rotations) || {},
+                charSpaceRotations: roundQuatMap(kf.pose.charSpaceRotations),
+              };
+              delete nextPose.worldLandmarks33;
+              return {
+                ...kf,
+                pose: nextPose,
+              };
+            }),
+          }
+        : a.trajectory,
+    })),
+    environment:
+      shot.environment?.conceptImageUrl && shot.environment.conceptImageUrl.length > 80_000
+        ? { ...shot.environment, conceptImageUrl: undefined }
+        : shot.environment,
+  };
+}
+
+/**
  * Safe wrapper for localStorage.getItem with JSON parsing.
  */
 export function safeGetItem<T>(key: string, fallback: T): T {
@@ -161,12 +213,42 @@ export function safeGetItem<T>(key: string, fallback: T): T {
 export function safeSetItem<T>(key: string, value: T): boolean {
   const storage = getRawStorage();
   if (!storage) return false;
+  const serialized = JSON.stringify(value);
   try {
-    storage.setItem(key, JSON.stringify(value));
+    storage.setItem(key, serialized);
     return true;
   } catch (err) {
-    console.warn(`[storage] Failed to write key "${key}" to storage:`, err);
-    return false;
+    // If localStorage hits the 5MB quota, prune heavy Mocap keyframe arrays from stored revision history and retry
+    try {
+      for (const revKey of [
+        'comfy_previs_shot_revisions_v2',
+        STORAGE_KEYS.REVISIONS_V2,
+        STORAGE_KEYS.REVISIONS_V1,
+        'ai_director_shot_revisions_v1',
+      ]) {
+        if (revKey === key) continue;
+        const rawRevs = storage.getItem(revKey);
+        if (rawRevs && rawRevs.length > 250_000) {
+          const parsedRevs = JSON.parse(rawRevs);
+          if (Array.isArray(parsedRevs)) {
+            const slimRevs = parsedRevs.slice(-15).map((r: any) =>
+              r?.shotSpec
+                ? {
+                    ...r,
+                    shotSpec: compactShotForLocalStorage(r.shotSpec),
+                  }
+                : r
+            );
+            storage.setItem(revKey, JSON.stringify(slimRevs));
+          }
+        }
+      }
+      storage.setItem(key, serialized);
+      return true;
+    } catch {
+      console.warn(`[storage] Failed to write key "${key}" to storage:`, err);
+      return false;
+    }
   }
 }
 

@@ -53,6 +53,16 @@ function registerComfyIpcHandlers() {
     const appUpdateService = require('../src/server/appUpdateService.cjs');
     return await appUpdateService.applyAppUpdate({ isElectron: true });
   });
+
+  ipcMain.handle('studio-storage:load-project', async () => {
+    const studioStorageService = require('../src/server/studioStorageService.cjs');
+    return studioStorageService.loadProjectFromDisk();
+  });
+
+  ipcMain.handle('studio-storage:save-project', async (_event, payload) => {
+    const studioStorageService = require('../src/server/studioStorageService.cjs');
+    return studioStorageService.saveProjectToDisk(payload || {});
+  });
 }
 
 const APP_TITLE = 'ComfyUI Motion Previs Studio';
