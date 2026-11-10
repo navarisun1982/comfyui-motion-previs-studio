@@ -133,6 +133,9 @@ flowchart LR
 ---
 
 ### 5. 🏃 20+ Ready-Made Motion Clips & Realistic Human Gait Engine
+
+![20+ Ready-Made Motion Clips & Realistic Human Gait Engine](docs/screenshots/feat-05-motion-clips.png)
+
 **How it helps you:** Animate characters like a pro with zero 3D animation experience. Pick a movement from a visual menu and watch your character perform it immediately with realistic human weight and balance.
 - **3 Organized Motion Categories**:
   - **Move / Jump**: `Walk Forward`, `Run / Sprint`, `Jump / Leap`, `Sneak / Stealth`, `Back Up / Retreat`, `Crawl (Prone)`, `Climb / Scale`.
