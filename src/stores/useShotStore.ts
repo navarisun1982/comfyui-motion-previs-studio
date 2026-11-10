@@ -1779,7 +1779,8 @@ export const useShotStore = create<ShotState>((set, get) => {
     },
 
     updateActor: (actorId, updates) => {
-      const { shot } = get();
+      const { shot, currentTime, stagingMoveMode } = get();
+      const safeDuration = shot.durationSeconds || 4.0;
       const updatedActors = shot.actors.map((a) => {
         if (a.id !== actorId) return a;
         let nextTrajectory = updates.trajectory ?? a.trajectory;
@@ -1803,6 +1804,66 @@ export const useShotStore = create<ShotState>((set, get) => {
                 : kf
             ),
           };
+        }
+        if ('pose' in updates && !updates.trajectory && nextTrajectory?.keyframes?.length) {
+          const existingPoseKfs = nextTrajectory.keyframes.filter(
+            (kf) => kf.pose !== undefined || kf.posePreset !== undefined
+          ).length;
+          if (existingPoseKfs > 0) {
+            if (updates.pose !== undefined) {
+              const propagateMode =
+                existingPoseKfs >= 4
+                  ? stagingMoveMode === 'keyframe'
+                    ? 'local-window'
+                    : 'whole-track'
+                  : 'single-keyframe';
+              const recorded = recordTrajectoryPoseAtTime(
+                nextTrajectory,
+                currentTime,
+                safeDuration,
+                updates.pose,
+                updates.posePreset,
+                updates.gait,
+                {
+                  basePose: a.pose,
+                  propagateMode,
+                }
+              );
+              nextTrajectory = {
+                ...recorded,
+                startTimeSeconds: recorded.startTimeSeconds ?? a.trajectory.startTimeSeconds ?? 0,
+              };
+            } else if (updates.posePreset) {
+              if (stagingMoveMode === 'keyframe') {
+                const recorded = recordTrajectoryPoseAtTime(
+                  nextTrajectory,
+                  currentTime,
+                  safeDuration,
+                  undefined,
+                  updates.posePreset,
+                  updates.gait,
+                  {
+                    basePose: a.pose,
+                    propagateMode: 'single-keyframe',
+                  }
+                );
+                nextTrajectory = {
+                  ...recorded,
+                  startTimeSeconds: recorded.startTimeSeconds ?? a.trajectory.startTimeSeconds ?? 0,
+                };
+              } else {
+                nextTrajectory = {
+                  ...nextTrajectory,
+                  keyframes: nextTrajectory.keyframes.map((kf) => ({
+                    ...kf,
+                    pose: undefined,
+                    posePreset: updates.posePreset,
+                    gait: updates.gait ?? kf.gait,
+                  })),
+                };
+              }
+            }
+          }
         }
         return { ...a, ...updates, trajectory: nextTrajectory };
       });

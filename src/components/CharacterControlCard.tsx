@@ -16,7 +16,7 @@ import {
   DEFAULT_HUMANOID_LANDMARKS,
   AutoRigType,
 } from '../engine/kinematics';
-import { interpolateTrajectoryPosition } from '../engine/trajectoryMath';
+import { interpolateTrajectoryPosition, interpolateActorPoseAtTime } from '../engine/trajectoryMath';
 import {
   Trash2,
   Upload,
@@ -2508,68 +2508,31 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                           </div>
                         </div>
 
-                        {/* Clickable Bone Pills */}
-                        <div className="flex flex-wrap gap-1">
-                          {(
-                            [
-                              'Head',
-                              'Neck',
-                              'Chest',
-                              'Spine',
-                              'Hips',
-                              'LeftArm',
-                              'LeftForeArm',
-                              'LeftHand',
-                              'RightArm',
-                              'RightForeArm',
-                              'RightHand',
-                              'LeftUpLeg',
-                              'LeftLeg',
-                              'LeftFoot',
-                              'RightUpLeg',
-                              'RightLeg',
-                              'RightFoot',
-                            ] as HumanoidBone[]
-                          ).map((bName) => {
-                            const bQuat = actor.pose?.rotations?.[bName];
-                            const hasRot = Boolean(
-                              bQuat &&
-                                (Math.abs(bQuat[0]) > 0.005 ||
-                                  Math.abs(bQuat[1]) > 0.005 ||
-                                  Math.abs(bQuat[2]) > 0.005)
-                            );
-                            const isSel = selectedInspectorBone === bName;
-                            return (
-                              <button
-                                key={bName}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedInspectorBone(bName);
-                                  if (typeof window !== 'undefined') {
-                                    window.dispatchEvent(
-                                      new CustomEvent('cmpvs:select-actor-bone', {
-                                        detail: { actorId: actor.id, bone: bName },
-                                      })
-                                    );
-                                  }
-                                }}
-                                className={`px-1.5 py-0.5 rounded border text-[9px] font-semibold transition-all cursor-pointer ${
-                                  isSel
-                                    ? 'bg-cyan-500/30 border-cyan-400 text-cyan-100'
-                                    : hasRot
-                                      ? 'bg-indigo-500/25 border-indigo-400/40 text-indigo-200'
-                                      : 'bg-black/40 border-white/10 text-slate-400 hover:text-white'
-                                }`}
-                              >
-                                {bName}
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        {/* Pitch (X) / Twist (Y) / Roll (Z) Sliders for Selected Bone */}
+                        {/* Clickable Bone Pills & Pitch (X) / Twist (Y) / Roll (Z) Sliders */}
                         {(() => {
-                          const curQuatTuple = actor.pose?.rotations?.[selectedInspectorBone] || [0, 0, 0, 1];
+                          const activePoseAtTime =
+                            interpolateActorPoseAtTime(
+                              actor.trajectory,
+                              actor.pose,
+                              currentTime,
+                              shotDurationSeconds || 4.0
+                            ).pose || actor.pose;
+
+                          const resolveBoneQuatTuple = (
+                            bName: HumanoidBone
+                          ): [number, number, number, number] | undefined => {
+                            if (activePoseAtTime?.charSpaceRotations) {
+                              if (bName === 'Chest' && activePoseAtTime.charSpaceRotations.Spine2) {
+                                return activePoseAtTime.charSpaceRotations.Spine2;
+                              }
+                              if (activePoseAtTime.charSpaceRotations[bName]) {
+                                return activePoseAtTime.charSpaceRotations[bName];
+                              }
+                            }
+                            return activePoseAtTime?.rotations?.[bName];
+                          };
+
+                          const curQuatTuple = resolveBoneQuatTuple(selectedInspectorBone) || [0, 0, 0, 1];
                           const curEuler = new THREE.Euler().setFromQuaternion(
                             new THREE.Quaternion(
                               curQuatTuple[0],
@@ -2599,15 +2562,33 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                                 'XYZ'
                               )
                             );
+                            const qTuple: [number, number, number, number] = [
+                              nextQ.x,
+                              nextQ.y,
+                              nextQ.z,
+                              nextQ.w,
+                            ];
                             const nextRotations: Record<string, [number, number, number, number]> = {
-                              ...(actor.pose?.rotations || {}),
-                              [selectedInspectorBone]: [nextQ.x, nextQ.y, nextQ.z, nextQ.w],
+                              ...(activePoseAtTime?.rotations || {}),
+                              [selectedInspectorBone]: qTuple,
                             };
+                            const nextCharSpaceRotations:
+                              | Record<string, [number, number, number, number]>
+                              | undefined = activePoseAtTime?.charSpaceRotations
+                              ? {
+                                  ...activePoseAtTime.charSpaceRotations,
+                                  [selectedInspectorBone]: qTuple,
+                                  ...(selectedInspectorBone === 'Chest' ? { Spine2: qTuple } : {}),
+                                }
+                              : undefined;
 
                             onUpdateActor(actor.id, {
                               pose: {
-                                ...(actor.pose || {}),
+                                ...(activePoseAtTime || {}),
                                 rotations: nextRotations,
+                                ...(nextCharSpaceRotations
+                                  ? { charSpaceRotations: nextCharSpaceRotations }
+                                  : {}),
                               },
                               posePreset: undefined,
                               gait: 'none',
@@ -2615,44 +2596,104 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                           };
 
                           return (
-                            <div className="grid grid-cols-3 gap-1.5 pt-1 text-[9.5px]">
-                              <label className="flex flex-col gap-0.5 text-slate-300">
-                                <span>Pitch X: {degX}°</span>
-                                <input
-                                  type="range"
-                                  min={-120}
-                                  max={120}
-                                  step={1}
-                                  value={degX}
-                                  onChange={(e) => handleBoneAxisChange(0, Number(e.target.value))}
-                                  className="accent-cyan-400"
-                                />
-                              </label>
-                              <label className="flex flex-col gap-0.5 text-slate-300">
-                                <span>Twist Y: {degY}°</span>
-                                <input
-                                  type="range"
-                                  min={-120}
-                                  max={120}
-                                  step={1}
-                                  value={degY}
-                                  onChange={(e) => handleBoneAxisChange(1, Number(e.target.value))}
-                                  className="accent-cyan-400"
-                                />
-                              </label>
-                              <label className="flex flex-col gap-0.5 text-slate-300">
-                                <span>Roll Z: {degZ}°</span>
-                                <input
-                                  type="range"
-                                  min={-120}
-                                  max={120}
-                                  step={1}
-                                  value={degZ}
-                                  onChange={(e) => handleBoneAxisChange(2, Number(e.target.value))}
-                                  className="accent-cyan-400"
-                                />
-                              </label>
-                            </div>
+                            <>
+                              <div className="flex flex-wrap gap-1">
+                                {(
+                                  [
+                                    'Head',
+                                    'Neck',
+                                    'Chest',
+                                    'Spine',
+                                    'Hips',
+                                    'LeftArm',
+                                    'LeftForeArm',
+                                    'LeftHand',
+                                    'RightArm',
+                                    'RightForeArm',
+                                    'RightHand',
+                                    'LeftUpLeg',
+                                    'LeftLeg',
+                                    'LeftFoot',
+                                    'RightUpLeg',
+                                    'RightLeg',
+                                    'RightFoot',
+                                  ] as HumanoidBone[]
+                                ).map((bName) => {
+                                  const bQuat = resolveBoneQuatTuple(bName);
+                                  const hasRot = Boolean(
+                                    bQuat &&
+                                      (Math.abs(bQuat[0]) > 0.005 ||
+                                        Math.abs(bQuat[1]) > 0.005 ||
+                                        Math.abs(bQuat[2]) > 0.005)
+                                  );
+                                  const isSel = selectedInspectorBone === bName;
+                                  return (
+                                    <button
+                                      key={bName}
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedInspectorBone(bName);
+                                        if (typeof window !== 'undefined') {
+                                          window.dispatchEvent(
+                                            new CustomEvent('cmpvs:select-actor-bone', {
+                                              detail: { actorId: actor.id, bone: bName },
+                                            })
+                                          );
+                                        }
+                                      }}
+                                      className={`px-1.5 py-0.5 rounded border text-[9px] font-semibold transition-all cursor-pointer ${
+                                        isSel
+                                          ? 'bg-cyan-500/30 border-cyan-400 text-cyan-100'
+                                          : hasRot
+                                            ? 'bg-indigo-500/25 border-indigo-400/40 text-indigo-200'
+                                            : 'bg-black/40 border-white/10 text-slate-400 hover:text-white'
+                                      }`}
+                                    >
+                                      {bName}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-1.5 pt-1 text-[9.5px]">
+                                <label className="flex flex-col gap-0.5 text-slate-300">
+                                  <span>Pitch X: {degX}°</span>
+                                  <input
+                                    type="range"
+                                    min={-120}
+                                    max={120}
+                                    step={1}
+                                    value={degX}
+                                    onChange={(e) => handleBoneAxisChange(0, Number(e.target.value))}
+                                    className="accent-cyan-400"
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-0.5 text-slate-300">
+                                  <span>Twist Y: {degY}°</span>
+                                  <input
+                                    type="range"
+                                    min={-120}
+                                    max={120}
+                                    step={1}
+                                    value={degY}
+                                    onChange={(e) => handleBoneAxisChange(1, Number(e.target.value))}
+                                    className="accent-cyan-400"
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-0.5 text-slate-300">
+                                  <span>Roll Z: {degZ}°</span>
+                                  <input
+                                    type="range"
+                                    min={-120}
+                                    max={120}
+                                    step={1}
+                                    value={degZ}
+                                    onChange={(e) => handleBoneAxisChange(2, Number(e.target.value))}
+                                    className="accent-cyan-400"
+                                  />
+                                </label>
+                              </div>
+                            </>
                           );
                         })()}
                       </div>

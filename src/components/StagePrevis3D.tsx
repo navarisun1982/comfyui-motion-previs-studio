@@ -2101,19 +2101,27 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           setRigOverlayVisible(mesh, Boolean(actor.showBones));
         }
         if (mesh.userData.rig) {
+          const hasPoseKeyframes = Boolean(
+            actor.trajectory?.keyframes?.some((kf) => kf.pose !== undefined || kf.posePreset !== undefined)
+          );
           if (mesh.userData.posePreset !== actor.posePreset || mesh.userData.pose !== actor.pose) {
-            if (actor.pose) {
-              applyBonePose(mesh.userData.rig, actor.pose);
-            } else if (
-              actor.posePreset &&
-              POSE_PRESETS[actor.posePreset] &&
-              (!mesh.userData.isAutoRiggedGlb || actor.posePreset !== 'neutral-stand')
-            ) {
-              applyPosePreset(mesh.userData.rig, actor.posePreset);
-            } else if (!mesh.userData.isAutoRiggedGlb && (mesh.userData.autoRigType === 'humanoid' || !mesh.userData.autoRigType)) {
-              applyPosePreset(mesh.userData.rig, 'neutral-stand');
-            } else {
-              resetToRestPose(mesh.userData.rig);
+            // When the actor is driven by a keyframed pose track (e.g. 3D Video Mocap),
+            // do NOT flash the t=0 base `actor.pose` or `resetToRestPose` (T-pose) here —
+            // `syncPositions(currentTimeRef.current)` immediately below is the single authority.
+            if (!hasPoseKeyframes) {
+              if (actor.pose) {
+                applyBonePose(mesh.userData.rig, actor.pose);
+              } else if (
+                actor.posePreset &&
+                POSE_PRESETS[actor.posePreset] &&
+                (!mesh.userData.isAutoRiggedGlb || actor.posePreset !== 'neutral-stand')
+              ) {
+                applyPosePreset(mesh.userData.rig, actor.posePreset);
+              } else if (!mesh.userData.isAutoRiggedGlb && (mesh.userData.autoRigType === 'humanoid' || !mesh.userData.autoRigType)) {
+                applyPosePreset(mesh.userData.rig, 'neutral-stand');
+              } else {
+                resetToRestPose(mesh.userData.rig);
+              }
             }
             mesh.userData.posePreset = actor.posePreset;
             mesh.userData.pose = actor.pose;
@@ -3973,6 +3981,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
     if (activeGizmoDragRef.current) {
       const { actorId, bone: boneName } = activeGizmoDragRef.current;
+      activeGizmoDragRef.current = null;
       const actorMesh = actorMeshesRef.current.get(actorId);
       const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
       if (rig) {
@@ -3982,8 +3991,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         const newPose = exportBonePose(rig);
         const targetActor = liveState.shot.actors.find((a) => a.id === actorId);
         const existingKfs = targetActor?.trajectory?.keyframes || [];
-        const isNearKf = existingKfs.some((kf) => Math.abs(kf.time - liveTime) <= 0.25);
-        if (liveState.stagingMoveMode === 'keyframe' || isNearKf) {
+        if (liveState.stagingMoveMode === 'keyframe' || existingKfs.length > 0) {
           recordActorPoseAtTime(actorId, liveTime, newPose, undefined, 'none', liveDur);
           logger.action(`Keyframed "${actorMesh?.name || 'Actor'}" pose cue @ ${liveTime.toFixed(1)}s on bone "${boneName}"`);
         } else {
@@ -3991,7 +3999,6 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           logger.action(`Updated "${actorMesh?.name || 'Actor'}" pose on bone "${boneName}"`);
         }
       }
-      activeGizmoDragRef.current = null;
       // Restore normal hover state on gizmo
       setGizmoHoveredAxis(boneGizmoGroupRef.current, hoveredGizmoAxisRef.current, null);
       endGesture();
@@ -4000,6 +4007,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
     if (activeIKHandleRef.current) {
       const activeIK = activeIKHandleRef.current;
+      activeIKHandleRef.current = null;
       const actorMesh = actorMeshesRef.current.get(activeIK.actorId);
       const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
       if (rig) {
@@ -4009,15 +4017,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         const newPose = exportBonePose(rig);
         const targetActor = liveState.shot.actors.find((a) => a.id === activeIK.actorId);
         const existingKfs = targetActor?.trajectory?.keyframes || [];
-        const isNearKf = existingKfs.some((kf) => Math.abs(kf.time - liveTime) <= 0.25);
-        if (liveState.stagingMoveMode === 'keyframe' || isNearKf) {
+        if (liveState.stagingMoveMode === 'keyframe' || existingKfs.length > 0) {
           recordActorPoseAtTime(activeIK.actorId, liveTime, newPose, undefined, 'none', liveDur);
           logger.action(`Keyframed "${actorMesh?.name || 'Actor'}" pose cue @ ${liveTime.toFixed(1)}s via IK`);
         } else {
           updateActor(activeIK.actorId, { pose: newPose, posePreset: undefined, gait: 'none' });
         }
       }
-      activeIKHandleRef.current = null;
       endGesture();
       return;
     }
@@ -4119,39 +4125,37 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       }
       if (activeGizmoDragRef.current) {
         const { actorId, bone: boneName } = activeGizmoDragRef.current;
+        activeGizmoDragRef.current = null;
         const actorMesh = actorMeshesRef.current.get(actorId);
         const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
         if (rig) {
           const newPose = exportBonePose(rig);
           const targetActor = shot.actors.find((a) => a.id === actorId);
           const existingKfs = targetActor?.trajectory?.keyframes || [];
-          const isNearKf = existingKfs.some((kf) => Math.abs(kf.time - currentTime) <= 0.25);
-          if (stagingMoveMode === 'keyframe' || isNearKf) {
+          if (stagingMoveMode === 'keyframe' || existingKfs.length > 0) {
             recordActorPoseAtTime(actorId, currentTime, newPose, undefined, 'none', duration);
           } else {
             updateActor(actorId, { pose: newPose, posePreset: undefined, gait: 'none' });
           }
           logger.action(`Updated "${actorMesh?.name || 'Actor'}" pose on bone "${boneName}"`);
         }
-        activeGizmoDragRef.current = null;
         endGesture();
       }
       if (activeIKHandleRef.current) {
         const activeIK = activeIKHandleRef.current;
+        activeIKHandleRef.current = null;
         const actorMesh = actorMeshesRef.current.get(activeIK.actorId);
         const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
         if (rig) {
           const newPose = exportBonePose(rig);
           const targetActor = shot.actors.find((a) => a.id === activeIK.actorId);
           const existingKfs = targetActor?.trajectory?.keyframes || [];
-          const isNearKf = existingKfs.some((kf) => Math.abs(kf.time - currentTime) <= 0.25);
-          if (stagingMoveMode === 'keyframe' || isNearKf) {
+          if (stagingMoveMode === 'keyframe' || existingKfs.length > 0) {
             recordActorPoseAtTime(activeIK.actorId, currentTime, newPose, undefined, 'none', duration);
           } else {
             updateActor(activeIK.actorId, { pose: newPose, posePreset: undefined, gait: 'none' });
           }
         }
-        activeIKHandleRef.current = null;
         endGesture();
       }
       if (stageControlsRef.current) {
@@ -4174,7 +4178,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       beginGesture();
       resetBoneToRest(rig, selectedBone);
       const newPose = exportBonePose(rig);
-      updateActor(selectedActorId, { pose: newPose, posePreset: undefined, gait: 'none' });
+      const targetActor = shot.actors.find((a) => a.id === selectedActorId);
+      const existingKfs = targetActor?.trajectory?.keyframes || [];
+      if (stagingMoveMode === 'keyframe' || existingKfs.length > 0) {
+        recordActorPoseAtTime(selectedActorId, currentTime, newPose, undefined, 'none', duration);
+      } else {
+        updateActor(selectedActorId, { pose: newPose, posePreset: undefined, gait: 'none' });
+      }
       endGesture();
       logger.action(`Reset joint "${selectedBone}" to rest rotation`);
     }
@@ -4190,8 +4200,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       const newPose = exportBonePose(rig);
       const targetActor = shot.actors.find((a) => a.id === selectedActorId);
       const existingKfs = targetActor?.trajectory?.keyframes || [];
-      const isNearKf = existingKfs.some((kf) => Math.abs(kf.time - currentTime) <= 0.25);
-      if (stagingMoveMode === 'keyframe' || isNearKf) {
+      if (stagingMoveMode === 'keyframe' || existingKfs.length > 0) {
         recordActorPoseAtTime(selectedActorId, currentTime, newPose, undefined, 'none', duration);
       } else {
         updateActor(selectedActorId, { pose: newPose, posePreset: undefined, gait: 'none' });
@@ -4238,8 +4247,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       applyPosePreset(rig, presetId);
       const newPose = exportBonePose(rig);
       const existingKfs = targetActor?.trajectory?.keyframes || [];
-      const isNearKf = existingKfs.some((kf) => Math.abs(kf.time - currentTime) <= 0.25);
-      if (stagingMoveMode === 'keyframe' || isNearKf) {
+      if (stagingMoveMode === 'keyframe' || existingKfs.length > 0) {
         recordActorPoseAtTime(targetId, currentTime, newPose, presetId, 'none', duration);
         logger.action(`Keyframed "${actorMesh?.name || 'Actor'}" pose preset "${presetId}" @ ${currentTime.toFixed(1)}s`);
       } else {
@@ -4275,7 +4283,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       beginGesture();
       groundBothFeet(rig);
       const newPose = exportBonePose(rig);
-      updateActor(selectedActorId, { pose: newPose, gait: 'none' });
+      const targetActor = shot.actors.find((a) => a.id === selectedActorId);
+      const existingKfs = targetActor?.trajectory?.keyframes || [];
+      if (stagingMoveMode === 'keyframe' || existingKfs.length > 0) {
+        recordActorPoseAtTime(selectedActorId, currentTime, newPose, undefined, 'none', duration);
+      } else {
+        updateActor(selectedActorId, { pose: newPose, gait: 'none' });
+      }
       endGesture();
     }
   };
@@ -4288,7 +4302,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       beginGesture();
       resetToRestPose(rig);
       const newPose = exportBonePose(rig);
-      updateActor(selectedActorId, { pose: newPose, posePreset: 't-pose' });
+      const targetActor = shot.actors.find((a) => a.id === selectedActorId);
+      const existingKfs = targetActor?.trajectory?.keyframes || [];
+      if (stagingMoveMode === 'keyframe' || existingKfs.length > 0) {
+        recordActorPoseAtTime(selectedActorId, currentTime, newPose, 't-pose', 'none', duration);
+      } else {
+        updateActor(selectedActorId, { pose: newPose, posePreset: 't-pose' });
+      }
       endGesture();
     }
   };
