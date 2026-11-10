@@ -630,8 +630,16 @@ export function slerpActorPoses(poseA: ActorPose, poseB: ActorPose, t: number): 
       ...Object.keys(poseB.charSpaceRotations || {}),
     ]);
     for (const bName of allCharBones) {
-      const rotA = poseA.charSpaceRotations?.[bName] || [0, 0, 0, 1];
-      const rotB = poseB.charSpaceRotations?.[bName] || [0, 0, 0, 1];
+      const rotA =
+        poseA.charSpaceRotations?.[bName] ||
+        poseA.rotations?.[bName] ||
+        poseB.charSpaceRotations?.[bName] ||
+        [0, 0, 0, 1];
+      const rotB =
+        poseB.charSpaceRotations?.[bName] ||
+        poseB.rotations?.[bName] ||
+        poseA.charSpaceRotations?.[bName] ||
+        [0, 0, 0, 1];
       qA.set(rotA[0], rotA[1], rotA[2], rotA[3]);
       qB.set(rotB[0], rotB[1], rotB[2], rotB[3]);
       qA.slerp(qB, t);
@@ -865,7 +873,101 @@ export function interpolateObjectRotationAtTime(
 }
 
 /**
+ * Applies the relative rotational delta between `prevPose` and `newPose` onto `targetPose`
+ * with blend weight `weight \in [0, 1]`.
+ */
+function applyPoseEditDeltaToKeyframePose(
+  targetPose: ActorPose,
+  prevPose: ActorPose,
+  newPose: ActorPose,
+  weight: number
+): ActorPose {
+  if (weight <= 1e-4) return targetPose;
+  const w = Math.max(0, Math.min(1, weight));
+  const qPrev = new THREE.Quaternion();
+  const qNew = new THREE.Quaternion();
+  const qDelta = new THREE.Quaternion();
+  const qTarget = new THREE.Quaternion();
+  const qIdentity = new THREE.Quaternion(0, 0, 0, 1);
+
+  const nextRotations: Record<string, [number, number, number, number]> = {
+    ...(targetPose.rotations || {}),
+  };
+  for (const [bName, newTuple] of Object.entries(newPose.rotations || {})) {
+    const prevTuple = prevPose.rotations?.[bName];
+    const targetTuple = targetPose.rotations?.[bName];
+    if (!newTuple || newTuple.length !== 4) continue;
+    if (!prevTuple || prevTuple.length !== 4 || !targetTuple || targetTuple.length !== 4) {
+      if (w >= 0.999) nextRotations[bName] = [...newTuple];
+      continue;
+    }
+    qPrev.set(prevTuple[0], prevTuple[1], prevTuple[2], prevTuple[3]).normalize();
+    qNew.set(newTuple[0], newTuple[1], newTuple[2], newTuple[3]).normalize();
+    qDelta.copy(qPrev).invert().multiply(qNew).normalize();
+    if (qDelta.angleTo(qIdentity) < 1e-4) continue;
+    if (w < 0.999) {
+      qDelta.slerp(qIdentity, 1 - w).normalize();
+    }
+    qTarget.set(targetTuple[0], targetTuple[1], targetTuple[2], targetTuple[3]).normalize();
+    qTarget.multiply(qDelta).normalize();
+    nextRotations[bName] = [qTarget.x, qTarget.y, qTarget.z, qTarget.w];
+  }
+
+  let nextCharSpaceRotations: Record<string, [number, number, number, number]> | undefined =
+    targetPose.charSpaceRotations ? { ...targetPose.charSpaceRotations } : undefined;
+
+  if (newPose.charSpaceRotations) {
+    if (!nextCharSpaceRotations) nextCharSpaceRotations = {};
+    for (const [bName, newTuple] of Object.entries(newPose.charSpaceRotations)) {
+      const prevTuple = prevPose.charSpaceRotations?.[bName] || prevPose.rotations?.[bName];
+      const targetTuple =
+        targetPose.charSpaceRotations?.[bName] || targetPose.rotations?.[bName];
+      if (!newTuple || newTuple.length !== 4) continue;
+      if (!prevTuple || prevTuple.length !== 4 || !targetTuple || targetTuple.length !== 4) {
+        if (w >= 0.999) nextCharSpaceRotations[bName] = [...newTuple];
+        continue;
+      }
+      qPrev.set(prevTuple[0], prevTuple[1], prevTuple[2], prevTuple[3]).normalize();
+      qNew.set(newTuple[0], newTuple[1], newTuple[2], newTuple[3]).normalize();
+      qDelta.copy(qPrev).invert().multiply(qNew).normalize();
+      if (qDelta.angleTo(qIdentity) < 1e-4) continue;
+      if (w < 0.999) {
+        qDelta.slerp(qIdentity, 1 - w).normalize();
+      }
+      qTarget.set(targetTuple[0], targetTuple[1], targetTuple[2], targetTuple[3]).normalize();
+      qTarget.multiply(qDelta).normalize();
+      nextCharSpaceRotations[bName] = [qTarget.x, qTarget.y, qTarget.z, qTarget.w];
+    }
+  }
+
+  let nextHipsOffset = targetPose.hipsOffset;
+  if (newPose.hipsOffset && prevPose.hipsOffset && targetPose.hipsOffset) {
+    nextHipsOffset = [
+      targetPose.hipsOffset[0] + (newPose.hipsOffset[0] - prevPose.hipsOffset[0]) * w,
+      targetPose.hipsOffset[1] + (newPose.hipsOffset[1] - prevPose.hipsOffset[1]) * w,
+      targetPose.hipsOffset[2] + (newPose.hipsOffset[2] - prevPose.hipsOffset[2]) * w,
+    ];
+  } else if (newPose.hipsOffset && !prevPose.hipsOffset) {
+    nextHipsOffset = [
+      (targetPose.hipsOffset?.[0] || 0) + newPose.hipsOffset[0] * w,
+      (targetPose.hipsOffset?.[1] || 0) + newPose.hipsOffset[1] * w,
+      (targetPose.hipsOffset?.[2] || 0) + newPose.hipsOffset[2] * w,
+    ];
+  }
+
+  return {
+    ...targetPose,
+    rotations: nextRotations,
+    ...(nextCharSpaceRotations ? { charSpaceRotations: nextCharSpaceRotations } : {}),
+    ...(nextHipsOffset ? { hipsOffset: nextHipsOffset } : {}),
+  };
+}
+
+/**
  * Records an actor pose into the trajectory at time t. If an existing keyframe is near t, updates it.
+ * For dense Mocap keyframe tracks (`>= 4` pose keyframes), also propagates the per-bone rotational
+ * edit delta across the track (`whole-track` in Whole Track mode, or a smooth cosine window in Keyframe Cue mode)
+ * so interactive FK/IK adjustments never snap back on the next Mocap frame.
  */
 export function recordTrajectoryPoseAtTime(
   trajectory: TrajectoryData,
@@ -873,19 +975,44 @@ export function recordTrajectoryPoseAtTime(
   duration: number,
   pose?: ActorPose,
   posePreset?: string,
-  gait?: 'auto' | 'walk' | 'run' | 'sneak' | 'idle' | 'none'
+  gait?: 'auto' | 'walk' | 'run' | 'sneak' | 'idle' | 'none',
+  options?: {
+    basePose?: ActorPose;
+    propagateMode?: 'whole-track' | 'local-window' | 'single-keyframe';
+  }
 ): TrajectoryData {
   const safeDuration = duration > 0 ? duration : 4.0;
   const clampedTime = Math.max(0, Math.min(safeDuration, time));
   const currentKeyframes = [...(trajectory.keyframes || [])];
-  const existingIdx = currentKeyframes.findIndex((k) => Math.abs(k.time - clampedTime) <= 0.25);
+
+  const prevInterpolatedPose =
+    pose !== undefined
+      ? interpolateActorPoseAtTime(trajectory, options?.basePose, clampedTime, safeDuration).pose
+      : undefined;
+
+  // Always locate the SINGLE CLOSEST keyframe within 0.25s (never first-match findIndex!)
+  let existingIdx = -1;
+  let minTimeDiff = Infinity;
+  for (let i = 0; i < currentKeyframes.length; i++) {
+    const diff = Math.abs(currentKeyframes[i].time - clampedTime);
+    if (diff <= 0.25 && diff < minTimeDiff) {
+      minTimeDiff = diff;
+      existingIdx = i;
+    }
+  }
 
   const currentPos = interpolateTrajectoryPosition(trajectory, clampedTime, safeDuration);
 
   if (existingIdx >= 0) {
+    // Only shift the keyframe's timestamp to clampedTime if doing so won't collide with another keyframe
+    const wouldCollideWithNeighbor = currentKeyframes.some(
+      (k, idx) => idx !== existingIdx && Math.abs(k.time - clampedTime) <= 0.035
+    );
+    const updatedTime = wouldCollideWithNeighbor ? currentKeyframes[existingIdx].time : clampedTime;
+
     currentKeyframes[existingIdx] = {
       ...currentKeyframes[existingIdx],
-      time: clampedTime,
+      time: updatedTime,
       pose: pose !== undefined ? pose : posePreset ? undefined : currentKeyframes[existingIdx].pose,
       posePreset: posePreset ?? currentKeyframes[existingIdx].posePreset,
       gait: gait ?? currentKeyframes[existingIdx].gait,
@@ -899,6 +1026,38 @@ export function recordTrajectoryPoseAtTime(
       posePreset,
       gait,
     });
+    existingIdx = currentKeyframes.length - 1;
+  }
+
+  // Propagate rotational edit delta across dense Mocap pose tracks so the edited pose holds smoothly
+  const poseKfCount = currentKeyframes.filter((k) => k.pose !== undefined).length;
+  const effectivePropagateMode =
+    options?.propagateMode ?? (poseKfCount >= 4 ? 'whole-track' : 'single-keyframe');
+
+  if (
+    pose !== undefined &&
+    prevInterpolatedPose !== undefined &&
+    poseKfCount >= 2 &&
+    effectivePropagateMode !== 'single-keyframe'
+  ) {
+    const windowRadiusSec = 0.85;
+    for (let i = 0; i < currentKeyframes.length; i++) {
+      if (i === existingIdx) continue;
+      const kf = currentKeyframes[i];
+      if (!kf.pose) continue;
+
+      let weight = 1.0;
+      if (effectivePropagateMode === 'local-window') {
+        const dt = Math.abs(kf.time - clampedTime);
+        if (dt >= windowRadiusSec) continue;
+        weight = 0.5 * (1 + Math.cos(Math.PI * (dt / windowRadiusSec)));
+      }
+
+      currentKeyframes[i] = {
+        ...kf,
+        pose: applyPoseEditDeltaToKeyframePose(kf.pose, prevInterpolatedPose, pose, weight),
+      };
+    }
   }
 
   currentKeyframes.sort((a, b) => a.time - b.time);

@@ -2090,19 +2090,31 @@ export const useShotStore = create<ShotState>((set, get) => {
     },
 
     recordActorPoseAtTime: (actorId, time, pose, posePreset, gait, duration) => {
-      const { shot } = get();
+      const { shot, stagingMoveMode } = get();
       const target = shot.actors.find((a) => a.id === actorId);
       if (!target) return;
       const safeDuration = duration ?? shot.durationSeconds ?? 4.0;
+      const existingPoseKfs = (target.trajectory.keyframes || []).filter((k) => k.pose !== undefined).length;
+      const propagateMode =
+        existingPoseKfs >= 4
+          ? stagingMoveMode === 'keyframe'
+            ? 'local-window'
+            : 'whole-track'
+          : 'single-keyframe';
       const updatedTrajectory = recordTrajectoryPoseAtTime(
         target.trajectory,
         time,
         safeDuration,
         pose,
         posePreset,
-        gait
+        gait,
+        {
+          basePose: target.pose,
+          propagateMode,
+        }
       );
       const isAtStart = time <= 0.15;
+      const firstKfPose = updatedTrajectory.keyframes?.[0]?.pose;
       const updatedActors = shot.actors.map((a) =>
         a.id === actorId
           ? {
@@ -2111,7 +2123,11 @@ export const useShotStore = create<ShotState>((set, get) => {
               ...updatedTrajectory,
               startTimeSeconds: a.trajectory.startTimeSeconds ?? 0,
             },
-            pose: isAtStart ? pose : a.pose,
+            pose: isAtStart
+              ? pose
+              : propagateMode === 'whole-track' && firstKfPose
+                ? firstKfPose
+                : a.pose,
             posePreset: isAtStart ? (posePreset ?? a.posePreset) : a.posePreset,
             gait: isAtStart ? (gait ?? a.gait) : a.gait,
           }

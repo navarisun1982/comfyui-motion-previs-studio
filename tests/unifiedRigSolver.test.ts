@@ -1265,4 +1265,97 @@ describe('Step 1: Unified Mixamo-SMPL Humanoid Rig Solver (`unifiedRigSolver.ts`
     expect(ybotGroup.scale.x).toBeCloseTo(ybotGroup.scale.y, 4);
     expect(ybotGroup.scale.z).toBeCloseTo(ybotGroup.scale.y, 4);
   });
+
+  it('Step 16: regularizes SMPL studio-mannequin groin/abdomen contour and preserves interactive FK/IK pose edits on dense Mocap tracks without T-pose flash or snap-back', async () => {
+    const {
+      loadSmplCanonicalTemplate,
+      loadSmplMannequinModel,
+    } = await import('../src/engine/kinematics/smplMannequinLoader');
+    const { exportBonePose, applyBonePose } = await import('../src/engine/kinematics/posePresets');
+    const { applyBoneRotationDelta } = await import('../src/engine/kinematics/boneTransformGizmo');
+    const {
+      recordTrajectoryPoseAtTime,
+      interpolateActorPoseAtTime,
+    } = await import('../src/engine/trajectoryMath');
+
+    // 1. Verify SMPL studio-mannequin contour has smooth monotonic anterior taper (no overhanging belly or groin pouch bulge)
+    const tpl = await loadSmplCanonicalTemplate();
+    const maxFrontZInBand = (yCenter: number): number => {
+      let maxZ = -Infinity;
+      for (let i = 0; i < tpl.numVertices; i++) {
+        const x = tpl.v_template[i * 3];
+        const y = tpl.v_template[i * 3 + 1];
+        const z = tpl.v_template[i * 3 + 2];
+        if (Math.abs(x) < 0.04 && Math.abs(y - yCenter) < 0.012 && z > 0) {
+          if (z > maxZ) maxZ = z;
+        }
+      }
+      return maxZ;
+    };
+
+    const bellyZ = maxFrontZInBand(-0.14);
+    const waistZ = maxFrontZInBand(-0.26);
+    const groinZ = maxFrontZInBand(-0.35);
+    expect(bellyZ).toBeLessThan(0.16); // Tamed from raw CAESAR 0.1932m pot-belly
+    expect(groinZ).toBeLessThan(waistZ); // Groin tapers inward below pelvic brim instead of bulging out
+
+    // 2. Verify interactive pose editing on a dense 24fps Mocap track (charSpaceRotations round-trip + delta propagation)
+    const smplRig = await loadSmplMannequinModel();
+    const baseMocapPose = {
+      rotations: {
+        LeftArm: [0, 0, -0.3827, 0.9239] as [number, number, number, number],
+      },
+      charSpaceRotations: {
+        LeftArm: [0, 0, -0.3827, 0.9239] as [number, number, number, number],
+        RightArm: [0, 0, 0.3827, 0.9239] as [number, number, number, number],
+        LeftUpLeg: [-0.2588, 0, 0, 0.9659] as [number, number, number, number],
+        RightUpLeg: [0.1736, 0, 0, 0.9848] as [number, number, number, number],
+      },
+    };
+
+    const denseTrajectory = {
+      startTimeSeconds: 0,
+      startPosition: { x: 50, y: 50, z: 0 },
+      endPosition: { x: 50, y: 60, z: 0 },
+      keyframes: Array.from({ length: 10 }, (_, idx) => ({
+        id: `kf_${idx}`,
+        time: Number((idx * 0.07).toFixed(2)),
+        position: { x: 50, y: 50 + idx, z: 0 },
+        pose: JSON.parse(JSON.stringify(baseMocapPose)),
+      })),
+    };
+
+    // Apply mocap pose at t = 0.21s, rotate LeftArm forward by +45 deg, and export pose
+    applyBonePose(smplRig, baseMocapPose);
+    applyBoneRotationDelta(smplRig, 'LeftArm', 'x', Math.PI / 4);
+    const expectedLeftArmQuat = smplRig.bones.get('LeftArm')!.quaternion.clone();
+
+    const exportedPose = exportBonePose(smplRig);
+    expect(exportedPose.charSpaceRotations).toBeDefined();
+    expect(exportedPose.charSpaceRotations!.LeftArm).toBeDefined();
+
+    // Record at t = 0.21s (index 3) in a dense 0.07s track
+    const updatedTraj = recordTrajectoryPoseAtTime(
+      denseTrajectory,
+      0.21,
+      1.0,
+      exportedPose,
+      undefined,
+      'none',
+      { basePose: baseMocapPose, propagateMode: 'whole-track' }
+    );
+
+    // Must NOT duplicate timestamp 0.21s by shifting kf_0 (0.00s) onto 0.21s
+    expect(updatedTraj.keyframes![0].time).toBeCloseTo(0.0, 3);
+    expect(updatedTraj.keyframes![3].time).toBeCloseTo(0.21, 3);
+
+    // Evaluating at t = 0.21s AND at subsequent frame t = 0.28s must preserve the edited LeftArm rotation (no T-pose flash or snap-back!)
+    for (const evalT of [0.21, 0.245, 0.28]) {
+      const interp = interpolateActorPoseAtTime(updatedTraj, updatedTraj.keyframes![0].pose, evalT, 1.0);
+      expect(interp.pose?.charSpaceRotations?.LeftArm).toBeDefined();
+      applyBonePose(smplRig, interp.pose!);
+      const posedQuat = smplRig.bones.get('LeftArm')!.quaternion;
+      expect(posedQuat.angleTo(expectedLeftArmQuat)).toBeLessThan(0.02);
+    }
+  });
 });

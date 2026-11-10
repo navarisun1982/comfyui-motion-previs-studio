@@ -609,6 +609,11 @@ export function applyPosePreset(rig: HumanoidRig, presetId: string): boolean {
 
 /**
  * Serializes the current bone rotations and hips position of a rig into an ActorPose.
+ * When the rig has `mixamoBones` (SMPL 24-bone or Mixamo 22-bone rigs), also exports
+ * `charSpaceRotations` using the exact algebraic inverse of `applyBonePose`:
+ *   `\Delta_local = R_local^-1 * q_bone`
+ *   `q_char = W_rest * \Delta_local * W_rest^-1`
+ * so interactive FK/IK bone edits on Mocap actors round-trip losslessly without flashing T-pose.
  */
 export function exportBonePose(rig: HumanoidRig): ActorPose {
   const rotations: Record<string, [number, number, number, number]> = {};
@@ -621,12 +626,48 @@ export function exportBonePose(rig: HumanoidRig): ActorPose {
     ];
   }
 
+  let charSpaceRotations: Record<string, [number, number, number, number]> | undefined;
+  const hasMixamoRig =
+    Boolean(rig.mixamoBones && rig.mixamoBones.size > 0) &&
+    Boolean(rig.mixamoRestRotations && rig.mixamoCharSpaceRestRotations);
+
+  if (hasMixamoRig && rig.mixamoBones && rig.mixamoRestRotations && rig.mixamoCharSpaceRestRotations) {
+    charSpaceRotations = {};
+    const rLocalInv = new THREE.Quaternion();
+    const deltaLocal = new THREE.Quaternion();
+    const wRestInv = new THREE.Quaternion();
+    const qChar = new THREE.Quaternion();
+
+    for (const [boneName, bone] of rig.mixamoBones) {
+      const rLocal = rig.mixamoRestRotations.get(boneName);
+      const wRest = rig.mixamoCharSpaceRestRotations.get(boneName);
+      if (!rLocal || !wRest) continue;
+      rLocalInv.copy(rLocal).invert();
+      deltaLocal.copy(rLocalInv).multiply(bone.quaternion);
+      wRestInv.copy(wRest).invert();
+      qChar.copy(wRest).multiply(deltaLocal).multiply(wRestInv).normalize();
+      charSpaceRotations[boneName] = [qChar.x, qChar.y, qChar.z, qChar.w];
+    }
+  }
+
   const hipsBone = rig.bones.get('Hips');
   let hipsOffset: [number, number, number] | undefined;
   if (hipsBone) {
     const restPos = rig.restPositions.get('Hips');
     if (restPos) {
       const diff = hipsBone.position.clone().sub(restPos);
+      if (hasMixamoRig) {
+        const footPinDeltaY =
+          typeof rig.root.userData?.__smoothedFootPinDeltaY === 'number' &&
+          Number.isFinite(rig.root.userData.__smoothedFootPinDeltaY)
+            ? rig.root.userData.__smoothedFootPinDeltaY
+            : 0;
+        diff.y += footPinDeltaY;
+        const normScale = (rig.height || 1.0) / (rig.root.scale.y || 1.0);
+        if (normScale > 1e-5) {
+          diff.divideScalar(normScale);
+        }
+      }
       if (diff.lengthSq() > 1e-4) {
         hipsOffset = [diff.x, diff.y, diff.z];
       }
@@ -636,6 +677,7 @@ export function exportBonePose(rig: HumanoidRig): ActorPose {
   return {
     hipsOffset,
     rotations,
+    ...(charSpaceRotations ? { charSpaceRotations } : {}),
   };
 }
 
@@ -644,9 +686,10 @@ export function exportBonePose(rig: HumanoidRig): ActorPose {
  * videoToMocapExtractor, or fbxMocapImporter) rather than raw Mixamo bind-space quaternions
  * exported from a Mixamo FBX rig (where LeftUpLeg bind rotation has a 180-deg flip with |w| < 0.35).
  */
-export function isSyntheticCompilerPose(pose?: ActorPose | null): boolean {
+export function isSyntheticCompilerPose(pose?: ActorPose | null, isSmplRig = false): boolean {
   if (!pose || !pose.rotations) return false;
   if (pose.anatomicalIk) return false;
+  if (pose.charSpaceRotations && Object.keys(pose.charSpaceRotations).length > 0) return false;
   const lf = pose.rotations.LeftFoot;
   const rf = pose.rotations.RightFoot;
   const isIdentity = (q?: [number, number, number, number]) =>
@@ -654,11 +697,14 @@ export function isSyntheticCompilerPose(pose?: ActorPose | null): boolean {
   if (isIdentity(lf) && isIdentity(rf)) return true;
 
   // Also detect relative delta poses where LeftUpLeg / RightUpLeg quaternion has w > 0.6
-  // (on Mixamo Y-Bot bind pose, LeftUpLeg/RightUpLeg have a 180-deg roll so |w| < 0.25)
-  const lul = pose.rotations.LeftUpLeg;
-  const rul = pose.rotations.RightUpLeg;
-  if (lul && rul && Math.abs(lul[3]) > 0.6 && Math.abs(rul[3]) > 0.6) {
-    return true;
+  // (on Mixamo Y-Bot bind pose, LeftUpLeg/RightUpLeg have a 180-deg roll so |w| < 0.25;
+  //  on SMPL rigs, bind pose is identity so w > 0.6 is normal)
+  if (!isSmplRig) {
+    const lul = pose.rotations.LeftUpLeg;
+    const rul = pose.rotations.RightUpLeg;
+    if (lul && rul && Math.abs(lul[3]) > 0.6 && Math.abs(rul[3]) > 0.6) {
+      return true;
+    }
   }
   return false;
 }
@@ -902,7 +948,7 @@ export function applyBonePose(rig: HumanoidRig, pose: ActorPose): void {
   }
 
   // 2. Guard Mixamo FBX rigs against relative delta poses (which would invert 180-deg Mixamo thigh/arm bind rotations)
-  if (rig.root.userData?.isMannequinRig && isSyntheticCompilerPose(pose)) {
+  if (rig.root.userData?.isMannequinRig && isSyntheticCompilerPose(pose, Boolean(rig.isSmplRig))) {
     for (const [bName, bone] of rig.bones) {
       const rPos = rig.restPositions.get(bName);
       const rRot = rig.restRotations.get(bName);
