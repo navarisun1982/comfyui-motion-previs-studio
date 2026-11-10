@@ -2,6 +2,29 @@ import * as THREE from 'three';
 import { EnvironmentSpec } from '../../types/shotspec';
 import { createBrickCanvasTexture, createWoodParquetCanvasTexture } from './stageTextures';
 import { lookupCuratedPartGraph, buildPartGraph } from '../procedural3D/partGraph';
+import {
+  applyTerrainToFloorMesh,
+  evaluateTerrainHeight,
+  evaluateTerrainNormalAndSlope,
+  resolveEffectiveTerrainConfig,
+  ResolvedTerrainConfig,
+} from './terrainGenerator';
+import {
+  buildProceduralVegetationAndClutter,
+  ExclusionCameraSpec,
+  resolveEffectiveVegetationConfig,
+  updateVegetationWind,
+} from './vegetationAndClutter';
+
+export {
+  applyTerrainToFloorMesh,
+  evaluateTerrainHeight,
+  evaluateTerrainNormalAndSlope,
+  resolveEffectiveTerrainConfig,
+  resolveEffectiveVegetationConfig,
+  updateVegetationWind,
+};
+export type { ResolvedTerrainConfig };
 
 /**
  * Recursively sets the Three.js render layer on an Object3D hierarchy
@@ -81,8 +104,10 @@ export interface EnvironmentBuildOptions {
     trajectory?: {
       startPosition?: { x: number; y: number; z?: number };
       endPosition?: { x: number; y: number; z?: number };
+      keyframes?: Array<{ position: { x: number; y: number; z?: number } }>;
     };
   }>;
+  camera?: ExclusionCameraSpec;
 }
 
 export interface SemanticEnvironmentBiome {
@@ -615,31 +640,6 @@ export function buildPerimeterEnvironment(
         envGroup.add(cone);
       }
     }
-
-    // Midground Parallax Trees & Forest Boulders (multi-depth z layers around clear central flight/action corridor)
-    const midTreeCoords: Array<{ x: number; z: number; scale: number }> = [
-      { x: -24, z: -28, scale: 0.95 },
-      { x: 25, z: -26, scale: 1.05 },
-      { x: -34, z: -14, scale: 0.85 },
-      { x: 35, z: -12, scale: 0.9 },
-      { x: -16, z: -36, scale: 1.1 },
-      { x: 18, z: -35, scale: 1.0 },
-      { x: -28, z: 16, scale: 0.85 },
-      { x: 29, z: 18, scale: 0.95 },
-      { x: -20, z: 32, scale: 0.9 },
-      { x: 22, z: 30, scale: 1.0 },
-    ];
-    midTreeCoords.forEach((pt) => {
-      const s = pt.scale;
-      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.55 * s, 0.95 * s, 13 * s, 8), trunkMat);
-      trunk.position.set(pt.x, 6.5 * s, pt.z);
-      envGroup.add(trunk);
-      for (let j = 0; j < 3; j++) {
-        const cone = new THREE.Mesh(new THREE.ConeGeometry((4.2 - j * 0.9) * s, 6.8 * s, 8), foliageMat);
-        cone.position.set(pt.x, (11.5 + j * 4.2) * s, pt.z);
-        envGroup.add(cone);
-      }
-    });
   } else if (rawCat.includes('desert') || rawCat.includes('wasteland')) {
     // Sahara Desert: Undulating Sand Dunes & Weathered Rock Mesas
     const sandMat = new THREE.MeshStandardMaterial({
@@ -817,6 +817,18 @@ export function buildPerimeterEnvironment(
     onAirSign.position.set(0, 15.2, -50.4);
     envGroup.add(onAirSign);
   }
+
+  // 67.js-inspired Plain-Data Procedural Vegetation & Ground Clutter Scattering
+  // (Respects Triple Smart Exclusion Zone: 18m central stage + actor trajectories + camera sightline cone)
+  const terrainConfig = resolveEffectiveTerrainConfig(env, inferred, options.sceneDescription);
+  envGroup.userData.terrainConfig = terrainConfig;
+  buildProceduralVegetationAndClutter(envGroup, {
+    env,
+    terrainConfig,
+    sceneDescription: options.sceneDescription,
+    actors: options.actors,
+    camera: options.camera,
+  });
 
   // Ensure all environment objects are on Layer 0 (World objects - visible in Viewfinder)
   setLayerRecursively(envGroup, 0);

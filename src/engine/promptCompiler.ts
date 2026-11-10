@@ -58,8 +58,23 @@ export function formatEnvironment(env?: EnvironmentSpec): string {
   );
   const showGroundSurface =
     env.groundSurface && !(isOutdoorNatural && env.groundSurface === 'studio-floor');
+
+  const terrainProfile = env.terrain?.profile;
+  const terrainPhrase =
+    terrainProfile && terrainProfile !== 'auto' && terrainProfile !== 'flat'
+      ? `surrounded by 3D ${terrainProfile.replace(/-/g, ' ')} terrain relief`
+      : '';
+
+  const vegSpecies = env.vegetation?.species;
+  const vegPhrase =
+    vegSpecies && vegSpecies !== 'auto' && vegSpecies !== 'none'
+      ? `with natural ${vegSpecies === 'mixed' ? 'mixed forest trees' : `${vegSpecies} foliage`}`
+      : '';
+
   const parts = [
     pureDesc,
+    terrainPhrase,
+    vegPhrase,
     env.weather && env.weather !== 'clear' ? `weather condition ${env.weather}` : '',
     env.timeOfDay ? `time of day ${env.timeOfDay.replace(/-/g, ' ')}` : '',
     showGroundSurface ? `ground surface ${env.groundSurface!.replace(/-/g, ' ')}` : '',

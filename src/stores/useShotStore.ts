@@ -52,6 +52,8 @@ import {
 import { toPersistentModelUri, offloadLargeImageToIndexedDB, resolveOffloadedImage, resolveOffloadedImageSync } from '../services/modelStorage';
 import { saveProjectToStudioStorage, loadProjectFromStudioStorage } from '../services/studioStorageClient';
 import { resolvePolyforkGlbUrl } from '../data/externalCatalogsRegistry';
+import { computeSmartNavmeshTrajectory } from '../engine/staging/navmeshPathfinder';
+import { inferSemanticEnvironmentBiome, resolveEffectiveTerrainConfig } from '../engine/staging/environmentBuilder';
 
 export type PrevisRendererFn = (
   passMode?: 'rgb' | 'clay' | 'depth' | 'openpose' | 'id-mask' | 'all',
@@ -148,6 +150,7 @@ interface ShotState {
   unsocketActor: (propActorId: string) => void;
   applyDirectorialMotion: (actorId: string, prompt: string, options?: { startTimeSec?: number; endTimeSec?: number; motionCycles?: number }) => void;
   applyReadyMadeMotion: (actorId: string, clipId: string, options?: { startTimeSec?: number; endTimeSec?: number; travelMode?: 'auto' | 'travel' | 'in-place'; motionCycles?: number }) => void;
+  routeActorPathWithNavmesh: (actorId: string) => void;
   resetActorMotion: (actorId: string) => void;
   setClaymationMode: (enabled: boolean, fps?: number) => void;
   stagingMoveMode: 'base' | 'keyframe';
@@ -2457,6 +2460,25 @@ export const useShotStore = create<ShotState>((set, get) => {
         /\b(walk|walks|walking|run|runs|running|sprint|jog|sneak|sneaking|creep|step|stride|move|moves|moving|advance|approach|head|go|drive|drives|driving)\b/i.test(prompt) ||
         /(يمشي|يمش|يركض|يجري|يتسلل|يتحرك|يتجه|يتقدم|يخطو|يسير|الذهاب|المشي)/.test(prompt);
 
+      // Smart Navmesh A* Obstacle & Slope Avoidance (Q5):
+      // If locomotion path crosses a static stage obstacle or steep cliff, automatically route around it!
+      if (isLocomotionPrompt && shot.actors.length > 1) {
+        const inferredBiome = inferSemanticEnvironmentBiome(shot.environment, {
+          sceneDescription: shot.sceneDescription,
+          actors: shot.actors,
+        });
+        const terrainCfg = resolveEffectiveTerrainConfig(shot.environment, inferredBiome, shot.sceneDescription);
+        const navRes = computeSmartNavmeshTrajectory(
+          { ...target, trajectory: updatedTrajectory },
+          shot.actors,
+          shot.durationSeconds || 4.0,
+          terrainCfg
+        );
+        if (navRes.bypassedObstacles.length > 0 && navRes.keyframes.length > 0) {
+          updatedTrajectory.keyframes = navRes.keyframes;
+        }
+      }
+
       const detectedGait: ActorGait =
         /\b(run|runs|running|sprint|jog)\b/i.test(prompt) || /(يركض|يجري)/.test(prompt)
           ? 'run'
@@ -2581,6 +2603,45 @@ export const useShotStore = create<ShotState>((set, get) => {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('cmpvs:transport-play', { detail: { time: winStart, play: true } }));
       }
+    },
+
+    routeActorPathWithNavmesh: (actorId) => {
+      const { shot } = get();
+      const target = shot.actors.find((a) => a.id === actorId);
+      if (!target) return;
+
+      const inferredBiome = inferSemanticEnvironmentBiome(shot.environment, {
+        sceneDescription: shot.sceneDescription,
+        actors: shot.actors,
+      });
+      const terrainCfg = resolveEffectiveTerrainConfig(
+        shot.environment,
+        inferredBiome,
+        shot.sceneDescription
+      );
+      const navRes = computeSmartNavmeshTrajectory(
+        target,
+        shot.actors,
+        shot.durationSeconds || 4.0,
+        terrainCfg
+      );
+
+      const updatedActors = shot.actors.map((a) =>
+        a.id === actorId
+          ? {
+              ...a,
+              trajectory: {
+                ...a.trajectory,
+                keyframes: navRes.keyframes,
+              },
+            }
+          : a
+      );
+
+      logger.action(
+        `Navmesh A* routed "${target.name}" (${navRes.pathLengthMeters}m path, bypassed ${navRes.bypassedObstacles.length} obstacles)`
+      );
+      commitShot({ ...shot, actors: updatedActors });
     },
 
     resetActorMotion: (actorId) => {

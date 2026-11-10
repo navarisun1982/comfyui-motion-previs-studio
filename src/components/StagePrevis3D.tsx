@@ -50,12 +50,20 @@ import {
   setRigOverlayVisible,
   highlightRigJointSphere,
   evaluateUnifiedHumanoidFrame,
+  isGroundVehicleActor,
+  evaluateVehicleDriveState,
+  applyVehicleDriveKinematicsToMesh,
 } from '../engine/kinematics';
 import { HumanoidBone } from '../engine/procedural3D/sculptSpec';
+import { CINEMATIC_ENVIRONMENT_PRESETS } from '../types/environment';
 
 import {
   setLayerRecursively,
   applyGroundSurface,
+  applyTerrainToFloorMesh,
+  evaluateTerrainHeight,
+  updateVegetationWind,
+  ResolvedTerrainConfig,
   buildPerimeterEnvironment,
   shouldHideStageBackdropInPrevis,
   inferSemanticEnvironmentBiome,
@@ -481,6 +489,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     stagingMoveMode,
     setStagingMoveMode,
     updateAspectRatio,
+    setEnvironment,
   } = useShotStore();
 
   const shotRef = useRef(shot);
@@ -1898,13 +1907,19 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     scene.background = new THREE.Color(effectiveSkyHex);
     scene.fog = new THREE.Fog(new THREE.Color(fogHex), fogNear, fogFar);
 
-    // 2. Ground Material & Surface Texturing
+    // 2. Ground Material, Surface Texturing & 67.js Procedural Heightfield / 4-Layer Splat Shader
     applyGroundSurface(floorMesh, inferredBiome.groundSurface);
+    applyTerrainToFloorMesh(floorMesh, env, inferredBiome, shot.sceneDescription);
 
-    // 3. Clear and Rebuild Perimeter Environmental Architecture
+    // 3. Clear and Rebuild Perimeter Environmental Architecture + Smart Exclusion Vegetation & Clutter
     buildPerimeterEnvironment(envGroup, env, {
       sceneDescription: shot.sceneDescription,
       actors: shot.actors,
+      camera: {
+        startPosition: shot.camera.movement.startPosition,
+        endPosition: shot.camera.movement.endPosition,
+        targetLookAt: shot.camera.movement.targetLookAt,
+      },
     });
 
     // 4. Smart Stage Backdrop Isolation for Viewfinder & <Video 1> Previs Render:
@@ -2462,6 +2477,14 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       // (Camera Viewfinder) and cameraGizmoGroupRef follow the keyframed camera trajectory.
     }
 
+    // Deterministic Wind Sway on Procedural Tree Canopies
+    if (environmentGroupRef.current) {
+      updateVegetationWind(environmentGroupRef.current, t);
+    }
+
+    const activeTerrainConfig = (floorMeshRef.current?.userData?.terrainConfig ||
+      environmentGroupRef.current?.userData?.terrainConfig) as ResolvedTerrainConfig | undefined;
+
     // Pass 1: Root positions, orientations, bone poses, and locomotion for all non-socketed actors
     liveShot.actors.forEach((actor, idx) => {
       if (actor.socketToBone?.targetActorId) return; // handled in pass 2
@@ -2488,13 +2511,18 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           Boolean(actor.motionClip) ||
           Boolean(actor.gait && actor.gait !== 'none' && actor.gait !== 'auto');
 
-        // Keep characters firmly planted on the floor (y >= 0) without synthetic vertical sine-wave jumping
-        const groundedY = Math.max(0, actorPos.y);
+        // Automatic Terrain Height Grounding (Q1): actors walking onto surrounding 3D hills/dunes
+        // climb smoothly along y = terrain.heightAt(x, z) while central 18m clearing stays at y = 0.
+        const terrainGroundY = activeTerrainConfig
+          ? evaluateTerrainHeight(actorPos.x, actorPos.z, activeTerrainConfig)
+          : 0;
+        const groundedY = Math.max(terrainGroundY, Math.max(0, actorPos.y) + terrainGroundY);
         mesh.position.set(actorPos.x, groundedY, actorPos.z);
         // Hide floor contact shadow disc when airborne (drones/aircraft/leaps) or bone-socketed so a black circle never floats in mid-air
         const contactShadow = mesh.getObjectByName('__contact_shadow__');
         if (contactShadow) {
-          contactShadow.visible = !actor.socketToBone?.targetActorId && groundedY < 0.25;
+          contactShadow.visible =
+            !actor.socketToBone?.targetActorId && Math.abs(groundedY - terrainGroundY) < 0.25;
         }
         if (typeof mesh.userData.update === 'function' && hasActiveMotion && !hasPoseTrack && t > 0) {
           mesh.userData.update(0.016);
@@ -2524,14 +2552,26 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           const dist = Math.sqrt(dx * dx + dz * dz);
 
           if (dist > 1.0) {
-            mesh.lookAt(actorPos.x + dx, actorPos.y, actorPos.z + dz);
+            mesh.lookAt(actorPos.x + dx, groundedY, actorPos.z + dz);
           } else if (isHuman && liveShot.actors.length === 2 && idx <= 1) {
             const otherActor = liveShot.actors[1 - idx];
             if (otherActor && (!otherActor.kind || otherActor.kind === 'human')) {
               const otherPos = getActorPositionAtTime(otherActor, t);
-              mesh.lookAt(otherPos.x, actorPos.y, otherPos.z);
+              mesh.lookAt(otherPos.x, groundedY, otherPos.z);
             }
           }
+        }
+
+        // Physical Vehicle Drive Kinematics (Q5): Wheel Spin, Front Ackermann Steering,
+        // Dynamic Braking/Cornering Suspension Pitch/Roll & 4-Wheel Terrain Slope Alignment
+        if (!isHuman && isGroundVehicleActor(actor)) {
+          const driveState = evaluateVehicleDriveState(
+            actor.trajectory,
+            t,
+            liveDur,
+            activeTerrainConfig
+          );
+          applyVehicleDriveKinematicsToMesh(mesh, driveState, hasExplicitRot);
         }
 
         // Ensure parent mesh transform (position, rotation, scale) is flushed to matrixWorld before evaluating IK / gait
@@ -4607,6 +4647,30 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
             >
               <span>🏺</span>
               <span>{shot.claymationMode ? '12fps Clay' : 'Clay'}</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const curEnv = shot.environment || CINEMATIC_ENVIRONMENT_PRESETS[0].spec;
+                const nextDetail = curEnv.detailLevel === 'hd' ? 'simple' : 'hd';
+                setEnvironment({
+                  ...curEnv,
+                  detailLevel: nextDetail,
+                });
+                logger.action(
+                  `Switched 3D Environment detail level to "${nextDetail === 'hd' ? 'HD High Detail' : 'Simple Previs'}"`
+                );
+              }}
+              data-testid="toggle-env-detail-level-btn"
+              className={`flex items-center gap-1 rounded-lg px-2 py-1 border transition-all ${
+                shot.environment?.detailLevel === 'hd'
+                  ? 'border-emerald-400/70 text-emerald-300 bg-emerald-500/20 font-bold shadow-[0_0_8px_rgba(16,185,129,0.25)]'
+                  : 'border-[#273247] bg-[#131C2E] text-[#98A5BC] hover:text-white'
+              }`}
+              title="Toggle 3D Environment Detail: Simple Previs (Fast 60 FPS Default) vs HD Detail (High-Res Terrain, Dense Ground Clutter & Grass)"
+            >
+              <span>{shot.environment?.detailLevel === 'hd' ? '✨' : '⚡'}</span>
+              <span>{shot.environment?.detailLevel === 'hd' ? 'HD Set' : 'Simple Set'}</span>
             </button>
 
             <input

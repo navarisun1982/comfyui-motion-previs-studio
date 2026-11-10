@@ -2150,6 +2150,238 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                 );
               })()}
 
+              {/* 67.js Plain-Data Procedural Terrain, Vegetation & Detail Level (Simple Previs vs HD) */}
+              {(() => {
+                const curEnv = shot.environment || CINEMATIC_ENVIRONMENT_PRESETS[0].spec;
+                const isHD = curEnv.detailLevel === 'hd';
+                const curProfile = curEnv.terrain?.profile || 'auto';
+                const curHeightScale = curEnv.terrain?.heightScale ?? 1.0;
+                const curClearing = curEnv.terrain?.clearingRadius ?? 18;
+                const curSpecies = curEnv.vegetation?.species || 'auto';
+                const curVegDensity = curEnv.vegetation?.density ?? 1.0;
+                const curSightline = curEnv.vegetation?.exclusionSightline !== false;
+
+                return (
+                  <div
+                    className="rounded-lg bg-[#0e131f] border border-emerald-500/25 p-2.5 space-y-2.5"
+                    data-testid="plain-data-environment-deck"
+                  >
+                    {/* Detail Level Header & 1-Click Toggle (Q4) */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="font-display font-bold text-xs text-white block">
+                          Plain-Data 3D Terrain &amp; Foliage
+                        </span>
+                        <span className="font-mono text-[9px] text-slate-400">
+                          18m Flat Stage + 4-Layer Splat + Sightline Exclusion
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        data-testid="deck-toggle-hd-detail-btn"
+                        onClick={() =>
+                          setEnvironment({
+                            ...curEnv,
+                            detailLevel: isHD ? 'simple' : 'hd',
+                          })
+                        }
+                        className={`px-2.5 py-1 rounded-md font-mono text-[9.5px] font-bold border transition-all cursor-pointer shrink-0 ${
+                          isHD
+                            ? 'bg-emerald-500/25 text-emerald-200 border-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.25)]'
+                            : 'bg-[#141a29] text-slate-300 border-white/15 hover:border-emerald-400/50 hover:text-white'
+                        }`}
+                        title="Keep Simple by default for fast 60 FPS Previs, or click to enable HD High Detail (112x112 terrain + dense rocks/clutter + foreground grass)"
+                      >
+                        {isHD ? '✨ HD Detail: ON' : '⚡ Simple Previs (Enable HD)'}
+                      </button>
+                    </div>
+
+                    {/* Terrain Profile Selector */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between font-mono text-[9.5px]">
+                        <span className="text-slate-300">Terrain Relief</span>
+                        <span className="text-emerald-400 uppercase">{curProfile}</span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1 font-mono text-[9px]">
+                        {(
+                          [
+                            { id: 'auto', label: '✨ Auto' },
+                            { id: 'flat', label: '➖ Flat' },
+                            { id: 'rolling-hills', label: '⛰️ Hills' },
+                            { id: 'mountain-ridge', label: '🏔️ Ridge' },
+                            { id: 'canyon-valley', label: '🏜️ Canyon' },
+                            { id: 'sand-dunes', label: '🌊 Dunes' },
+                            { id: 'coastal-slope', label: '🏖️ Coast' },
+                          ] as const
+                        ).map((tp) => {
+                          const active = curProfile === tp.id;
+                          return (
+                            <button
+                              key={tp.id}
+                              type="button"
+                              onClick={() =>
+                                setEnvironment({
+                                  ...curEnv,
+                                  terrain: {
+                                    ...curEnv.terrain,
+                                    profile: tp.id,
+                                  },
+                                })
+                              }
+                              className={`py-1 px-1.5 rounded border text-center truncate transition-all cursor-pointer ${
+                                active
+                                  ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50 font-bold'
+                                  : 'bg-[#121622] text-slate-300 border-white/5 hover:border-white/20'
+                              }`}
+                            >
+                              {tp.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Terrain Elevation Scale & Central Flat Acting Clearing Radius */}
+                    <div className="grid grid-cols-2 gap-2 pt-0.5">
+                      <div>
+                        <div className="flex items-center justify-between text-[9px] font-mono text-slate-300 mb-0.5">
+                          <span>Hill Height</span>
+                          <span className="text-emerald-300 font-bold">{curHeightScale.toFixed(1)}x</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={2.5}
+                          step={0.1}
+                          value={curHeightScale}
+                          onChange={(e) =>
+                            setEnvironment({
+                              ...curEnv,
+                              terrain: {
+                                ...curEnv.terrain,
+                                heightScale: Number(e.target.value),
+                              },
+                            })
+                          }
+                          className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between text-[9px] font-mono text-slate-300 mb-0.5">
+                          <span>Flat Stage Radius</span>
+                          <span className="text-cyan-300 font-bold">{curClearing}m</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={10}
+                          max={36}
+                          step={1}
+                          value={curClearing}
+                          onChange={(e) =>
+                            setEnvironment({
+                              ...curEnv,
+                              terrain: {
+                                ...curEnv.terrain,
+                                clearingRadius: Number(e.target.value),
+                              },
+                            })
+                          }
+                          className="w-full h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-cyan-400"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Procedural Vegetation Species & Sightline Exclusion */}
+                    <div className="space-y-1 pt-1 border-t border-white/5">
+                      <div className="flex items-center justify-between font-mono text-[9.5px]">
+                        <span className="text-slate-300">Procedural Trees</span>
+                        <label className="flex items-center gap-1 text-[9px] text-cyan-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={curSightline}
+                            onChange={(e) =>
+                              setEnvironment({
+                                ...curEnv,
+                                vegetation: {
+                                  ...curEnv.vegetation,
+                                  exclusionSightline: e.target.checked,
+                                },
+                              })
+                            }
+                            className="rounded border-white/20 bg-black/50 accent-cyan-400 h-3 w-3"
+                          />
+                          <span>📷 Clear Camera Sightline</span>
+                        </label>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1 font-mono text-[9px]">
+                        {(
+                          [
+                            { id: 'auto', label: '✨ Auto' },
+                            { id: 'none', label: '🚫 None' },
+                            { id: 'conifer', label: '🌲 Pine' },
+                            { id: 'broadleaf', label: '🌳 Oak' },
+                            { id: 'palm', label: '🌴 Palm' },
+                            { id: 'birch', label: '🌿 Birch' },
+                            { id: 'bush', label: '🌾 Scrub' },
+                            { id: 'mixed', label: '🌲🌳 Mixed' },
+                          ] as const
+                        ).map((sp) => {
+                          const active = curSpecies === sp.id;
+                          return (
+                            <button
+                              key={sp.id}
+                              type="button"
+                              onClick={() =>
+                                setEnvironment({
+                                  ...curEnv,
+                                  vegetation: {
+                                    ...curEnv.vegetation,
+                                    species: sp.id,
+                                  },
+                                })
+                              }
+                              className={`py-1 px-1.5 rounded border text-center truncate transition-all cursor-pointer ${
+                                active
+                                  ? 'bg-teal-600/30 text-teal-200 border-teal-500/50 font-bold'
+                                  : 'bg-[#121622] text-slate-300 border-white/5 hover:border-white/20'
+                              }`}
+                            >
+                              {sp.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-1 text-[9px] font-mono text-slate-300">
+                        <span>Tree &amp; Rock Density: {Math.round(curVegDensity * 100)}%</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={2}
+                          step={0.1}
+                          value={curVegDensity}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setEnvironment({
+                              ...curEnv,
+                              vegetation: {
+                                ...curEnv.vegetation,
+                                density: val,
+                              },
+                              clutter: {
+                                ...curEnv.clutter,
+                                density: val,
+                              },
+                            });
+                          }}
+                          className="w-28 h-1 bg-slate-700 rounded appearance-none cursor-pointer accent-teal-400"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="font-display font-bold text-xs text-white">Weather</span>

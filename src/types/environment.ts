@@ -44,6 +44,56 @@ export const EnvironmentCategorySchema = z.enum([
 ]);
 export type EnvironmentCategory = z.infer<typeof EnvironmentCategorySchema>;
 
+export const EnvironmentDetailLevelSchema = z.enum(['simple', 'hd']);
+export type EnvironmentDetailLevel = z.infer<typeof EnvironmentDetailLevelSchema>;
+
+export const TerrainProfileSchema = z.enum([
+  'auto',
+  'flat',
+  'rolling-hills',
+  'mountain-ridge',
+  'canyon-valley',
+  'sand-dunes',
+  'coastal-slope',
+]);
+export type TerrainProfile = z.infer<typeof TerrainProfileSchema>;
+
+export const VegetationSpeciesSchema = z.enum([
+  'auto',
+  'none',
+  'conifer',
+  'broadleaf',
+  'palm',
+  'birch',
+  'bush',
+  'mixed',
+]);
+export type VegetationSpecies = z.infer<typeof VegetationSpeciesSchema>;
+
+export const TerrainSpecSchema = z.object({
+  profile: TerrainProfileSchema.default('auto').optional(),
+  heightScale: z.number().min(0).max(3).default(1.0).optional(),
+  clearingRadius: z.number().min(8).max(42).default(18).optional(),
+  seed: z.number().int().default(67).optional(),
+});
+export type TerrainSpec = z.infer<typeof TerrainSpecSchema>;
+
+export const VegetationSpecSchema = z.object({
+  species: VegetationSpeciesSchema.default('auto').optional(),
+  density: z.number().min(0).max(2.5).default(1.0).optional(),
+  exclusionSightline: z.boolean().default(true).optional(),
+  windStrength: z.number().min(0).max(2).default(0.45).optional(),
+  seed: z.number().int().default(67).optional(),
+});
+export type VegetationSpec = z.infer<typeof VegetationSpecSchema>;
+
+export const ClutterSpecSchema = z.object({
+  enabled: z.boolean().default(true).optional(),
+  density: z.number().min(0).max(2.5).default(1.0).optional(),
+  grassRing: z.boolean().default(false).optional(),
+});
+export type ClutterSpec = z.infer<typeof ClutterSpecSchema>;
+
 export const EnvironmentSpecSchema = z.object({
   id: z.string().default('env-studio-stage'),
   name: z.string().default('Soundstage Studio'),
@@ -64,6 +114,10 @@ export const EnvironmentSpecSchema = z.object({
   ambientColor: z.string().default('#38bdf8'),
   visibleInPrevis: z.boolean().default(true),
   previsStageMode: z.enum(['auto', 'hide-stage', 'show-stage']).default('auto').optional(),
+  detailLevel: EnvironmentDetailLevelSchema.default('simple').optional(),
+  terrain: TerrainSpecSchema.optional(),
+  vegetation: VegetationSpecSchema.optional(),
+  clutter: ClutterSpecSchema.optional(),
   conceptImageUrl: z.string().optional(),
   conceptImageName: z.string().optional(),
 });

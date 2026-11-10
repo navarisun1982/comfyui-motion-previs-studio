@@ -21,3 +21,4 @@ export * from './videoToMocapExtractor';
 export * from './mediaPipePoseLandmarker';
 export * from './unifiedRigSolver';
 export * from './mixamoClipLibrary';
+export * from './vehicleDriveKinematics';
