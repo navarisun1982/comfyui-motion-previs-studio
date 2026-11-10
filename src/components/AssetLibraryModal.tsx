@@ -2119,16 +2119,19 @@ export const AssetLibraryModal: React.FC = () => {
                     </div>
                     <button
                       type="button"
+                      title={`Generate "${searchQuery}" in 3D (.GLB)`}
                       onClick={() => {
                         open3DStudio({
                           initialMode: 'text-to-3d',
                           initialPrompt: searchQuery,
                         });
                       }}
-                      className="rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 text-xs font-semibold flex items-center gap-1.5 shadow cursor-pointer"
+                      className="max-w-md overflow-hidden rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 text-xs font-semibold flex items-center gap-1.5 shadow cursor-pointer"
                     >
-                      <Sparkles className="h-3.5 w-3.5" />
-                      <span>Generate &ldquo;{searchQuery}&rdquo; in 3D (.GLB)</span>
+                      <Sparkles className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate min-w-0">
+                        Generate &ldquo;{searchQuery}&rdquo; in 3D (.GLB)
+                      </span>
                     </button>
                   </div>
                 ) : (

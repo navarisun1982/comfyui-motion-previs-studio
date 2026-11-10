@@ -763,6 +763,7 @@ export const Asset3DPreviewInspector: React.FC<Asset3DPreviewInspectorProps> = (
         <div className="pt-1">
           <button
             type="button"
+            title={`Place "${asset.name}" on 3D Stage`}
             onClick={() =>
               onPlaceOnStage(asset, {
                 scale: previewScale,
@@ -771,10 +772,12 @@ export const Asset3DPreviewInspector: React.FC<Asset3DPreviewInspectorProps> = (
                 showBones,
               })
             }
-            className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-600 hover:brightness-110 py-2.5 px-4 text-xs font-bold font-mono text-white shadow-lg shadow-cyan-500/25 transition-all cursor-pointer"
+            className="w-full max-w-full overflow-hidden flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-600 hover:brightness-110 py-2.5 px-3 text-xs font-bold font-mono text-white shadow-lg shadow-cyan-500/25 transition-all cursor-pointer"
           >
-            <Plus className="h-4 w-4 stroke-[3]" />
-            <span>Place &ldquo;{asset.name}&rdquo; on 3D Stage ▶</span>
+            <Plus className="h-4 w-4 shrink-0 stroke-[3]" />
+            <span className="truncate min-w-0">
+              Place &ldquo;{asset.name}&rdquo; on 3D Stage
+            </span>
           </button>
         </div>
       </div>
