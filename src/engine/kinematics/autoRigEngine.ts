@@ -60,6 +60,9 @@ export interface RigLandmarks {
   quadBackLegZ?: number;
   isLengthAlongZ?: boolean;
 
+  // Per-bone 3D position offsets [dx, dy, dz] as fractions of model height H for point-by-point joint placement
+  boneOffsets?: Partial<Record<HumanoidBone, [number, number, number]>>;
+
   // Detected stance metadata
   detectedStance?: 't-pose' | 'a-pose' | 'relaxed' | 'quadruped' | 'flexible' | 'rigid';
 }
@@ -771,6 +774,18 @@ function buildAdaptiveRigSkeleton(
     worldPos.set('RightUpLeg', new THREE.Vector3(-hipX, hipY * 0.94, 0));
     worldPos.set('RightLeg', new THREE.Vector3(-kneX, kneY, kneZ));
     worldPos.set('RightFoot', new THREE.Vector3(-ankX, ankY, ankZ));
+  }
+
+  // Apply point-by-point per-bone 3D position offsets (in fractions of model height H)
+  if (landmarks.boneOffsets) {
+    for (const [bName, offsetTuple] of Object.entries(landmarks.boneOffsets)) {
+      const wPos = worldPos.get(bName as HumanoidBone);
+      if (wPos && offsetTuple) {
+        wPos.x += (offsetTuple[0] || 0) * H;
+        wPos.y += (offsetTuple[1] || 0) * H;
+        wPos.z += (offsetTuple[2] || 0) * H;
+      }
+    }
   }
 
   // Hierarchy definition

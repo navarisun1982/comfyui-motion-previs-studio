@@ -137,6 +137,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   >('bind');
   const [showLandmarkEditor, setShowLandmarkEditor] = useState<boolean>(false);
   const [showBonePoseEditor, setShowBonePoseEditor] = useState<boolean>(false);
+  const [mirrorJointLandmarks, setMirrorJointLandmarks] = useState<boolean>(false);
   const [selectedPreviewBone, setSelectedPreviewBone] = useState<HumanoidBone>('RightArm');
   const [customBonePose, setCustomBonePose] = useState<
     Partial<Record<HumanoidBone, [number, number, number]>>
@@ -148,12 +149,24 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   previewMotionRef.current = previewMotion;
   const showBonesRef = useRef(showBones);
   showBonesRef.current = showBones;
+  const showLandmarkEditorRef = useRef(showLandmarkEditor);
+  showLandmarkEditorRef.current = showLandmarkEditor;
+  const mirrorJointLandmarksRef = useRef(mirrorJointLandmarks);
+  mirrorJointLandmarksRef.current = mirrorJointLandmarks;
+  const rigInfoRef = useRef<AutoRigResult | null>(rigInfo);
+  rigInfoRef.current = rigInfo;
   const customBonePoseRef = useRef<Partial<Record<HumanoidBone, [number, number, number]>>>(
     customBonePose
   );
   customBonePoseRef.current = customBonePose;
   const draggingPreviewBoneRef = useRef<HumanoidBone | null>(null);
   const loadedSceneRef = useRef<THREE.Group | null>(null);
+
+  const getMirrorHumanoidBone = (b: HumanoidBone): HumanoidBone | null => {
+    if (b.startsWith('Left')) return `Right${b.slice(4)}` as HumanoidBone;
+    if (b.startsWith('Right')) return `Left${b.slice(5)}` as HumanoidBone;
+    return null;
+  };
 
   // 3D Canvas Mount Ref
   const canvasMountRef = useRef<HTMLDivElement>(null);
@@ -442,7 +455,9 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
               draggingPreviewBoneRef.current = hitBone;
               setSelectedPreviewBone(hitBone);
               highlightRigJointSphere(activeScene, hitBone);
-              setShowBonePoseEditor(true);
+              if (!showLandmarkEditorRef.current) {
+                setShowBonePoseEditor(true);
+              }
               setPreviewMotion('bind');
               setAutoSpin(false);
               return;
@@ -460,6 +475,40 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         const dy = e.clientY - prevMouseRef.current.y;
         prevMouseRef.current = { x: e.clientX, y: e.clientY };
         const bName = draggingPreviewBoneRef.current;
+
+        // When Adjust Joint Landmarks is active, dragging a 3D joint sphere moves that joint's 3D position point-by-point!
+        if (showLandmarkEditorRef.current) {
+          setCustomLandmarks((prev) => {
+            const base = prev || rigInfoRef.current?.landmarks || {};
+            const prevOffsets = base.boneOffsets || {};
+            const cur = prevOffsets[bName] || [0, 0, 0];
+            const nextX = e.shiftKey
+              ? cur[0]
+              : Number(Math.max(-0.35, Math.min(0.35, cur[0] + dx * 0.0022)).toFixed(3));
+            const nextY = e.shiftKey
+              ? cur[1]
+              : Number(Math.max(-0.35, Math.min(0.35, cur[1] - dy * 0.0022)).toFixed(3));
+            const nextZ = e.shiftKey
+              ? Number(Math.max(-0.35, Math.min(0.35, cur[2] - dy * 0.0022)).toFixed(3))
+              : cur[2];
+            const updatedOffsets: Partial<Record<HumanoidBone, [number, number, number]>> = {
+              ...prevOffsets,
+              [bName]: [nextX, nextY, nextZ],
+            };
+            if (mirrorJointLandmarksRef.current) {
+              const mirrorBone = getMirrorHumanoidBone(bName);
+              if (mirrorBone) {
+                updatedOffsets[mirrorBone] = [-nextX, nextY, nextZ];
+              }
+            }
+            return {
+              ...base,
+              boneOffsets: updatedOffsets,
+            };
+          });
+          return;
+        }
+
         setCustomBonePose((prev) => {
           const cur = prev[bName] || [0, 0, 0];
           const nextX = e.shiftKey ? cur[0] : Number(Math.max(-2.2, Math.min(2.2, cur[0] + dy * 0.012)).toFixed(3));
@@ -2159,18 +2208,185 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                 {/* Interactive Joint Landmark Fine-Tuner Sliders */}
                 {showLandmarkEditor && rigInfo && rigInfo.rigType !== 'rigid_prop' && (
                   <div className="rounded-lg border border-amber-500/30 bg-black/60 p-2.5 space-y-2 text-[10px] font-mono">
-                    <div className="flex items-center justify-between">
-                      <span className="text-amber-300 font-bold">
-                        🎯 Silhouette Joint Landmark Fine-Tuner (Symmetrical L/R)
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setCustomLandmarks(null)}
-                        className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-cyan-200 border border-cyan-500/30 cursor-pointer"
-                      >
-                        ↺ Reset Auto-Fit
-                      </button>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-amber-300 font-bold">
+                          🎯 Point-by-Point Joint Position
+                        </span>
+                        <span
+                          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/20 border border-amber-400/40 text-[9px] text-amber-200 font-semibold"
+                          title="Click & drag any 3D joint sphere in viewport (Shift+Drag for Z depth) or use sliders below"
+                        >
+                          🖱️ Drag Joint in 3D
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1 text-[9.5px] text-amber-200 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={mirrorJointLandmarks}
+                            onChange={(e) => setMirrorJointLandmarks(e.target.checked)}
+                            className="accent-amber-400 cursor-pointer"
+                          />
+                          <span>🔗 Mirror L/R</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setCustomLandmarks(null)}
+                          className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-cyan-200 border border-cyan-500/30 cursor-pointer"
+                        >
+                          ↺ Reset All
+                        </button>
+                      </div>
                     </div>
+
+                    {/* Point-by-Point Joint Selector Pills & X/Y/Z Position Sliders */}
+                    <div className="flex flex-wrap gap-1">
+                      {(rigInfo.rigType === 'humanoid'
+                        ? ([
+                            'Head',
+                            'Neck',
+                            'Chest',
+                            'Spine',
+                            'Hips',
+                            'LeftShoulder',
+                            'LeftArm',
+                            'LeftForeArm',
+                            'LeftHand',
+                            'RightShoulder',
+                            'RightArm',
+                            'RightForeArm',
+                            'RightHand',
+                            'LeftUpLeg',
+                            'LeftLeg',
+                            'LeftFoot',
+                            'RightUpLeg',
+                            'RightLeg',
+                            'RightFoot',
+                          ] as HumanoidBone[])
+                        : ([
+                            'Head',
+                            'Neck',
+                            'Chest',
+                            'Spine',
+                            'Hips',
+                            'LeftArm',
+                            'LeftForeArm',
+                            'RightArm',
+                            'RightForeArm',
+                            'LeftUpLeg',
+                            'LeftLeg',
+                            'RightUpLeg',
+                            'RightLeg',
+                          ] as HumanoidBone[])
+                      ).map((b) => {
+                        const off = customLandmarks?.boneOffsets?.[b];
+                        const hasOffset =
+                          off && (Math.abs(off[0]) > 0.001 || Math.abs(off[1]) > 0.001 || Math.abs(off[2]) > 0.001);
+                        return (
+                          <button
+                            key={b}
+                            type="button"
+                            onClick={() => setSelectedPreviewBone(b)}
+                            className={`px-1.5 py-0.5 rounded border text-[9px] cursor-pointer transition-all ${
+                              selectedPreviewBone === b
+                                ? 'bg-amber-500/30 border-amber-400 text-amber-100 font-bold'
+                                : hasOffset
+                                  ? 'bg-emerald-500/20 border-emerald-400/50 text-emerald-200'
+                                  : 'bg-white/5 border-white/10 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {b}
+                            {hasOffset ? ' •' : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {(() => {
+                      const curOff = customLandmarks?.boneOffsets?.[selectedPreviewBone] || [0, 0, 0];
+                      const pctX = Math.round(curOff[0] * 100);
+                      const pctY = Math.round(curOff[1] * 100);
+                      const pctZ = Math.round(curOff[2] * 100);
+                      const updateJointOffsetAxis = (axisIdx: 0 | 1 | 2, pctVal: number) => {
+                        const normVal = Number((pctVal / 100).toFixed(3));
+                        setCustomLandmarks((prev) => {
+                          const base = prev || rigInfo.landmarks;
+                          const prevOffsets = base.boneOffsets || {};
+                          const existing = prevOffsets[selectedPreviewBone] || [0, 0, 0];
+                          const nextTuple: [number, number, number] = [
+                            existing[0],
+                            existing[1],
+                            existing[2],
+                          ];
+                          nextTuple[axisIdx] = normVal;
+                          const updatedOffsets: Partial<Record<HumanoidBone, [number, number, number]>> = {
+                            ...prevOffsets,
+                            [selectedPreviewBone]: nextTuple,
+                          };
+                          if (mirrorJointLandmarks) {
+                            const mirrorBone = getMirrorHumanoidBone(selectedPreviewBone);
+                            if (mirrorBone) {
+                              updatedOffsets[mirrorBone] = [
+                                -nextTuple[0],
+                                nextTuple[1],
+                                nextTuple[2],
+                              ];
+                            }
+                          }
+                          return {
+                            ...base,
+                            boneOffsets: updatedOffsets,
+                          };
+                        });
+                      };
+                      return (
+                        <div className="grid grid-cols-3 gap-2 pb-1 border-b border-white/10">
+                          <label className="flex flex-col gap-0.5 text-amber-100">
+                            <span>
+                              {selectedPreviewBone} X (L/R): {pctX > 0 ? `+${pctX}` : pctX}%
+                            </span>
+                            <input
+                              type="range"
+                              min={-35}
+                              max={35}
+                              step={1}
+                              value={pctX}
+                              onChange={(e) => updateJointOffsetAxis(0, Number(e.target.value))}
+                              className="accent-amber-400"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-0.5 text-amber-100">
+                            <span>
+                              {selectedPreviewBone} Y (Up/Dn): {pctY > 0 ? `+${pctY}` : pctY}%
+                            </span>
+                            <input
+                              type="range"
+                              min={-35}
+                              max={35}
+                              step={1}
+                              value={pctY}
+                              onChange={(e) => updateJointOffsetAxis(1, Number(e.target.value))}
+                              className="accent-amber-400"
+                            />
+                          </label>
+                          <label className="flex flex-col gap-0.5 text-amber-100">
+                            <span>
+                              {selectedPreviewBone} Z (Depth): {pctZ > 0 ? `+${pctZ}` : pctZ}%
+                            </span>
+                            <input
+                              type="range"
+                              min={-35}
+                              max={35}
+                              step={1}
+                              value={pctZ}
+                              onChange={(e) => updateJointOffsetAxis(2, Number(e.target.value))}
+                              className="accent-amber-400"
+                            />
+                          </label>
+                        </div>
+                      );
+                    })()}
 
                     {rigInfo.rigType === 'humanoid' ? (
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
