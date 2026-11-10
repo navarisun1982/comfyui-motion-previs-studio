@@ -528,6 +528,7 @@ export function buildPerimeterEnvironment(
     const oceanPlane = new THREE.Mesh(new THREE.PlaneGeometry(190, 80), oceanWaterMat);
     oceanPlane.rotation.x = -Math.PI * 0.5;
     oceanPlane.position.set(0, 0.06, -56);
+    oceanPlane.userData.isOceanWater = true;
     envGroup.add(oceanPlane);
 
     // Layered White Surf Foam Ribbons Along the Shoreline
@@ -551,6 +552,7 @@ export function buildPerimeterEnvironment(
       );
       dune.position.set(side * (48 + (i % 3) * 5), -2.2, zOff);
       dune.scale.set(1.8, 0.22, 1.4);
+      dune.userData.isGroundTerrain = true;
       envGroup.add(dune);
     }
 

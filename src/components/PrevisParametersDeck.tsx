@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useShotStore, getEffectiveStageLights } from '../stores/useShotStore';
-import { formatReadableEnginePrompt } from '../engine/promptCompiler';
+import { formatReadableEnginePrompt, isCustomPromptCoherentWithShot } from '../engine/promptCompiler';
 import {
   FocalLength,
   ShotType,
@@ -211,11 +211,11 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
   const stageDeterministicPrompt = getAdapter(activeStageEngine).compilePrompt(shot);
   const stageLockedCustom = shot.customPositivePrompts?.[activeStageEngine];
   const isStagePromptLocked =
-    typeof stageLockedCustom === 'string' && stageLockedCustom.trim().length > 0;
+    typeof stageLockedCustom === 'string' &&
+    stageLockedCustom.trim().length > 0 &&
+    isCustomPromptCoherentWithShot(stageLockedCustom, shot);
   const stageDisplayPositivePrompt = formatReadableEnginePrompt(
-    isStagePromptLocked
-      ? stageLockedCustom
-      : compiledPrompt?.positivePrompt || stageDeterministicPrompt.positivePrompt,
+    isStagePromptLocked ? stageLockedCustom : stageDeterministicPrompt.positivePrompt,
     activeStageEngine
   );
   const stageUndoCount = (shot.promptHistory?.[activeStageEngine] || []).length;

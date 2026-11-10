@@ -1,11 +1,25 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { execSync } from 'child_process';
 import { openaiAuthPlugin } from './src/server/openaiAuthPlugin';
+
+let buildGitSha = 'local';
+let buildGitSummary = 'Local Studio Build';
+try {
+  buildGitSha = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+  buildGitSummary = execSync('git log -1 --format="%h • %s (%cr)"', { encoding: 'utf8' }).trim();
+} catch {
+  // ignore if git unavailable
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
   base: './',
+  define: {
+    __APP_GIT_SHA__: JSON.stringify(buildGitSha),
+    __APP_GIT_SUMMARY__: JSON.stringify(buildGitSummary),
+  },
   plugins: [react(), openaiAuthPlugin()],
   resolve: {
     alias: {

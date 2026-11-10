@@ -327,10 +327,30 @@ describe('offlinePrevisRenderer', () => {
       floorMesh.rotation.x = -Math.PI / 2;
       scene.add(floorMesh);
 
+      // Ocean mesh & Cyclorama Backdrop mesh
+      const origOceanMat = new THREE.MeshStandardMaterial({ color: 0x06b6d4 });
+      const oceanMesh = new THREE.Mesh(new THREE.PlaneGeometry(40, 20), origOceanMat);
+      oceanMesh.rotation.x = -Math.PI / 2;
+      oceanMesh.position.set(0, 0.06, -56);
+      oceanMesh.userData.isOceanWater = true;
+      scene.add(oceanMesh);
+
+      const backdropMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(88, 46),
+        new THREE.MeshBasicMaterial({ color: 0x1e293b })
+      );
+      backdropMesh.position.set(0, 22, -48);
+      backdropMesh.visible = true;
+      backdropMesh.userData.isCycloramaBackdrop = true;
+      scene.add(backdropMesh);
+
       const capturedDuringClayRender: {
         actorColorHex?: number;
         floorColorHex?: number;
+        oceanColorHex?: number;
         lightColorHex?: number;
+        lightIntensity?: number;
+        backdropVisible?: boolean;
       }[] = [];
 
       const fakeDom = document.createElement('canvas');
@@ -345,7 +365,10 @@ describe('offlinePrevisRenderer', () => {
           capturedDuringClayRender.push({
             actorColorHex: (actorMesh.material as unknown as THREE.MeshStandardMaterial).color?.getHex(),
             floorColorHex: (floorMesh.material as unknown as THREE.MeshStandardMaterial).color?.getHex(),
+            oceanColorHex: (oceanMesh.material as unknown as THREE.MeshStandardMaterial).color?.getHex(),
             lightColorHex: coloredLight.color.getHex(),
+            lightIntensity: coloredLight.intensity,
+            backdropVisible: backdropMesh.visible,
           });
         }),
       } as unknown as THREE.WebGLRenderer;
@@ -367,15 +390,21 @@ describe('offlinePrevisRenderer', () => {
       expect(result.rgbBlob).toBeUndefined();
 
       expect(capturedDuringClayRender.length).toBeGreaterThan(0);
-      // Verify zero-chrominance (R === G === B) clay colors during render
+      // Verify zero-chrominance (R === G === B) clay colors, normalized light intensity, and hidden cyclorama backdrop during render
       expect(capturedDuringClayRender[0].actorColorHex).toBe(0xb4b4b4);
       expect(capturedDuringClayRender[0].floorColorHex).toBe(0x626262);
+      expect(capturedDuringClayRender[0].oceanColorHex).toBe(0x525252);
       expect(capturedDuringClayRender[0].lightColorHex).toBe(0xffffff);
+      expect(capturedDuringClayRender[0].lightIntensity).toBeCloseTo(1.15, 2);
+      expect(capturedDuringClayRender[0].backdropVisible).toBe(false);
 
-      // Verify original materials and colored light were restored after Clay pass
+      // Verify original materials, backdrop visibility, and colored light were restored after Clay pass
       expect(actorMesh.material).toBe(origActorMat);
       expect(floorMesh.material).toBe(origFloorMat);
+      expect(oceanMesh.material).toBe(origOceanMat);
+      expect(backdropMesh.visible).toBe(true);
       expect(coloredLight.color.getHex()).toBe(0xff33aa);
+      expect(coloredLight.intensity).toBe(1.5);
     });
   });
 });

@@ -43,6 +43,12 @@ import { logger } from './useLogStore';
 import { interpolateTrajectoryPosition, recordTrajectoryPoseAtTime } from '../engine/trajectoryMath';
 import { decomposeDirectorialMotion, compileMotionPlan, compileReadyMadeMotionKeyframes, matchReadyMadeMotionFromPrompt } from '../engine/kinematics';
 import { STORAGE_KEYS, safeGetItem, safeSetItem, sanitizeShotForStorage } from '../services/storage';
+import {
+  resolveCoherentSceneDescription,
+  resolveCoherentLighting,
+  isCustomPromptCoherentWithShot,
+  PRESET_LIGHT_NAMES,
+} from '../engine/promptCompiler';
 import { toPersistentModelUri, offloadLargeImageToIndexedDB, resolveOffloadedImage, resolveOffloadedImageSync } from '../services/modelStorage';
 import { saveProjectToStudioStorage } from '../services/studioStorageClient';
 import { resolvePolyforkGlbUrl } from '../data/externalCatalogsRegistry';
@@ -460,6 +466,25 @@ const loadCachedShots = (): Record<string, ShotSpec> => {
             };
           }
 
+          // If a cached human actor was repurposed via Mocap Studio (e.g. `actor-kael-lead` renamed to "Man"),
+          // strip any leftover preset `partGraph` / `sculpt` (such as Kael's cyan plasma katana).
+          const hasMocapKeyframes = Boolean(
+            nextActor.trajectory?.keyframes?.some(
+              (kf) =>
+                kf.pose?.charSpaceRotations !== undefined ||
+                kf.pose?.anatomicalIk !== undefined ||
+                Boolean(kf.pose && Object.keys(kf.pose.rotations || {}).length > 0)
+            )
+          );
+          if (
+            nextActor.kind === 'human' &&
+            hasMocapKeyframes &&
+            !/kael|ronin/i.test(`${nextActor.name} ${nextActor.token || ''}`) &&
+            (nextActor.partGraph || nextActor.sculpt)
+          ) {
+            nextActor = { ...nextActor, partGraph: undefined, sculpt: undefined };
+          }
+
           // Never treat 3D catalog preview thumbnails as user-uploaded ComfyUI reference images
           if (
             nextActor.conceptImageUrl &&
@@ -487,6 +512,23 @@ const loadCachedShots = (): Record<string, ShotSpec> => {
               targetLookAt: { x: 50, y: 50 },
             },
           };
+        }
+
+        // Purge any orphaned preset narrative, orphaned preset lights, or stale custom prompts on load
+        s.sceneDescription = resolveCoherentSceneDescription(s);
+        s.lighting = {
+          ...s.lighting,
+          ...resolveCoherentLighting(s),
+          contrast: resolveCoherentLighting(s).contrast as ShotSpec['lighting']['contrast'],
+        };
+        if (s.customPositivePrompts) {
+          const cleanedCustom: Record<string, string> = {};
+          for (const [eng, text] of Object.entries(s.customPositivePrompts)) {
+            if (isCustomPromptCoherentWithShot(text, s)) {
+              cleanedCustom[eng] = text;
+            }
+          }
+          s.customPositivePrompts = cleanedCustom;
         }
       }
     }
@@ -733,17 +775,31 @@ export const useShotStore = create<ShotState>((set, get) => {
     const baseCompiled = adapter.compilePrompt(shot);
     const lockedCustom = shot.customPositivePrompts?.[shot.targetModel];
     const compiledPrompt =
-      typeof lockedCustom === 'string' && lockedCustom.trim().length > 0
+      typeof lockedCustom === 'string' &&
+      lockedCustom.trim().length > 0 &&
+      isCustomPromptCoherentWithShot(lockedCustom, shot)
         ? { ...baseCompiled, positivePrompt: lockedCustom }
         : baseCompiled;
     return { validation, compiledPrompt };
   };
 
   const commitShot = (
-    updated: ShotSpec,
+    rawUpdated: ShotSpec,
     extraState?: Partial<ShotState>,
-    options?: { skipHistory?: boolean; immediatePersist?: boolean }
+    options?: { skipHistory?: boolean; immediatePersist?: boolean; preserveCustomPrompts?: boolean }
   ) => {
+    const coherentLight = resolveCoherentLighting(rawUpdated);
+    const updated: ShotSpec = {
+      ...rawUpdated,
+      sceneDescription: resolveCoherentSceneDescription(rawUpdated),
+      lighting: {
+        ...rawUpdated.lighting,
+        ...coherentLight,
+        contrast: coherentLight.contrast as ShotSpec['lighting']['contrast'],
+      },
+      customPositivePrompts: options?.preserveCustomPrompts ? rawUpdated.customPositivePrompts : {},
+    };
+
     const currentShot = get().shot;
     const shotHistory = getShotHistory(updated.id);
 
@@ -855,10 +911,14 @@ export const useShotStore = create<ShotState>((set, get) => {
 
       const newShot = vfxRef ? { ...shot, vfxReference: vfxRef } : shot;
       logger.action(url ? `In-app 3D Previs video ready: ${newShot.name}` : 'Cleared previs video');
-      commitShot(newShot, {
-        previsVideoUrl: url,
-        previsVideoBlob: blob,
-      });
+      commitShot(
+        newShot,
+        {
+          previsVideoUrl: url,
+          previsVideoBlob: blob,
+        },
+        { preserveCustomPrompts: true }
+      );
     },
 
     setPrevisClay: (url?: string, blob?: Blob) => {
@@ -970,7 +1030,7 @@ export const useShotStore = create<ShotState>((set, get) => {
     updateTargetModel: (targetModel) => {
       const shot = { ...get().shot, targetModel };
       logger.action(`Switched target model to "${targetModel}"`);
-      commitShot(shot);
+      commitShot(shot, undefined, { preserveCustomPrompts: true });
     },
 
     setFocalLength: (focalLength) => {
@@ -2607,16 +2667,23 @@ export const useShotStore = create<ShotState>((set, get) => {
       if (nextLights && nextLights.length > 0) {
         const dirChanged = direction && direction !== shot.lighting.direction;
         const styleChanged = style !== shot.lighting.style;
-        const primary = { ...nextLights[0] };
-        if (dirChanged) {
-          primary.position = { ...(DEFAULT_LIGHT_POSITIONS[nextDir] || DEFAULT_LIGHT_POSITIONS['side-key']) };
+        const hasPresetMultiLights = nextLights.some((l) =>
+          PRESET_LIGHT_NAMES.includes(l.name.toLowerCase() as (typeof PRESET_LIGHT_NAMES)[number])
+        );
+        if (styleChanged && hasPresetMultiLights) {
+          nextLights = undefined;
+        } else {
+          const primary = { ...nextLights[0] };
+          if (dirChanged) {
+            primary.position = { ...(DEFAULT_LIGHT_POSITIONS[nextDir] || DEFAULT_LIGHT_POSITIONS['side-key']) };
+          }
+          if (styleChanged) {
+            const def = getStyleDefaultColorAndIntensity(style);
+            primary.color = def.color;
+            primary.intensity = def.intensity;
+          }
+          nextLights[0] = primary;
         }
-        if (styleChanged) {
-          const def = getStyleDefaultColorAndIntensity(style);
-          primary.color = def.color;
-          primary.intensity = def.intensity;
-        }
-        nextLights[0] = primary;
       }
       logger.action(`Set lighting mood to ${style} (dir: ${nextDir}, contrast: ${nextContrast})`);
       const updated: ShotSpec = {
@@ -2711,7 +2778,7 @@ export const useShotStore = create<ShotState>((set, get) => {
     setNegativePrompt: (negativePrompt) => {
       const shot = { ...get().shot, negativePrompt };
       logger.action(`Updated negative prompt filter (${negativePrompt.length} chars)`);
-      commitShot(shot);
+      commitShot(shot, undefined, { preserveCustomPrompts: true });
     },
 
     setCustomPositivePrompt: (engineId, promptText, pushHistory = false) => {
@@ -2741,7 +2808,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         customPositivePrompts: prevCustomMap,
         promptHistory: prevHistoryMap,
       };
-      commitShot(updated, undefined, { skipHistory: true });
+      commitShot(updated, undefined, { skipHistory: true, preserveCustomPrompts: true });
     },
 
     undoCustomPositivePrompt: (engineId) => {
@@ -2759,7 +2826,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         promptHistory: prevHistoryMap,
       };
       logger.action(`Reverted prompt for ${engineId} to previous version`);
-      commitShot(updated, undefined, { skipHistory: true });
+      commitShot(updated, undefined, { skipHistory: true, preserveCustomPrompts: true });
     },
 
     appendPromptChatMessage: (msg) => {
@@ -2772,7 +2839,7 @@ export const useShotStore = create<ShotState>((set, get) => {
         ...curShot,
         promptChatMessages: nextMessages,
       };
-      commitShot(updated, undefined, { skipHistory: true });
+      commitShot(updated, undefined, { skipHistory: true, preserveCustomPrompts: true });
     },
 
     clearPromptChatMessages: () => {
@@ -2781,13 +2848,13 @@ export const useShotStore = create<ShotState>((set, get) => {
         ...curShot,
         promptChatMessages: [],
       };
-      commitShot(updated, undefined, { skipHistory: true });
+      commitShot(updated, undefined, { skipHistory: true, preserveCustomPrompts: true });
     },
 
     setReferenceImage: (referenceImage) => {
       const shot = { ...get().shot, referenceImage };
       logger.action(`Assigned reference image for Image-to-Video`, { hasImage: !!referenceImage });
-      commitShot(shot);
+      commitShot(shot, undefined, { preserveCustomPrompts: true });
     },
 
     updateVfxReference: (updates) => {

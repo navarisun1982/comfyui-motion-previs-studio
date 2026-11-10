@@ -292,17 +292,22 @@ export async function renderOfflinePrevisPasses(
 
   // Albedo-Neutral Matte 3D Studio Clay Materials for LTX-2.5 `layout-to-render` (Zero Chrominance R=G=B)
   const clayActorMaterial = new THREE.MeshStandardMaterial({
-    color: 0xb4b4b4,
-    roughness: 0.85,
-    metalness: 0.04,
+    color: 0xb0b0b0,
+    roughness: 0.72,
+    metalness: 0.05,
   });
   const clayEnvMaterial = new THREE.MeshStandardMaterial({
-    color: 0x828282,
-    roughness: 0.9,
-    metalness: 0.02,
+    color: 0x757575,
+    roughness: 0.85,
+    metalness: 0.03,
+  });
+  const clayOceanMaterial = new THREE.MeshStandardMaterial({
+    color: 0x5c5c5c,
+    roughness: 0.55,
+    metalness: 0.08,
   });
   const clayFloorMaterial = new THREE.MeshStandardMaterial({
-    color: 0x626262,
+    color: 0x484848,
     roughness: 0.92,
     metalness: 0.02,
   });
@@ -320,6 +325,8 @@ export async function renderOfflinePrevisPasses(
   const prevOverride = scene.overrideMaterial;
   const prevBackground = scene.background;
   const prevFog = scene.fog;
+  const prevEnvironment = scene.environment;
+  const prevExposure = renderer.toneMappingExposure;
   const prevShadowEnabled = renderer.shadowMap ? renderer.shadowMap.enabled : false;
   const prevSize = new THREE.Vector2();
   renderer.getSize(prevSize);
@@ -384,6 +391,7 @@ export async function renderOfflinePrevisPasses(
               curr.userData?.isContactShadow ||
               curr.userData?.isBaseRing ||
               curr.userData?.isHitProxy ||
+              curr.userData?.isCycloramaBackdrop ||
               curr.name === '__base_ring_group__' ||
               curr.name === '__contact_shadow__' ||
               (curr as THREE.Sprite).isSprite
@@ -403,6 +411,7 @@ export async function renderOfflinePrevisPasses(
           groundHex?: number;
           intensity: number;
         }> = [];
+        let directionalLightCounter = 0;
 
         scene.traverse((obj) => {
           if (obj === scene) return;
@@ -410,6 +419,8 @@ export async function renderOfflinePrevisPasses(
           const asLight = obj as THREE.Light;
           if (asLight.isLight) {
             const hemi = asLight as THREE.HemisphereLight;
+            const amb = asLight as THREE.AmbientLight;
+            const dir = asLight as THREE.DirectionalLight;
             savedLightStates.push({
               light: asLight,
               colorHex: asLight.color ? asLight.color.getHex() : 0xffffff,
@@ -419,8 +430,19 @@ export async function renderOfflinePrevisPasses(
             if (asLight.color) {
               asLight.color.setHex(0xffffff);
             }
-            if (hemi.isHemisphereLight && hemi.groundColor) {
-              hemi.groundColor.setHex(0x4a4a4a);
+            if (hemi.isHemisphereLight) {
+              if (hemi.groundColor) {
+                hemi.groundColor.setHex(0x3a3a3a);
+              }
+              asLight.intensity = 0.55;
+            } else if (amb.isAmbientLight) {
+              asLight.intensity = 0.35;
+            } else if (dir.isDirectionalLight) {
+              directionalLightCounter += 1;
+              asLight.intensity = directionalLightCounter === 1 ? 1.15 : directionalLightCounter === 2 ? 0.45 : 0;
+            } else {
+              // Suppress arbitrary stage PointLights/SpotLights in the Clay pass so total irradiance never clips to pure white
+              asLight.intensity = 0;
             }
             return;
           }
@@ -441,12 +463,21 @@ export async function renderOfflinePrevisPasses(
           const mesh = obj as THREE.Mesh;
           if (mesh.isMesh) {
             savedClayMaterials.set(mesh, mesh.material);
+            const insideActor = isInsideActorRoot(mesh);
+            const isOcean =
+              !insideActor &&
+              (mesh.userData?.isOceanWater === true ||
+                (mesh.rotation.x < -1.4 && mesh.position.y <= 0.08 && mesh.position.z <= -35));
             const isFloor =
-              mesh.rotation.x < -1.4 &&
-              mesh.position.y <= 0.05 &&
-              !isInsideActorRoot(mesh);
-            if (isInsideActorRoot(mesh)) {
+              !insideActor &&
+              !isOcean &&
+              (mesh.userData?.isFloorPlane === true ||
+                mesh.userData?.isGroundTerrain === true ||
+                (mesh.rotation.x < -1.4 && mesh.position.y <= 0.05));
+            if (insideActor) {
               mesh.material = clayActorMaterial;
+            } else if (isOcean) {
+              mesh.material = clayOceanMaterial;
             } else if (isFloor) {
               mesh.material = clayFloorMaterial;
             } else {
@@ -459,8 +490,10 @@ export async function renderOfflinePrevisPasses(
           renderer.shadowMap.enabled = true;
         }
         scene.overrideMaterial = null;
-        scene.background = new THREE.Color(0x3a3a3e);
-        scene.fog = new THREE.Fog(0x3a3a3e, 38, 190);
+        scene.environment = null;
+        renderer.toneMappingExposure = 1.0;
+        scene.background = new THREE.Color(0x2c2c30);
+        scene.fog = new THREE.Fog(0x2c2c30, 45, 210);
         renderer.render(scene, camera);
 
         // Restore original materials, lights, and helper visibility immediately
@@ -478,6 +511,8 @@ export async function renderOfflinePrevisPasses(
           }
           st.light.intensity = st.intensity;
         }
+        scene.environment = prevEnvironment;
+        renderer.toneMappingExposure = prevExposure;
         scene.background = prevBackground;
         scene.fog = prevFog;
 
@@ -495,7 +530,7 @@ export async function renderOfflinePrevisPasses(
       if (shouldRenderDepth) {
         const hiddenContactShadows: THREE.Object3D[] = [];
         scene.traverse((obj) => {
-          if (obj.userData?.isContactShadow && obj.visible) {
+          if ((obj.userData?.isContactShadow || obj.userData?.isCycloramaBackdrop) && obj.visible) {
             obj.visible = false;
             hiddenContactShadows.push(obj);
           }
@@ -750,11 +785,14 @@ export async function renderOfflinePrevisPasses(
     depthMaterial.dispose();
     clayActorMaterial.dispose();
     clayEnvMaterial.dispose();
+    clayOceanMaterial.dispose();
     clayFloorMaterial.dispose();
     idMaskMaterialCache.forEach((mat) => mat.dispose());
     scene.overrideMaterial = prevOverride;
     scene.background = prevBackground;
     scene.fog = prevFog;
+    scene.environment = prevEnvironment;
+    renderer.toneMappingExposure = prevExposure;
     if (renderer.shadowMap) {
       renderer.shadowMap.enabled = prevShadowEnabled;
     }

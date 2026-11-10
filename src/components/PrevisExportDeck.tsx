@@ -5,7 +5,7 @@ import { getAdapter } from '../adapters';
 import { getReasonerConfig } from '../services/objectReasoner';
 import { directPromptWithAI, refinePromptWithAIChat } from '../services/aiPromptDirector';
 import { analyzeShotPovVisibility } from '../engine/povVisibilityEngine';
-import { formatReadableEnginePrompt } from '../engine/promptCompiler';
+import { formatReadableEnginePrompt, isCustomPromptCoherentWithShot } from '../engine/promptCompiler';
 import { exportCameraPoseBundle, exportCameraExtrinsicsJson } from '../engine/cameraMatrixExport';
 import { shouldHideStageBackdropInPrevis } from '../engine/staging/environmentBuilder';
 import { CINEMATIC_ENVIRONMENT_PRESETS } from '../types/environment';
@@ -87,7 +87,7 @@ export function computeOptimalWorkflowTuning(
       case 'clay':
         return {
           steps: isStrictMotion ? 10 : 8,
-          controlStrength: isStrictMotion ? 0.75 : 0.65,
+          controlStrength: isStrictMotion ? 0.62 : 0.52,
           firstPassScale: 1.0,
           referenceMode: 'OFF',
           presetSummary: isFastNative
@@ -760,34 +760,28 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       // 2. Queue job via JobRunner using active engine template (LTX-2.5 or MiniMax H3)
       const engineCompiled = getAdapter(targetEngine).compilePrompt(shot);
       const rawLockedCustomForEngine = shot.customPositivePrompts?.[targetEngine]?.trim();
-      const isLockedStale =
-        typeof rawLockedCustomForEngine === 'string' &&
-        (rawLockedCustomForEngine.includes('#334155 3D previz stage blocks') ||
-          rawLockedCustomForEngine.includes('settling into the final composition and locking focus') ||
-          rawLockedCustomForEngine.includes('Procedural 3D stage subject for') ||
-          rawLockedCustomForEngine.includes('placed on stage from 3D Asset Library') ||
-          rawLockedCustomForEngine.includes("ignoring <Picture 1>'s original background") ||
-          rawLockedCustomForEngine.includes('<Video 1> (camera/motion reference): partially_preserved') ||
-          rawLockedCustomForEngine.includes('Strictly follows the screen position, 3D orientation') ||
-          rawLockedCustomForEngine.includes('placeholder volume in the') ||
-          rawLockedCustomForEngine.includes('[Choreography Reference:') ||
-          rawLockedCustomForEngine.includes('Camera smoothly decelerates'));
-      const lockedCustomForEngine = !isLockedStale ? rawLockedCustomForEngine : undefined;
+      const lockedCustomForEngine = isCustomPromptCoherentWithShot(rawLockedCustomForEngine, shot)
+        ? rawLockedCustomForEngine
+        : undefined;
       const effectivePrompt =
         lockedCustomForEngine && lockedCustomForEngine.length > 0
           ? lockedCustomForEngine
-          : targetEngine === 'minimax-h3'
-          ? displayPositivePrompt.includes('subject_definitions:') && !displayPositivePrompt.includes('from mark (')
-            ? displayPositivePrompt
-            : engineCompiled.positivePrompt
-          : !displayPositivePrompt.includes('subject_definitions:') && !displayPositivePrompt.includes('from mark (') && displayPositivePrompt.trim().length > 0
-          ? displayPositivePrompt
           : engineCompiled.positivePrompt;
 
+      // Guarantee that Auto-Tune uses the exact tuning for (targetEngine, activeWf.id, passToUpload)
+      const effectiveTuning = isWorkflowAutoTune
+        ? computeOptimalWorkflowTuning(targetEngine, activeWf.id, passToUpload)
+        : {
+            steps: wfSteps,
+            controlStrength: wfControlStrength,
+            firstPassScale: wfFirstPassScale,
+            referenceMode: wfReferenceMode,
+          };
+
       setComfyStatusText(
-        `Step 3/3: Binding "${activeWf.shortLabel}" (${passHumanName} • ${wfSteps} steps • Str ${wfControlStrength.toFixed(
+        `Step 3/3: Binding "${activeWf.shortLabel}" (${passHumanName} • ${effectiveTuning.steps} steps • Str ${effectiveTuning.controlStrength.toFixed(
           2
-        )} • RefMode ${wfReferenceMode}) & queuing in ComfyUI...`
+        )} • RefMode ${effectiveTuning.referenceMode}) & queuing in ComfyUI...`
       );
       await defaultJobRunner.run({
         shot,
@@ -798,10 +792,10 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
         prompt: effectivePrompt,
         negative: displayNegativePrompt,
         seed: Math.max(0, Math.floor(comfySeed)),
-        steps: wfSteps,
-        icLoraStrength: wfControlStrength,
-        firstPassScale: wfFirstPassScale,
-        referenceMode: wfReferenceMode,
+        steps: effectiveTuning.steps,
+        icLoraStrength: effectiveTuning.controlStrength,
+        firstPassScale: effectiveTuning.firstPassScale,
+        referenceMode: effectiveTuning.referenceMode,
         promptSource: 'compiled',
         controlVideoBlob: previsBlob,
         refImageBlobs: resolvedRefBlobs,
@@ -875,26 +869,35 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     setActiveEngineTab(normalized);
   }, [shot.targetModel]);
 
+  useEffect(() => {
+    const onPreviewState = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      if (detail.activePassTab) setActivePassTab(detail.activePassTab);
+      if (detail.activeSourcePass) setActiveSourcePass(detail.activeSourcePass);
+      if (detail.compareViewMode) setCompareViewMode(detail.compareViewMode);
+      if (detail.wipePercent !== undefined) setWipePercent(Number(detail.wipePercent));
+      if (detail.finalComfyVideoUrl !== undefined) setFinalComfyVideoUrl(detail.finalComfyVideoUrl);
+      if (detail.useRenderedPrevisAsComfyFinal) {
+        const rgbUrl = useShotStore.getState().previsVideoUrl;
+        if (rgbUrl) setFinalComfyVideoUrl(rgbUrl);
+      }
+      if (detail.finalComfyFilename !== undefined) setFinalComfyFilename(detail.finalComfyFilename);
+      if (detail.finalComfyMeta !== undefined) setFinalComfyMeta(detail.finalComfyMeta);
+      if (detail.isPromptChatOpen !== undefined) setIsPromptChatOpen(Boolean(detail.isPromptChatOpen));
+      if (detail.showTimelineDetails !== undefined) setShowTimelineDetails(Boolean(detail.showTimelineDetails));
+    };
+    window.addEventListener('cmpvs:export-deck-preview-state', onPreviewState);
+    return () => window.removeEventListener('cmpvs:export-deck-preview-state', onPreviewState);
+  }, []);
+
   // Compile deterministic fallback for active tab
   const activeAdapter = getAdapter(activeEngineTab);
   const deterministicPrompt = activeAdapter.compilePrompt(shot);
   const customLockedPrompt = shot.customPositivePrompts?.[activeEngineTab];
-  const isStaleLegacyPrompt =
-    typeof customLockedPrompt === 'string' &&
-    (customLockedPrompt.includes('#334155 3D previz stage blocks') ||
-      customLockedPrompt.includes('settling into the final composition and locking focus') ||
-      customLockedPrompt.includes('Procedural 3D stage subject for') ||
-      customLockedPrompt.includes('placed on stage from 3D Asset Library') ||
-      customLockedPrompt.includes("ignoring <Picture 1>'s original background") ||
-      customLockedPrompt.includes('<Video 1> (camera/motion reference): partially_preserved') ||
-      customLockedPrompt.includes('Strictly follows the screen position, 3D orientation') ||
-      customLockedPrompt.includes('placeholder volume in the') ||
-      customLockedPrompt.includes('[Choreography Reference:') ||
-      customLockedPrompt.includes('Camera smoothly decelerates'));
   const isCustomPromptLocked =
     typeof customLockedPrompt === 'string' &&
     customLockedPrompt.trim().length > 0 &&
-    !isStaleLegacyPrompt;
+    isCustomPromptCoherentWithShot(customLockedPrompt, shot);
   const engineUndoCount = (shot.promptHistory?.[activeEngineTab] || []).length;
   const displayPositivePrompt = formatReadableEnginePrompt(
     isCustomPromptLocked ? customLockedPrompt : deterministicPrompt.positivePrompt,
@@ -914,7 +917,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     const baseCompiled = adapter.compilePrompt({ ...shot, targetModel: engineId });
     const locked = shot.customPositivePrompts?.[engineId];
     setCompiledPrompt(
-      locked && locked.trim().length > 0
+      locked && locked.trim().length > 0 && isCustomPromptCoherentWithShot(locked, shot)
         ? { ...baseCompiled, positivePrompt: locked }
         : baseCompiled
     );

@@ -37,6 +37,22 @@ function registerComfyIpcHandlers() {
   ipcMain.handle('comfy:fetch-remote-workflow', async (_event, rawUrl) => {
     return await getComfySyncService().fetchRemoteWorkflowJson(rawUrl);
   });
+
+  ipcMain.handle('app-update:check', async (_event, options) => {
+    try {
+      startLocalProxyServer();
+    } catch {}
+    const appUpdateService = require('../src/server/appUpdateService.cjs');
+    return await appUpdateService.checkAppUpdate(options || {});
+  });
+
+  ipcMain.handle('app-update:apply', async () => {
+    try {
+      startLocalProxyServer();
+    } catch {}
+    const appUpdateService = require('../src/server/appUpdateService.cjs');
+    return await appUpdateService.applyAppUpdate({ isElectron: true });
+  });
 }
 
 const APP_TITLE = 'ComfyUI Motion Previs Studio';
@@ -189,7 +205,14 @@ function isValidComfyWorkflowJsonString(rawContent) {
 }
 
 function startLocalProxyServer() {
-  if (localProxyServer) return;
+  if (localProxyServer) {
+    if (!localProxyServer.listening) {
+      try {
+        localProxyServer.listen(51731, '127.0.0.1');
+      } catch {}
+    }
+    return;
+  }
   localProxyServer = http.createServer((req, res) => {
     // Restrict CORS headers to localhost / Electron file:// origins only
     res.setHeader('Access-Control-Allow-Origin', resolveSafeCorsOrigin(req));
@@ -540,8 +563,17 @@ function startLocalProxyServer() {
     req.pipe(proxyReq);
   });
 
-  localProxyServer.on('error', () => {
-    // Port 51731 may already be bound by another instance
+  localProxyServer.on('error', (err) => {
+    // Port 51731 may temporarily be bound by another instance; retry once freed
+    if (err && err.code === 'EADDRINUSE') {
+      setTimeout(() => {
+        try {
+          if (localProxyServer && !localProxyServer.listening) {
+            localProxyServer.listen(51731, '127.0.0.1');
+          }
+        } catch {}
+      }, 3000);
+    }
   });
 
   localProxyServer.listen(51731, '127.0.0.1');

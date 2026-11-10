@@ -68,6 +68,74 @@ export function formatEnvironment(env?: EnvironmentSpec): string {
   return parts.join(', ');
 }
 
+export const PRESET_NARRATIVE_SIGNATURES = [
+  'neo-tokyo',
+  'agent kael',
+  'cyber-ronin',
+  'ronin enforcer',
+  'plasma katana',
+  'hunter-killer',
+  'attack drone',
+  'vtol gunship',
+  'syndicate checkpoint',
+  'syndicate patrol cruiser',
+  'syndicate enforcer',
+  'syndicate defense turret',
+  'drift cruiser',
+  'cyber-motorcycle',
+  'minimalist penthouse',
+  'explorer aria',
+  'dune buggy',
+  'solar obelisk',
+  'chronos shrine',
+  'redwood forest',
+  'citadel guardian',
+  'castle courtyard',
+  'ruin sentinel',
+  'archivist vance',
+  'council map table',
+  'commander vance',
+  'chronos ark',
+  'orbital starship hangar',
+  'chronos relic',
+  'obsidian ziggurat',
+  'apex mecha',
+  'valkyrie',
+  'moody atmospheric interior with subtle dust motes',
+] as const;
+
+export const PRESET_LIGHT_NAMES = [
+  'drone crimson searchlight',
+  'cyan rooftop helipad key',
+  'amber skyline backlight',
+  'plasma muzzle cyan key',
+  'turret crimson flood',
+  'cruiser headlight backfill',
+  'magenta highway billboard key',
+  'cyan streetlight rim',
+  'headlight streak fill',
+  'crimson duel rim',
+  'cyan duel key',
+  'expressway arc key',
+  'cyan street fill',
+  'dawn horizon gold',
+  'penthouse warm key',
+  'saharan sun key',
+  'warm sand bounce',
+  'forest canopy key',
+  'emerald shrine glow',
+  'brazier torch west',
+  'brazier torch east',
+  'courtyard moon fill',
+  'amber ruin key',
+  'storm sky rim',
+  'hearth firelight key',
+  'warm chamber fill',
+  'hangar deck flood',
+  'bay beacon amber',
+  'starship rim glow',
+] as const;
+
 /**
  * Ensures `shot.sceneDescription` does not inject stale ShotBible preset narratives
  * (e.g. "Neo-Tokyo rooftop helipad... Agent Kael... Hunter-Killer Attack Drone")
@@ -78,6 +146,8 @@ export function resolveCoherentSceneDescription(shot: ShotSpec): string {
   const envPrompt = (shot.environment?.promptDescription || shot.environment?.name || '').trim();
   if (!rawDesc) return envPrompt;
 
+  // IMPORTANT: Never include `actor.id` here, because Mocap Studio may reuse an existing actor slot ID
+  // (e.g. `actor-kael-lead`) after renaming the actor to "Man" and replacing its token/action.
   const currentContext = [
     envPrompt,
     shot.environment?.name || '',
@@ -86,22 +156,9 @@ export function resolveCoherentSceneDescription(shot: ShotSpec): string {
     .join(' ')
     .toLowerCase();
 
-  const presetSignatures = [
-    'neo-tokyo',
-    'agent kael',
-    'cyber-ronin',
-    'hunter-killer attack drone',
-    'vtol gunship',
-    'syndicate checkpoint',
-    'chronos relic',
-    'explorer aria',
-    'obsidian ziggurat',
-    'apex mecha',
-    'valkyrie',
-  ];
-
-  const hasOrphanedPresetNarrative = presetSignatures.some(
-    (sig) => rawDesc.toLowerCase().includes(sig) && !currentContext.includes(sig)
+  const rawLower = rawDesc.toLowerCase();
+  const hasOrphanedPresetNarrative = PRESET_NARRATIVE_SIGNATURES.some(
+    (sig) => rawLower.includes(sig) && !currentContext.includes(sig)
   );
   if (hasOrphanedPresetNarrative) {
     return envPrompt;
@@ -111,8 +168,8 @@ export function resolveCoherentSceneDescription(shot: ShotSpec): string {
 }
 
 /**
- * Prevents orphaned Shot 01A/01B cyberpunk light rigs ("Drone Crimson Searchlight", "Cyan Rooftop Helipad Key")
- * from polluting prompts after the user switches to a daylight/natural Mocap or custom environment.
+ * Prevents orphaned ShotBible preset light rigs ("Drone Crimson Searchlight", "Cyan Rooftop Helipad Key", etc.)
+ * from polluting prompts after the user switches to a different environment or replaces preset actors.
  */
 export function resolveCoherentLighting(shot: ShotSpec): {
   style: LightingStyle;
@@ -121,14 +178,44 @@ export function resolveCoherentLighting(shot: ShotSpec): {
   lights?: ShotSpec['lighting']['lights'];
 } {
   const envContext = `${shot.environment?.name || ''} ${shot.environment?.promptDescription || ''} ${shot.environment?.category || ''}`.toLowerCase();
-  const isCyberpunkEnv = /cyberpunk|neo-tokyo|neon|sci-fi|helipad/.test(envContext);
-  const hasKaelActor = shot.actors.some((a) => /kael|ronin|hunter-drone|syndicate/i.test(`${a.id} ${a.name}`));
+  const actorContext = shot.actors
+    .map((a) => `${a.name} ${a.token || ''}`)
+    .join(' ')
+    .toLowerCase();
 
-  const hasPresetCyberpunkLights = (shot.lighting.lights || []).some((l) =>
-    /Drone Crimson Searchlight|Cyan Rooftop Helipad Key|Plasma Muzzle Cyan Key|Turret Crimson Flood/i.test(l.name)
+  const isCyberpunkEnv = /cyberpunk|neo-tokyo|neon|helipad|expressway/.test(envContext);
+  const hasCyberpunkActor = /kael|ronin|hunter-drone|syndicate|cipher/.test(actorContext);
+
+  const lights = shot.lighting.lights || [];
+  const hasPresetCyberpunkLights = lights.some((l) =>
+    /Drone Crimson Searchlight|Cyan Rooftop Helipad Key|Amber Skyline Backlight|Plasma Muzzle Cyan Key|Turret Crimson Flood|Cruiser Headlight Backfill|Magenta Highway Billboard Key|Cyan Streetlight Rim|Headlight Streak Fill|Crimson Duel Rim|Cyan Duel Key|Expressway Arc Key|Cyan Street Fill/i.test(
+      l.name
+    )
   );
+  const hasOtherOrphanedPresetLights = lights.some((l) => {
+    const ln = l.name.toLowerCase();
+    if (/penthouse warm key|dawn horizon gold/.test(ln)) {
+      return !/penthouse/.test(envContext);
+    }
+    if (/saharan sun key|warm sand bounce/.test(ln)) {
+      return !/desert|sahara|dune/.test(envContext);
+    }
+    if (/forest canopy key|emerald shrine glow/.test(ln)) {
+      return !/forest|redwood|shrine|nature/.test(envContext);
+    }
+    if (/brazier torch|courtyard moon fill|amber ruin key|storm sky rim/.test(ln)) {
+      return !/courtyard|castle|ruin|citadel/.test(envContext);
+    }
+    if (/hearth firelight key|warm chamber fill/.test(ln)) {
+      return !/hearth|fireplace|council|chamber/.test(envContext);
+    }
+    if (/hangar deck flood|bay beacon amber|starship rim glow/.test(ln)) {
+      return !/hangar|starship|orbital/.test(envContext);
+    }
+    return false;
+  });
 
-  if (!isCyberpunkEnv && !hasKaelActor && hasPresetCyberpunkLights) {
+  if ((!isCyberpunkEnv && !hasCyberpunkActor && hasPresetCyberpunkLights) || hasOtherOrphanedPresetLights) {
     const tod = shot.environment?.timeOfDay;
     const fallbackStyle: LightingStyle =
       tod === 'golden-hour'
@@ -139,14 +226,92 @@ export function resolveCoherentLighting(shot: ShotSpec): {
         ? 'neon-cyberpunk'
         : 'cinematic-natural';
     return {
-      style: shot.lighting.style === 'neon-cyberpunk' ? fallbackStyle : shot.lighting.style,
+      style: shot.lighting.style === 'neon-cyberpunk' && !isCyberpunkEnv ? fallbackStyle : shot.lighting.style,
       direction: shot.lighting.direction,
-      contrast: shot.lighting.contrast === 'high-contrast' && fallbackStyle === 'cinematic-natural' ? 'balanced' : shot.lighting.contrast,
+      contrast:
+        shot.lighting.contrast === 'high-contrast' && fallbackStyle === 'cinematic-natural'
+          ? 'balanced'
+          : shot.lighting.contrast,
       lights: undefined,
     };
   }
 
   return shot.lighting;
+}
+
+/**
+ * Verifies whether a cached/locked custom prompt for any engine (`ltx-2.5`, `minimax-h3`, `seedance`)
+ * is coherent with the current 3D scene (`shot.actors`, `shot.environment`, `shot.lighting`) and
+ * free of leftover preset characters, weapons, lights, or deleted actors.
+ */
+export function isCustomPromptCoherentWithShot(promptText: string | undefined | null, shot: ShotSpec): boolean {
+  if (!promptText || !promptText.trim()) return false;
+  const trimmed = promptText.trim();
+
+  // 1. Reject legacy schema markers
+  if (
+    trimmed.includes('#334155 3D previz stage blocks') ||
+    trimmed.includes('settling into the final composition and locking focus') ||
+    trimmed.includes('Procedural 3D stage subject for') ||
+    trimmed.includes('placed on stage from 3D Asset Library') ||
+    trimmed.includes("ignoring <Picture 1>'s original background") ||
+    trimmed.includes('<Video 1> (camera/motion reference): partially_preserved') ||
+    trimmed.includes('Strictly follows the screen position, 3D orientation') ||
+    trimmed.includes('placeholder volume in the') ||
+    trimmed.includes('[Choreography Reference:') ||
+    trimmed.includes('Camera smoothly decelerates')
+  ) {
+    return false;
+  }
+
+  const promptLower = trimmed.toLowerCase();
+  const envPrompt = (shot.environment?.promptDescription || shot.environment?.name || '').trim();
+  const coherentLight = resolveCoherentLighting(shot);
+  const activeLightNames = (coherentLight.lights || []).map((l) => l.name.toLowerCase()).join(' ');
+  const currentContext = [
+    envPrompt,
+    shot.environment?.name || '',
+    activeLightNames,
+    ...shot.actors.map((a) => `${a.name} ${a.token || ''} ${a.actionDescription || ''}`),
+  ]
+    .join(' ')
+    .toLowerCase();
+
+  // 2. Reject if the prompt contains any preset character/weapon/vehicle/environment signature not in the current scene
+  for (const sig of PRESET_NARRATIVE_SIGNATURES) {
+    if (promptLower.includes(sig) && !currentContext.includes(sig)) {
+      return false;
+    }
+  }
+
+  // 3. Reject if the prompt contains any preset light name not active in the current coherent lighting rig
+  for (const lightName of PRESET_LIGHT_NAMES) {
+    if (promptLower.includes(lightName) && !activeLightNames.includes(lightName)) {
+      return false;
+    }
+  }
+
+  // 4. If the prompt is a structured engine prompt (LTX narrative, MiniMax subject_definitions, or Seedance brackets),
+  // ensure every currently POV-visible actor is present in the prompt so added/renamed actors are never omitted.
+  const isStructuredEnginePrompt =
+    promptLower.includes('subject_definitions:') ||
+    promptLower.includes('in the camera frame,') ||
+    promptLower.includes('throughout the continuous ') ||
+    promptLower.includes('[camera 6-axis motion') ||
+    promptLower.includes('[temporal cue timetable]');
+
+  if (isStructuredEnginePrompt) {
+    const pov = analyzeShotPovVisibility(shot);
+    for (const visActor of pov.visibleActors) {
+      const nameLower = visActor.name.trim().toLowerCase();
+      const tokenLower = cleanActorToken(visActor.token, visActor.name).toLowerCase();
+      if (nameLower && !promptLower.includes(nameLower) && (!tokenLower || !promptLower.includes(tokenLower))) {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 export function formatCameraMovement(

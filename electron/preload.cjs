@@ -7,5 +7,7 @@ contextBridge.exposeInMainWorld('electronComfyBridge', {
   syncWorkflows: (options) => ipcRenderer.invoke('comfy:sync-workflows', options),
   getSyncStatus: () => ipcRenderer.invoke('comfy:sync-status'),
   fetchRemoteWorkflow: (url) => ipcRenderer.invoke('comfy:fetch-remote-workflow', url),
+  checkAppUpdate: (options) => ipcRenderer.invoke('app-update:check', options),
+  applyAppUpdate: () => ipcRenderer.invoke('app-update:apply'),
 });
 

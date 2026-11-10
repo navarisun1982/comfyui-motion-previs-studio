@@ -1558,6 +1558,7 @@ export function autoRigGltfScene(
     if (nativeRig) {
       const overlay = createRigVisualOverlay(nativeRig, Boolean(options.showBones));
       sceneRoot.userData.rig = nativeRig;
+      sceneRoot.userData.autoRigType = 'humanoid';
       sceneRoot.userData.autoRigResult = {
         rigType: 'humanoid',
         rig: nativeRig,

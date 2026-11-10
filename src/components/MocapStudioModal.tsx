@@ -91,7 +91,9 @@ export function applyMocapStudioPayloadToShotStore(
   });
 
   const primaryTrack = payload.actorTracks?.[0];
-  const isDefaultKaelPreset = /Agent Kael|Cyber-Ronin/i.test(`${targetActor.name} ${targetActor.token || ''}`);
+  const isDefaultKaelPreset = /kael|ronin|syndicate|aria|vance|guardian/i.test(
+    `${targetActor.id} ${targetActor.name} ${targetActor.token || ''}`
+  );
   const isSpecificRoleName =
     Boolean(
       primaryTrack?.actorName &&
@@ -106,11 +108,11 @@ export function applyMocapStudioPayloadToShotStore(
     pose: mergedKeyframes[0]?.pose || targetActor.pose,
     ...(mergedKeyframes[0]?.rotation ? { rotation: mergedKeyframes[0].rotation } : {}),
     ...(primaryTrack?.clothingColorHex ? { color: primaryTrack.clothingColorHex } : {}),
+    ...(primaryTrack ? { partGraph: undefined, sculpt: undefined } : {}),
     ...(isSpecificRoleName && primaryTrack
       ? {
           name: primaryTrack.actorName,
           token: primaryTrack.appearanceToken || targetActor.token,
-          ...(isDefaultKaelPreset ? { partGraph: undefined } : {}),
         }
       : {}),
     trajectory: {
@@ -322,22 +324,22 @@ export function applyMocapStudioPayloadToShotStore(
   if (
     (payload.actorTracks && payload.actorTracks.length > 0) ||
     extraPersonActors.length > 0 ||
-    (payload.surroundingActors && payload.surroundingActors.length > 0)
+    (payload.surroundingActors && payload.surroundingActors.length > 0) ||
+    Boolean(payload.reconstructedEnvironment)
   ) {
     const hasVideoTracks = Boolean(payload.actorTracks && payload.actorTracks.length > 0);
     const isFullSceneCapture = Boolean(payload.reconstructedEnvironment);
     const currentActors = useShotStore.getState().shot.actors;
     const baseActors = currentActors
-      .filter(
-        (a) =>
-          !a.id.startsWith('mocap-surrounding-') &&
-          !a.id.startsWith('mocap-person-') &&
-          !(
-            isFullSceneCapture &&
-            /^(actor-hunter-drone|actor-gunship-overwatch|env-rooftop-antenna)$/i.test(a.id)
-          ) &&
-          (!hasVideoTracks || a.id === payload.actorId || a.kind !== 'human')
-      )
+      .filter((a) => {
+        if (a.id.startsWith('mocap-surrounding-') || a.id.startsWith('mocap-person-')) {
+          return false;
+        }
+        if (isFullSceneCapture) {
+          return a.id === payload.actorId;
+        }
+        return !hasVideoTracks || a.id === payload.actorId || a.kind !== 'human';
+      })
       .map((a) => (a.id === payload.actorId ? { ...a, ...updates } : a));
     const taggedSurrounding = (payload.surroundingActors ?? []).map((sa, idx) => ({
       ...sa,

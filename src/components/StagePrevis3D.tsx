@@ -696,13 +696,16 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     }
   }, [shot.referenceImage?.previewUrl]);
 
-  // Update Soundstage Cyclorama Backdrop with Environment Reference Image (<Picture 4>) or 2D Canvas Drawing / Shot Reference Plate
+  // Update Soundstage Cyclorama Backdrop with 2D Canvas Drawing / Shot Reference Plate (or Studio Cyclorama Ref)
   useEffect(() => {
     const backdrop = stageBackdropMeshRef.current;
     const frame = stageBackdropFrameMeshRef.current;
     if (!backdrop) return;
 
-    const cycloramaUrl = shot.environment?.conceptImageUrl || shot.referenceImage?.previewUrl;
+    const isStudioCyclorama = !shot.environment?.category || shot.environment.category === 'studio';
+    const cycloramaUrl =
+      shot.referenceImage?.previewUrl ||
+      (isStudioCyclorama ? shot.environment?.conceptImageUrl : undefined);
     if (cycloramaUrl) {
       const loader = new THREE.TextureLoader();
       loader.load(
@@ -725,7 +728,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       backdrop.visible = false;
       if (frame) frame.visible = false;
     }
-  }, [shot.referenceImage?.previewUrl, shot.environment?.conceptImageUrl]);
+  }, [shot.referenceImage?.previewUrl, shot.environment?.conceptImageUrl, shot.environment?.category]);
 
   // Keyboard Shortcut for Object Deletion (Delete / Backspace)
   useEffect(() => {
@@ -838,6 +841,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
+    floor.userData.isFloorPlane = true;
     stageScene.add(floor);
     floorMeshRef.current = floor;
 
@@ -872,6 +876,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     const screenMesh = new THREE.Mesh(screenGeo, screenMat);
     screenMesh.position.set(0, 22, -48);
     screenMesh.visible = false;
+    screenMesh.userData.isCycloramaBackdrop = true;
     stageScene.add(screenMesh);
     stageBackdropMeshRef.current = screenMesh;
 
@@ -881,6 +886,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     const frameMesh = new THREE.Mesh(frameGeo, frameMat);
     frameMesh.position.set(0, 22, -48.25);
     frameMesh.visible = false;
+    frameMesh.userData.isCycloramaBackdrop = true;
     stageScene.add(frameMesh);
     stageBackdropFrameMeshRef.current = frameMesh;
 
@@ -2439,29 +2445,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         vfCameraRef.current.fov = baseFov;
         vfCameraRef.current.updateProjectionMatrix();
       }
-
-      // During active playback of a keyframed camera trajectory (e.g., solved Mocap camera),
-      // synchronize the Stage viewport camera & lens FOV so STAGE view shows the live camera movement and proximity.
-      if (
-        isPlayingRef.current &&
-        !isFloorDraggingRef.current &&
-        !activeGizmoDragRef.current &&
-        liveShot.camera.movement.customTrajectory &&
-        (liveShot.camera.movement.keyframes?.length ?? 0) >= 2 &&
-        stageCameraRef.current
-      ) {
-        stageCameraRef.current.position.set(effectiveCamX, effectiveCamY + 1.5, effectiveCamZ);
-        if (Math.abs(stageCameraRef.current.fov - vfCameraRef.current.fov) > 0.2) {
-          stageCameraRef.current.fov = vfCameraRef.current.fov;
-          stageCameraRef.current.updateProjectionMatrix();
-        }
-        if (stageControlsRef.current) {
-          stageControlsRef.current.target.copy(targetLookAt);
-          stageControlsRef.current.update();
-        } else {
-          stageCameraRef.current.lookAt(targetLookAt);
-        }
-      }
+      // Keep stageCameraRef (3D Perspective viewport) 100% free under OrbitControls mouse control
+      // even during playback of solved 3D Mocap / keyframed camera trajectories, while vfCameraRef
+      // (Camera Viewfinder) and cameraGizmoGroupRef follow the keyframed camera trajectory.
     }
 
     // Pass 1: Root positions, orientations, bone poses, and locomotion for all non-socketed actors
@@ -4342,8 +4328,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       if (detail?.presetId) handleApplyPresetToSelectedActor(detail.presetId, detail.actorId);
     };
     const onSelectActorBone = (e: Event) => {
-      const detail = (e as CustomEvent<{ actorId?: string; boneName: HumanoidBone | null; mode?: 'fk' | 'ik' }>).detail;
+      const detail = (e as CustomEvent<{ actorId?: string; boneName?: HumanoidBone | null; bone?: HumanoidBone | null; mode?: 'fk' | 'ik' }>).detail;
       if (!detail) return;
+      const resolvedBone = detail.boneName ?? detail.bone ?? null;
       if (detail.actorId && detail.actorId !== selectedActorId) {
         setSelectedActorId(detail.actorId);
       }
@@ -4352,12 +4339,12 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       if (detail.mode) {
         setPosingMode(detail.mode);
         posingModeRef.current = detail.mode;
-      } else if (detail.boneName) {
+      } else if (resolvedBone) {
         setPosingMode('fk');
         posingModeRef.current = 'fk';
       }
-      setSelectedBone(detail.boneName);
-      selectedBoneRef.current = detail.boneName;
+      setSelectedBone(resolvedBone);
+      selectedBoneRef.current = resolvedBone;
     };
     window.addEventListener('cmpvs:ground-actor-feet', onGroundFeet);
     window.addEventListener('cmpvs:reset-actor-pose', onResetPose);

@@ -125,6 +125,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
 
   // Generated .GLB Result & Viewport Controls
   const [generatedResult, setGeneratedResult] = useState<Comfy3DGenerationResult | null>(null);
+  const [previewUnlocked, setPreviewUnlocked] = useState(false);
   const [isWireframe, setIsWireframe] = useState(false);
   const [autoSpin, setAutoSpin] = useState(true);
   const [appliedSuccess, setAppliedSuccess] = useState(false);
@@ -324,6 +325,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       renderer = new THREE.WebGLRenderer({
         antialias: true,
         alpha: true,
+        preserveDrawingBuffer: true,
         powerPreference: 'default',
       });
     } catch (err) {
@@ -335,7 +337,9 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     scene.background = new THREE.Color(0x090c14);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(38, w / h, 0.1, 100);
+    const camera = new THREE.PerspectiveCamera(38, w / h, 0.1, 1000);
+    camera.layers.enable(0);
+    camera.layers.enable(1);
     cameraRef.current = camera;
 
     renderer.setSize(w, h);
@@ -343,6 +347,8 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     renderer.shadowMap.enabled = false;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.15;
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.inset = '0';
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
     renderer.domElement.style.display = 'block';
@@ -417,21 +423,15 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         loadedSceneRef.current = loaded.scene;
 
         loaded.scene.updateMatrixWorld(true);
-        const rawBox = new THREE.Box3().setFromObject(loaded.scene);
-        if (!rawBox.isEmpty()) {
-          const rawCenter = rawBox.getCenter(new THREE.Vector3());
-          loaded.scene.position.x -= rawCenter.x;
-          loaded.scene.position.z -= rawCenter.z;
-          loaded.scene.position.y -= rawBox.min.y;
-          loaded.scene.updateMatrixWorld(true);
-        }
-
-        const box = new THREE.Box3().setFromObject(loaded.scene);
-        const center = box.getCenter(new THREE.Vector3());
-        const size = box.getSize(new THREE.Vector3());
-        const maxDim = Math.max(size.x, size.y, size.z, 1.0);
-        orbitRef.current.radius = maxDim * 1.65;
-        targetLookAtRef.current.copy(center);
+        const size = loaded.size || new THREE.Vector3(1.0, 2.0, 1.0);
+        const center = loaded.center || new THREE.Vector3(0, 1.0, 0);
+        const maxDim = THREE.MathUtils.clamp(Math.max(size.x, size.y, size.z, 1.8), 1.6, 3.6);
+        orbitRef.current.radius = maxDim * 1.55;
+        targetLookAtRef.current.set(
+          THREE.MathUtils.clamp(center.x, -1.0, 1.0),
+          THREE.MathUtils.clamp(center.y, 0.75, 1.35),
+          THREE.MathUtils.clamp(center.z, -1.0, 1.0)
+        );
         updateCamera();
 
         // Automatically fit skeleton & volumetric skin weights
@@ -445,6 +445,9 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
         });
         setRigOverlayVisible(loaded.scene, showBonesRef.current, true);
         setRigInfo(rigRes);
+        try {
+          renderer.render(scene, camera);
+        } catch {}
 
         // If the user did not manually force a category, sync actorCategory & default name with the 3D geometry detection
         if (!userManuallySelectedCategoryRef.current) {
@@ -663,7 +666,7 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
       if (nw > 0 && nh > 0) {
         camera.aspect = nw / nh;
         camera.updateProjectionMatrix();
-        renderer.setSize(nw, nh);
+        renderer.setSize(nw, nh, false);
       }
     });
     ro.observe(container);
@@ -756,11 +759,58 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   }, [isWireframe]);
 
   // Once a 3D object is created, lock its creation inputs (mode, prompt, image, engine settings)
-  const isCreationLocked = Boolean(generatedResult);
+  const isCreationLocked = Boolean(generatedResult) && !previewUnlocked;
+
+  useEffect(() => {
+    const onPreviewGlb = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      if (detail.openStudio !== false) {
+        useAssetLibraryStore.getState().closeLibrary();
+        useAssetLibraryStore.getState().open3DStudio({
+          initialMode: detail.generationMode || 'image-to-3d',
+          initialImageUrl: detail.referenceImageUrl,
+          initialPrompt: detail.textPrompt,
+        });
+      }
+      if (!detail.blobUrl) return;
+      if (detail.generationMode) setGenerationMode(detail.generationMode);
+      if (detail.textPrompt !== undefined) setTextPrompt(detail.textPrompt);
+      if (detail.actorName) setActorName(detail.actorName);
+      if (detail.actorCategory) {
+        userManuallySelectedCategoryRef.current = true;
+        setActorCategory(detail.actorCategory);
+      }
+      if (detail.referenceImageUrl !== undefined) setReferenceImageUrl(detail.referenceImageUrl);
+      if (detail.rigType) setRigType(detail.rigType);
+      if (detail.showBones !== undefined) setShowBones(Boolean(detail.showBones));
+      if (detail.showBonePoseEditor !== undefined) setShowBonePoseEditor(Boolean(detail.showBonePoseEditor));
+      if (detail.showLandmarkEditor !== undefined) setShowLandmarkEditor(Boolean(detail.showLandmarkEditor));
+      if (detail.previewMotion) setPreviewMotion(detail.previewMotion);
+      if (detail.autoSpin !== undefined) setAutoSpin(Boolean(detail.autoSpin));
+      setPreviewUnlocked(Boolean(detail.previewUnlocked));
+      setGeneratedResult({
+        modelId: detail.modelId || 'preview-3d-glb',
+        modelUri: `model://${detail.modelId || 'preview-3d-glb'}`,
+        blobUrl: detail.blobUrl,
+        glbFile: new File([], detail.filename || 'Tactical_Soldier_Rigged.glb', { type: 'model/gltf-binary' }),
+        filename: detail.filename || 'Tactical_Soldier_Rigged.glb',
+        sizeBytes: detail.sizeBytes || 2248192,
+        vertexCount: detail.vertexCount || 7432,
+        triangleCount: detail.triangleCount || 11840,
+        bboxSize: { x: 0.85, y: 1.82, z: 0.45 },
+        engineUsed: detail.engineUsed || 'pixal3d',
+        qualityUsed: detail.qualityUsed || 'full_pbr',
+        generationModeUsed: detail.generationMode || 'image-to-3d',
+      });
+    };
+    window.addEventListener('cmpvs:preview-glb-in-3d-studio', onPreviewGlb);
+    return () => window.removeEventListener('cmpvs:preview-glb-in-3d-studio', onPreviewGlb);
+  }, []);
 
   // Reset Studio to start a brand-new 3D object
   const handleStartNew3DObject = () => {
     setGeneratedResult(null);
+    setPreviewUnlocked(false);
     setRigInfo(null);
     setCustomLandmarks(null);
     setGenerationError(null);

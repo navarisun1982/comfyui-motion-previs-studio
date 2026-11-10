@@ -1,7 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { createDefaultShotSpec } from '../src/types/shotspec';
 import { analyzeShotPovVisibility } from '../src/engine/povVisibilityEngine';
-import { compileLtxPrompt, compileMiniMaxPrompt, compileSeedancePrompt, formatCameraMovement } from '../src/engine/promptCompiler';
+import {
+  compileLtxPrompt,
+  compileMiniMaxPrompt,
+  compileSeedancePrompt,
+  formatCameraMovement,
+  isCustomPromptCoherentWithShot,
+} from '../src/engine/promptCompiler';
+import { useShotStore } from '../src/stores/useShotStore';
 
 describe('Universal 6-DoF Kinematic & Camera-Relative POV Prompt Engine', () => {
   it('suppresses preset camera movement name (e.g. dolly-in) when customTrajectory or camera keyframes are active', () => {
@@ -172,6 +179,121 @@ describe('Universal 6-DoF Kinematic & Camera-Relative POV Prompt Engine', () => 
     expect(minimax.temporalBeats?.[2].cameraAction.toLowerCase()).not.toContain('smoothly decelerates');
     expect(minimax.positivePrompt).toContain('Completely supplants the entire 3D previz background, terrain, and stage geometry in <Video 1>');
     expect(minimax.positivePrompt).toContain('without any synthetic 3D previz geometry or keyframe rigidity');
+  });
+
+  it('purges all old preset leftovers (Agent Kael, plasma katana, Drone Crimson Searchlight) across all 3 video models even when actor-kael-lead ID is reused', () => {
+    const shot = createDefaultShotSpec({
+      sceneDescription:
+        'Rain-drenched Neo-Tokyo rooftop helipad at night. Cyber-Ronin Agent Kael charges from stage left with a glowing cyan plasma katana slash while an autonomous Hunter-Killer Attack Drone swoops down.',
+      environment: {
+        id: 'env-coastal-beach',
+        name: 'Coastal Sandy Beach & Ocean Shoreline',
+        nameAr: 'شاطئ رملي ساحلي وموج البحر',
+        category: 'coastal-beach',
+        weather: 'clear',
+        timeOfDay: 'day',
+        groundSurface: 'sand-dunes',
+        fogDensity: 0.01,
+        fogColor: '#bae6fd',
+        skyColor: '#38bdf8',
+        groundColor: '#fde68a',
+        ambientColor: '#fef3c7',
+        promptDescription:
+          'sunlit coastal sandy beach with gentle turquoise ocean surf, warm golden sand dunes, and bright coastal horizon',
+        visibleInPrevis: true,
+      },
+      lighting: {
+        style: 'neon-cyberpunk',
+        direction: 'side-key',
+        contrast: 'high-contrast',
+        lights: [
+          {
+            id: 'lgt-01a-crimson',
+            name: 'Drone Crimson Searchlight',
+            position: { x: 74, y: 38, z: 68 },
+            color: '#f43f5e',
+            intensity: 3.8,
+            enabled: true,
+          },
+          {
+            id: 'lgt-01a-cyan',
+            name: 'Cyan Rooftop Helipad Key',
+            position: { x: 24, y: 62, z: 48 },
+            color: '#06b6d4',
+            intensity: 3.5,
+            enabled: true,
+          },
+        ],
+      },
+      actors: [
+        {
+          // Deliberately reuse `actor-kael-lead` ID as Mocap Studio does when updating the lead slot
+          id: 'actor-kael-lead',
+          name: 'Man',
+          kind: 'human',
+          token: 'adult man in casual coastal jacket and trousers',
+          actionDescription: 'walking forward naturally along the sandy beach shoreline',
+          trajectory: {
+            startTimeSeconds: 0,
+            startPosition: { x: 47, y: 45, z: 0 },
+            endPosition: { x: 47, y: 58, z: 0 },
+          },
+        },
+        {
+          id: 'mocap-person-2',
+          name: 'Woman',
+          kind: 'human',
+          token: 'young woman in summer beachwear',
+          actionDescription: 'walking alongside the man on the beach',
+          trajectory: {
+            startTimeSeconds: 0,
+            startPosition: { x: 53, y: 45, z: 0 },
+            endPosition: { x: 53, y: 58, z: 0 },
+          },
+        },
+      ],
+    });
+
+    const ltx = compileLtxPrompt(shot);
+    const minimax = compileMiniMaxPrompt(shot);
+    const seedance = compileSeedancePrompt(shot);
+
+    for (const bundle of [ltx, minimax, seedance]) {
+      const p = bundle.positivePrompt.toLowerCase();
+      expect(p).toContain('man');
+      expect(p).toContain('woman');
+      expect(p).toContain('coastal sandy beach');
+      expect(p).not.toContain('agent kael');
+      expect(p).not.toContain('cyber-ronin');
+      expect(p).not.toContain('plasma katana');
+      expect(p).not.toContain('neo-tokyo');
+      expect(p).not.toContain('drone crimson searchlight');
+      expect(p).not.toContain('cyan rooftop helipad key');
+      expect(p).not.toContain('hunter-killer');
+    }
+
+    // Verify isCustomPromptCoherentWithShot rejects any stale prompt containing old preset leftovers
+    expect(
+      isCustomPromptCoherentWithShot(
+        'Cinematic shot of Cyber-Ronin Agent Kael with a glowing cyan plasma katana under Drone Crimson Searchlight.',
+        shot
+      )
+    ).toBe(false);
+    expect(isCustomPromptCoherentWithShot(ltx.positivePrompt, shot)).toBe(true);
+    expect(isCustomPromptCoherentWithShot(minimax.positivePrompt, shot)).toBe(true);
+    expect(isCustomPromptCoherentWithShot(seedance.positivePrompt, shot)).toBe(true);
+
+    // Verify useShotStore invalidates customPositivePrompts across all 3 engines whenever the 3D scene is mutated
+    const store = useShotStore.getState();
+    store.resetToDefault();
+    store.setCustomPositivePrompt('ltx-2.5', 'Custom locked LTX prompt');
+    store.setCustomPositivePrompt('minimax-h3', 'Custom locked MiniMax prompt');
+    store.setCustomPositivePrompt('seedance', 'Custom locked Seedance prompt');
+    expect(useShotStore.getState().shot.customPositivePrompts?.['ltx-2.5']).toBe('Custom locked LTX prompt');
+
+    // Mutating actors or environment clears customPositivePrompts so all 3 engines recompile fresh scene-only prompts
+    store.addActor('Beach Umbrella', 'prop');
+    expect(useShotStore.getState().shot.customPositivePrompts).toEqual({});
   });
 });
 
