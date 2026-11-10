@@ -49,10 +49,10 @@ Directing AI video by typing text prompts alone is like directing a movie blindf
 
 ## 🎬 Live Studio Demo Video
 
-[![ComfyUI Motion Previs Studio — Full Demo Video](docs/demo/Comfy-AI-Director-Demo-Cover.jpg)](https://github.com/navarisun1982/comfyui-motion-previs-studio/raw/master/docs/demo/Comfy-AI-Director-Demo.mp4)
+[![ComfyUI Motion Previs Studio — Full Demo Video](docs/demo/Comfy-AI-Director-Demo-Cover.jpg)](https://navarisun1982.github.io/comfyui-motion-previs-studio/demo/Comfy-AI-Director-Demo.mp4)
 
 <p align="center">
-  <a href="https://github.com/navarisun1982/comfyui-motion-previs-studio/raw/master/docs/demo/Comfy-AI-Director-Demo.mp4"><strong>🎬 Download / Watch Full 1080p Studio Demo Video (.MP4 with Audio)</strong></a>
+  <a href="https://navarisun1982.github.io/comfyui-motion-previs-studio/demo/Comfy-AI-Director-Demo.mp4"><strong>🎬 Watch Full 1080p Studio Demo Video (.MP4 Stream with Audio)</strong></a>
 </p>
 
 ---
