@@ -13,7 +13,6 @@ import {
   Settings,
   AlertTriangle,
   Dice5,
-  FolderOpen,
   RotateCw,
   FileCode,
   Lock,
@@ -53,8 +52,6 @@ import {
 } from '../services/comfy3dGenerator';
 import {
   ensure3DWorkflowsSyncedToComfyUI,
-  listLocalComfyWorkflows,
-  normalizeWorkflowUrl,
 } from '../pipeline/customWorkflowResolver';
 
 export interface AIGenerator3DProps {
@@ -110,12 +107,9 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
   const [seed, setSeed] = useState<number>(42);
 
   // Custom Local 3D Workflow URL / .JSON
-  const [workflowSource, setWorkflowSource] = useState<'builtin' | 'custom'>('builtin');
-  const [customWorkflowUrl, setCustomWorkflowUrl] = useState<string>('');
-  const [customWorkflowJson, setCustomWorkflowJson] = useState<string>('');
-  const [customWorkflowLabel, setCustomWorkflowLabel] = useState<string>('');
-  const [localWorkflows, setLocalWorkflows] = useState<string[]>([]);
-  const [isScanningLocal, setIsScanningLocal] = useState<boolean>(false);
+  const [workflowSource] = useState<'builtin' | 'custom'>('builtin');
+  const [customWorkflowJson] = useState<string>('');
+  const [customWorkflowLabel] = useState<string>('');
 
   // Generation State
   const [isGenerating, setIsGenerating] = useState(false);
@@ -256,60 +250,6 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
     if (!file) return;
     applyUploadedImageFile(file);
     e.target.value = '';
-  };
-
-  // Load Custom 3D Workflow from Local URL / Local File Path
-  const handleLoadCustomWorkflowUrl = async (targetUrl?: string) => {
-    const raw = (targetUrl ?? customWorkflowUrl).trim();
-    if (!raw) {
-      setGenerationError('Please enter a local ComfyUI 3D workflow URL or file path (.json).');
-      return;
-    }
-    setGenerationError(null);
-    try {
-      const normalized = normalizeWorkflowUrl(raw);
-      const res = await fetch(normalized);
-      if (!res.ok) {
-        throw new Error(`Failed to load local 3D workflow (HTTP ${res.status}).`);
-      }
-      const text = await res.text();
-      JSON.parse(text);
-      setCustomWorkflowJson(text);
-      setCustomWorkflowUrl(raw);
-      setCustomWorkflowLabel(raw.split(/[\\/]/).pop() || 'custom_3d_workflow.json');
-    } catch (err: any) {
-      setGenerationError(err?.message || 'Could not load custom 3D workflow JSON.');
-    }
-  };
-
-  const handleUploadCustomWorkflowFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setGenerationError(null);
-    try {
-      const text = await file.text();
-      JSON.parse(text);
-      setCustomWorkflowJson(text);
-      setCustomWorkflowUrl(file.name);
-      setCustomWorkflowLabel(file.name);
-    } catch (err: any) {
-      setGenerationError(`Invalid workflow JSON in ${file.name}: ${err?.message || 'parse error'}`);
-    } finally {
-      e.target.value = '';
-    }
-  };
-
-  const handleScanLocalComfyWorkflows = async () => {
-    setIsScanningLocal(true);
-    setGenerationError(null);
-    try {
-      const list = await listLocalComfyWorkflows();
-      setLocalWorkflows(list);
-    } catch (err: any) {
-      setGenerationError(err?.message || 'Could not scan local ComfyUI workflows.');
-    } finally {
-      setIsScanningLocal(false);
-    }
   };
 
   // Initialize Three.js interactive preview ONLY when a generated .GLB is ready
@@ -1513,180 +1453,79 @@ export const AIGenerator3D: React.FC<AIGenerator3DProps> = ({
                 <span className="text-[11px] font-bold text-indigo-200 uppercase tracking-wider">
                   4. ComfyUI 3D Engine &amp; Mesh Settings
                 </span>
-                <div className="flex rounded-lg bg-black/60 p-0.5 border border-white/10 text-[10px]">
+              </div>
+
+              {/* Model Switch: Pixal3D vs. TRELLIS.2 */}
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400">
+                  3D Diffusion Model (Installed in <code className="text-slate-300">D:\ComfyUI\models\</code>)
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
                   <button
                     type="button"
-                    disabled={isCreationLocked || isGenerating}
-                    onClick={() => setWorkflowSource('builtin')}
-                    className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${workflowSource === 'builtin'
-                        ? 'bg-indigo-600 text-white'
-                        : 'text-slate-400 hover:text-white'
+                    onClick={() => setEngineMode('pixal3d')}
+                    className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${engineMode === 'pixal3d'
+                        ? 'bg-indigo-600/30 border-indigo-400 text-white shadow'
+                        : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
                       }`}
                   >
-                    {generationMode === 'text-to-3d' ? 'Built-in (#e7a9555b)' : 'Built-in (#aa77013b)'}
+                    <div className="font-bold text-[11px] text-indigo-200">⚡ Pixal3D INT8</div>
+                    <div className="text-[9.5px] text-slate-400 truncate">
+                      + MoGe Camera FoV Depth
+                    </div>
                   </button>
                   <button
                     type="button"
-                    disabled={isCreationLocked || isGenerating}
-                    onClick={() => setWorkflowSource('custom')}
-                    className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${workflowSource === 'custom'
-                        ? 'bg-cyan-500 text-black font-bold'
-                        : 'text-slate-400 hover:text-white'
+                    onClick={() => setEngineMode('trellis2')}
+                    className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${engineMode === 'trellis2'
+                        ? 'bg-cyan-600/30 border-cyan-400 text-white shadow'
+                        : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
                       }`}
                   >
-                    Custom 3D .JSON
+                    <div className="font-bold text-[11px] text-cyan-200">🧊 TRELLIS.2 INT8</div>
+                    <div className="text-[9.5px] text-slate-400 truncate">
+                      Direct Voxel-to-Mesh
+                    </div>
                   </button>
                 </div>
               </div>
 
-              {workflowSource === 'custom' ? (
-                <div className="space-y-2 pt-1 border-t border-white/10">
-                  <div className="text-[10px] text-slate-300">
-                    Load any local ComfyUI 3D workflow (e.g. <code className="text-cyan-300">StableFast3D_to_Mesh.json</code> or custom local URL/path):
-                  </div>
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      value={customWorkflowUrl}
-                      onChange={(e) => setCustomWorkflowUrl(e.target.value)}
-                      placeholder="D:\ComfyUI\custom_nodes\ComfyUI-3D-Pack\_Example_Workflows\StableFast3D_to_Mesh.json"
-                      className="flex-1 rounded-lg bg-black/70 border border-white/15 px-2.5 py-1.5 text-[10.5px] text-white placeholder-slate-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleLoadCustomWorkflowUrl()}
-                      className="px-2.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-[10px] cursor-pointer shrink-0"
-                    >
-                      Load
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleLoadCustomWorkflowUrl(
-                          'D:\\ComfyUI\\custom_nodes\\ComfyUI-3D-Pack\\_Example_Workflows\\StableFast3D_to_Mesh.json'
-                        )
-                      }
-                      className="px-2 py-1 rounded bg-white/10 hover:bg-white/15 text-[10px] text-cyan-200 border border-cyan-500/30 cursor-pointer"
-                    >
-                      ⚡ Load Installed StableFast3D_to_Mesh.json
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleScanLocalComfyWorkflows}
-                      disabled={isScanningLocal}
-                      className="flex items-center gap-1 px-2 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-[10px] text-indigo-200 border border-indigo-400/30 cursor-pointer"
-                    >
-                      <FolderOpen className="h-3 w-3" />
-                      <span>{isScanningLocal ? 'Scanning...' : 'Scan Local ComfyUI'}</span>
-                    </button>
-                    <label className="flex items-center gap-1 px-2 py-1 rounded bg-white/10 hover:bg-white/15 text-[10px] text-slate-200 border border-white/15 cursor-pointer">
-                      <Upload className="h-3 w-3 text-cyan-300" />
-                      <span>Upload .JSON</span>
-                      <input
-                        type="file"
-                        accept=".json,application/json"
-                        onChange={handleUploadCustomWorkflowFile}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-                  {localWorkflows.length > 0 && (
-                    <div className="flex flex-wrap gap-1 pt-1">
-                      {localWorkflows.map((wf) => (
-                        <button
-                          key={wf}
-                          type="button"
-                          onClick={() => handleLoadCustomWorkflowUrl(wf)}
-                          className="px-1.5 py-0.5 rounded bg-indigo-500/20 hover:bg-cyan-500/30 text-[9.5px] text-indigo-100 border border-indigo-400/30 cursor-pointer"
-                        >
-                          📄 {wf}
-                        </button>
-                      ))}
+              {/* Quality Mode: Fast Vertex-Color vs. Full PBR */}
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400">Mesh &amp; Texture Baking Mode</label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setQualityMode('fast_vertex')}
+                    className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${qualityMode === 'fast_vertex'
+                        ? 'bg-emerald-600/25 border-emerald-400 text-white'
+                        : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
+                      }`}
+                  >
+                    <div className="font-bold text-[11px] text-emerald-300">
+                      🚀 Fast Vertex-Color
                     </div>
-                  )}
-                  {customWorkflowLabel && (
-                    <div className="text-[10px] text-emerald-300 font-semibold">
-                      ✓ Active Custom 3D Workflow: {customWorkflowLabel}
+                    <div className="text-[9.5px] text-slate-400 truncate">
+                      Skips slow UV/Normal bake
                     </div>
-                  )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQualityMode('full_pbr')}
+                    className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${qualityMode === 'full_pbr'
+                        ? 'bg-amber-600/25 border-amber-400 text-white'
+                        : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
+                      }`}
+                  >
+                    <div className="font-bold text-[11px] text-amber-300">
+                      🎨 Full PBR UV-Baked
+                    </div>
+                    <div className="text-[9.5px] text-slate-400 truncate">
+                      Base + Normal + AO + Roughness
+                    </div>
+                  </button>
                 </div>
-              ) : (
-                <>
-                  {/* Model Switch: Pixal3D vs. TRELLIS.2 */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-slate-400">
-                      3D Diffusion Model (Installed in <code className="text-slate-300">D:\ComfyUI\models\</code>)
-                    </label>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setEngineMode('pixal3d')}
-                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${engineMode === 'pixal3d'
-                            ? 'bg-indigo-600/30 border-indigo-400 text-white shadow'
-                            : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
-                          }`}
-                      >
-                        <div className="font-bold text-[11px] text-indigo-200">⚡ Pixal3D INT8</div>
-                        <div className="text-[9.5px] text-slate-400 truncate">
-                          + MoGe Camera FoV Depth
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEngineMode('trellis2')}
-                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${engineMode === 'trellis2'
-                            ? 'bg-cyan-600/30 border-cyan-400 text-white shadow'
-                            : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
-                          }`}
-                      >
-                        <div className="font-bold text-[11px] text-cyan-200">🧊 TRELLIS.2 INT8</div>
-                        <div className="text-[9.5px] text-slate-400 truncate">
-                          Direct Voxel-to-Mesh
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Quality Mode: Fast Vertex-Color vs. Full PBR */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] text-slate-400">Mesh &amp; Texture Baking Mode</label>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setQualityMode('fast_vertex')}
-                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${qualityMode === 'fast_vertex'
-                            ? 'bg-emerald-600/25 border-emerald-400 text-white'
-                            : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
-                          }`}
-                      >
-                        <div className="font-bold text-[11px] text-emerald-300">
-                          🚀 Fast Vertex-Color
-                        </div>
-                        <div className="text-[9.5px] text-slate-400 truncate">
-                          Skips slow UV/Normal bake
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setQualityMode('full_pbr')}
-                        className={`p-2 rounded-lg border text-left transition-all cursor-pointer ${qualityMode === 'full_pbr'
-                            ? 'bg-amber-600/25 border-amber-400 text-white'
-                            : 'bg-black/50 border-white/10 text-slate-400 hover:text-white'
-                          }`}
-                      >
-                        <div className="font-bold text-[11px] text-amber-300">
-                          🎨 Full PBR UV-Baked
-                        </div>
-                        <div className="text-[9.5px] text-slate-400 truncate">
-                          Base + Normal + AO + Roughness
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
+              </div>
 
               {/* Background Removal Toggle + Texture Resolution + Seed */}
               <div className="grid grid-cols-3 gap-2 pt-1">
