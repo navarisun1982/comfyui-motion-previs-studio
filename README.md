@@ -99,6 +99,9 @@ flowchart LR
 ---
 
 ### 2. 🕺 3D Video Mocap & Camera Tracking Studio (`Real SMPL Body` vs. `Mixamo Y-Bot`)
+
+![3D Video Mocap & Camera Tracking Studio](docs/screenshots/feat-02-video-mocap-studio.jpg)
+
 **How it helps you:** Have a real-life video clip with great acting or camera movement? Upload any RGB video (up to 30 seconds) and convert the people, camera motion, and surrounding buildings into an editable 3D scene on your stage.
 - **Multi-Person 3D Motion Capture (`1..N` Actors)**: Automatically detects and tracks multiple people moving in 3D depth space—even when they cross paths.
 - **User Choice of 3D Character Mesh**:
