@@ -231,7 +231,9 @@ export function safeSetItem<T>(key: string, value: T): boolean {
         if (rawRevs && rawRevs.length > 250_000) {
           const parsedRevs = JSON.parse(rawRevs);
           if (Array.isArray(parsedRevs)) {
-            const slimRevs = parsedRevs.slice(-15).map((r: any) =>
+            // Revisions are stored newest-first (`[revision, ...existing]` in useHistoryStore),
+            // so `.slice(0, 15)` retains the 15 most recent takes rather than the oldest.
+            const slimRevs = parsedRevs.slice(0, 15).map((r: any) =>
               r?.shotSpec
                 ? {
                     ...r,
@@ -293,3 +295,18 @@ export function safeRemoveItem(key: string): boolean {
     return false;
   }
 }
+
+/**
+ * Confirmation guard for destructive UI actions (deleting scenes, shots, or wiping all stage actors).
+ */
+export function confirmDestructiveAction(message: string): boolean {
+  if (typeof window === 'undefined' || typeof window.confirm !== 'function') {
+    return true;
+  }
+  try {
+    return window.confirm(message);
+  } catch {
+    return true;
+  }
+}
+

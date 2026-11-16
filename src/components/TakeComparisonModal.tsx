@@ -116,18 +116,23 @@ export const TakeComparisonModal: React.FC<TakeComparisonModalProps> = ({
     }
   };
 
-  // Keyboard shortcut: Space to toggle play
+  // Keyboard shortcut: Space to toggle play, Escape to close without leaking to hidden 3D stage
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space') {
+        const tag = (document.activeElement as HTMLElement | null)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
         e.preventDefault();
+        e.stopPropagation();
         togglePlay();
       } else if (e.code === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
         onClose();
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [togglePlay, onClose]);
 
   // Split view dragging
@@ -187,7 +192,12 @@ export const TakeComparisonModal: React.FC<TakeComparisonModalProps> = ({
   const diffItems = computeShotDiff(currentTakeA.shotSpec, currentTakeB.shotSpec);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="A/B Take Comparison"
+      className="fixed inset-0 z-[105] flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-200"
+    >
       <div className="flex h-full max-h-[92vh] w-full max-w-6xl flex-col rounded-2xl border border-white/10 bg-director-darkest shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-director-border px-5 py-3.5 bg-black/40">

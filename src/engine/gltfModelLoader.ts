@@ -6,6 +6,11 @@ import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { getModelBuffer, getModelIdFromUrl, storeModelBuffer } from '../services/modelStorage';
 
 const dracoLoader = new DRACOLoader();
+dracoLoader.setDecoderPath(
+  typeof window !== 'undefined' && window.location?.protocol?.startsWith('file:')
+    ? './draco/'
+    : '/draco/'
+);
 const gltfLoader = new GLTFLoader();
 gltfLoader.setDRACOLoader(dracoLoader);
 if (MeshoptDecoder) {

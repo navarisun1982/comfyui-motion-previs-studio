@@ -131,13 +131,12 @@ const ltxFirstFramePatcher: TimelinePatcher = {
     const guideVideoStrength = Number(Math.max(0.2, Math.min(0.52, effectiveStrength * 0.55)).toFixed(2));
     const guideAttnStrength = Number(Math.max(0.12, Math.min(0.32, effectiveStrength * 0.3)).toFixed(2));
 
+    const refsEnabled = ctx.referenceMode !== 'OFF' && hasAnyRef;
+
     if (ctx.mode === 'control' && ctx.controlVideoFile) {
-      result.reference_mode =
-        ctx.referenceMode === 'OFF' || ctx.referenceMode === 'ON'
-          ? 'OFF'
-          : hasAnyRef
-          ? 'Ghost Mask (End)'
-          : 'OFF';
+      // In Layout-to-Render control mode (where msr_lora defaults to "none"), Ghost Mask (End)
+      // conflicts with motionSegments; style & identity are anchored via frame-0 image + @ref1..4 characters.
+      result.reference_mode = 'OFF';
       result.retakeVideo = null;
       result.retakeMode = false;
       result.motionTrackEnabled = true;
@@ -156,9 +155,9 @@ const ltxFirstFramePatcher: TimelinePatcher = {
         },
       ];
 
-      // When Reference Mode is explicitly ON and a reference image is provided, anchor style via
+      // When Reference Mode is enabled and a reference image is provided, anchor style via
       // a frame-0 image segment (cropped cleanly by LTXDirectorCropGuidesCS25 without requiring MSR LoRA).
-      if (ctx.referenceMode === 'ON' && hasAnyRef) {
+      if (ctx.referenceMode === 'ON' && refsEnabled) {
         const primaryRefFile = refFiles.find((f) => typeof f === 'string' && f.trim().length > 0)?.trim();
         const hasStartImage = Array.isArray(result.segments) &&
           result.segments.some((s) => isPlainObject(s) && s.type === 'image' && (s.start === 0 || s.start === '0'));
@@ -176,7 +175,14 @@ const ltxFirstFramePatcher: TimelinePatcher = {
       }
     }
 
-    if (hasAnyRef) {
+    if (ctx.referenceMode === 'OFF') {
+      result.reference_mode = 'OFF';
+      if (Array.isArray(data.characters)) {
+        result.characters = data.characters.map((ch) =>
+          isPlainObject(ch) ? { ...ch, images: [] } : { images: [], description: '' }
+        );
+      }
+    } else if (refsEnabled) {
       const existingChars = Array.isArray(data.characters) ? [...data.characters] : [];
       const nextChars = [0, 1, 2, 3, 4].map((idx) => {
         const existing = isPlainObject(existingChars[idx]) ? { ...existingChars[idx] } : { images: [], description: '' };
@@ -201,11 +207,8 @@ const ltxFirstFramePatcher: TimelinePatcher = {
         };
       });
       result.characters = nextChars;
-      if (ctx.referenceMode === 'OFF' || ctx.referenceMode === 'ON') {
-        result.reference_mode = 'OFF';
-      } else {
-        result.reference_mode = 'Ghost Mask (End)';
-      }
+      result.reference_mode =
+        ctx.mode === 'control' && ctx.referenceMode === 'ON' ? 'OFF' : 'Ghost Mask (End)';
     }
 
     return result;

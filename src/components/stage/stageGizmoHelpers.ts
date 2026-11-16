@@ -2,31 +2,46 @@ import * as THREE from 'three';
 import { setLayerRecursively } from '../../engine/staging/environmentBuilder';
 
 /**
- * Cleanly disposes of a Three.js Object3D hierarchy, its geometries and materials
+ * Cleanly disposes of a Three.js Object3D hierarchy, including Meshes, Lines, Points, Sprites,
+ * material textures, and Light shadow-map render targets, while preserving `userData.shared` assets.
  */
 export function disposeObject3D(obj: THREE.Object3D): void {
+  const disposeMaterial = (m: THREE.Material | undefined | null) => {
+    if (!m || m.userData?.shared) return;
+    Object.keys(m).forEach((prop) => {
+      const val = (m as any)[prop];
+      if (val && typeof val === 'object' && typeof val.dispose === 'function' && !val.userData?.shared) {
+        val.dispose();
+      }
+    });
+    m.dispose();
+  };
+
   obj.traverse((child) => {
-    if ((child as THREE.Mesh).isMesh) {
-      const mesh = child as THREE.Mesh;
-      mesh.geometry?.dispose();
-      if (Array.isArray(mesh.material)) {
-        mesh.material.forEach((m) => {
-          Object.keys(m).forEach((prop) => {
-            const val = (m as any)[prop];
-            if (val && typeof val === 'object' && typeof val.dispose === 'function') {
-              val.dispose();
-            }
-          });
-          m.dispose();
-        });
-      } else if (mesh.material) {
-        Object.keys(mesh.material).forEach((prop) => {
-          const val = (mesh.material as any)[prop];
-          if (val && typeof val === 'object' && typeof val.dispose === 'function') {
-            val.dispose();
-          }
-        });
-        mesh.material.dispose();
+    if ((child as THREE.Light).isLight) {
+      const lightWithShadow = child as THREE.Light & { shadow?: THREE.LightShadow };
+      if (lightWithShadow.shadow?.map) {
+        lightWithShadow.shadow.map.dispose();
+        lightWithShadow.shadow.map = null;
+      }
+    }
+
+    const renderable = child as THREE.Mesh | THREE.Line | THREE.Points | THREE.Sprite;
+    if (
+      (renderable as THREE.Mesh).isMesh ||
+      (renderable as THREE.Line).isLine ||
+      (renderable as THREE.Points).isPoints ||
+      (renderable as THREE.Sprite).isSprite
+    ) {
+      const geom = (renderable as THREE.Mesh).geometry;
+      if (geom && !geom.userData?.shared) {
+        geom.dispose();
+      }
+      const mat = renderable.material;
+      if (Array.isArray(mat)) {
+        mat.forEach((m) => disposeMaterial(m));
+      } else {
+        disposeMaterial(mat);
       }
     }
   });

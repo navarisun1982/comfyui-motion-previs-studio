@@ -50,6 +50,11 @@ interface HistoryState {
   toggleCircledTake: (id: string) => void;
   setTakeRating: (id: string, rating: number) => void;
   setTakeMotionFidelity: (id: string, analysis: MotionFidelityAnalysis) => void;
+  setTakeSteeringLineage: (
+    id: string,
+    steeredFromTakeId?: string,
+    steeringPatch?: ShotRevisionV2['steeringPatch']
+  ) => void;
   getTakesForShot: (shotId: string) => ShotRevision[];
   deleteRevision: (id: string) => void;
   clearHistory: () => void;
@@ -216,6 +221,14 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
       );
       return { ...r, motionFidelity: analysis };
     });
+    set({ revisions: updated });
+    persistRevisions(updated);
+  },
+
+  setTakeSteeringLineage: (id, steeredFromTakeId, steeringPatch) => {
+    const updated = get().revisions.map((r) =>
+      r.id === id ? { ...r, steeredFromTakeId, steeringPatch } : r
+    );
     set({ revisions: updated });
     persistRevisions(updated);
   },

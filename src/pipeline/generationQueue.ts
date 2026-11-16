@@ -14,15 +14,24 @@ export interface QueueItem {
   engine: EngineId;
   mode: GenerationMode;
   profile: QualityProfile;
+  templateId?: string;
   seed: number;
   prompt: string;
   negative: string;
+  promptSource?: 'compiled' | 'ai' | 'manual';
   firstFrameFilename?: string;
   firstFrameBlob?: Blob;
   controlVideoBlob?: Blob;
   controlVideoFilename?: string;
+  refImageBlobs?: Array<Blob | File | null>;
+  refImageFilenames?: [string, string, string, string];
+  refImageDescriptions?: [string, string, string, string];
   icLora?: string;
   icLoraStrength?: number;
+  steps?: number;
+  firstPassScale?: number;
+  referenceMode?: 'OFF' | 'ON';
+  onTakeCompleted?: (revisionId: string, videoUrl: string, filename: string, item: QueueItem) => void;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   progress: number;
   currentNodeTitle?: string;
@@ -41,8 +50,10 @@ export interface EnqueueBatchParams {
   engine: EngineId;
   mode: GenerationMode;
   profile: QualityProfile;
+  templateId?: string;
   prompt: string;
   negative: string;
+  promptSource?: 'compiled' | 'ai' | 'manual';
   baseSeed?: number;
   count: number;
   seedStrategy: 'random' | 'sequential';
@@ -50,10 +61,17 @@ export interface EnqueueBatchParams {
   firstFrameBlob?: Blob;
   controlVideoBlob?: Blob;
   controlVideoFilename?: string;
+  refImageBlobs?: Array<Blob | File | null>;
+  refImageFilenames?: [string, string, string, string];
+  refImageDescriptions?: [string, string, string, string];
   icLora?: string;
   icLoraStrength?: number;
+  steps?: number;
+  firstPassScale?: number;
+  referenceMode?: 'OFF' | 'ON';
   steeredFromTakeId?: string;
   steeringPatch?: DirectorialSteeringPatch;
+  onTakeCompleted?: (revisionId: string, videoUrl: string, filename: string, item: QueueItem) => void;
 }
 
 export type QueueListener = (items: QueueItem[], activeItem: QueueItem | null) => void;
@@ -131,17 +149,26 @@ export class GenerationQueueManager {
         engine: params.engine,
         mode: params.mode,
         profile: params.profile,
+        templateId: params.templateId,
         seed,
         prompt: params.prompt,
         negative: params.negative,
+        promptSource: params.promptSource || 'compiled',
         firstFrameFilename: params.firstFrameFilename,
         firstFrameBlob: params.firstFrameBlob,
         controlVideoBlob: params.controlVideoBlob,
         controlVideoFilename: params.controlVideoFilename,
+        refImageBlobs: params.refImageBlobs,
+        refImageFilenames: params.refImageFilenames,
+        refImageDescriptions: params.refImageDescriptions,
         icLora: params.icLora,
         icLoraStrength: params.icLoraStrength,
+        steps: params.steps,
+        firstPassScale: params.firstPassScale,
+        referenceMode: params.referenceMode,
         steeredFromTakeId: params.steeredFromTakeId,
         steeringPatch: params.steeringPatch,
+        onTakeCompleted: params.onTakeCompleted,
         status: 'queued',
         progress: 0,
         createdAt: Date.now() + i,
@@ -273,17 +300,24 @@ export class GenerationQueueManager {
         engine: nextItem.engine,
         mode: nextItem.mode,
         profile: nextItem.profile,
+        templateId: nextItem.templateId,
         shot: resolvedShot,
         prompt: nextItem.prompt,
         negative: nextItem.negative,
         seed: nextItem.seed,
-        promptSource: 'compiled',
+        promptSource: nextItem.promptSource || 'compiled',
         firstFrameFilename: nextItem.firstFrameFilename,
         firstFrameBlob: nextItem.firstFrameBlob,
         controlVideoBlob: nextItem.controlVideoBlob,
         controlVideoFilename: nextItem.controlVideoFilename,
+        refImageBlobs: nextItem.refImageBlobs,
+        refImageFilenames: nextItem.refImageFilenames,
+        refImageDescriptions: nextItem.refImageDescriptions,
         icLora: nextItem.icLora,
         icLoraStrength: nextItem.icLoraStrength,
+        steps: nextItem.steps,
+        firstPassScale: nextItem.firstPassScale,
+        referenceMode: nextItem.referenceMode,
         onProgress: (pct, nodeTitle) => {
           nextItem.progress = pct;
           nextItem.currentNodeTitle = nodeTitle;
@@ -297,21 +331,17 @@ export class GenerationQueueManager {
           nextItem.outputFilename = filename;
           nextItem.completedAt = Date.now();
 
-          // If this take was steered from a previous take, record lineage on the created revision
+          // If this take was steered from a previous take, record & persist lineage on the created revision
           if (nextItem.steeredFromTakeId || nextItem.steeringPatch) {
-            const hStore = useHistoryStore.getState();
-            const updatedRevs = hStore.revisions.map((r) => {
-              if (r.id === revisionId) {
-                return {
-                  ...r,
-                  steeredFromTakeId: nextItem.steeredFromTakeId,
-                  steeringPatch: nextItem.steeringPatch,
-                };
-              }
-              return r;
-            });
-            useHistoryStore.setState({ revisions: updatedRevs });
+            useHistoryStore
+              .getState()
+              .setTakeSteeringLineage(
+                revisionId,
+                nextItem.steeredFromTakeId,
+                nextItem.steeringPatch
+              );
           }
+          nextItem.onTakeCompleted?.(revisionId, videoUrl, filename, nextItem);
 
           this.activeHandle = null;
           this.isProcessing = false;

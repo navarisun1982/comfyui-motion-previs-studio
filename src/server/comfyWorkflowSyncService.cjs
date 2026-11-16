@@ -152,7 +152,7 @@ function getComfyWorkflowSyncStatus(customDir) {
   };
 }
 
-function pushWorkflowToComfyHttpApi(port, relPath, rawJsonContent) {
+function pushWorkflowToComfyHttpApi(port, relPath, rawJsonContent, overwrite = false) {
   return new Promise((resolve) => {
     const encodedPath = encodeURIComponent(`workflows/${relPath.replace(/\\/g, '/')}`);
     const bodyBuf = Buffer.from(rawJsonContent, 'utf-8');
@@ -160,7 +160,7 @@ function pushWorkflowToComfyHttpApi(port, relPath, rawJsonContent) {
       {
         hostname: '127.0.0.1',
         port,
-        path: `/api/userdata/${encodedPath}?overwrite=true`,
+        path: `/api/userdata/${encodedPath}?overwrite=${overwrite ? 'true' : 'false'}`,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
@@ -227,16 +227,16 @@ async function syncWorkflowsToComfyUI(options = {}) {
 
     // Also push via ComfyUI userdata HTTP API if running on 8188 or 8000 (both root and subfolder)
     const relSub = item.subfolder ? `${item.subfolder}/${item.filename}` : item.filename;
-    const pushed8188 = await pushWorkflowToComfyHttpApi(8188, item.filename, rawContent);
+    const pushed8188 = await pushWorkflowToComfyHttpApi(8188, item.filename, rawContent, overwrite);
     if (item.subfolder) {
-      await pushWorkflowToComfyHttpApi(8188, relSub, rawContent);
+      await pushWorkflowToComfyHttpApi(8188, relSub, rawContent, overwrite);
     }
     if (pushed8188) {
       pushedToApi.push(item.filename);
     } else {
-      const pushed8000 = await pushWorkflowToComfyHttpApi(8000, item.filename, rawContent);
+      const pushed8000 = await pushWorkflowToComfyHttpApi(8000, item.filename, rawContent, overwrite);
       if (item.subfolder) {
-        await pushWorkflowToComfyHttpApi(8000, relSub, rawContent);
+        await pushWorkflowToComfyHttpApi(8000, relSub, rawContent, overwrite);
       }
       if (pushed8000) pushedToApi.push(item.filename);
     }
@@ -276,9 +276,9 @@ async function syncWorkflowsToComfyUI(options = {}) {
         }
       }
 
-      const pushed = await pushWorkflowToComfyHttpApi(8188, finalName, rawContent);
+      const pushed = await pushWorkflowToComfyHttpApi(8188, finalName, rawContent, overwrite);
       if (subfolder) {
-        await pushWorkflowToComfyHttpApi(8188, `${subfolder}/${finalName}`, rawContent);
+        await pushWorkflowToComfyHttpApi(8188, `${subfolder}/${finalName}`, rawContent, overwrite);
       }
       if (pushed && !pushedToApi.includes(finalName)) {
         pushedToApi.push(finalName);
@@ -301,6 +301,51 @@ async function syncWorkflowsToComfyUI(options = {}) {
     missingCount: statusAfter.missingCount,
     existingWorkflows: statusAfter.existingWorkflows,
   };
+}
+
+const MAX_WORKFLOW_ARCHIVE_BYTES = 64 * 1024 * 1024;
+
+function assertSafePublicHttpsUrl(rawUrlStr) {
+  let parsed;
+  try {
+    parsed = new URL(String(rawUrlStr));
+  } catch {
+    throw new Error('Invalid remote workflow URL.');
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Only public HTTPS URLs are allowed for remote workflow imports.');
+  }
+  const host = (parsed.hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (
+    !host ||
+    host === 'localhost' ||
+    host === '::1' ||
+    host === '0.0.0.0' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^169\.254\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+  ) {
+    throw new Error('Private, loopback, and link-local hosts are forbidden for remote workflow imports.');
+  }
+  return parsed.toString();
+}
+
+function resolveAllowedCorsOrigin(req) {
+  const origin = String((req && req.headers && req.headers.origin) || '').trim();
+  if (!origin) return 'http://127.0.0.1:5173';
+  if (
+    origin === 'null' ||
+    origin.startsWith('file://') ||
+    origin.startsWith('app://') ||
+    /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(origin)
+  ) {
+    return origin;
+  }
+  return 'http://127.0.0.1:5173';
 }
 
 function extractJsonFromZipBuffer(buf) {
@@ -331,7 +376,13 @@ function extractJsonFromZipBuffer(buf) {
 
     ptr += 46 + nameLen + extraLen + commentLen;
 
-    if (name.toLowerCase().endsWith('.json') && !name.includes('__MACOSX') && compressedSize > 0) {
+    if (
+      name.toLowerCase().endsWith('.json') &&
+      !name.includes('__MACOSX') &&
+      compressedSize > 0 &&
+      compressedSize <= MAX_WORKFLOW_ARCHIVE_BYTES &&
+      uncompressedSize <= MAX_WORKFLOW_ARCHIVE_BYTES
+    ) {
       if (
         localHeaderOffset + 30 <= buf.length &&
         buf.readUInt32LE(localHeaderOffset) === 0x04034b50
@@ -341,12 +392,15 @@ function extractJsonFromZipBuffer(buf) {
         const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
         const slice = buf.subarray(dataStart, dataStart + compressedSize);
         try {
-          const raw = compression === 0 ? slice : zlib.inflateRawSync(slice);
+          const raw =
+            compression === 0
+              ? slice
+              : zlib.inflateRawSync(slice, { maxOutputLength: MAX_WORKFLOW_ARCHIVE_BYTES });
           const text = raw.toString('utf8');
           JSON.parse(text);
           results.push({ name: path.basename(name), text, size: uncompressedSize });
         } catch {
-          // ignore invalid json inside zip
+          // ignore invalid or oversized json inside zip
         }
       }
     }
@@ -417,12 +471,23 @@ async function fetchRemoteWorkflowJson(rawUrl) {
     }
   }
 
-  const dlRes = await fetch(downloadUrl);
+  const safeDownloadUrl = assertSafePublicHttpsUrl(downloadUrl);
+  const dlRes = await fetch(safeDownloadUrl);
+  if (dlRes.url) {
+    assertSafePublicHttpsUrl(dlRes.url);
+  }
   if (!dlRes.ok) {
-    throw new Error(`HTTP ${dlRes.status} (${dlRes.statusText}) fetching workflow from ${downloadUrl}`);
+    throw new Error(`HTTP ${dlRes.status} (${dlRes.statusText}) fetching workflow from ${safeDownloadUrl}`);
+  }
+  const contentLen = Number(dlRes.headers.get('content-length') || '0');
+  if (contentLen > MAX_WORKFLOW_ARCHIVE_BYTES) {
+    throw new Error(`Remote workflow file exceeds maximum allowed size (${MAX_WORKFLOW_ARCHIVE_BYTES} bytes).`);
   }
 
   const buf = Buffer.from(await dlRes.arrayBuffer());
+  if (buf.length > MAX_WORKFLOW_ARCHIVE_BYTES) {
+    throw new Error(`Remote workflow file exceeds maximum allowed size (${MAX_WORKFLOW_ARCHIVE_BYTES} bytes).`);
+  }
   // Check if ZIP magic bytes (PK\x03\x04)
   if (buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b) {
     const extracted = extractJsonFromZipBuffer(buf);
@@ -474,19 +539,13 @@ function sanitizeComfyPromptBuffer(reqPath, buf) {
     const str = buf.toString('utf-8');
     if (
       !str.includes('9:16 (Vertical)') &&
-      !str.includes('4:3 (Classic TV)') &&
-      !str.includes('minimax_h3_turbo_v4_step600_ema.safetensors') &&
-      !str.includes('MiniMax-H3-Ref2VA-Acc-8Step.safetensors')
+      !str.includes('4:3 (Classic TV)')
     ) {
       return buf;
     }
     const fixed = str
       .replace(/9:16 \(Vertical\)/g, '9:16 (Portrait Widescreen)')
-      .replace(/4:3 \(Classic TV\)/g, '4:3 (Standard)')
-      .replace(
-        /minimax_h3_turbo_v4_step600_ema\.safetensors|MiniMax-H3-Ref2VA-Acc-8Step\.safetensors/g,
-        'minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors'
-      );
+      .replace(/4:3 \(Classic TV\)/g, '4:3 (Standard)');
     return Buffer.from(fixed, 'utf-8');
   } catch {
     return buf;
@@ -494,12 +553,6 @@ function sanitizeComfyPromptBuffer(reqPath, buf) {
 }
 
 function getMocapNlfService() {
-  try {
-    const resolved = require.resolve('./mocapNlfService.cjs');
-    delete require.cache[resolved];
-  } catch {
-    // ignore
-  }
   return require('./mocapNlfService.cjs');
 }
 
@@ -766,7 +819,8 @@ function forwardComfyRequest(req, res, forwardPath) {
               cleanHeaders[k] = v;
             }
           }
-          cleanHeaders['Access-Control-Allow-Origin'] = '*';
+          const safeOrigin = resolveAllowedCorsOrigin(req);
+          cleanHeaders['Access-Control-Allow-Origin'] = safeOrigin;
           cleanHeaders['Access-Control-Allow-Headers'] = '*';
           cleanHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
           cleanHeaders['Access-Control-Expose-Headers'] = '*';
@@ -784,7 +838,7 @@ function forwardComfyRequest(req, res, forwardPath) {
         if (!res.headersSent) {
           res.writeHead(502, {
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Origin': resolveAllowedCorsOrigin(req),
             'Access-Control-Expose-Headers': '*',
           });
           res.end(

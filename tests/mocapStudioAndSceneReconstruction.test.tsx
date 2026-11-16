@@ -694,10 +694,12 @@ describe('3D Mocap Studio, SMPL/Mixamo Bone Retargeter & Scene Reconstructor', (
     expect(res.actorTracks.length).toBe(2);
 
     const [trackA, trackB] = res.actorTracks;
-    // Left-to-right identity preservation & metric side-by-side unprojection (`flow_placement.py`)
+    // Left-to-right identity preservation & metric side-by-side unprojection (`flow_placement.py`):
+    // At unified stage scale (1m = 5.06 / 1.75 ≈ 2.8914u), 0.18 normalized horizontal hip separation
+    // at ~3.07m camera distance unprojects to ~0.53m (~1.52 stage units, > 1.21u shoulder width).
     expect(trackA.startPosition.x).toBeLessThan(trackB.startPosition.x);
-    expect(Math.abs(trackA.startPosition.x - trackB.startPosition.x)).toBeGreaterThanOrEqual(2);
-    expect(Math.abs(trackA.startPosition.x - trackB.startPosition.x)).toBeLessThanOrEqual(14);
+    expect(Math.abs(trackA.startPosition.x - trackB.startPosition.x)).toBeGreaterThanOrEqual(1.3);
+    expect(Math.abs(trackA.startPosition.x - trackB.startPosition.x)).toBeLessThanOrEqual(6);
 
     // Pure landmark-driven IK on Track A: left/right ankle Z alternates across frames from real `worldLandmarks`
     const kf0Ik = trackA.poseKeyframes[0].pose?.anatomicalIk;

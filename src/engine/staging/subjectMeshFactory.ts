@@ -217,11 +217,15 @@ export function createSubjectMesh(
     activeSculpt?.parts?.some?.((p: any) => !!p.bone);
 
   const combinedIdentityText = `${name} ${tokenPrompt || ''}`;
+  const nameOnlyText = `${name || ''}`.trim();
+
+  const humanRolePatternEn =
+    /\b(character|person|man|woman|boy|girl|human|actor|actress|hero|heroine|knight|warrior|archer|scout|detective|soldier|doctor|surgeon|chef|samurai|miner|ninja|blacksmith|captain|inventor|executive|operative|astronaut|biped|pilot|wizard|mage|king|queen|prince|princess|emperor|empress|dancer|singer|musician|photographer|guard|officer|policeman|firefighter|worker|driver|rider|monk|priest|witch|sorcerer|paladin|rogue|thief|assassin|hunter|villager|citizen|elder|child|kid|teen|lady|gentleman|lord|wanderer|traveler|explorer|boxer|fighter|athlete)\b/i;
+  const humanRolePatternAr =
+    /(شخصية|رجل|امرأة|إنسان|بطل|بطلة|فارس|محارب|محقق|جندي|ساحر|نينجا|ساموراي|طيار|حداد|طاهي|جراح|ملك|ملكة|أمير|أميرة|راقص|راقصة|مصور|حارس|ضابط|عامل|سائق|طفل|فتى|فتاة|شاب|سيدة|ملاكم|مقاتل)/;
 
   const hasExplicitHumanPerson =
-    /\b(character|person|man|woman|boy|girl|human|actor|actress|hero|heroine|knight|warrior|archer|scout|detective|soldier|doctor|surgeon|chef|samurai|miner|ninja|blacksmith|captain|inventor|executive|operative|astronaut|biped|pilot|wizard|mage)\b/i.test(
-      combinedIdentityText
-    ) || /(شخصية|رجل|امرأة|إنسان|بطل|فارس|محارب|محقق|جندي|ساحر|نينجا|ساموراي|طيار|حداد|طاهي|جراح)/.test(combinedIdentityText);
+    humanRolePatternEn.test(combinedIdentityText) || humanRolePatternAr.test(combinedIdentityText);
 
   const isExplicitNonHumanKind =
     kind === 'prop' ||
@@ -241,23 +245,35 @@ export function createSubjectMesh(
     kind === 'scifi' ||
     kind === 'custom';
 
+  const nonHumanObjectPatternEn =
+    /\b(car|automobile|vehicle|helicopter|chopper|aircraft|airplane|jet|plane|ship|boat|yacht|submarine|train|locomotive|truck|bus|van|ambulance|motorcycle|bike|bicycle|scooter|tank|tractor|excavator|forklift|spaceship|starship|ufo|saucer|rover|mech|ring|jewelry|jewel|sword|broadsword|longsword|blade|katana|dagger|knife|axe|battleaxe|hammer|warhammer|spear|halberd|bow|crossbow|ballista|shield|gun|pistol|revolver|rifle|sniper|cannon|turret|raygun|flamethrower|shuriken|morningstar|scythe|bottle|potion|goblet|chalice|decanter|mug|cup|chair|armchair|throne|sofa|couch|bench|stool|table|desk|workbench|podium|easel|bed|cabinet|wardrobe|bookshelf|shelf|box|crate|chest|barrel|lamp|lantern|chandelier|candelabra|torch|clock|well|fountain|statue|altar|pillar|column|arch|gate|bridge|wall|fence|tower|castle|fortress|house|cottage|cabin|building|skyscraper|cathedral|church|temple|shrine|pagoda|pyramid|tent|windmill|lighthouse|ruins|tree|pine|oak|palm|willow|bamboo|cactus|bush|shrub|flower|mushroom|rock|boulder|cliff|mountain|volcano|crystal|cloud|fire|campfire|bonfire|tornado|camera|dolly|clapperboard|clapboard|megaphone|gramophone|tripod|lens|microphone|guitar|piano|drum|violin|book|scroll|globe|telescope|microscope|compass|hourglass|trophy|crown|anvil|cauldron|laptop|computer|monitor|tv|television|phone|smartphone|arcade|vending|generator|reactor|portal|stargate|satellite|beacon|console|hologram|pod|capsule|machine|drone|dog|hound|wolf|werewolf|fox|cat|lion|tiger|sabertooth|panther|leopard|horse|stallion|unicorn|pegasus|bear|deer|stag|moose|elephant|rhino|gorilla|monkey|minotaur|gargoyle|mummy|dragon|wyvern|drake|dinosaur|rex|raptor|eagle|hawk|falcon|owl|raven|crow|bird|swan|phoenix|griffin|shark|whale|dolphin|octopus|kraken|crab|lobster|fish|turtle|tortoise|frog|toad|snake|serpent|cobra|spider|scorpion|beetle|butterfly|bee|ant|worm)\b/i;
+  const nonHumanObjectPatternAr =
+    /(خاتم|سيارة|مركبة|طائرة|هليكوبتر|مروحية|سفينة|قارب|قطار|شاحنة|دراجة|دبابة|صاروخ|كرسي|أريكة|كنبة|سرير|خزانة|طاولة|مكتب|مصباح|فانوس|ساعة|سيف|درع|رمح|فأس|قوس|بندقية|مسدس|مدفع|زجاجة|صندوق|برميل|منزل|بيت|مبنى|قلعة|برج|جسر|بوابة|عمود|معبد|خيمة|طاحونة|منارة|شجرة|نخلة|صبار|زهرة|صخرة|جبل|بركان|كريستال|سحابة|نار|كاميرا|كتاب|حاسوب|لابتوب|تلفاز|هاتف|بوابة|قمر صناعي|مفاعل|كلب|ذئب|قط|أسد|نمر|حصان|دب|غزال|فيل|تنين|ديناصور|نسر|صقر|بومة|غراب|طائر|قرش|حوت|دلفين|ثعبان|أفعى|عنكبوت|عقرب)/;
+
+  // When `kind === 'human' || kind === 'character'`, NEVER let worn/held items in `tokenPrompt`
+  // ("wearing a crown/ring", "holding a sword/camera/guitar") turn a human actor into a floating prop!
+  // Only override an explicit human kind if the actor's `name` ITSELF is an explicit non-human object without human words.
+  const isNameExplicitlyProp =
+    !humanRolePatternEn.test(nameOnlyText) &&
+    !humanRolePatternAr.test(nameOnlyText) &&
+    (nonHumanObjectPatternEn.test(nameOnlyText) || nonHumanObjectPatternAr.test(nameOnlyText));
+
   const isPropSignal =
     isExplicitNonHumanKind ||
-    (!hasExplicitHumanPerson &&
-      (/\b(car|automobile|vehicle|helicopter|chopper|aircraft|airplane|jet|plane|ship|boat|yacht|submarine|train|locomotive|truck|bus|van|ambulance|motorcycle|bike|bicycle|scooter|tank|tractor|excavator|forklift|spaceship|starship|ufo|saucer|rover|mech|ring|jewelry|jewel|sword|broadsword|longsword|blade|katana|dagger|knife|axe|battleaxe|hammer|warhammer|spear|halberd|bow|crossbow|ballista|shield|gun|pistol|revolver|rifle|sniper|cannon|turret|raygun|flamethrower|shuriken|morningstar|scythe|bottle|potion|goblet|chalice|decanter|mug|cup|chair|armchair|throne|sofa|couch|bench|stool|table|desk|workbench|podium|easel|bed|cabinet|wardrobe|bookshelf|shelf|box|crate|chest|barrel|lamp|lantern|chandelier|candelabra|torch|clock|well|fountain|statue|altar|pillar|column|arch|gate|bridge|wall|fence|tower|castle|fortress|house|cottage|cabin|building|skyscraper|cathedral|church|temple|shrine|pagoda|pyramid|tent|windmill|lighthouse|ruins|tree|pine|oak|palm|willow|bamboo|cactus|bush|shrub|flower|mushroom|rock|boulder|cliff|mountain|volcano|crystal|cloud|fire|campfire|bonfire|tornado|camera|dolly|clapperboard|clapboard|megaphone|gramophone|tripod|lens|microphone|guitar|piano|drum|violin|book|scroll|globe|telescope|microscope|compass|hourglass|trophy|crown|anvil|cauldron|laptop|computer|monitor|tv|television|phone|smartphone|arcade|vending|generator|reactor|portal|stargate|satellite|beacon|console|hologram|pod|capsule|machine|drone|dog|hound|wolf|werewolf|fox|cat|lion|tiger|sabertooth|panther|leopard|horse|stallion|unicorn|pegasus|bear|deer|stag|moose|elephant|rhino|gorilla|monkey|minotaur|gargoyle|mummy|dragon|wyvern|drake|dinosaur|rex|raptor|eagle|hawk|falcon|owl|raven|crow|bird|swan|phoenix|griffin|shark|whale|dolphin|octopus|kraken|crab|lobster|fish|turtle|tortoise|frog|toad|snake|serpent|cobra|spider|scorpion|beetle|butterfly|bee|ant|worm)\b/i.test(
-        combinedIdentityText
-      ) ||
-        /(خاتم|سيارة|مركبة|طائرة|هليكوبتر|مروحية|سفينة|قارب|قطار|شاحنة|دراجة|دبابة|صاروخ|كرسي|أريكة|كنبة|سرير|خزانة|طاولة|مكتب|مصباح|فانوس|ساعة|سيف|درع|رمح|فأس|قوس|بندقية|مسدس|مدفع|زجاجة|صندوق|برميل|منزل|بيت|مبنى|قلعة|برج|جسر|بوابة|عمود|معبد|خيمة|طاحونة|منارة|شجرة|نخلة|صبار|زهرة|صخرة|جبل|بركان|كريستال|سحابة|نار|كاميرا|كتاب|حاسوب|لابتوب|تلفاز|هاتف|بوابة|قمر صناعي|مفاعل|كلب|ذئب|قط|أسد|نمر|حصان|دب|غزال|فيل|تنين|ديناصور|نسر|صقر|بومة|غراب|طائر|قرش|حوت|دلفين|ثعبان|أفعى|عنكبوت|عقرب)/.test(combinedIdentityText)));
+    (kind === 'human' || kind === 'character'
+      ? isNameExplicitlyProp
+      : !hasExplicitHumanPerson &&
+        (nonHumanObjectPatternEn.test(combinedIdentityText) ||
+          nonHumanObjectPatternAr.test(combinedIdentityText)));
 
   const isMechaOrRobot =
-    /\b(robot|mecha|mech\b|automaton|golem|droid|cyberbeast)\b/i.test(combinedIdentityText) ||
-    /(روبوت|ميكا|رجل آلي)/.test(combinedIdentityText);
+    /\b(robot|mecha|mech\b|automaton|golem|droid|cyberbeast)\b/i.test(nameOnlyText) ||
+    /(روبوت|ميكا|رجل آلي)/.test(nameOnlyText);
 
   const isExplicitHumanKind =
     (kind === 'human' || kind === 'character') &&
     !isMechaOrRobot &&
-    !isPropSignal &&
-    hasExplicitHumanPerson;
+    !isPropSignal;
   const isHumanoid = (isExplicitHumanKind || (hasHumanoidSignals && !isPropSignal)) && !isMechaOrRobot;
 
   const isTestEnv =
@@ -385,9 +401,7 @@ export function createSubjectMesh(
     if (cached) {
       const finalSize = scaleAndAutoRigGltfForStage(cached.scene);
       group.add(cached.scene);
-      if (!group.userData.rig) {
-        attachGltfAnimations(cached.scene, cached.animations);
-      }
+      attachGltfAnimations(cached.scene, cached.animations);
       const baseRadius = Math.max(2.4, Math.max(finalSize.x, finalSize.z) * 0.55);
       group.add(createBaseRing(baseRadius, colorHex, isGhostWireframe, isSelected));
       const banner = createSpriteBanner(
@@ -440,9 +454,7 @@ export function createSubjectMesh(
         }
         group.add(result.scene);
         group.updateMatrixWorld(true);
-        if (!group.userData.rig) {
-          attachGltfAnimations(result.scene, result.animations);
-        }
+        attachGltfAnimations(result.scene, result.animations);
 
         // Update hit proxy cylinder to match the loaded GLB dimensions
         const hitProxy = group.getObjectByName('__actor_hit_proxy__') as THREE.Mesh | undefined;
@@ -492,12 +504,15 @@ export function createSubjectMesh(
     return group;
   }
 
-  // 2. Cutouts & Standees (2D image cards standing on stage or backdrops)
+  // 2. Cutouts & Standees (2D image cards standing on stage or backdrops, scaled to 1m = 5.06/1.75 stage units)
   if (isCutoutKind(kind)) {
+    const stageUnitsPerMeter = 5.06 / 1.75;
+    const isBackdropCard = kind.toLowerCase() === 'backdrop';
     const cutoutGroup = createCutoutMesh({
       imageUrl: conceptImageUrl,
       name,
       kind,
+      height: (isBackdropCard ? 5.0 : 1.8) * stageUnitsPerMeter,
       colorHex,
       isSelected,
       isGhostWireframe,
@@ -703,18 +718,29 @@ export function createSubjectMesh(
     partGraph: activeSculpt,
   });
 
-  // Normalize stage envelope so microscopic props (< 2.2u) and colossal towers (> 8.5u tall) are always camera-readable on stage
+  // Convert 1.0m procedural blueprints & SculptSpecs into true Stage Units (1m = 5.06 / 1.75 = 2.8914u)
+  // so creatures, furniture, vehicles, props, and buildings match the 5.06u (1.75m) human cast!
+  const proceduralUnitsPerMeter = 5.06 / 1.75;
+  procMesh.scale.multiplyScalar(proceduralUnitsPerMeter);
   procMesh.updateMatrixWorld(true);
   const initialBox = new THREE.Box3().setFromObject(procMesh);
   if (!initialBox.isEmpty()) {
     const rawSize = initialBox.getSize(new THREE.Vector3());
     const maxSpan = Math.max(rawSize.x, rawSize.y, rawSize.z);
-    if (Number.isFinite(maxSpan) && maxSpan > 0.01) {
+    const isColossalKind =
+      kind === 'building' ||
+      kind === 'architecture' ||
+      kind === 'environment' ||
+      kind === 'spaceship' ||
+      kind === 'vehicle' ||
+      kind === 'tree';
+    const maxAllowedSpan = isColossalKind ? 48.0 : 24.0;
+    if (Number.isFinite(maxSpan) && maxSpan > 0.005) {
       let stageFitFactor = 1.0;
-      if (maxSpan < 2.2) {
-        stageFitFactor = 2.4 / maxSpan;
-      } else if (rawSize.y > 8.5 || maxSpan > 10.5) {
-        stageFitFactor = Math.min(8.5 / Math.max(0.1, rawSize.y), 10.5 / maxSpan);
+      if (maxSpan < 0.08) {
+        stageFitFactor = 0.25 / maxSpan;
+      } else if (maxSpan > maxAllowedSpan) {
+        stageFitFactor = maxAllowedSpan / maxSpan;
       }
       if (Math.abs(stageFitFactor - 1.0) > 0.04) {
         procMesh.scale.multiplyScalar(stageFitFactor);

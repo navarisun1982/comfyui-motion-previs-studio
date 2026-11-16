@@ -29,8 +29,8 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { DebuggerTogglePill } from './components/DebuggerTogglePill';
-import { AIGenerator3D } from './components/AIGenerator3D';
 import { useAssetLibraryStore } from './stores/useAssetLibraryStore';
+import { safeGetItem, STORAGE_KEYS } from './services/storage';
 
 import { ShotBible } from './components/ShotBible';
 
@@ -78,6 +78,9 @@ const WelcomeModal = lazy(() =>
 const PrevisExportDeck = lazy(() =>
   import('./components/PrevisExportDeck').then((m) => ({ default: m.PrevisExportDeck }))
 );
+const AIGenerator3D = lazy(() =>
+  import('./components/AIGenerator3D').then((m) => ({ default: m.AIGenerator3D }))
+);
 
 export type WorkspaceMode = 'previs' | 'export';
 export type StepTab = WorkspaceMode | 'shot' | 'analyze' | 'plan';
@@ -85,7 +88,6 @@ export type StepTab = WorkspaceMode | 'shot' | 'analyze' | 'plan';
 export default function App() {
   const {
     shot,
-    setActiveDeckTab,
     canUndo,
     canRedo,
     undo,
@@ -93,7 +95,6 @@ export default function App() {
   } = useShotStore(
     useShallow((s) => ({
       shot: s.shot,
-      setActiveDeckTab: s.setActiveDeckTab,
       canUndo: s.canUndo,
       canRedo: s.canRedo,
       undo: s.undo,
@@ -103,6 +104,8 @@ export default function App() {
   const revisions = useHistoryStore((s) => s.revisions);
 
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('previs');
+  const [hasOpenedExport, setHasOpenedExport] = useState<boolean>(false);
+  const [hasOpened3DStudio, setHasOpened3DStudio] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const [activeShotId, setActiveShotId] = useState('shot-01a');
   const [activeShotTitle, setActiveShotTitle] = useState('Shot 01A');
@@ -111,7 +114,9 @@ export default function App() {
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState<boolean>(true);
   const [showPresetsModal, setShowPresetsModal] = useState<boolean>(false);
   const [showDiffInspector, setShowDiffInspector] = useState<boolean>(false);
-  const [showWelcomeModal, setShowWelcomeModal] = useState<boolean>(false);
+  const [showWelcomeModal, setShowWelcomeModal] = useState<boolean>(
+    () => safeGetItem<boolean | null>(STORAGE_KEYS.WELCOME_DISMISSED, null) === false
+  );
   const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateStatus | null>(null);
   const [checkingUpdateHeader, setCheckingUpdateHeader] = useState<boolean>(false);
   const { toggleOpen: toggleDebugger } = useLogStore();
@@ -180,9 +185,96 @@ export default function App() {
     };
   }, [setComfyConnectionStatus, setComfySystemStats]);
 
-  // Global Keyboard Shortcuts (Undo/Redo, Debugger) with Editable Element Guard
+  useEffect(() => {
+    if (workspaceMode === 'export') setHasOpenedExport(true);
+  }, [workspaceMode]);
+
+  useEffect(() => {
+    if (is3DStudioOpen) setHasOpened3DStudio(true);
+  }, [is3DStudioOpen]);
+
+  useEffect(() => {
+    const onPreviewGlb = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      if (detail.openStudio !== false) {
+        setHasOpened3DStudio(true);
+        useAssetLibraryStore.getState().closeLibrary();
+        useAssetLibraryStore.getState().open3DStudio({
+          initialMode: detail.generationMode || 'image-to-3d',
+          initialImageUrl: detail.referenceImageUrl,
+          initialPrompt: detail.textPrompt,
+        });
+      }
+    };
+    window.addEventListener('cmpvs:preview-glb-in-3d-studio', onPreviewGlb);
+    return () => window.removeEventListener('cmpvs:preview-glb-in-3d-studio', onPreviewGlb);
+  }, []);
+
+  // Global Slider Gesture Batching: 1 continuous <input type="range"> drag = 1 Undo step & 1 disk flush
+  useEffect(() => {
+    let activeRangeInput = false;
+    const isRangeInput = (target: EventTarget | null): boolean => {
+      const el = target as HTMLInputElement | null;
+      return Boolean(el && el.tagName === 'INPUT' && el.type === 'range');
+    };
+    const onGestureStart = (e: Event) => {
+      if (isRangeInput(e.target)) {
+        activeRangeInput = true;
+        useShotStore.getState().beginGesture();
+      }
+    };
+    const onGestureEnd = () => {
+      if (activeRangeInput) {
+        activeRangeInput = false;
+        useShotStore.getState().endGesture();
+      }
+    };
+    window.addEventListener('pointerdown', onGestureStart, true);
+    window.addEventListener('mousedown', onGestureStart, true);
+    window.addEventListener('touchstart', onGestureStart, true);
+    window.addEventListener('pointerup', onGestureEnd, true);
+    window.addEventListener('pointercancel', onGestureEnd, true);
+    window.addEventListener('mouseup', onGestureEnd, true);
+    window.addEventListener('touchend', onGestureEnd, true);
+    window.addEventListener('blur', onGestureEnd);
+    return () => {
+      window.removeEventListener('pointerdown', onGestureStart, true);
+      window.removeEventListener('mousedown', onGestureStart, true);
+      window.removeEventListener('touchstart', onGestureStart, true);
+      window.removeEventListener('pointerup', onGestureEnd, true);
+      window.removeEventListener('pointercancel', onGestureEnd, true);
+      window.removeEventListener('mouseup', onGestureEnd, true);
+      window.removeEventListener('touchend', onGestureEnd, true);
+      window.removeEventListener('blur', onGestureEnd);
+    };
+  }, []);
+
+  // Global Keyboard Shortcuts (Escape for Modals, Undo/Redo, Debugger) with Editable Element Guard
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showWelcomeModal) {
+          setShowWelcomeModal(false);
+          return;
+        }
+        if (showPresetsModal) {
+          setShowPresetsModal(false);
+          return;
+        }
+        if (showSettingsModal) {
+          setShowSettingsModal(false);
+          return;
+        }
+        if (is3DStudioOpen) {
+          close3DStudio();
+          return;
+        }
+        if (showDiffInspector) {
+          setShowDiffInspector(false);
+          return;
+        }
+      }
+
       const activeEl = document.activeElement;
       const isEditingText =
         activeEl?.tagName === 'INPUT' ||
@@ -191,8 +283,8 @@ export default function App() {
 
       if (isEditingText) return;
 
-      // Debugger toggle
-      if (e.key === '`' || e.key === '~' || e.key === 'F12') {
+      // Debugger toggle (leave F12 untouched so browser/Electron DevTools still open normally)
+      if (e.key === '`' || e.key === '~') {
         e.preventDefault();
         toggleDebugger();
         return;
@@ -218,7 +310,31 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleDebugger, undo, redo]);
+  }, [
+    toggleDebugger,
+    undo,
+    redo,
+    showWelcomeModal,
+    showPresetsModal,
+    showSettingsModal,
+    is3DStudioOpen,
+    close3DStudio,
+    showDiffInspector,
+  ]);
+
+  // Sync top-bar scene/shot breadcrumbs when a project is restored from Studio Storage disk
+  useEffect(() => {
+    const handleProjectRestored = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      const firstScene = Array.isArray(detail?.scenes) ? detail.scenes[0] : null;
+      const firstShot = firstScene?.shots?.[0];
+      if (firstScene?.name) setActiveSceneName(firstScene.name);
+      if (firstShot?.id) setActiveShotId(firstShot.id);
+      if (firstShot?.code) setActiveShotTitle(firstShot.code);
+    };
+    window.addEventListener('studio-storage:project-restored', handleProjectRestored);
+    return () => window.removeEventListener('studio-storage:project-restored', handleProjectRestored);
+  }, []);
 
   return (
     <div className="flex h-screen w-screen flex-col bg-[#090D16] text-[#F0F3FA] font-sans overflow-hidden">
@@ -264,7 +380,6 @@ export default function App() {
           <button
             onClick={() => {
               setWorkspaceMode('previs');
-              setActiveDeckTab('camera');
             }}
             className={`flex items-center gap-1.5 rounded-lg px-3.5 py-1 font-semibold transition-all ${
               workspaceMode === 'previs'
@@ -443,8 +558,8 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Studio Body */}
-      {showDiffInspector ? (
+      {/* Main Studio Body (kept mounted when Diff Inspector opens so 3D WebGL stage & ShotBible listeners survive) */}
+      {showDiffInspector && (
         <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
           <Suspense
             fallback={
@@ -456,15 +571,21 @@ export default function App() {
             <DirectorDiffInspector onClose={() => setShowDiffInspector(false)} />
           </Suspense>
         </div>
-      ) : (
-        <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden relative">
+      )}
+      <div
+        className={
+          showDiffInspector
+            ? 'hidden'
+            : 'flex flex-1 min-w-0 min-h-0 overflow-hidden relative'
+        }
+      >
           {/* Left Column: Permanent Shot Bible & Scene Project Hierarchy */}
           <aside
             className={`flex flex-col border-r border-[#273247] bg-[#0D1320] shrink-0 overflow-hidden transition-all duration-200 ease-in-out ${
-              isLeftSidebarOpen ? 'w-64 min-w-[256px] max-w-[256px]' : 'w-0 min-w-0 max-w-0 border-r-0'
+              isLeftSidebarOpen ? 'w-56 xl:w-64 min-w-[224px] xl:min-w-[256px] max-w-[224px] xl:max-w-[256px]' : 'w-0 min-w-0 max-w-0 border-r-0'
             }`}
           >
-            <div className="w-64 h-full flex flex-col min-w-[256px]">
+            <div className="w-56 xl:w-64 h-full flex flex-col min-w-[224px] xl:min-w-[256px]">
               <Suspense
                 fallback={
                   <div className="flex h-full w-full items-center justify-center text-[#98A5BC] font-mono text-xs">
@@ -505,8 +626,14 @@ export default function App() {
               </StudioErrorBoundary>
             </div>
 
-            {workspaceMode === 'export' && (
-              <div className="flex-1 overflow-hidden">
+            {(hasOpenedExport || workspaceMode === 'export') && (
+              <div
+                className={
+                  workspaceMode === 'export'
+                    ? 'flex-1 overflow-hidden flex flex-col min-h-0'
+                    : 'hidden'
+                }
+              >
                 <Suspense
                   fallback={
                     <div className="flex h-full w-full items-center justify-center text-[#98A5BC] font-mono text-xs">
@@ -526,11 +653,11 @@ export default function App() {
               <aside
                 className={`flex flex-col border-l border-[#273247] bg-[#0D1320] shrink-0 transition-all duration-200 ease-in-out ${
                   isRightSidebarOpen
-                    ? 'w-[380px] min-w-[380px] max-w-[380px] overflow-y-auto overflow-x-hidden'
+                    ? 'w-[340px] xl:w-[380px] min-w-[340px] xl:min-w-[380px] max-w-[340px] xl:max-w-[380px] overflow-y-auto overflow-x-hidden'
                     : 'w-0 min-w-0 max-w-0 border-l-0 overflow-hidden'
                 }`}
               >
-                <div className="w-[380px] h-full flex flex-col min-w-[380px] overflow-y-auto">
+                <div className="w-[340px] xl:w-[380px] h-full flex flex-col min-w-[340px] xl:min-w-[380px] overflow-y-auto">
                   <PrevisParametersDeck
                     onOpenPromptInspector={() => setWorkspaceMode('export')}
                     onExportProductionPack={() => setWorkspaceMode('export')}
@@ -543,7 +670,7 @@ export default function App() {
                 type="button"
                 onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
                 className={`absolute top-1/2 -translate-y-1/2 z-30 flex items-center justify-center w-4 h-12 rounded-l-md border border-[#273247] bg-[#121A2A]/95 hover:bg-[#6658F5] text-[#98A5BC] hover:text-white shadow-2xl backdrop-blur-md transition-all duration-200 group cursor-pointer ${
-                  isRightSidebarOpen ? 'right-[380px]' : 'right-0'
+                  isRightSidebarOpen ? 'right-[340px] xl:right-[380px]' : 'right-0'
                 }`}
                 title={isRightSidebarOpen ? 'Collapse Parameters Deck' : 'Expand Parameters Deck'}
                 aria-label={isRightSidebarOpen ? 'Collapse Parameters Deck' : 'Expand Parameters Deck'}
@@ -556,8 +683,7 @@ export default function App() {
               </button>
             </>
           )}
-        </div>
-      )}
+      </div>
 
       {/* Docked In-App Debugger & Modals wrapped in Suspense */}
       <Suspense fallback={null}>
@@ -574,6 +700,8 @@ export default function App() {
         />
         {showSettingsModal && (
           <div
+            role="dialog"
+            aria-modal="true"
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
             onClick={() => setShowSettingsModal(false)}
           >
@@ -587,17 +715,17 @@ export default function App() {
             </div>
           </div>
         )}
+        {(hasOpened3DStudio || is3DStudioOpen) && (
+          <AIGenerator3D
+            isOpen={is3DStudioOpen}
+            onClose={close3DStudio}
+            initialPrompt={studioInitialPrompt}
+            initialImageUrl={studioInitialImageUrl}
+            targetActorId={studioTargetActorId}
+            initialMode={studioInitialMode}
+          />
+        )}
       </Suspense>
-
-      {/* Top-level persistent ComfyUI 3D Character & Object Studio (.GLB) */}
-      <AIGenerator3D
-        isOpen={is3DStudioOpen}
-        onClose={close3DStudio}
-        initialPrompt={studioInitialPrompt}
-        initialImageUrl={studioInitialImageUrl}
-        targetActorId={studioTargetActorId}
-        initialMode={studioInitialMode}
-      />
     </div>
   );
 }

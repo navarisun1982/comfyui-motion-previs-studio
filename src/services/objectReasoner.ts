@@ -838,7 +838,7 @@ export function resolveWireUrl(url: string, provider: ReasonerProvider): string 
     !isElectron;
 
   if (isFileProtocol && url.startsWith('/api/')) {
-    return `http://127.0.0.1:5173${url}`;
+    return `http://127.0.0.1:51731${url}`;
   }
 
   if (!isDevServer) return url;

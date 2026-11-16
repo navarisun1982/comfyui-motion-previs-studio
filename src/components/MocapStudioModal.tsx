@@ -170,6 +170,8 @@ export function applyMocapStudioPayloadToShotStore(
   }
 
   const store = useShotStore.getState();
+  store.beginGesture();
+  try {
   if (onUpdateActor) {
     onUpdateActor(payload.actorId, updates);
   } else {
@@ -349,6 +351,9 @@ export function applyMocapStudioPayloadToShotStore(
     }));
     store.setActors([...baseActors, ...extraPersonActors, ...taggedSurrounding]);
   }
+  } finally {
+    store.endGesture();
+  }
 
   if (
     payload.cameraMotion &&
@@ -420,6 +425,18 @@ export const MocapStudioModal: React.FC<MocapStudioModalProps> = ({
       }
     };
   }, [videoPreviewUrl]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -725,8 +742,8 @@ export const MocapStudioModal: React.FC<MocapStudioModalProps> = ({
     );
   };
 
-  const triggerVideoPicker = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const triggerVideoPicker = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     setActiveTab('video');
     if (videoInputRef.current) {
       videoInputRef.current.value = '';
@@ -940,37 +957,73 @@ export const MocapStudioModal: React.FC<MocapStudioModalProps> = ({
             {/* CARD 1: LOCAL GPU 3D SMPL MODEL STATUS & ONE-CLICK DOWNLOADER */}
             <MocapModelsManagerCard compact />
 
-            {/* CARD 2: UPLOAD (VIDEO-ONLY FILE PICKER + DRAG & DROP ZONE) */}
+            {/* CARD 2: UPLOAD (VIDEO OR 3D MOCAP FILE PICKER + DRAG & DROP ZONE) */}
             <div className="rounded-2xl bg-[#0c111d]/95 border border-white/[0.08] p-3.5 space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-white flex items-center gap-2">
                   <Upload className="h-4 w-4 text-cyan-400" />
-                  <span>Upload Video</span>
+                  <span>Upload Video or 3D Mocap</span>
                 </span>
                 <span className="text-[10.5px] text-slate-400">
-                  Video files only (.MP4 / .MOV / .WEBM / .MKV / .AVI)
+                  .MP4 / .MOV / .FBX / .GLB / .JSON
                 </span>
               </div>
 
-              <button
-                type="button"
-                onClick={triggerVideoPicker}
-                data-testid="mocap-tab-video"
-                className="w-full flex items-center justify-between gap-2 py-2.5 px-3.5 rounded-xl text-xs font-bold transition-all border cursor-pointer bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white border-cyan-300/50 shadow-[0_4px_18px_rgba(37,99,235,0.35)]"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-8 w-8 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
-                    <Video className="h-4 w-4" />
-                  </div>
-                  <div className="text-left min-w-0">
-                    <div className="truncate font-bold">Upload RGB Video</div>
-                    <div className="text-[9.5px] font-mono text-cyan-100/90 font-normal truncate">
-                      .MP4 / .MOV / .WEBM / .MKV / .AVI
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('video');
+                    triggerVideoPicker();
+                  }}
+                  data-testid="mocap-tab-video"
+                  className={`w-full flex items-center justify-between gap-2 py-2.5 px-3 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                    activeTab === 'video'
+                      ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white border-cyan-300/50 shadow-[0_4px_18px_rgba(37,99,235,0.35)]'
+                      : 'bg-[#121829] hover:bg-[#192238] text-slate-200 border-white/10'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="h-8 w-8 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+                      <Video className="h-4 w-4" />
+                    </div>
+                    <div className="text-left min-w-0">
+                      <div className="truncate font-bold">Upload RGB Video</div>
+                      <div className="text-[9.5px] font-mono text-cyan-100/90 font-normal truncate">
+                        .MP4 / .MOV / .WEBM / .MKV
+                      </div>
                     </div>
                   </div>
-                </div>
-                <ChevronRight className="h-4 w-4 text-white/80 shrink-0" />
-              </button>
+                  <ChevronRight className="h-4 w-4 text-white/80 shrink-0" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('fbx');
+                    fbxInputRef.current?.click();
+                  }}
+                  data-testid="mocap-tab-fbx"
+                  className={`w-full flex items-center justify-between gap-2 py-2.5 px-3 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
+                    activeTab === 'fbx'
+                      ? 'bg-gradient-to-r from-indigo-600 to-violet-600 text-white border-indigo-300/50 shadow-[0_4px_18px_rgba(99,102,241,0.35)]'
+                      : 'bg-[#121829] hover:bg-[#192238] text-slate-200 border-white/10'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="h-8 w-8 rounded-lg bg-indigo-500/20 flex items-center justify-center shrink-0">
+                      <Upload className="h-4 w-4 text-indigo-300" />
+                    </div>
+                    <div className="text-left min-w-0">
+                      <div className="truncate font-bold">Import .FBX / .GLB</div>
+                      <div className="text-[9.5px] font-mono text-indigo-200/90 font-normal truncate">
+                        Mixamo .FBX / .GLB / SMPL .JSON
+                      </div>
+                    </div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-white/80 shrink-0" />
+                </button>
+              </div>
 
               {/* Unified Drag & Drop Zone + Video Preview */}
               <div

@@ -67,13 +67,14 @@ export function extractStageObstaclesForActor(
     const scale = other.scale ?? 1.0;
     const sig = `${other.kind || ''} ${other.name || ''} ${other.token || ''}`.toLowerCase();
 
-    let baseRadius = 1.35;
+    const stageUnitsPerMeter = 5.06 / 1.75;
+    let baseRadiusMeters = 0.65;
     if (/\b(building|house|cabin|castle|tower|wall|bunker|arch|temple|fireplace|hearth)\b/i.test(sig)) {
-      baseRadius = 3.6;
+      baseRadiusMeters = 2.6;
     } else if (/\b(car|vehicle|truck|van|suv|bus|tank|spaceship)\b/i.test(sig)) {
-      baseRadius = 2.8;
+      baseRadiusMeters = 1.9;
     } else if (/\b(table|sofa|couch|bed|desk|tree|boulder|rock|fountain|statue)\b/i.test(sig)) {
-      baseRadius = 2.0;
+      baseRadiusMeters = 1.25;
     }
 
     obstacles.push({
@@ -81,7 +82,7 @@ export function extractStageObstaclesForActor(
       name: other.name || other.id,
       x: ox,
       z: oz,
-      radius: baseRadius * Math.max(0.7, Math.min(2.0, scale)),
+      radius: baseRadiusMeters * stageUnitsPerMeter * Math.max(0.7, Math.min(2.0, scale)),
     });
   }
   return obstacles;

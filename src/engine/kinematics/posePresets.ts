@@ -658,9 +658,9 @@ export function exportBonePose(rig: HumanoidRig): ActorPose {
       const diff = hipsBone.position.clone().sub(restPos);
       if (hasMixamoRig) {
         const footPinDeltaY =
-          typeof rig.root.userData?.__smoothedFootPinDeltaY === 'number' &&
-          Number.isFinite(rig.root.userData.__smoothedFootPinDeltaY)
-            ? rig.root.userData.__smoothedFootPinDeltaY
+          typeof rig.root.userData?.__statelessFootPinDeltaY === 'number' &&
+          Number.isFinite(rig.root.userData.__statelessFootPinDeltaY)
+            ? rig.root.userData.__statelessFootPinDeltaY
             : 0;
         diff.y += footPinDeltaY;
         const normScale = (rig.height || 1.0) / (rig.root.scale.y || 1.0);
@@ -758,10 +758,6 @@ export function applyBonePose(rig: HumanoidRig, pose: ActorPose): void {
     resetToRestPose(rig);
     const restLowestFootY = computeLowestFootLocalYForPose(rig);
 
-    if (pose.hipsOffset) {
-      setHipsOffset(rig, pose.hipsOffset[0], pose.hipsOffset[1], pose.hipsOffset[2]);
-    }
-
     if (
       rig.mixamoBones &&
       rig.mixamoBones.size > 0 &&
@@ -826,23 +822,36 @@ export function applyBonePose(rig: HumanoidRig, pose: ActorPose): void {
       }
     }
 
-    // Stance-Foot Sole Floor Pinning: keep the lowest supporting foot flush with the stage floor
-    // with temporal low-pass damping so micro-rotations in ankles/knees never cause vertical pelvis jitter.
+    // Stateless Stance-Foot Sole Floor Pinning:
+    // Measure leg-bend foot delta while Hips is still at restPos so scrubbing and 8n+1 renders are 100% deterministic,
+    // THEN apply `pose.hipsOffset` (preserving positive airborne jump lift `hipsOffset[1] > 0`!).
     const hipsBone = rig.bones.get('Hips');
+    const restHipsPos = rig.restPositions.get('Hips');
+    let legBendFootDeltaY = 0;
     if (hipsBone && restLowestFootY !== null) {
       const posedLowestFootY = computeLowestFootLocalYForPose(rig);
       if (posedLowestFootY !== null) {
-        const rawFootDeltaY = posedLowestFootY - restLowestFootY;
-        const prevSmooth = rig.root.userData?.__smoothedFootPinDeltaY;
-        const dampedFootDeltaY =
-          typeof prevSmooth === 'number' && Number.isFinite(prevSmooth) && Math.abs(rawFootDeltaY - prevSmooth) < rig.height * 0.18
-            ? prevSmooth * 0.78 + rawFootDeltaY * 0.22
-            : rawFootDeltaY;
-        if (rig.root.userData) {
-          rig.root.userData.__smoothedFootPinDeltaY = dampedFootDeltaY;
-        }
-        hipsBone.position.y -= dampedFootDeltaY;
+        legBendFootDeltaY = posedLowestFootY - restLowestFootY;
       }
+    }
+    if (rig.root.userData) {
+      rig.root.userData.__statelessFootPinDeltaY = legBendFootDeltaY;
+      delete rig.root.userData.__smoothedFootPinDeltaY;
+    }
+
+    if (hipsBone && restHipsPos) {
+      const invScale = 1.0 / (rig.root.scale.y || 1.0);
+      const normScale = (rig.height || 1.0) * invScale;
+      const dx = (pose.hipsOffset?.[0] ?? 0) * normScale;
+      // Positive `hipsOffset[1]` lifts the character off the floor for jumps/hops;
+      // negative crouch drop is already accounted for by `legBendFootDeltaY` stance pinning.
+      const airborneLiftY = Math.max(0, pose.hipsOffset?.[1] ?? 0) * normScale;
+      const dz = (pose.hipsOffset?.[2] ?? 0) * normScale;
+      hipsBone.position.set(
+        restHipsPos.x + dx,
+        restHipsPos.y - legBendFootDeltaY + airborneLiftY,
+        restHipsPos.z + dz
+      );
     }
 
     rig.root.updateMatrixWorld(true);

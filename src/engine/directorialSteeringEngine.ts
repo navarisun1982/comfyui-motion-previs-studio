@@ -18,7 +18,8 @@ export interface SteeringResult {
 }
 
 /**
- * Returns counter-steering negative phrases for common camera movements
+ * Returns natural-language counter-steering negative phrases for modern video DiTs
+ * (LTX-2.5 Gemma & MiniMax H3 Qwen-VL — zero legacy SD1.5 `(token:1.35)` parenthesis weights).
  */
 function getCounterMovementNegative(directed: CameraMovementType, detected: CameraMovementType): string {
   const parts: string[] = [];
@@ -27,24 +28,24 @@ function getCounterMovementNegative(directed: CameraMovementType, detected: Came
   if (detected !== 'static' && detected !== directed) {
     switch (detected) {
       case 'pan-left':
-        parts.push('(camera panning left, leftward flow:1.25)');
+        parts.push('camera panning left, leftward flow');
         break;
       case 'pan-right':
-        parts.push('(camera panning right, rightward flow:1.25)');
+        parts.push('camera panning right, rightward flow');
         break;
       case 'tilt-up':
-        parts.push('(camera tilting up, upward tilt:1.25)');
+        parts.push('camera tilting up, upward tilt');
         break;
       case 'tilt-down':
-        parts.push('(camera tilting down, downward tilt:1.25)');
+        parts.push('camera tilting down, downward tilt');
         break;
       case 'dolly-in':
       case 'zoom-in':
-        parts.push('(camera pushing in, zooming in:1.25)');
+        parts.push('camera pushing in, zooming in');
         break;
       case 'dolly-out':
       case 'zoom-out':
-        parts.push('(camera pulling back, zooming out:1.25)');
+        parts.push('camera pulling back, zooming out');
         break;
     }
   }
@@ -52,36 +53,42 @@ function getCounterMovementNegative(directed: CameraMovementType, detected: Came
   // Prevent opposite movement to directed
   switch (directed) {
     case 'pan-left':
-      parts.push('(camera pan right, panning right:1.3)');
+      parts.push('camera pan right, panning right');
       break;
     case 'pan-right':
-      parts.push('(camera pan left, panning left:1.3)');
+      parts.push('camera pan left, panning left');
       break;
     case 'tilt-up':
-      parts.push('(camera tilt down, downward camera tilt:1.3)');
+      parts.push('camera tilt down, downward camera tilt');
       break;
     case 'tilt-down':
-      parts.push('(camera tilt up, upward camera tilt:1.3)');
+      parts.push('camera tilt up, upward camera tilt');
       break;
     case 'dolly-in':
     case 'zoom-in':
-      parts.push('(pull back, dolly out, zooming out, retreating camera:1.3)');
+      parts.push('pull back, dolly out, zooming out, retreating camera');
       break;
     case 'dolly-out':
     case 'zoom-out':
-      parts.push('(push in, dolly in, zooming in, advancing camera:1.3)');
+      parts.push('push in, dolly in, zooming in, advancing camera');
       break;
     case 'static':
-      parts.push('(camera movement, panning, tilting, shaky handheld camera, moving camera:1.35)');
+      parts.push('camera movement, panning, tilting, shaky handheld camera, moving camera');
       break;
   }
 
   return parts.join(', ');
 }
 
+function computeSafeSteeredControlStrength(baseStrength: number, delta: number): number {
+  const clampedBase = Math.max(0.1, Math.min(1.0, baseStrength));
+  return Number(Math.min(1.0, clampedBase + delta).toFixed(2));
+}
+
 /**
  * Closed-Loop Directorial Auto-Steering Engine
- * Compares take motion fidelity against directed trajectory and constructs a compensatory patch.
+ * Compares take motion fidelity against directed trajectory and constructs a compensatory patch
+ * using clean natural-language camera prose compatible with LTX-2.5 and MiniMax H3.
  */
 export function generateDirectorialSteeringPatch(
   take: ShotRevisionV2,
@@ -106,7 +113,7 @@ export function generateDirectorialSteeringPatch(
   const detected = analysis.detectedMovement;
   const originalPos = take.prompt || take.shotSpec.sceneDescription || '';
   const originalNeg = take.negative || take.shotSpec.negativePrompt || '';
-  const baseIcLora = options.currentIcLoraStrength ?? 1.0;
+  const baseIcLora = Math.max(0.1, Math.min(1.0, options.currentIcLoraStrength ?? 0.85));
 
   const appliedDirectives: string[] = [];
   let posAddition = '';
@@ -119,13 +126,17 @@ export function generateDirectorialSteeringPatch(
   if (directed === 'static') {
     if (analysis.overallScore < 85) {
       reason = `Take ${take.takeNumber ?? take.version} exhibited camera motion drift (${detected}) on a directed static shot.`;
+      steeredIcLora = computeSafeSteeredControlStrength(baseIcLora, 0.12);
       appliedDirectives.push('Lock camera to stationary tripod anchor');
       appliedDirectives.push('Inject anti-motion suppression in negative prompt');
-      appliedDirectives.push('Boost IC-LoRA conditioning strength by +0.20x to pin background');
+      appliedDirectives.push(
+        steeredIcLora > baseIcLora
+          ? `Raise 3D control conditioning to ${steeredIcLora.toFixed(2)}x (safe <= 1.00x ceiling) to pin background`
+          : 'Maintain 1.00x 3D control conditioning ceiling to pin background without overbaking'
+      );
 
-      posAddition = '(static locked camera, locked tripod shot, stationary camera framing:1.3)';
+      posAddition = 'static locked camera, locked tripod shot, stationary camera framing with zero camera drift';
       negAddition = getCounterMovementNegative(directed, detected);
-      steeredIcLora = Math.min(1.5, baseIcLora + 0.2);
     } else {
       reason = `Take ${take.takeNumber ?? take.version} maintained excellent static stability (${analysis.overallScore}%).`;
       appliedDirectives.push('Maintain locked static framing');
@@ -147,24 +158,28 @@ export function generateDirectorialSteeringPatch(
   ) {
     if (analysis.directionalScore < 60 || (detected !== directed && detected !== 'static')) {
       reason = `Take ${take.takeNumber ?? take.version} drifted from directed ${directed} (achieved ${detected}, fidelity: ${analysis.overallScore}%).`;
-      appliedDirectives.push(`Reinforce directed ${directed} camera trajectory verbs with weighted conditioning`);
+      steeredIcLora = computeSafeSteeredControlStrength(baseIcLora, 0.15);
+      appliedDirectives.push(`Reinforce directed ${directed} camera trajectory in natural-language prose`);
       appliedDirectives.push(`Counter-steer against detected ${detected} in negative prompt`);
-      appliedDirectives.push(`Elevate IC-LoRA geometry guidance to 1.25x to anchor 3D trajectory pass`);
+      appliedDirectives.push(
+        steeredIcLora > baseIcLora
+          ? `Elevate 3D trajectory control strength to ${steeredIcLora.toFixed(2)}x (capped <= 1.00x)`
+          : 'Hold 3D trajectory control strength at 1.00x safe ceiling'
+      );
 
-      posAddition = `(deliberate camera ${directed}, steady ${directed} tracking shot, cinematic camera motion:1.35)`;
+      posAddition = `deliberate camera ${directed}, steady ${directed} tracking shot, continuous cinematic camera motion`;
       negAddition = getCounterMovementNegative(directed, detected);
-      steeredIcLora = Math.min(1.5, Math.max(1.2, baseIcLora + 0.25));
     } else if (analysis.speedScore < 65) {
       reason = `Take ${take.takeNumber ?? take.version} achieved direction but had insufficient camera velocity (${analysis.speedScore}% speed match).`;
+      steeredIcLora = computeSafeSteeredControlStrength(baseIcLora, 0.1);
       appliedDirectives.push(`Amplify kinetic momentum for ${directed}`);
-      appliedDirectives.push(`Suppress stationary and motionless frames`);
+      appliedDirectives.push('Suppress stationary and motionless frames');
 
-      posAddition = `(dynamic fast camera ${directed}, kinetic camera translation, motion blur:1.25)`;
-      negAddition = '(static, frozen, slow motion, stationary camera, motionless:1.25)';
-      steeredIcLora = Math.min(1.4, baseIcLora + 0.15);
+      posAddition = `dynamic fast camera ${directed}, kinetic camera translation, swift tracking motion`;
+      negAddition = 'static, frozen, slow motion, stationary camera, motionless';
     } else {
       reason = `Take ${take.takeNumber ?? take.version} achieved strong alignment (${analysis.overallScore}%). Iterating seed for visual variety.`;
-      appliedDirectives.push(`Preserve proven prompt structure and iterate RNG seed`);
+      appliedDirectives.push('Preserve proven prompt structure and iterate RNG seed');
       seedOffset = 1;
     }
   }
@@ -172,13 +187,13 @@ export function generateDirectorialSteeringPatch(
   else if (directed === 'dolly-in' || directed === 'zoom-in') {
     if (analysis.overallScore < 75 || detected !== 'dolly-in') {
       reason = `Take ${take.takeNumber ?? take.version} lacked forward camera momentum (detected ${detected}).`;
+      steeredIcLora = computeSafeSteeredControlStrength(baseIcLora, 0.12);
       appliedDirectives.push('Enforce forward camera push-in trajectory');
       appliedDirectives.push('Suppress backward retreating camera motion');
-      appliedDirectives.push('Boost 3D previs IC-LoRA strength by +0.20x');
+      appliedDirectives.push(`Set 3D previs control strength to ${steeredIcLora.toFixed(2)}x (safe <= 1.00x ceiling)`);
 
-      posAddition = '(push in dolly camera move, camera zooming in, advancing toward subject:1.35)';
+      posAddition = 'push in dolly camera move, camera zooming in, steady forward advance toward subject';
       negAddition = getCounterMovementNegative(directed, detected);
-      steeredIcLora = Math.min(1.5, baseIcLora + 0.2);
     } else {
       reason = `Take ${take.takeNumber ?? take.version} achieved clean forward expansion (${analysis.overallScore}%).`;
       appliedDirectives.push('Preserve forward push-in parameters');
@@ -187,13 +202,13 @@ export function generateDirectorialSteeringPatch(
   } else if (directed === 'dolly-out' || directed === 'zoom-out') {
     if (analysis.overallScore < 75 || detected !== 'dolly-out') {
       reason = `Take ${take.takeNumber ?? take.version} lacked backward camera retreat (detected ${detected}).`;
+      steeredIcLora = computeSafeSteeredControlStrength(baseIcLora, 0.12);
       appliedDirectives.push('Enforce backward camera pull-out trajectory');
       appliedDirectives.push('Suppress forward advancing motion in negative prompt');
-      appliedDirectives.push('Boost 3D previs IC-LoRA strength by +0.20x');
+      appliedDirectives.push(`Set 3D previs control strength to ${steeredIcLora.toFixed(2)}x (safe <= 1.00x ceiling)`);
 
-      posAddition = '(pull out dolly camera move, camera zooming out, widening angle, revealing scene:1.35)';
+      posAddition = 'pull out dolly camera move, camera zooming out, widening angle revealing the scene';
       negAddition = getCounterMovementNegative(directed, detected);
-      steeredIcLora = Math.min(1.5, baseIcLora + 0.2);
     } else {
       reason = `Take ${take.takeNumber ?? take.version} achieved clean backward retreat (${analysis.overallScore}%).`;
       appliedDirectives.push('Preserve backward pull-out parameters');
@@ -201,7 +216,7 @@ export function generateDirectorialSteeringPatch(
     }
   } else {
     reason = `Directorial steering pass for ${directed}.`;
-    appliedDirectives.push(`Fine-tune camera stability`);
+    appliedDirectives.push('Fine-tune camera stability');
   }
 
   if (options.customDirective) {
@@ -211,7 +226,7 @@ export function generateDirectorialSteeringPatch(
   // Construct steered prompts without duplicating additions
   let steeredPositive = originalPos.trim();
   if (posAddition && !steeredPositive.includes(posAddition)) {
-    steeredPositive = `${steeredPositive}, ${posAddition}`;
+    steeredPositive = steeredPositive ? `${steeredPositive}. ${posAddition}` : posAddition;
   }
 
   let steeredNegative = originalNeg.trim();
@@ -220,6 +235,7 @@ export function generateDirectorialSteeringPatch(
   }
 
   const suggestedSeed = (take.seed + seedOffset) % 2147483647;
+  const targetEngineKey = take.shotSpec.targetModel === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5';
 
   const patch: DirectorialSteeringPatch = {
     sourceTakeId: take.id,
@@ -239,6 +255,10 @@ export function generateDirectorialSteeringPatch(
     ...take.shotSpec,
     seed: suggestedSeed,
     negativePrompt: steeredNegative,
+    customPositivePrompts: {
+      ...(take.shotSpec.customPositivePrompts || {}),
+      [targetEngineKey]: steeredPositive,
+    },
   };
 
   return {
@@ -249,17 +269,22 @@ export function generateDirectorialSteeringPatch(
 }
 
 /**
- * Applies a steering patch onto an active ShotSpec
+ * Applies a steering patch onto an active ShotSpec without wiping custom prompts
  */
 export function applySteeringPatchToShot(
   shot: ShotSpec,
   patch: DirectorialSteeringPatch
 ): ShotSpec {
   const currentSeed = shot.seed ?? 42;
+  const targetEngineKey = shot.targetModel === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5';
   return {
     ...shot,
     seed: patch.suggestedSeedOffset ? (currentSeed + patch.suggestedSeedOffset) % 2147483647 : currentSeed,
     negativePrompt: patch.steeredNegativePrompt,
+    customPositivePrompts: {
+      ...(shot.customPositivePrompts || {}),
+      [targetEngineKey]: patch.steeredPositivePrompt,
+    },
   };
 }
 

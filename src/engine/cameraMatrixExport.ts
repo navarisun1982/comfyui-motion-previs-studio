@@ -1,5 +1,10 @@
+import * as THREE from 'three';
 import { ShotSpec, FocalLength } from '../types/shotspec';
-import { interpolateCameraPosition } from './trajectoryMath';
+import {
+  interpolateCameraPosition,
+  interpolateTrajectoryPosition,
+} from './trajectoryMath';
+import { computeCameraFovDeg } from './povVisibilityEngine';
 
 export interface CameraIntrinsics {
   focalLengthMm: number;
@@ -55,23 +60,9 @@ const FOCAL_MM_MAP: Record<FocalLength, number> = {
   '135mm': 135,
 };
 
-const FOV_MAP: Record<FocalLength, number> = {
-  '12mm': 122,
-  '14mm': 114,
-  '40mm': 56,
-  '70mm': 34,
-  '100mm': 24,
-  '200mm': 12,
-  '18mm': 100,
-  '24mm': 84,
-  '35mm': 63,
-  '50mm': 47,
-  '85mm': 28,
-  '135mm': 18,
-};
-
 /**
- * Calculates camera intrinsic matrix K based on standard 35mm film sensor format (36mm x 24mm).
+ * Calculates camera intrinsic matrix K based on cinema vertical sensor gate height (`vFOV`)
+ * with square pixels (`fx = fy = targetHeight / (2 * tan(vFOV / 2))`), matching Three.js `PerspectiveCamera`.
  */
 export function computeCameraIntrinsics(
   focalLength: FocalLength,
@@ -97,32 +88,23 @@ export function computeCameraIntrinsics(
     typeof customFocalLengthMm === 'number' && Number.isFinite(customFocalLengthMm)
       ? customFocalLengthMm
       : baseMm;
-  const hasCustomLensOrSensor =
-    (typeof customFocalLengthMm === 'number' && customFocalLengthMm !== baseMm) ||
-    (sensorSize && sensorSize !== 'super-35');
-  const sensorHeightMm =
-    sensorSize === 'imax-65mm'
-      ? 38.5
-      : sensorSize === 'full-frame'
-      ? 24.0
-      : sensorSize === 'anamorphic-2x'
-      ? 21.0
-      : 18.66;
-  const fovDeg = hasCustomLensOrSensor
-    ? Math.max(8, Math.min(130, (2 * Math.atan(sensorHeightMm / (2 * Math.max(8, focalMm))) * 180) / Math.PI))
-    : FOV_MAP[focalLength] || 63;
-  const fovRad = (fovDeg * Math.PI) / 180;
+  const vFovDeg = computeCameraFovDeg({
+    focalLength,
+    customFocalLengthMm,
+    sensorSize: sensorSize || 'full-frame',
+  });
+  const vFovRad = (vFovDeg * Math.PI) / 180;
 
-  // Focal length in pixel coordinates
-  const rawFx = targetWidth / (2 * Math.tan(fovRad / 2));
-  const fx = Math.round(rawFx * 100) / 100;
-  const fy = fx; // Square pixels
+  // Square-pixel focal length derived directly from vertical FOV and vertical pixel height
+  const rawFy = targetHeight / (2 * Math.tan(vFovRad / 2));
+  const fy = Math.round(rawFy * 100) / 100;
+  const fx = fy;
   const cx = targetWidth / 2;
   const cy = targetHeight / 2;
 
   return {
     focalLengthMm: focalMm,
-    fovDegrees: fovDeg,
+    fovDegrees: vFovDeg,
     fx,
     fy,
     cx,
@@ -226,52 +208,180 @@ export function exportCameraPoseBundle(shot: ShotSpec): CameraPoseBundle {
   const timestamps: number[] = [];
 
   const angle = shot.camera.angle;
-  const baseLookHeight =
-    angle === 'low-angle'
-      ? 6.1
-      : angle === 'ground-level'
-      ? 6.4
-      : angle === 'high-angle'
-      ? 3.8
-      : angle === 'overhead-gods-eye'
-      ? 0.5
-      : 5.0;
+  const moveType = shot.camera.movement.type;
+  const baseLookAt = shot.camera.movement.targetLookAt ?? { x: 50, y: 50 };
+  const camLookKfs = (shot.camera.movement.keyframes || [])
+    .filter((k) => k.lookAt !== undefined && k.time >= 0 && k.time <= duration)
+    .sort((a, b) => a.time - b.time);
 
-  const lookAtTarget = {
-    x: (shot.camera.movement.targetLookAt.x - 50) * 1.0,
-    y: baseLookHeight + (shot.camera.lookAtHeightOffset ?? 0),
-    z: (shot.camera.movement.targetLookAt.y - 50) * 1.0,
-  };
+  const baseLookHeight =
+    shot.camera.shotType === 'extreme-close-up'
+      ? 4.48
+      : shot.camera.shotType === 'close-up'
+      ? 4.32
+      : shot.camera.shotType === 'medium-close-up'
+      ? 3.95
+      : shot.camera.shotType === 'medium'
+      ? 3.45
+      : 2.85;
 
   const rollRad =
     (((shot.camera.dutchRollDeg ?? 0) + (angle === 'dutch-angle' ? -15 : 0)) * Math.PI) / 180;
-  const cosR = Math.cos(rollRad);
-  const sinR = Math.sin(rollRad);
+  const pitchOffsetRad = ((shot.camera.pitchOffsetDeg ?? 0) * Math.PI) / 180;
+  const yawOffsetRad = ((shot.camera.yawOffsetDeg ?? 0) * Math.PI) / 180;
+
+  const virtualCam = new THREE.PerspectiveCamera();
 
   for (let f = 0; f < frameCount; f++) {
     const t = (f / Math.max(1, frameCount - 1)) * duration;
+    const ratio = duration > 0 ? Math.max(0, Math.min(1, t / duration)) : 0;
     timestamps.push(Math.round(t * 1000) / 1000);
 
     const rawEye = interpolateCameraPosition(shot.camera.movement, t, duration);
+    let effectiveCamX = rawEye.x;
+    let effectiveCamY =
+      angle === 'ground-level'
+        ? Math.min(rawEye.y, 0.4)
+        : angle === 'overhead-gods-eye'
+        ? Math.max(rawEye.y, 28)
+        : rawEye.y;
+    let effectiveCamZ = rawEye.z;
+
+    let lookAtCoord: { x: number; y: number; z?: number } = baseLookAt;
+    if (camLookKfs.length > 0) {
+      const lookWaypoints: Array<{ time: number; lookAt: { x: number; y: number; z?: number } }> = [];
+      if (camLookKfs[0].time > 0.01) {
+        lookWaypoints.push({ time: 0, lookAt: camLookKfs[0].lookAt! });
+      }
+      for (const kf of camLookKfs) {
+        lookWaypoints.push({ time: kf.time, lookAt: kf.lookAt! });
+      }
+      if (lookWaypoints[lookWaypoints.length - 1].time < duration - 0.01) {
+        lookWaypoints.push({ time: duration, lookAt: baseLookAt });
+      }
+      const clampedT = Math.max(0, Math.min(duration, t));
+      if (clampedT <= lookWaypoints[0].time) {
+        lookAtCoord = lookWaypoints[0].lookAt;
+      } else if (clampedT >= lookWaypoints[lookWaypoints.length - 1].time) {
+        lookAtCoord = lookWaypoints[lookWaypoints.length - 1].lookAt;
+      } else {
+        for (let i = 0; i < lookWaypoints.length - 1; i++) {
+          const wA = lookWaypoints[i];
+          const wB = lookWaypoints[i + 1];
+          if (clampedT >= wA.time && clampedT <= wB.time) {
+            const seg = wB.time - wA.time;
+            const u = seg > 0 ? (clampedT - wA.time) / seg : 0;
+            const smoothU = u * u * (3 - 2 * u);
+            const zA = wA.lookAt.z ?? 50;
+            const zB = wB.lookAt.z ?? 50;
+            lookAtCoord = {
+              x: wA.lookAt.x + (wB.lookAt.x - wA.lookAt.x) * smoothU,
+              y: wA.lookAt.y + (wB.lookAt.y - wA.lookAt.y) * smoothU,
+              z: zA + (zB - zA) * smoothU,
+            };
+            break;
+          }
+        }
+      }
+    }
+
+    let targetX = (lookAtCoord.x - 50) * 1.0;
+    let targetZ = (lookAtCoord.y - 50) * 1.0;
+    let targetY =
+      lookAtCoord.z !== undefined
+        ? baseLookHeight + (lookAtCoord.z - 50) * 0.075
+        : baseLookHeight;
+
+    if (moveType === 'pan-left') {
+      targetX += (0.5 - ratio) * 15;
+    } else if (moveType === 'pan-right') {
+      targetX += (ratio - 0.5) * 15;
+    } else if (moveType === 'tilt-up') {
+      targetY += (ratio - 0.5) * 8;
+    } else if (moveType === 'tilt-down') {
+      targetY += (0.5 - ratio) * 8;
+    } else if (moveType === 'whip-pan') {
+      targetX += Math.sin(ratio * Math.PI) * 20;
+    }
+
+    if (shot.camera.trackTargetActorId) {
+      const trackedActor = shot.actors.find((a) => a.id === shot.camera.trackTargetActorId);
+      if (trackedActor) {
+        const trackedStartTime = trackedActor.trajectory?.startTimeSeconds ?? 0;
+        const trackedEffectiveTime = Math.max(0, t - trackedStartTime);
+        const tPos = interpolateTrajectoryPosition(
+          trackedActor.trajectory,
+          trackedEffectiveTime,
+          duration
+        );
+        const tScale = trackedActor.scale ?? 1.0;
+        const bone = shot.camera.trackTargetBone || 'head';
+        const boneOffset =
+          bone === 'head'
+            ? 4.35 * tScale
+            : bone === 'chest'
+            ? 3.45 * tScale
+            : bone === 'pelvis'
+            ? 2.55 * tScale
+            : 0.45 * tScale;
+        targetX = (tPos.x - 50) * 1.0;
+        targetZ = (tPos.y - 50) * 1.0;
+        targetY = (tPos.z ?? 0) * 0.4 + boneOffset;
+
+        if (shot.camera.followActorMovement || moveType === 'steadicam-follow') {
+          const initPos = trackedActor.trajectory?.startPosition || { x: 50, y: 50, z: 0 };
+          effectiveCamX += (tPos.x - initPos.x) * 1.0;
+          effectiveCamZ += (tPos.y - initPos.y) * 1.0;
+          effectiveCamY += ((tPos.z ?? 0) - (initPos.z ?? 0)) * 0.4;
+        }
+      }
+    }
+
+    let effectiveTargetY = targetY + (shot.camera.lookAtHeightOffset ?? 0);
+    if (angle === 'low-angle') {
+      effectiveTargetY += 1.1;
+    } else if (angle === 'ground-level') {
+      effectiveTargetY += 1.4;
+    } else if (angle === 'high-angle') {
+      effectiveTargetY = Math.max(1.2, effectiveTargetY - 1.2);
+    } else if (angle === 'overhead-gods-eye') {
+      effectiveTargetY = 0.5;
+    }
+
     const eyePos = {
-      x: rawEye.x,
-      y:
-        angle === 'ground-level'
-          ? Math.min(rawEye.y, 0.4)
-          : angle === 'overhead-gods-eye'
-          ? Math.max(rawEye.y, 28)
-          : rawEye.y,
-      z: rawEye.z,
+      x: effectiveCamX,
+      y: effectiveCamY + 1.5,
+      z: effectiveCamZ,
     };
 
     const isOverhead =
       angle === 'overhead-gods-eye' ||
-      (Math.abs(eyePos.x - lookAtTarget.x) < 0.1 && Math.abs(eyePos.z - lookAtTarget.z) < 0.1);
-    const upVec = isOverhead
-      ? { x: 0, y: 0, z: -1 }
-      : { x: -sinR, y: cosR, z: 0 };
+      (Math.abs(eyePos.x - targetX) < 0.1 && Math.abs(eyePos.z - targetZ) < 0.1);
 
-    const { c2w, w2c } = lookAtToMatrix4(eyePos, lookAtTarget, upVec);
+    virtualCam.position.set(eyePos.x, eyePos.y, eyePos.z);
+    if (isOverhead) {
+      virtualCam.up.set(0, 0, -1);
+    } else {
+      virtualCam.up.set(0, 1, 0);
+    }
+    virtualCam.lookAt(targetX, effectiveTargetY, targetZ);
+    if (Math.abs(yawOffsetRad) > 1e-5) virtualCam.rotateY(yawOffsetRad);
+    if (Math.abs(pitchOffsetRad) > 1e-5) virtualCam.rotateX(pitchOffsetRad);
+    if (Math.abs(rollRad) > 1e-5) virtualCam.rotateZ(rollRad);
+    virtualCam.updateMatrixWorld(true);
+
+    // Extract local camera forward and rolled up vectors without gimbal lock along +/-X
+    const localForward = new THREE.Vector3(0, 0, -1).applyQuaternion(virtualCam.quaternion);
+    const localUp = new THREE.Vector3(0, 1, 0).applyQuaternion(virtualCam.quaternion);
+    const lookDist = Math.max(1.0, Math.hypot(targetX - eyePos.x, effectiveTargetY - eyePos.y, targetZ - eyePos.z));
+    const orientedTarget = {
+      x: eyePos.x + localForward.x * lookDist,
+      y: eyePos.y + localForward.y * lookDist,
+      z: eyePos.z + localForward.z * lookDist,
+    };
+    const orientedUp = { x: localUp.x, y: localUp.y, z: localUp.z };
+
+    const { c2w, w2c } = lookAtToMatrix4(eyePos, orientedTarget, orientedUp);
 
     w2cExtrinsics.push(w2c);
     c2wPoses.push(c2w);

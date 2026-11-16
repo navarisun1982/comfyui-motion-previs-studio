@@ -13,6 +13,41 @@ try {
   // ignore if git unavailable
 }
 
+const sharedLocalProxy = {
+  '/ws': {
+    target: 'ws://127.0.0.1:8188',
+    ws: true,
+    changeOrigin: true,
+    headers: {
+      Origin: 'http://127.0.0.1:8188',
+    },
+  },
+  '/api/ollama': {
+    target: 'http://127.0.0.1:11434',
+    changeOrigin: true,
+    headers: {
+      Origin: 'http://127.0.0.1:11434',
+    },
+    rewrite: (p: string) => p.replace(/^\/api\/ollama/, ''),
+  },
+  '/api/llamacpp': {
+    target: 'http://127.0.0.1:8080',
+    changeOrigin: true,
+    rewrite: (p: string) => p.replace(/^\/api\/llamacpp/, ''),
+  },
+  '/api/lmstudio': {
+    target: 'http://127.0.0.1:1234',
+    changeOrigin: true,
+    rewrite: (p: string) => p.replace(/^\/api\/lmstudio/, ''),
+  },
+  '/api/openai-proxy': {
+    target: 'https://api.openai.com/v1',
+    changeOrigin: true,
+    secure: true,
+    rewrite: (p: string) => p.replace(/^\/api\/openai-proxy/, ''),
+  },
+};
+
 // https://vitejs.dev/config/
 export default defineConfig({
   base: './',
@@ -29,40 +64,11 @@ export default defineConfig({
   server: {
     port: 5173,
     host: '127.0.0.1',
-    proxy: {
-      '/ws': {
-        target: 'ws://127.0.0.1:8188',
-        ws: true,
-        changeOrigin: true,
-        headers: {
-          Origin: 'http://127.0.0.1:8188',
-        },
-      },
-      '/api/ollama': {
-        target: 'http://127.0.0.1:11434',
-        changeOrigin: true,
-        headers: {
-          Origin: 'http://127.0.0.1:11434',
-        },
-        rewrite: (path) => path.replace(/^\/api\/ollama/, ''),
-      },
-      '/api/llamacpp': {
-        target: 'http://127.0.0.1:8080',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/llamacpp/, ''),
-      },
-      '/api/lmstudio': {
-        target: 'http://127.0.0.1:1234',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api\/lmstudio/, ''),
-      },
-      '/api/openai-proxy': {
-        target: 'https://api.openai.com/v1',
-        changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/api\/openai-proxy/, ''),
-      },
-    },
+    proxy: sharedLocalProxy,
+  },
+  preview: {
+    host: '127.0.0.1',
+    proxy: sharedLocalProxy,
   },
   build: {
     chunkSizeWarningLimit: 750,

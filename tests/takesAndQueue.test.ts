@@ -149,6 +149,104 @@ describe('Stage 7: Takes Grid & Generation Queue', () => {
       expect(retried?.status).toBe('queued');
       expect(retried?.error).toBeUndefined();
     });
+
+    it('should forward MiniMax H3 4-ref payloads, tuning params, and persist steering lineage on completion', async () => {
+      const shot = createDefaultShotSpec({ id: 'shot-h3-parity', name: 'H3 Ref2VA Parity' });
+      const revId = useHistoryStore.getState().saveRevisionV2({
+        shot,
+        engine: 'minimax-h3',
+        templateId: 'h3_stubelius',
+        templateHash: 'hash-h3',
+        bindingSchema: 1,
+        mode: 'control',
+        profile: 'final',
+        seed: 777,
+        prompt: 'Steered camera motion',
+        negative: 'static camera',
+        promptSource: 'manual',
+        submittedWorkflow: {},
+        outputVideoUrl: 'blob:steered-h3.mp4',
+        outputFilename: 'Steered_H3.mp4',
+      });
+
+      const onTakeCompleted = vi.fn();
+      const mockRunner = {
+        run: vi.fn().mockImplementation(async (opts) => {
+          opts.onSuccess?.(revId, 'blob:steered-h3.mp4', 'Steered_H3.mp4');
+          return {
+            promptId: 'prompt-h3-1',
+            cancel: vi.fn(),
+            getBoundWorkflow: () => ({}),
+          };
+        }),
+      };
+
+      const queue = new GenerationQueueManager({ runner: mockRunner });
+      const refBlob1 = new Blob(['img1'], { type: 'image/png' });
+      const controlBlob = new Blob(['vid'], { type: 'video/mp4' });
+      const steeringPatch = {
+        sourceTakeId: 'rev-source-001',
+        sourceTakeNumber: 1,
+        reason: 'Under-moved pan corrected via closed-loop steering',
+        originalPositivePrompt: 'Original camera motion',
+        steeredPositivePrompt: 'Steered camera motion',
+        originalNegativePrompt: '',
+        steeredNegativePrompt: 'static camera',
+        originalIcLoraStrength: 0.75,
+        steeredIcLoraStrength: 0.92,
+        suggestedSeedOffset: 107,
+        appliedDirectives: ['smooth horizontal leftward camera pan'],
+      };
+
+      queue.enqueueBatch({
+        shot,
+        engine: 'minimax-h3',
+        mode: 'control',
+        templateId: 'h3_stubelius',
+        profile: 'final',
+        prompt: 'Steered camera motion',
+        negative: 'static camera',
+        promptSource: 'manual',
+        baseSeed: 777,
+        count: 1,
+        seedStrategy: 'sequential',
+        steps: 10,
+        icLoraStrength: 0.92,
+        firstPassScale: 0.8,
+        referenceMode: 'ON',
+        controlVideoBlob: controlBlob,
+        refImageBlobs: [refBlob1, null, null, null],
+        refImageFilenames: ['hero.png', '', '', ''],
+        refImageDescriptions: ['hero operative', '', '', ''],
+        steeredFromTakeId: 'rev-source-001',
+        steeringPatch,
+        onTakeCompleted,
+      });
+
+      await vi.waitFor(() => {
+        expect(mockRunner.run).toHaveBeenCalledTimes(1);
+        expect(onTakeCompleted).toHaveBeenCalledWith(
+          revId,
+          'blob:steered-h3.mp4',
+          'Steered_H3.mp4',
+          expect.objectContaining({ seed: 777, status: 'completed' })
+        );
+      });
+
+      const passedOpts = mockRunner.run.mock.calls[0][0];
+      expect(passedOpts.templateId).toBe('h3_stubelius');
+      expect(passedOpts.steps).toBe(10);
+      expect(passedOpts.icLoraStrength).toBe(0.92);
+      expect(passedOpts.firstPassScale).toBe(0.8);
+      expect(passedOpts.referenceMode).toBe('ON');
+      expect(passedOpts.refImageFilenames).toEqual(['hero.png', '', '', '']);
+      expect(passedOpts.refImageDescriptions).toEqual(['hero operative', '', '', '']);
+      expect(passedOpts.refImageBlobs[0]).toBe(refBlob1);
+
+      const savedRev = useHistoryStore.getState().getRevision(revId);
+      expect(savedRev?.steeredFromTakeId).toBe('rev-source-001');
+      expect(savedRev?.steeringPatch?.steeredIcLoraStrength).toBe(0.92);
+    });
   });
 
   describe('Takes Persistence & Circling Hero Takes', () => {

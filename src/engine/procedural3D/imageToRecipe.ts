@@ -930,18 +930,22 @@ export function synthesizeRecipeFromImage(opts: ImageToRecipeOptions): SculptSpe
     return curated;
   }
 
-  // 2.5. Humanoid Character Clay Maquette Compiler (head, torso, tunic skirt, arms, legs, boots, bow/weapons)
+  // 2.5. Humanoid Character Clay Maquette Compiler (head, torso, arms, legs, boots)
   if (isHumanoidPrompt(cleanPrompt) || /\b(reference figure|character)\b/i.test(cleanPrompt)) {
     const features = extractCharacterFeaturesFromModelOutput(
       { name: name || 'Sculpted Character', heightMeters: defaultHeight || 1.75 },
-      cleanPrompt || 'Elven Scout Archer',
+      cleanPrompt || 'Neutral Human Figure',
       palette as any
     );
     return compileCharacterToClaySculpt(features);
   }
 
-  // 3. Legacy stand-up pouch fallback when synthetic 10-band widthProfile is passed
+  // 3. Stand-up pouch silhouette detection when promptless OR when prompt/name mentions pouch/bag/pack
+  const hasExplicitNonPouchPrompt =
+    Boolean(prompt.trim() || (name.trim() && name.trim().toLowerCase() !== '3d object')) &&
+    !/\b(pouch|bag|pack|sachet)\b/i.test(`${cleanPrompt} ${name || ''}`);
   const isLegacyPouchGeometry =
+    !hasExplicitNonPouchPrompt &&
     !metrics?.outline &&
     !isHumanoidPrompt(cleanPrompt) &&
     metrics &&

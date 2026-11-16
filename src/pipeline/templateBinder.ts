@@ -149,8 +149,7 @@ export function bindTemplate(api: ApiWorkflow, binding: TemplateBinding, values:
             ? values.refImage3File
             : values.refImage4File;
         if (!rawSlotVal || !rawSlotVal.trim()) {
-          delete workflow[target.node];
-          pruneBrokenRefImageLinks(workflow, target.node);
+          pruneUnusedRefImageNode(workflow, target.node);
         }
       }
 
@@ -365,24 +364,95 @@ function fieldValue(field: BindableField, v: BindValues, engine?: string): unkno
   }
 }
 
+function isRefImageInputKey(key: string): boolean {
+  return (
+    /^ref_images\.ref_image_\d+$/.test(key) ||
+    /^ref_image_\d+$/.test(key) ||
+    /^image_?\d+$/.test(key)
+  );
+}
+
+function isPassThroughImageResizeNode(classType: string): boolean {
+  return /^(ImageScale|ImageScaleBy|ImageScaleToTotalPixels|ImageScaleToMaxDimension|ImageResize|JWImageResize|LayerUtility:\s*ImageScale)/i.test(
+    classType
+  );
+}
+
+function hasNonRefConsumers(workflow: ApiWorkflow, sourceId: string, ignoredIds = new Set<string>()): boolean {
+  for (const [consumerId, node] of Object.entries(workflow)) {
+    if (ignoredIds.has(consumerId) || !node?.inputs) continue;
+    for (const [k, v] of Object.entries(node.inputs)) {
+      if (k === 'ref_images' && v && typeof v === 'object' && !Array.isArray(v)) {
+        continue;
+      }
+      if (Array.isArray(v) && String(v[0]) === String(sourceId)) {
+        if (isRefImageInputKey(k)) continue;
+        if (isPassThroughImageResizeNode(node.class_type || '')) {
+          if (hasNonRefConsumers(workflow, consumerId, new Set([...ignoredIds, sourceId]))) {
+            return true;
+          }
+          continue;
+        }
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /**
- * Removes references to a pruned LoadImage node from MiniMaxH3ReferenceToVideo.inputs.ref_images
- * and re-packs remaining ref_image_0..N keys sequentially.
+ * Safely prunes an unused LoadImage reference slot (and any exclusive pass-through
+ * ImageScale/ImageResize node fed solely by it) while preserving the LoadImage node
+ * if non-reference nodes still depend on it.
  */
-function pruneBrokenRefImageLinks(workflow: ApiWorkflow, deletedNodeId: string): void {
+function pruneUnusedRefImageNode(workflow: ApiWorkflow, loadNodeId: string): void {
+  const deletedIds = new Set<string>([String(loadNodeId)]);
+
+  // Collect pass-through resize nodes fed exclusively by loadNodeId for reference slots
+  for (const [nodeId, node] of Object.entries(workflow)) {
+    if (!node?.inputs || !isPassThroughImageResizeNode(node.class_type || '')) continue;
+    const feedsFromLoad = Object.values(node.inputs).some(
+      (v) => Array.isArray(v) && String(v[0]) === String(loadNodeId)
+    );
+    if (feedsFromLoad && !hasNonRefConsumers(workflow, nodeId, new Set([String(loadNodeId)]))) {
+      deletedIds.add(String(nodeId));
+    }
+  }
+
+  // Always detach reference-slot links pointing to loadNodeId or its exclusive resize pass-throughs
+  pruneBrokenRefImageLinks(workflow, deletedIds);
+
+  // Only delete the LoadImage (and pass-through resize nodes) when no non-reference node still links to them
+  if (!hasNonRefConsumers(workflow, loadNodeId)) {
+    for (const id of deletedIds) {
+      delete workflow[id];
+    }
+  }
+}
+
+/**
+ * Removes references to pruned LoadImage / pass-through nodes from MiniMaxH3ReferenceToVideo
+ * (`ref_images.ref_image_0..N`, nested `ref_images`, or direct `ref_image_1..4` / `image_1..4`)
+ * and re-packs remaining `ref_image_0..N` keys sequentially.
+ */
+function pruneBrokenRefImageLinks(workflow: ApiWorkflow, deletedNodeIds: Set<string>): void {
   for (const node of Object.values(workflow)) {
     if (!node?.inputs) continue;
 
     // 1. Handle flat dotted keys on node.inputs: "ref_images.ref_image_0", "ref_images.ref_image_1", etc.
     const flatRefKeys = Object.keys(node.inputs)
       .filter((k) => /^ref_images\.ref_image_\d+$/.test(k))
-      .sort();
+      .sort((a, b) => {
+        const na = Number(a.split('_').pop()) || 0;
+        const nb = Number(b.split('_').pop()) || 0;
+        return na - nb;
+      });
     if (flatRefKeys.length > 0) {
       const keptFlatLinks: unknown[] = [];
       for (const k of flatRefKeys) {
         const v = node.inputs[k];
         delete node.inputs[k];
-        if (!Array.isArray(v) || String(v[0]) !== String(deletedNodeId)) {
+        if (!Array.isArray(v) || !deletedNodeIds.has(String(v[0]))) {
           keptFlatLinks.push(v);
         }
       }
@@ -395,19 +465,31 @@ function pruneBrokenRefImageLinks(workflow: ApiWorkflow, deletedNodeId: string):
     const refImages = node.inputs.ref_images;
     if (refImages && typeof refImages === 'object' && !Array.isArray(refImages)) {
       const record = refImages as Record<string, unknown>;
+      const nestedKeys = Object.keys(record)
+        .filter((k) => k.startsWith('ref_image_'))
+        .sort((a, b) => {
+          const na = Number(a.split('_').pop()) || 0;
+          const nb = Number(b.split('_').pop()) || 0;
+          return na - nb;
+        });
       const keptLinks: unknown[] = [];
-      for (const [k, v] of Object.entries(record)) {
-        if (!k.startsWith('ref_image_')) continue;
-        if (Array.isArray(v) && String(v[0]) === String(deletedNodeId)) {
-          delete record[k];
-        } else {
+      for (const k of nestedKeys) {
+        const v = record[k];
+        delete record[k];
+        if (!Array.isArray(v) || !deletedNodeIds.has(String(v[0]))) {
           keptLinks.push(v);
-          delete record[k];
         }
       }
       keptLinks.forEach((link, idx) => {
         record[`ref_image_${idx}`] = link;
       });
+    }
+
+    // 3. Handle direct optional slot links (ref_image_1..4, image_1..4, image1..4)
+    for (const [k, v] of Object.entries(node.inputs)) {
+      if ((/^ref_image_\d+$/.test(k) || /^image_?\d+$/.test(k)) && Array.isArray(v) && deletedNodeIds.has(String(v[0]))) {
+        delete node.inputs[k];
+      }
     }
   }
 }
@@ -479,11 +561,33 @@ export function normalizeMiniMaxPromptForConnectedRefs(prompt: string, v: BindVa
     .replace(
       /<Picture \d+>[–-]<Picture \d+>\s+and\s+<Picture 4>/g,
       replacementRange
+    )
+    .replace(
+      /<Picture 4>\s+for\s+the\s+scene\s+environment/g,
+      denseCounter === 0
+        ? 'authentic real-world descriptions for the scene environment'
+        : `__DENSE_PIC_${denseMap[3] ?? 1}__ for the scene environment`
     );
 
   if (denseCounter === 0) {
-    // Strip standalone <Picture 1> summary definition line when zero reference images are connected
-    out = out.replace(/\n*<Picture 1> is the finished visual reference[^\n]*/g, '');
+    // Strip standalone visual reference definition line & <Picture N> priority citation when zero reference images are connected
+    out = out
+      .replace(/\n*<Picture \d+> is the finished visual reference[^\n]*/g, '')
+      .replace(
+        /Whenever movement or framing implied by <Picture \d+> differs from <Video 1>,/g,
+        'Whenever static styling expectations differ from <Video 1>,'
+      );
+  } else {
+    // Anchor global visual reference lines to dense <Picture 1> before stripping empty individual slots
+    out = out
+      .replace(
+        /Whenever movement or framing implied by <Picture \d+> differs from <Video 1>,/g,
+        'Whenever movement or framing implied by __DENSE_PIC_1__ differs from <Video 1>,'
+      )
+      .replace(
+        /<Picture \d+> is the finished visual reference/g,
+        '__DENSE_PIC_1__ is the finished visual reference'
+      );
   }
 
   // Strip or remap each slot 1..4
@@ -500,7 +604,8 @@ export function normalizeMiniMaxPromptForConnectedRefs(prompt: string, v: BindVa
         .replace(new RegExp(`matches <Picture ${origNum}>;\\s*`, 'g'), '')
         .replace(new RegExp(`matches <Picture ${origNum}>\\.`, 'g'), 'preserves its authentic real-world identity.')
         .replace(new RegExp(`\\s+and <Picture ${origNum}>`, 'g'), '')
-        .replace(new RegExp(`<Picture ${origNum}>\\s+for\\s+`, 'g'), 'for ');
+        .replace(new RegExp(`<Picture ${origNum}>\\s+for\\s+`, 'g'), 'for ')
+        .replace(new RegExp(`\\s*<Picture ${origNum}>`, 'g'), '');
     } else if (denseNum !== origNum) {
       out = out.replace(new RegExp(`<Picture ${origNum}>`, 'g'), `__DENSE_PIC_${denseNum}__`);
     }

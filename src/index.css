@@ -33,6 +33,17 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  input,
+  textarea,
+  pre,
+  code,
+  .select-text,
+  [role="alert"],
+  [data-selectable="true"] {
+    user-select: text;
+    -webkit-user-select: text;
+  }
+
   /* Custom subtle scrollbar */
   ::-webkit-scrollbar {
     width: 6px;

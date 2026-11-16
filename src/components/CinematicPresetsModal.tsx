@@ -192,27 +192,42 @@ interface CinematicPresetsModalProps {
 }
 
 export const CinematicPresetsModal: React.FC<CinematicPresetsModalProps> = ({ isOpen, onClose }) => {
-  const { setFocalLength, setShotType, setCameraAngle, setCameraMovement, setLighting, updateAspectRatio } =
-    useShotStore(
-      useShallow((s) => ({
-        setFocalLength: s.setFocalLength,
-        setShotType: s.setShotType,
-        setCameraAngle: s.setCameraAngle,
-        setCameraMovement: s.setCameraMovement,
-        setLighting: s.setLighting,
-        updateAspectRatio: s.updateAspectRatio,
-      }))
-    );
+  const {
+    setFocalLength,
+    setShotType,
+    setCameraAngle,
+    setCameraMovement,
+    setLighting,
+    updateAspectRatio,
+    beginGesture,
+    endGesture,
+  } = useShotStore(
+    useShallow((s) => ({
+      setFocalLength: s.setFocalLength,
+      setShotType: s.setShotType,
+      setCameraAngle: s.setCameraAngle,
+      setCameraMovement: s.setCameraMovement,
+      setLighting: s.setLighting,
+      updateAspectRatio: s.updateAspectRatio,
+      beginGesture: s.beginGesture,
+      endGesture: s.endGesture,
+    }))
+  );
 
   if (!isOpen) return null;
 
   const applyPreset = (preset: DirectorPreset) => {
-    setFocalLength(preset.lens);
-    setShotType(preset.shotType);
-    setCameraAngle(preset.angle);
-    setCameraMovement(preset.movement, preset.speed);
-    setLighting(preset.lightingStyle, preset.lightingDirection, preset.contrast);
-    updateAspectRatio(preset.aspectRatio);
+    beginGesture();
+    try {
+      setFocalLength(preset.lens);
+      setShotType(preset.shotType);
+      setCameraAngle(preset.angle);
+      setCameraMovement(preset.movement, preset.speed);
+      setLighting(preset.lightingStyle, preset.lightingDirection, preset.contrast);
+      updateAspectRatio(preset.aspectRatio);
+    } finally {
+      endGesture();
+    }
 
     logger.action(`Applied Directorial Mood Preset: "${preset.title}"`, {
       presetId: preset.id,
@@ -225,8 +240,16 @@ export const CinematicPresetsModal: React.FC<CinematicPresetsModalProps> = ({ is
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-      <div className="relative flex w-full max-w-4xl max-h-[85vh] flex-col rounded-2xl border border-director-border bg-director-darkest/95 shadow-2xl glass-card overflow-hidden">
+    <div
+      role="dialog"
+      aria-modal="true"
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative flex w-full max-w-4xl max-h-[85vh] flex-col rounded-2xl border border-director-border bg-director-darkest/95 shadow-2xl glass-card overflow-hidden"
+      >
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-director-border px-6 py-4 bg-director-panel/60">
           <div className="flex items-center gap-3">

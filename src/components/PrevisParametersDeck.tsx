@@ -38,6 +38,7 @@ import { CINEMATIC_ENVIRONMENT_PRESETS } from '../types/environment';
 import { shouldHideStageBackdropInPrevis } from '../engine/staging/environmentBuilder';
 import { reasonEnvironment, reasonObject } from '../services/objectReasoner';
 import { registerModelFile } from '../services/modelStorage';
+import { confirmDestructiveAction } from '../services/storage';
 import { preloadGltfModels } from '../engine/gltfModelLoader';
 import { decomposeDirectorialScene } from '../engine/directorialSceneDecomposer';
 import { HumanoidMotionGroup } from '../engine/kinematics';
@@ -1501,7 +1502,13 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        clearAllActors();
+                        if (
+                          confirmDestructiveAction(
+                            `Remove all ${shot.actors.length} object(s) from the stage?`
+                          )
+                        ) {
+                          clearAllActors();
+                        }
                       }}
                       className="ui-chip text-[10px] px-2 py-1 border-rose-500/30 text-rose-300 bg-rose-500/10 hover:bg-rose-500/25"
                       title="Remove all objects from stage"
@@ -2128,13 +2135,14 @@ export const PrevisParametersDeck: React.FC<PrevisParametersDeckProps> = ({
                           <button
                             key={opt.id}
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
                               setEnvironment({
                                 ...(shot.environment || CINEMATIC_ENVIRONMENT_PRESETS[0].spec),
                                 previsStageMode: opt.id,
                                 visibleInPrevis: opt.id !== 'hide-stage',
-                              })
-                            }
+                              });
+                              useShotStore.getState().setPrevisVideo(undefined, undefined);
+                            }}
                             className={`py-1.5 px-1.5 rounded border text-center transition-all cursor-pointer ${
                               active
                                 ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50 font-bold'

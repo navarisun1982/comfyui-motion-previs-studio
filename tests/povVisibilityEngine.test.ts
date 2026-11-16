@@ -291,8 +291,17 @@ describe('Universal 6-DoF Kinematic & Camera-Relative POV Prompt Engine', () => 
     store.setCustomPositivePrompt('seedance', 'Custom locked Seedance prompt');
     expect(useShotStore.getState().shot.customPositivePrompts?.['ltx-2.5']).toBe('Custom locked LTX prompt');
 
-    // Mutating actors or environment clears customPositivePrompts so all 3 engines recompile fresh scene-only prompts
+    // Mutating actors or environment preserves user-authored customPositivePrompts (P0 invariant)
+    // while `clearCustomPositivePrompt()` explicitly resets them when the user chooses to re-unlock auto-compilation.
     store.addActor('Beach Umbrella', 'prop');
+    expect(useShotStore.getState().shot.customPositivePrompts).toEqual({
+      'ltx-2.5': 'Custom locked LTX prompt',
+      'minimax-h3': 'Custom locked MiniMax prompt',
+      'seedance': 'Custom locked Seedance prompt',
+    });
+    store.setCustomPositivePrompt('ltx-2.5', undefined);
+    store.setCustomPositivePrompt('minimax-h3', undefined);
+    store.setCustomPositivePrompt('seedance', undefined);
     expect(useShotStore.getState().shot.customPositivePrompts).toEqual({});
   });
 });

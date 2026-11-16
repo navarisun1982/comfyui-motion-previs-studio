@@ -69,7 +69,7 @@ export const InAppDebugger: React.FC = () => {
 
   if (!isOpen) return null;
 
-  const heightClass = isExpanded ? 'h-96' : 'h-64';
+  const heightClass = isExpanded ? 'h-96 max-h-[45vh]' : 'h-56 max-h-[30vh]';
 
   const categoryBadgeColor = (cat: LogCategory) => {
     switch (cat) {
@@ -105,7 +105,7 @@ export const InAppDebugger: React.FC = () => {
 
   return (
     <div
-      className={`flex w-full flex-col border-t border-director-border bg-director-darkest/98 shadow-2xl backdrop-blur-xl transition-all duration-200 z-40 ${heightClass}`}
+      className={`flex w-full flex-col border-t border-director-border bg-director-darkest/98 shadow-2xl backdrop-blur-xl transition-all duration-200 z-40 select-text ${heightClass}`}
     >
       {/* Debugger Dock Header */}
       <div className="flex h-9 shrink-0 items-center justify-between border-b border-director-border bg-director-panel px-4 font-mono text-xs">

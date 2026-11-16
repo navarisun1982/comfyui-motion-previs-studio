@@ -566,8 +566,9 @@ export function trackMultiPersonMediaPipePoses(
         Math.hypot(bbox.shoulderCenterX - bbox.hipCenterX, bbox.shoulderCenterY - bbox.hipCenterY)
       );
 
-      const focalNorm = 1.05; // ~35-50mm normalized focal length
-      const boneDepthMeters = clamp((focalNorm * wTorso3D) / iTorso2D, 1.4, 12.0);
+      const fxNorm = 1.05; // ~38mm horizontal normalized focal length (f_mm / 36mm)
+      const fyNorm = fxNorm * (16 / 9); // Vertical normalized focal length (f_px / height_px on 16:9)
+      const boneDepthMeters = clamp((fyNorm * wTorso3D) / iTorso2D, 1.4, 12.0);
       // Fuse with ankle ground-plane contact y in image space
       const lAnkle2D = smoothedLms[MP_POSE.LEFT_ANKLE];
       const rAnkle2D = smoothedLms[MP_POSE.RIGHT_ANKLE];
@@ -576,10 +577,10 @@ export function trackMultiPersonMediaPipePoses(
       const rawDepthMeters = boneDepthMeters * 0.65 + groundHomographyDepth * 0.35;
       const smoothDepthMeters = tr.depthFilter.filter(rawDepthMeters, det.timeSec);
 
-      // Camera-pan-compensated horizontal position
+      // Camera-pan-compensated horizontal position using true horizontal pinhole unprojection
       const worldHipX2D = bbox.hipCenterX - flow.cumPanX * 0.75;
       const worldHipY2D = bbox.hipCenterY - flow.cumTiltY * 0.75;
-      const metricX = ((worldHipX2D - 0.5) / focalNorm) * smoothDepthMeters;
+      const metricX = ((worldHipX2D - 0.5) / fxNorm) * smoothDepthMeters;
 
       tr.rawFrames.push({
         timeSec: det.timeSec,
@@ -644,11 +645,12 @@ export function trackMultiPersonMediaPipePoses(
       const leftFootContact = lNearGround && lVel < 0.85;
       const rightFootContact = rNearGround && rVel < 0.85;
 
-      // 1 meter horizontally = 8.5 stage units around Stage Center X = 50
+      // Canonical stage scale: 1 meter = 5.06 / 1.75 (~2.8914) stage units around Stage Center X = 50
       // Depth change relative to initial group depth maps to Stage Y (centered at Y = 46)
-      const rawStageX = clamp(50 + rf.unprojectedX * 8.5, 16, 84);
+      const stageUnitsPerMeter = 5.06 / 1.75;
+      const rawStageX = clamp(50 + rf.unprojectedX * stageUnitsPerMeter, 16, 84);
       const depthDeltaMeters = refDepth0 - rf.metricDepthMeters;
-      const rawStageY = clamp(46 + depthDeltaMeters * 8.5, 18, 84);
+      const rawStageY = clamp(46 + depthDeltaMeters * stageUnitsPerMeter, 18, 84);
 
       const stageX = Number(tr.stageXFilter.filter(rawStageX, rf.timeSec).toFixed(2));
       const stageY = Number(tr.stageYFilter.filter(rawStageY, rf.timeSec).toFixed(2));

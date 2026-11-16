@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { ShotRevisionV2, DirectorialSteeringPatch } from '../pipeline/revisionTypes';
 import { useShotStore } from '../stores/useShotStore';
 import { useQueueStore } from '../stores/useQueueStore';
@@ -13,6 +13,15 @@ import {
   Zap,
 } from 'lucide-react';
 
+export interface SteeredTakeEnqueuePayload {
+  prompt: string;
+  negative: string;
+  seed: number;
+  icLoraStrength?: number;
+  steeredFromTakeId: string;
+  steeringPatch: DirectorialSteeringPatch;
+}
+
 interface DirectorialSteeringModalProps {
   sourceTake: ShotRevisionV2;
   patch: DirectorialSteeringPatch;
@@ -20,45 +29,87 @@ interface DirectorialSteeringModalProps {
   currentMode?: GenerationMode;
   onClose: () => void;
   onNotice?: (notice: { type: 'warn' | 'error'; message: string }) => void;
+  onApplySeedToDeck?: (seed: number) => void;
+  onEnqueueSteeredTake?: (payload: SteeredTakeEnqueuePayload) => void | Promise<void>;
 }
 
 export const DirectorialSteeringModal: React.FC<DirectorialSteeringModalProps> = ({
   sourceTake,
   patch,
   currentProfile = 'final',
-  currentMode = 't2v',
+  currentMode = 'control',
   onClose,
   onNotice: _onNotice,
+  onApplySeedToDeck,
+  onEnqueueSteeredTake,
 }) => {
-  const { shot, loadShot, previsVideoBlob } = useShotStore();
+  const {
+    shot,
+    previsVideoBlob,
+    setCustomPositivePrompt,
+    setNegativePrompt,
+    setSeed,
+    beginGesture,
+    endGesture,
+  } = useShotStore();
   const { enqueueBatch } = useQueueStore();
 
-  const handleApplyToActiveShot = () => {
-    const currentSeed = shot.seed ?? 42;
-    loadShot({
-      ...shot,
-      negativePrompt: patch.steeredNegativePrompt,
-      seed: patch.suggestedSeedOffset ? (currentSeed + patch.suggestedSeedOffset) % 2147483647 : currentSeed,
-    });
-    onClose();
-  };
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [onClose]);
 
-  const handleApplyAndQueue = () => {
-    // Apply to shot
-    const currentSeed = shot.seed ?? 42;
+  const applyPatchToStoreAtomically = (): { newSeed: number; engine: 'ltx-2.5' | 'minimax-h3' } => {
+    const currentSeed = sourceTake.seed ?? shot.seed ?? 42;
     const newSeed = patch.suggestedSeedOffset
       ? (currentSeed + patch.suggestedSeedOffset) % 2147483647
       : currentSeed;
+    const engine: 'ltx-2.5' | 'minimax-h3' =
+      shot.targetModel === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5';
 
-    loadShot({
-      ...shot,
-      negativePrompt: patch.steeredNegativePrompt,
-      seed: newSeed,
-    });
+    // Group positive prompt, negative prompt, and RNG seed into 1 atomic Undo step
+    // without calling `loadShot` (preserving all 5 rendered 3D Previs video passes!)
+    beginGesture();
+    try {
+      setCustomPositivePrompt(engine, patch.steeredPositivePrompt, true);
+      setNegativePrompt(patch.steeredNegativePrompt);
+      setSeed(newSeed);
+    } finally {
+      endGesture();
+    }
+    onApplySeedToDeck?.(newSeed);
+    return { newSeed, engine };
+  };
 
-    const engine = shot.targetModel === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5';
+  const handleApplyToActiveShot = () => {
+    applyPatchToStoreAtomically();
+    onClose();
+  };
+
+  const handleApplyAndQueue = async () => {
+    const { newSeed, engine } = applyPatchToStoreAtomically();
+
+    if (onEnqueueSteeredTake) {
+      await onEnqueueSteeredTake({
+        prompt: patch.steeredPositivePrompt,
+        negative: patch.steeredNegativePrompt,
+        seed: newSeed,
+        icLoraStrength: patch.steeredIcLoraStrength,
+        steeredFromTakeId: sourceTake.id,
+        steeringPatch: patch,
+      });
+      onClose();
+      return;
+    }
+
     const mode = currentMode;
-
     let controlBlob: Blob | undefined = undefined;
     let controlFilename: string | undefined = undefined;
 
@@ -69,12 +120,15 @@ export const DirectorialSteeringModal: React.FC<DirectorialSteeringModalProps> =
       controlFilename = `${shot.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_previs.mp4`;
     }
 
-    // Queue 1 steered take with steering metadata
     enqueueBatch({
       shot: {
         ...shot,
         seed: newSeed,
         negativePrompt: patch.steeredNegativePrompt,
+        customPositivePrompts: {
+          ...(shot.customPositivePrompts || {}),
+          [engine]: patch.steeredPositivePrompt,
+        },
       },
       engine,
       mode,
@@ -97,7 +151,12 @@ export const DirectorialSteeringModal: React.FC<DirectorialSteeringModalProps> =
   const fidelity = sourceTake.motionFidelity;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Directorial Closed-Loop Auto-Steering"
+      className="fixed inset-0 z-[105] flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200"
+    >
       <div className="flex h-full max-h-[90vh] w-full max-w-4xl flex-col rounded-2xl border border-director-gold/30 bg-director-darkest shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-director-border px-5 py-3.5 bg-black/50">
@@ -189,7 +248,7 @@ export const DirectorialSteeringModal: React.FC<DirectorialSteeringModalProps> =
                 {patch.steeredPositivePrompt}
               </div>
               <span className="font-mono text-[9px] text-slate-500">
-                Adds weighted camera action clauses: (deliberate camera..., tracking shot:1.35)
+                Appends natural-language Gemma / Qwen-VL camera trajectory directives (zero legacy SD1.5 weight syntax)
               </span>
             </div>
 
@@ -219,10 +278,10 @@ export const DirectorialSteeringModal: React.FC<DirectorialSteeringModalProps> =
                 </span>
               </div>
               <div className="flex items-center gap-2 text-xs">
-                <span className="text-slate-400">{patch.originalIcLoraStrength ?? 1.0}x</span>
+                <span className="text-slate-400">{patch.originalIcLoraStrength ?? 0.85}x</span>
                 <ArrowRight className="h-3 w-3 text-slate-600" />
                 <span className="font-bold text-director-gold">
-                  {patch.steeredIcLoraStrength ?? 1.25}x
+                  {patch.steeredIcLoraStrength ?? 1.0}x
                 </span>
               </div>
             </div>

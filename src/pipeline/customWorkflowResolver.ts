@@ -8,6 +8,7 @@ import {
 } from './templateTypes';
 import { templateRegistry, RegisteredTemplate } from './templateRegistry';
 import { loadBundledTemplates } from './templateLoader';
+import { resolveLocalApiUrl } from '../services/localApiBase';
 
 export interface WorkflowNodeCandidate {
   id: string;
@@ -23,6 +24,7 @@ export interface DetectedSlotBinding {
 
 export interface CustomWorkflowSlotOverrides {
   prompt?: DetectedSlotBinding | null;
+  negative?: DetectedSlotBinding | null;
   controlVideo?: DetectedSlotBinding | null;
   refImage1?: DetectedSlotBinding | null;
   refImage2?: DetectedSlotBinding | null;
@@ -38,6 +40,7 @@ export interface AutoDetectedWorkflowResult {
   binding: TemplateBinding;
   detectedSlots: {
     prompt?: DetectedSlotBinding;
+    negative?: DetectedSlotBinding;
     controlVideo?: DetectedSlotBinding;
     refImage1?: DetectedSlotBinding;
     refImage2?: DetectedSlotBinding;
@@ -203,6 +206,7 @@ interface UiWorkflowJson {
       id?: string;
       name?: string;
       nodes?: UiWorkflowNode[];
+      links?: Array<[number, number | string, number, number | string, number, string]>;
     }>;
   };
 }
@@ -263,6 +267,20 @@ export function convertUiWorkflowToApi(
           originId: String(l[1]),
           originSlot: Number(l[2]),
         });
+      }
+    }
+  }
+  if (Array.isArray(ui.definitions?.subgraphs)) {
+    for (const sg of ui.definitions!.subgraphs!) {
+      if (Array.isArray(sg.links)) {
+        for (const l of sg.links) {
+          if (Array.isArray(l) && l.length >= 5 && !linkMap.has(Number(l[0]))) {
+            linkMap.set(Number(l[0]), {
+              originId: String(l[1]),
+              originSlot: Number(l[2]),
+            });
+          }
+        }
       }
     }
   }
@@ -484,7 +502,17 @@ export function autoDetectWorkflowBindings(
     controlVideo = overrides.controlVideo;
   } else {
     if (minimaxEntry) {
-      const refVideoLink = minimaxEntry[1].inputs['ref_video'] ?? minimaxEntry[1].inputs['video'];
+      const nestedRefVideos =
+        minimaxEntry[1].inputs['ref_videos'] &&
+        typeof minimaxEntry[1].inputs['ref_videos'] === 'object' &&
+        !Array.isArray(minimaxEntry[1].inputs['ref_videos'])
+          ? (minimaxEntry[1].inputs['ref_videos'] as Record<string, unknown>)['ref_video_0']
+          : undefined;
+      const refVideoLink =
+        minimaxEntry[1].inputs['ref_video'] ??
+        minimaxEntry[1].inputs['video'] ??
+        minimaxEntry[1].inputs['ref_videos.ref_video_0'] ??
+        nestedRefVideos;
       const tracedVideoId = traceUpstreamNode(api, refVideoLink, (_id, n) =>
         /VHS_LoadVideo|LoadVideo/i.test(n.class_type)
       );
@@ -587,20 +615,88 @@ export function autoDetectWorkflowBindings(
     warnings.push('No Prompt input node detected.');
   }
 
+  // 2b. Detect Negative Prompt Input (only when workflow actively uses CFG > 1 or has a dedicated negative conditioning/prompt node)
+  let negative: DetectedSlotBinding | undefined;
+  if (overrides && Object.prototype.hasOwnProperty.call(overrides, 'negative')) {
+    negative = overrides.negative || undefined;
+  } else {
+    // Check CFGGuider / KSampler / SamplerCustomAdvanced with active negative conditioning (cfg > 1 when literal cfg present)
+    const activeCfgSampler = nodeEntries.find(([_, n]) => {
+      if (!/CFGGuider|KSampler|KSamplerAdvanced|DualCFGGuider/i.test(n.class_type)) return false;
+      if (!('negative' in n.inputs)) return false;
+      const cfgVal = n.inputs['cfg'];
+      if (typeof cfgVal === 'number' && cfgVal <= 1) return false;
+      return true;
+    });
+    if (activeCfgSampler) {
+      const tracedNegId = traceUpstreamNode(api, activeCfgSampler[1].inputs['negative'], (id, n) =>
+        id !== prompt?.node &&
+        /PrimitiveString|String|Text|CLIPTextEncode|PixaromaText/i.test(n.class_type)
+      );
+      if (tracedNegId && api[tracedNegId]) {
+        const negNode = api[tracedNegId];
+        const inName =
+          'text' in negNode.inputs
+            ? 'text'
+            : 'value' in negNode.inputs
+            ? 'value'
+            : 'prompt' in negNode.inputs
+            ? 'prompt'
+            : 'string' in negNode.inputs
+            ? 'string'
+            : '';
+        if (inName) {
+          negative = { node: tracedNegId, input: inName };
+        }
+      }
+    }
+    if (!negative && minimaxEntry) {
+      const hasBasicGuiderOnly = nodeEntries.some(([_, n]) => n.class_type === 'BasicGuider') &&
+        !nodeEntries.some(([_, n]) => /CFGGuider|KSampler/i.test(n.class_type));
+      if (!hasBasicGuiderOnly) {
+        const negVal = minimaxEntry[1].inputs['negative_prompt'] ?? minimaxEntry[1].inputs['negative'];
+        if (isLink(negVal)) {
+          const tracedNegId = traceUpstreamNode(api, negVal, (id, n) =>
+            id !== prompt?.node &&
+            /PrimitiveString|String|Text|CLIPTextEncode|PixaromaText/i.test(n.class_type)
+          );
+          if (tracedNegId && api[tracedNegId]) {
+            const negNode = api[tracedNegId];
+            const inName =
+              'value' in negNode.inputs ? 'value' : 'text' in negNode.inputs ? 'text' : 'prompt';
+            negative = { node: tracedNegId, input: inName };
+          }
+        } else if (typeof negVal === 'string') {
+          const negKey = 'negative_prompt' in minimaxEntry[1].inputs ? 'negative_prompt' : 'negative';
+          negative = { node: minimaxEntry[0], input: negKey };
+        }
+      }
+    }
+  }
+
   // 3. Detect 4 Reference Image Slots (<picture 1> .. <picture 4>)
   const detectedRefImages: Array<DetectedSlotBinding | undefined> = [undefined, undefined, undefined, undefined];
   const usedImageNodes = new Set<string>();
 
   if (minimaxEntry) {
+    const nestedRefImages =
+      minimaxEntry[1].inputs['ref_images'] &&
+      typeof minimaxEntry[1].inputs['ref_images'] === 'object' &&
+      !Array.isArray(minimaxEntry[1].inputs['ref_images'])
+        ? (minimaxEntry[1].inputs['ref_images'] as Record<string, unknown>)
+        : null;
     const imgKeys = [
-      ['image_1', 'ref_image_1', 'image1', 'start_image'],
-      ['image_2', 'ref_image_2', 'image2', 'end_image'],
-      ['image_3', 'ref_image_3', 'image3'],
-      ['image_4', 'ref_image_4', 'image4'],
+      ['ref_images.ref_image_0', 'image_1', 'ref_image_1', 'image1', 'start_image'],
+      ['ref_images.ref_image_1', 'image_2', 'ref_image_2', 'image2', 'end_image'],
+      ['ref_images.ref_image_2', 'image_3', 'ref_image_3', 'image3'],
+      ['ref_images.ref_image_3', 'image_4', 'ref_image_4', 'image4'],
     ];
     for (let i = 0; i < 4; i++) {
-      for (const k of imgKeys[i]) {
-        const linkVal = minimaxEntry[1].inputs[k];
+      const candidatesForSlot: unknown[] = imgKeys[i].map((k) => minimaxEntry[1].inputs[k]);
+      if (nestedRefImages && `ref_image_${i}` in nestedRefImages) {
+        candidatesForSlot.unshift(nestedRefImages[`ref_image_${i}`]);
+      }
+      for (const linkVal of candidatesForSlot) {
         const tracedImgId = traceUpstreamNode(api, linkVal, (_id, n) =>
           /LoadImage|LoadImageCrop/i.test(n.class_type)
         );
@@ -704,11 +800,33 @@ export function autoDetectWorkflowBindings(
   const fields: Partial<Record<BindableField, FieldTarget>> = {};
   const nodesFingerprint: Record<string, string> = {};
 
+  const defaultScalarForField = (field: BindableField): string | number => {
+    switch (field) {
+      case 'seed':
+        return 0;
+      case 'seedCount':
+      case 'winner':
+        return 1;
+      case 'durationSeconds':
+        return 5;
+      case 'frameRate':
+        return 24;
+      case 'width':
+        return 1280;
+      case 'height':
+        return 720;
+      case 'icLoraStrength':
+        return 0.85;
+      default:
+        return '';
+    }
+  };
+
   const addBindingField = (field: BindableField, slot: DetectedSlotBinding | undefined) => {
     if (!slot || !api[slot.node]) return;
-    // Ensure input exists on api node and is not a link tuple so verifyBinding succeeds
+    // Ensure input exists on api node and is not a link tuple so verifyBinding succeeds while preserving scalar types
     if (!(slot.input in api[slot.node].inputs) || isLink(api[slot.node].inputs[slot.input])) {
-      api[slot.node].inputs[slot.input] = '';
+      api[slot.node].inputs[slot.input] = defaultScalarForField(field);
     }
     fields[field] = {
       node: slot.node,
@@ -719,6 +837,7 @@ export function autoDetectWorkflowBindings(
   };
 
   addBindingField('prompt', prompt);
+  addBindingField('negative', negative);
   addBindingField('controlVideo', controlVideo);
   addBindingField('refImage1', detectedRefImages[0]);
   addBindingField('refImage2', detectedRefImages[1]);
@@ -829,6 +948,7 @@ export function autoDetectWorkflowBindings(
     binding,
     detectedSlots: {
       prompt,
+      negative,
       controlVideo,
       refImage1: detectedRefImages[0],
       refImage2: detectedRefImages[1],
@@ -1041,7 +1161,7 @@ export async function fetchAndDetectWorkflowFromUrl(
   if (rootComfyMatch) {
     // 1. Try grabbing the most recent active workflow from local ComfyUI /history
     try {
-      const histRes = await fetch('/api/comfy/history?max_items=1');
+      const histRes = await fetch(resolveLocalApiUrl('/api/comfy/history?max_items=1'));
       if (histRes.ok) {
         const histData = (await histRes.json()) as Record<string, any>;
         const promptIds = Object.keys(histData || {});
@@ -1067,7 +1187,9 @@ export async function fetchAndDetectWorkflowFromUrl(
     const savedList = await listLocalComfyWorkflows();
     if (savedList.length > 0) {
       const firstSaved = savedList[0];
-      const userdataUrl = `/api/comfy/api/userdata/${encodeURIComponent(`workflows/${firstSaved.replace(/^workflows[\\/]/i, '')}`)}`;
+      const userdataUrl = resolveLocalApiUrl(
+        `/api/comfy/api/userdata/${encodeURIComponent(`workflows/${firstSaved.replace(/^workflows[\\/]/i, '')}`)}`
+      );
       const savedRes = await fetch(userdataUrl);
       if (savedRes.ok) {
         const rawJson = await savedRes.text();
@@ -1144,12 +1266,12 @@ export async function fetchAndDetectWorkflowFromUrl(
 
   let res: Response;
   try {
-    res = await fetch(normalizedUrl);
+    res = await fetch(resolveLocalApiUrl(normalizedUrl));
   } catch (err) {
     // If direct fetch to http://127.0.0.1:8188/... failed due to browser CORS, route via /api/comfy proxy
     const localProxyMatch = normalizedUrl.match(/^https?:\/\/(?:127\.0\.0\.1|localhost):(?:8188|8000)(\/.*)$/i);
     if (localProxyMatch) {
-      res = await fetch(`/api/comfy${localProxyMatch[1]}`);
+      res = await fetch(resolveLocalApiUrl(`/api/comfy${localProxyMatch[1]}`));
     } else {
       throw err;
     }
@@ -1402,24 +1524,24 @@ export const WORKFLOW_ARCHITECTURE_PROFILES: Record<string, WorkflowArchitecture
     workflowId: 'ltx25_devdist_ollama_vsr',
     engine: 'ltx-2.5',
     primarySaveNodeId: '15',
-    primarySaveNodeLabel: 'Node #15 (FINAL VIDEO) / UI Node #75 (SaveVideo)',
-    fallbackSaveNodeIds: ['10', '75'],
-    fallbackSaveNodeLabel: 'Node #10 (Seed 1) / Node #75 (SaveVideo)',
-    controlInputNodeLabel: 'Node #7 (LTXDirectorCS25) / UI Node #990 (VHS_LoadVideo)',
+    primarySaveNodeLabel: 'Node #15 (FINAL VIDEO • VHS_VideoCombine)',
+    fallbackSaveNodeIds: ['10', '11', '12', '13'],
+    fallbackSaveNodeLabel: 'Node #10 (Seed 1 Direct Combine)',
+    controlInputNodeLabel: 'Node #7 (LTXDirectorCS25 • motionSegments)',
     architectureSummary:
-      'LTX-2.5 Dev/Distilled IC-LoRA + RTX Video Super Resolution upscaler with single-pass 24GB VRAM protection',
+      'LTX-2.5 Dev/Distilled IC-LoRA + RTX Video Super Resolution upscaler (API executes verified local ltx25_stubelius graph; companion Civitai UI JSON synced to ComfyUI workflows/)',
     recommendedPass: 'clay',
   },
   ltx25_unlimited_sing_talk: {
     workflowId: 'ltx25_unlimited_sing_talk',
     engine: 'ltx-2.5',
     primarySaveNodeId: '15',
-    primarySaveNodeLabel: 'Node #15 (FINAL VIDEO) / UI Node #454 (VHS_VideoCombine)',
-    fallbackSaveNodeIds: ['10', '454'],
-    fallbackSaveNodeLabel: 'Node #10 (Seed 1) / Node #454 (Combine)',
-    controlInputNodeLabel: 'Node #7 (LTXDirectorCS25) / UI Node #365 (TKVideoInputs)',
+    primarySaveNodeLabel: 'Node #15 (FINAL VIDEO • VHS_VideoCombine)',
+    fallbackSaveNodeIds: ['10', '11', '12', '13'],
+    fallbackSaveNodeLabel: 'Node #10 (Seed 1 Direct Combine)',
+    controlInputNodeLabel: 'Node #7 (LTXDirectorCS25 • motionSegments)',
     architectureSummary:
-      'LTX-2.5 Alternating Camera & Lip-Sync Audio pipeline with Layout-to-Render IC-LoRA motion conditioning',
+      'LTX-2.5 Layout-to-Render IC-LoRA motion conditioning (API executes verified local ltx25_stubelius graph; companion Sing/Talk UI JSON synced to ComfyUI workflows/)',
     recommendedPass: 'clay',
   },
   ltx25_fast_native: {
@@ -1451,35 +1573,32 @@ export const WORKFLOW_ARCHITECTURE_PROFILES: Record<string, WorkflowArchitecture
     engine: 'minimax-h3',
     primarySaveNodeId: '145',
     primarySaveNodeLabel: 'Node #145 (VHS_VideoCombine • 60fps Audio)',
-    fallbackSaveNodeIds: ['702'],
-    fallbackSaveNodeLabel: 'UI Node #702 (VHS_VideoCombine)',
+    fallbackSaveNodeIds: [],
     controlInputNodeLabel: 'Node #638 (VHS_LoadVideo → Node #136 Ref2V)',
     architectureSummary:
-      'MiniMax H3 Ref2VA + SolAttnPatch + 8-Step Turbo LoRA (Node #674) + 4 Ref Images (<Picture 1..4>) → RIFE 60fps + Audio (Node #145)',
+      'MiniMax H3 Ref2VA + SolAttnPatch + Turbo LoRA (Node #674) + 4 Ref Images (<Picture 1..4>) → RIFE 60fps + Audio (Node #145)',
     recommendedPass: 'rgb',
   },
   minimax_h3_t2v_i2v_ref2v_advanced: {
     workflowId: 'minimax_h3_t2v_i2v_ref2v_advanced',
     engine: 'minimax-h3',
     primarySaveNodeId: '145',
-    primarySaveNodeLabel: 'Node #145 (API Combine) / UI Node #702 (VHS_VideoCombine)',
-    fallbackSaveNodeIds: ['702'],
-    fallbackSaveNodeLabel: 'UI Node #702 (VHS_VideoCombine)',
+    primarySaveNodeLabel: 'Node #145 (VHS_VideoCombine • 60fps Audio)',
+    fallbackSaveNodeIds: [],
     controlInputNodeLabel: 'Node #638 (VHS_LoadVideo → Node #136 Ref2V)',
     architectureSummary:
-      'MiniMax H3 Advanced Filmmaking v2.0 with Ref2V 3D Previs conditioning, 4 Reference Images, SolAttn, and 60fps RIFE interpolation',
+      'MiniMax H3 Advanced Filmmaking v2.0 preset (API executes verified local minimax_h3_ref2va graph; companion Civitai UI JSON synced to ComfyUI workflows/)',
     recommendedPass: 'rgb',
   },
   minimax_h3_seed_hunter: {
     workflowId: 'minimax_h3_seed_hunter',
     engine: 'minimax-h3',
     primarySaveNodeId: '145',
-    primarySaveNodeLabel: 'Node #145 (API Combine) / UI Node #34 (Final Video)',
-    fallbackSaveNodeIds: ['34', '134', '144', '18'],
-    fallbackSaveNodeLabel: 'UI Nodes #34 / #134 / #144 (Seed Hunter Combines)',
-    controlInputNodeLabel: 'Node #638 (VHS_LoadVideo → Ref2V)',
+    primarySaveNodeLabel: 'Node #145 (VHS_VideoCombine • 60fps Audio)',
+    fallbackSaveNodeIds: [],
+    controlInputNodeLabel: 'Node #638 (VHS_LoadVideo → Node #136 Ref2V)',
     architectureSummary:
-      'MiniMax H3 Seed Hunter v2.51 with Latent Upscaler, Reference Mods, and multi-stage video combine fallback nodes',
+      'MiniMax H3 Seed Hunter v2.51 preset (API executes verified local minimax_h3_ref2va graph; companion Seed Hunter UI JSON synced to ComfyUI workflows/)',
     recommendedPass: 'clay',
   },
   h3_stubelius: {
@@ -1499,10 +1618,10 @@ export const WORKFLOW_ARCHITECTURE_PROFILES: Record<string, WorkflowArchitecture
     engine: 'minimax-h3',
     primarySaveNodeId: '145',
     primarySaveNodeLabel: 'Node #145 (VHS_VideoCombine • Fast Draft)',
-    fallbackSaveNodeIds: ['702'],
+    fallbackSaveNodeIds: [],
     controlInputNodeLabel: 'Node #638 (VHS_LoadVideo → Node #136 Ref2V)',
     architectureSummary:
-      'Rapid 0.50 MP draft pass with 8-Step Turbo LoRA for fast camera framing, silhouette, and motion verification',
+      'Rapid 0.50 MP draft pass with Turbo LoRA for fast camera framing, silhouette, and motion verification',
     recommendedPass: 'clay',
   },
 };

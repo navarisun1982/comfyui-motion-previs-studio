@@ -273,38 +273,23 @@ export class JobRunner {
 
     const failJob = async (errMsg: string, isInterrupted = false) => {
       if (isCompleted) return;
-      // If a secondary post-processing/refine stage failed AFTER an intermediate seed save node
-      // (such as Node #10 in Stubelius LTX) already produced a valid full video, recover that video!
-      if (!isInterrupted) {
-        if (capturedVideoUrl || fallbackVideoUrl) {
-          await finalizeSuccess();
-          return;
-        }
-        try {
-          const hist = await client.getPromptHistory(promptId);
-          if (hist && hist.outputs) {
-            const v = extractVideoFromHistoryOutputs(hist.outputs as Record<string, Record<string, unknown>>);
-            if (v) {
-              fallbackVideoUrl = await client.fetchVideoBlobUrl(v.filename, v.subfolder, v.type);
-              fallbackFilename = v.filename;
-              await finalizeSuccess();
-              return;
-            }
-          }
-        } catch {
-          // proceed with normal error reporting
-        }
-      }
       isCompleted = true;
       cleanupJobListeners();
       if (this.activeHandle?.promptId === promptId) {
         this.activeHandle = null;
       }
-      useComfyStore.getState().setJobFailed(errMsg);
+
+      let fullErrMsg = errMsg;
+      const partialName = fallbackFilename || capturedFilename;
+      if (!isInterrupted && partialName) {
+        fullErrMsg = `${errMsg} (Intermediate preview "${partialName}" was written before execution failed.)`;
+      }
+
+      useComfyStore.getState().setJobFailed(fullErrMsg);
       if (isInterrupted) {
         options.onInterrupted?.();
       } else {
-        options.onError?.(new Error(errMsg));
+        options.onError?.(new Error(fullErrMsg));
       }
     };
 

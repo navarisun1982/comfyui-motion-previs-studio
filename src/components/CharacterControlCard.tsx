@@ -237,6 +237,7 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         e.stopPropagation();
+        e.stopImmediatePropagation();
         onRemoveActorCue(actor.id, selectedCueId);
         setSelectedCueId(null);
         window.dispatchEvent(new CustomEvent('cmpvs:select-cue', { detail: null }));
@@ -275,10 +276,10 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
   const currentDepthZ = Math.round(currentPos.y);
   const currentElevationY = Math.round(currentPos.z ?? 0);
 
-  const otherHumanoids = humanoidActors.filter((h) => h.id !== actor.id);
+  const otherHumanoids = (humanoidActors || []).filter((h) => h.id !== actor.id);
 
-  const safeStart = Math.max(0, Math.min(shotDur - 0.5, motionWindow.start));
-  const safeEnd = Math.max(safeStart + 0.5, Math.min(shotDur, motionWindow.end));
+  const safeStart = Math.max(0, Math.min(shotDur - 0.5, motionWindow?.start ?? 0));
+  const safeEnd = Math.max(safeStart + 0.5, Math.min(shotDur, motionWindow?.end ?? shotDur));
   const cueDuration = Number((safeEnd - safeStart).toFixed(1));
   const kfs = actor.trajectory.keyframes || [];
   const lastKfTime = kfs.length > 0 ? kfs[kfs.length - 1].time : 0;
@@ -1978,8 +1979,18 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         </div>
                       </div>
 
-                      {/* Draggable Individual Cue Nodes (All Cues Rendered Stably & Centered 1:1) */}
-                      {kfs.map((kf) => {
+                      {/* Draggable Individual Cue Nodes (Downsampled smoothly when dense Mocap > 36 frames) */}
+                      {(() => {
+                        const cueStride = kfs.length > 36 ? Math.max(1, Math.ceil(kfs.length / 36)) : 1;
+                        return kfs.filter(
+                          (kf, idx) =>
+                            kfs.length <= 36 ||
+                            idx === 0 ||
+                            idx === kfs.length - 1 ||
+                            kf.id === selectedCueId ||
+                            idx % cueStride === 0
+                        );
+                      })().map((kf) => {
                         const kfPct = Math.max(0, Math.min(100, (kf.time / shotDur) * 100));
                         const isAirborne = (kf.position.z ?? 0) > 2;
                         const isLocomotion = kf.gait === 'walk' || kf.gait === 'run' || kf.gait === 'sneak';
@@ -2086,31 +2097,31 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                       <div className="flex items-center justify-between gap-1.5">
                         <span className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-300">
                           <Sparkles className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                          <span>
-                            {actor.modelUrl ? '🔒 Locked .GLB' : '3D Look Prompt'}
+                          <span className="text-[11px] font-semibold text-slate-200">
+                            {actor.modelUrl ? '3D Look & Prompt (.GLB)' : '3D Look Prompt'}
                           </span>
                         </span>
 
                         <div className="flex items-center gap-1.5 shrink-0">
+                          <label
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[#161c2a] hover:bg-[#1e2638] border border-white/[0.1] text-[10px] font-medium text-slate-200 hover:text-white cursor-pointer transition-colors"
+                            title={actor.modelUrl ? 'Replace custom .GLB / .GLTF 3D model' : 'Attach a custom .GLB / .GLTF 3D model'}
+                          >
+                            <input
+                              type="file"
+                              accept=".glb,.gltf"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) onAttachGlbFile(actor.id, file);
+                              }}
+                            />
+                            <Upload className="h-3 w-3 text-slate-300" />
+                            <span>{actor.modelUrl ? 'Replace .GLB' : 'Attach .GLB'}</span>
+                          </label>
+
                           {!actor.modelUrl && (
                             <>
-                              <label
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[#161c2a] hover:bg-[#1e2638] border border-white/[0.1] text-[10px] font-medium text-slate-200 hover:text-white cursor-pointer transition-colors"
-                                title="Attach a custom .GLB / .GLTF 3D model"
-                              >
-                                <input
-                                  type="file"
-                                  accept=".glb,.gltf"
-                                  className="hidden"
-                                  onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) onAttachGlbFile(actor.id, file);
-                                  }}
-                                />
-                                <Upload className="h-3 w-3 text-slate-300" />
-                                <span>Attach .GLB</span>
-                              </label>
-
                               <button
                                 type="button"
                                 onClick={() => setShowGlbResources((prev) => !prev)}
@@ -2153,36 +2164,37 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         </div>
                       </div>
 
-                      {actor.modelUrl ? (
-                        <div className="rounded-lg bg-[#0d111a] border border-white/[0.08] px-2.5 py-1.5 text-[10.5px] font-mono text-slate-400 leading-relaxed">
-                          3D <code className="text-cyan-300">.GLB</code> mesh is locked after creation. You can position, rotate, scale, and animate its rig on stage.
-                        </div>
-                      ) : (
-                        <div className="relative">
-                          <input
-                            ref={lookPromptInputRef}
-                            type="text"
-                            value={actor.token}
-                            onChange={(e) => onUpdateActor(actor.id, { token: e.target.value })}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                onRefineObjectByPrompt(actor);
-                              }
-                            }}
-                            placeholder="Describe 3D look / wearables (e.g. wearing a trench coat)..."
-                            className="w-full rounded-lg bg-[#0d111a] border border-white/[0.09] pl-2.5 pr-7 py-1.5 text-slate-200 text-[11px] font-mono placeholder-slate-500 focus:outline-none focus:border-amber-400/70"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => lookPromptInputRef.current?.focus()}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                            title="Edit 3D appearance description"
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </button>
+                      {actor.modelUrl && (
+                        <div className="rounded-lg bg-[#0d111a] border border-white/[0.08] px-2.5 py-1 text-[10px] font-mono text-slate-400 leading-relaxed">
+                          3D <code className="text-cyan-300">.GLB</code> mesh active. Edit prompt description below for video generation:
                         </div>
                       )}
+
+                      <div className="relative">
+                        <input
+                          ref={lookPromptInputRef}
+                          type="text"
+                          dir="auto"
+                          value={actor.token}
+                          onChange={(e) => onUpdateActor(actor.id, { token: e.target.value })}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !actor.modelUrl) {
+                              e.preventDefault();
+                              onRefineObjectByPrompt(actor);
+                            }
+                          }}
+                          placeholder="Describe appearance / outfit / details for video prompt..."
+                          className="w-full rounded-lg bg-[#0d111a] border border-white/[0.09] pl-2.5 pr-7 py-1.5 text-slate-200 text-[11px] font-mono placeholder-slate-500 focus:outline-none focus:border-amber-400/70"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => lookPromptInputRef.current?.focus()}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                          title="Edit appearance description"
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                      </div>
 
                       {showGlbResources && !actor.modelUrl && (
                         <div className="pt-1">
@@ -2729,12 +2741,12 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         />
                       </div>
 
-                      {/* Height Y */}
+                      {/* Elevation Z */}
                       <div className="inspector-subcard space-y-1.5">
                         <div className="flex items-center justify-between text-[10px]">
                           <span className="flex items-center gap-1 text-amber-300 font-semibold">
                             <ArrowUpDown className="h-3 w-3 text-amber-400" />
-                            <span>Height Y</span>
+                            <span>Elev Z</span>
                           </span>
                           <span className="text-amber-300 font-bold">{currentElevationY}</span>
                         </div>
@@ -2757,12 +2769,12 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                         />
                       </div>
 
-                      {/* Depth Z */}
+                      {/* Depth Y */}
                       <div className="inspector-subcard space-y-1.5">
                         <div className="flex items-center justify-between text-[10px]">
                           <span className="flex items-center gap-1 text-emerald-300 font-semibold">
                             <Box className="h-3 w-3 text-emerald-400" />
-                            <span>Depth Z</span>
+                            <span>Depth Y</span>
                           </span>
                           <span className="text-emerald-300 font-bold">{currentDepthZ}</span>
                         </div>
@@ -2895,7 +2907,9 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                             type="button"
                             onClick={() => {
                               onSelectActor(actor.id);
-                              setTimeout(() => window.dispatchEvent(new CustomEvent('cmpvs:ground-actor-feet')), 10);
+                              window.dispatchEvent(
+                                new CustomEvent('cmpvs:ground-actor-feet', { detail: { actorId: actor.id } })
+                              );
                             }}
                             className="inline-flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-500/40 text-emerald-300 text-[10.5px] font-semibold transition-colors"
                             title="Snap character feet onto floor plane using analytic IK"
@@ -2908,7 +2922,9 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                             type="button"
                             onClick={() => {
                               onSelectActor(actor.id);
-                              setTimeout(() => window.dispatchEvent(new CustomEvent('cmpvs:record-pose-cue')), 10);
+                              window.dispatchEvent(
+                                new CustomEvent('cmpvs:record-pose-cue', { detail: { actorId: actor.id } })
+                              );
                             }}
                             className="inline-flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg bg-amber-950/40 hover:bg-amber-900/50 border border-amber-500/40 text-amber-300 text-[10.5px] font-semibold transition-colors"
                             title={`Record current manual FK/IK skeleton pose at ${currentTime.toFixed(1)}s`}
@@ -2921,7 +2937,9 @@ export const CharacterControlCard: React.FC<CharacterControlCardProps> = ({
                             type="button"
                             onClick={() => {
                               onSelectActor(actor.id);
-                              setTimeout(() => window.dispatchEvent(new CustomEvent('cmpvs:reset-actor-pose')), 10);
+                              window.dispatchEvent(
+                                new CustomEvent('cmpvs:reset-actor-pose', { detail: { actorId: actor.id } })
+                              );
                             }}
                             className="inline-flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg bg-[#141926] hover:bg-[#1c2334] border border-white/[0.1] text-slate-200 text-[10.5px] font-medium transition-colors"
                             title="Reset character skeleton to T-Pose / Rest"

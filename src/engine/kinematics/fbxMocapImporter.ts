@@ -720,9 +720,10 @@ export function extractMocapFromAnimationClips(
     localToMeters = 1.75 / 5.06;
   }
 
-  // Stage coordinate scale: ~8.5 stage units per meter of horizontal travel
-  const metersToStageXY = 8.5;
-  const metersToStageZ = 18.0;
+  // Canonical stage metric scale: 1.75m adult human = 5.06 stage units (~2.8914 stage units per meter).
+  // `StagePrevis3D` maps `stageZ * 0.4 -> Three.js Y`, so 1m vertical elevation = `STAGE_UNITS_PER_METER / 0.4` stageZ units.
+  const metersToStageXY = 5.06 / 1.75;
+  const metersToStageZ = metersToStageXY / 0.4;
 
   interface RawSampleFrame {
     time: number;
@@ -903,7 +904,8 @@ export function extractMocapFromAnimationClips(
       : Math.max(0, hipsRiseMeters);
 
     let stageZ = Math.max(0, (startPos.z ?? 0) + rawElevationMeters * metersToStageZ);
-    let hipsOffsetY = clamp(hipsRiseMeters, -0.65, 0.85);
+    // Subtract `rawElevationMeters` already applied to `stageZ` so airborne jumps are never double-counted
+    let hipsOffsetY = clamp(hipsRiseMeters - rawElevationMeters, -0.65, 0.35);
 
     if (lockFootContacts) {
       // Foot Contact Correction:
@@ -1396,9 +1398,13 @@ export async function importMocapFileBuffer(
       exportedGlbBuffer = buffer;
     } else {
       exportedGlbBuffer = await exportObjectToGlbBufferSafe(rootObject, animations);
-      if (!exportedGlbBuffer && buffer.byteLength > 0) {
-        // Fallback so caller still receives a valid binary buffer in headless test environments
-        exportedGlbBuffer = buffer;
+      // Never return raw `.fbx` bytes masquerading as `.glb` (which crashes `GLTFLoader`!);
+      // only accept fallback buffer if it actually begins with the `glTF` binary magic header (0x46546C67).
+      if (!exportedGlbBuffer && buffer.byteLength >= 12) {
+        const magic = new DataView(buffer).getUint32(0, true);
+        if (magic === 0x46546c67) {
+          exportedGlbBuffer = buffer;
+        }
       }
     }
   }

@@ -46,7 +46,12 @@ import {
   Asset3DPreviewPlacementOptions,
 } from './Asset3DPreviewInspector';
 import { useShallow } from 'zustand/react/shallow';
-import { getModelBuffer } from '../services/modelStorage';
+import {
+  getModelBuffer,
+  countCachedModelUrls,
+  isBundledLocalModelUrl,
+} from '../services/modelStorage';
+import { resolveLocalApiUrl } from '../services/localApiBase';
 import {
   POLYFORK_KITS_CATALOG,
   SANDFLOW_DATASETS_CATALOG,
@@ -176,6 +181,13 @@ export const AssetLibraryModal: React.FC = () => {
     total: number;
     label: string;
   } | null>(null);
+  const curatedGlbUrls = React.useMemo(
+    () => CURATED_3D_ASSETS.map((a) => a.modelUrl).filter((u): u is string => Boolean(u)),
+    []
+  );
+  const [cachedCuratedCount, setCachedCuratedCount] = useState<number>(() =>
+    CURATED_3D_ASSETS.filter((a) => isBundledLocalModelUrl(a.modelUrl)).length
+  );
   const [sandflowPreviewId, setSandflowPreviewId] = useState<string | null>(null);
   const [sandflowPreviewRows, setSandflowPreviewRows] = useState<SandflowPreviewRow[]>([]);
   const [sandflowLoading, setSandflowLoading] = useState(false);
@@ -233,7 +245,7 @@ export const AssetLibraryModal: React.FC = () => {
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
-    fetch('/api/comfy-glb-output?list=1')
+    fetch(resolveLocalApiUrl('/api/comfy-glb-output?list=1'))
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (cancelled || !data || !Array.isArray(data.items)) return;
@@ -292,39 +304,64 @@ export const AssetLibraryModal: React.FC = () => {
       });
   }, [showFullCatalogsDrawer, polyforkFullList.length, polyforkLoading]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    countCachedModelUrls(curatedGlbUrls).then((count) => {
+      if (!cancelled) setCachedCuratedCount(count);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, curatedGlbUrls]);
+
   const handlePreCacheCurated200 = async () => {
     if (cachingProgress?.active) return;
     const glbTargets = CURATED_3D_ASSETS.filter((a) => Boolean(a.modelUrl));
     setCachingProgress({
       active: true,
-      done: 0,
+      done: cachedCuratedCount,
       total: glbTargets.length,
-      label: 'Pre-caching 200 Curated GLBs to IndexedDB...',
+      label: `Pre-caching ${glbTargets.length} Curated GLBs to IndexedDB...`,
     });
-    let completed = 0;
+    let succeeded = 0;
+    let attempted = 0;
     const batchSize = 6;
     for (let i = 0; i < glbTargets.length; i += batchSize) {
       const slice = glbTargets.slice(i, i + batchSize);
       await Promise.all(
         slice.map(async (item) => {
+          let ok = false;
           if (item.modelUrl) {
-            await getModelBuffer(item.modelUrl);
+            if (isBundledLocalModelUrl(item.modelUrl)) {
+              ok = true;
+            } else {
+              const buf = await getModelBuffer(item.modelUrl);
+              ok = Boolean(buf && buf.byteLength > 0);
+            }
           }
-          completed += 1;
+          attempted += 1;
+          if (ok) succeeded += 1;
           setCachingProgress({
             active: true,
-            done: completed,
+            done: succeeded,
             total: glbTargets.length,
-            label: `Caching ${item.name} (${completed}/${glbTargets.length})`,
+            label: `Caching ${item.name} (${succeeded}/${glbTargets.length} cached • ${attempted} checked)`,
           });
         })
       );
     }
+    const verifiedCached = await countCachedModelUrls(curatedGlbUrls);
+    setCachedCuratedCount(verifiedCached);
+    const failedCount = Math.max(0, glbTargets.length - verifiedCached);
     setCachingProgress({
       active: false,
-      done: glbTargets.length,
+      done: verifiedCached,
       total: glbTargets.length,
-      label: `✓ All ${glbTargets.length} Curated GLBs Cached Offline in IndexedDB`,
+      label:
+        failedCount === 0
+          ? `✓ All ${verifiedCached}/${glbTargets.length} Curated GLBs Cached Offline in IndexedDB`
+          : `Cached ${verifiedCached}/${glbTargets.length} GLBs (${failedCount} unreachable offline)`,
     });
   };
 
@@ -347,38 +384,42 @@ export const AssetLibraryModal: React.FC = () => {
       total: kitItems.length,
       label: `Downloading Kit "${kitLabel}" (${kitItems.length} GLBs)...`,
     });
-    let completed = 0;
+    let succeeded = 0;
     const batchSize = 5;
     for (let i = 0; i < kitItems.length; i += batchSize) {
       const slice = kitItems.slice(i, i + batchSize);
       await Promise.all(
         slice.map(async (item) => {
-          if (item.modelUrl) {
-            await getModelBuffer(item.modelUrl);
+          const buf = item.modelUrl ? await getModelBuffer(item.modelUrl) : null;
+          if (buf && buf.byteLength > 0) {
+            addCustomAsset({
+              ...item,
+              id: `pf-kit-${item.id}`,
+              name: `${item.name} (${kitLabel})`,
+              nameAr: `${item.name} (${kitLabel})`,
+              isCustom: true,
+              source: 'uploaded',
+            });
+            succeeded += 1;
           }
-          addCustomAsset({
-            ...item,
-            id: `pf-kit-${item.id}`,
-            name: `${item.name} (${kitLabel})`,
-            nameAr: `${item.name} (${kitLabel})`,
-            isCustom: true,
-            source: 'uploaded',
-          });
-          completed += 1;
           setCachingProgress({
             active: true,
-            done: completed,
+            done: succeeded,
             total: kitItems.length,
-            label: `Cached ${item.name} (${completed}/${kitItems.length})`,
+            label: `Cached ${item.name} (${succeeded}/${kitItems.length})`,
           });
         })
       );
     }
+    const failedKitCount = Math.max(0, kitItems.length - succeeded);
     setCachingProgress({
       active: false,
-      done: kitItems.length,
+      done: succeeded,
       total: kitItems.length,
-      label: `✓ Kit "${kitLabel}" (${kitItems.length} GLBs) Saved to Custom Library & Offline Cache!`,
+      label:
+        failedKitCount === 0
+          ? `✓ Kit "${kitLabel}" (${succeeded} GLBs) Saved to Custom Library & Offline Cache!`
+          : `Kit "${kitLabel}": Cached ${succeeded}/${kitItems.length} GLBs (${failedKitCount} failed to download)`,
     });
   };
 
@@ -1015,48 +1056,64 @@ export const AssetLibraryModal: React.FC = () => {
 
             {/* Bottom Sidebar Dock: Local Cache Card + Upload GLB Button */}
             <div className="pt-3 border-t border-white/10 space-y-2.5 shrink-0">
-              <div
-                onClick={handlePreCacheCurated200}
-                title="Click to pre-cache all 200 curated GLBs into local IndexedDB for 100% offline use"
-                className="rounded-xl border border-white/10 bg-[#111728]/90 p-2.5 space-y-2 cursor-pointer hover:border-emerald-500/40 transition-all"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
-                      <HardDrive className="h-3.5 w-3.5" />
+              {(() => {
+                const activeDone = cachingProgress
+                  ? cachingProgress.done
+                  : cachedCuratedCount;
+                const activeTotal = cachingProgress
+                  ? cachingProgress.total
+                  : curatedGlbUrls.length;
+                const cachePct =
+                  activeTotal > 0
+                    ? Math.min(100, Math.max(0, Math.round((activeDone / activeTotal) * 100)))
+                    : 0;
+                const isFullyCached = activeTotal > 0 && activeDone >= activeTotal;
+                return (
+                  <div
+                    onClick={handlePreCacheCurated200}
+                    title="Click to pre-cache all curated GLBs into local IndexedDB for 100% offline use"
+                    className="rounded-xl border border-white/10 bg-[#111728]/90 p-2.5 space-y-2 cursor-pointer hover:border-emerald-500/40 transition-all"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
+                          <HardDrive className="h-3.5 w-3.5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-bold text-white leading-tight">
+                            Local Cache
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate">
+                            {`${activeDone}/${activeTotal} Cached (${cachePct}%)`}
+                          </div>
+                        </div>
+                      </div>
+                      {isFullyCached ? (
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                          <Check className="h-3 w-3 stroke-[3]" />
+                        </span>
+                      ) : (
+                        <span className="flex h-5 px-1.5 shrink-0 items-center justify-center rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[9px] font-mono">
+                          {cachingProgress?.active ? '...' : `${cachePct}%`}
+                        </span>
+                      )}
                     </div>
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-bold text-white leading-tight">
-                        Local Cache
-                      </div>
-                      <div className="text-[10px] text-slate-400 truncate">
-                        {cachingProgress
-                          ? `${cachingProgress.done}/${cachingProgress.total} Cached`
-                          : `${CURATED_3D_ASSETS.length} Assets (Offline)`}
-                      </div>
+                    <div className="w-full h-1.5 rounded-full bg-black/60 overflow-hidden border border-white/10">
+                      <div
+                        className="h-full bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 transition-all"
+                        style={{ width: `${cachePct}%` }}
+                      />
+                    </div>
+                    <div className="text-[9.5px] font-mono text-slate-400 text-center">
+                      {isFullyCached
+                        ? 'IndexedDB Storage • 100% Ready Offline'
+                        : cachingProgress?.active
+                          ? 'Syncing GLBs to IndexedDB...'
+                          : 'Click to Pre-Cache Remaining GLBs Offline'}
                     </div>
                   </div>
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                    <Check className="h-3 w-3 stroke-[3]" />
-                  </span>
-                </div>
-                <div className="w-full h-1.5 rounded-full bg-black/60 overflow-hidden border border-white/10">
-                  <div
-                    className="h-full bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 transition-all"
-                    style={{
-                      width: cachingProgress
-                        ? `${Math.max(
-                            8,
-                            Math.round((cachingProgress.done / Math.max(1, cachingProgress.total)) * 100)
-                          )}%`
-                        : '65%',
-                    }}
-                  />
-                </div>
-                <div className="text-[9.5px] font-mono text-slate-400 text-center">
-                  IndexedDB Storage • Ready Offline
-                </div>
-              </div>
+                );
+              })()}
 
               <button
                 type="button"

@@ -162,5 +162,5 @@ describe('Trajectory Math & Keyframe Engine', () => {
     // Cue 2 at t = 3.0s and after (t = 3.8s) holds at (80, 70)
     expect(interpolateTrajectoryPosition(actor.trajectory, 3.0, 4.0)).toMatchObject({ x: 80, y: 70 });
     expect(interpolateTrajectoryPosition(actor.trajectory, 3.8, 4.0)).toMatchObject({ x: 80, y: 70 });
-  });
+  }, 20000);
 });

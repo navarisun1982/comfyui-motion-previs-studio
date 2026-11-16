@@ -96,7 +96,7 @@ const SCENE_ARCHETYPES: SceneArchetypeConfig[] = [
     presetId: 'env-scifi-hangar',
     settingLabel: 'Sci-Fi Hangar / Underground Hive Structure',
     name: 'Reconstructed Sci-Fi Facility & Hangar',
-    nameAr: 'Reconstructed Sci-Fi Facility & Hangar',
+    nameAr: 'منشأة وحظيرة خيال علمي معاد بناؤها',
     category: 'scifi',
     groundSurface: 'metal-grate',
     weather: 'clear',
@@ -123,7 +123,7 @@ const SCENE_ARCHETYPES: SceneArchetypeConfig[] = [
     presetId: 'env-scifi-hangar',
     settingLabel: 'High-Tech Research Laboratory Building',
     name: 'Reconstructed Research Laboratory',
-    nameAr: 'Reconstructed Research Laboratory',
+    nameAr: 'مختبر أبحاث تقني معاد بناؤه',
     category: 'interior',
     groundSurface: 'concrete-floor',
     weather: 'clear',
@@ -150,7 +150,7 @@ const SCENE_ARCHETYPES: SceneArchetypeConfig[] = [
     presetId: 'env-cyberpunk-alley',
     settingLabel: 'Urban Street & Surrounding Building Facades',
     name: 'Reconstructed Urban Street & Buildings',
-    nameAr: 'Reconstructed Urban Street & Buildings',
+    nameAr: 'شارع حضري ومباني محيطة معاد بناؤها',
     category: 'urban',
     groundSurface: 'asphalt-wet',
     weather: 'clear',
@@ -177,7 +177,7 @@ const SCENE_ARCHETYPES: SceneArchetypeConfig[] = [
     presetId: 'env-post-apocalyptic',
     settingLabel: 'Industrial Warehouse / Concrete Structure',
     name: 'Reconstructed Industrial Warehouse',
-    nameAr: 'Reconstructed Industrial Warehouse',
+    nameAr: 'مستودع صناعي خرساني معاد بناؤه',
     category: 'interior',
     groundSurface: 'concrete-floor',
     weather: 'overcast',
@@ -204,7 +204,7 @@ const SCENE_ARCHETYPES: SceneArchetypeConfig[] = [
     presetId: 'env-modern-penthouse',
     settingLabel: 'Architectural Room / Modern Interior Building',
     name: 'Reconstructed Architectural Interior',
-    nameAr: 'Reconstructed Architectural Interior',
+    nameAr: 'غرفة معمارية داخلية معاد بناؤها',
     category: 'interior',
     groundSurface: 'wood-parquet',
     weather: 'clear',
@@ -231,7 +231,7 @@ const SCENE_ARCHETYPES: SceneArchetypeConfig[] = [
     presetId: 'env-rustic-hearth',
     settingLabel: 'Rustic Timber & Stone Interior Building',
     name: 'Reconstructed Rustic Chamber',
-    nameAr: 'Reconstructed Rustic Chamber',
+    nameAr: 'قاعة ريفية خشبية وحجرية معاد بناؤها',
     category: 'interior',
     groundSurface: 'wood-parquet',
     weather: 'clear',
@@ -258,7 +258,7 @@ const SCENE_ARCHETYPES: SceneArchetypeConfig[] = [
     presetId: 'env-medieval-courtyard',
     settingLabel: 'Ancient Stone Courtyard & Monumental Buildings',
     name: 'Reconstructed Stone Temple & Courtyard',
-    nameAr: 'Reconstructed Stone Temple & Courtyard',
+    nameAr: 'ساحة ومعبد حجري أثري معاد بناؤه',
     category: 'historical',
     groundSurface: 'stone-cobblestone',
     weather: 'fog',
@@ -285,7 +285,7 @@ const SCENE_ARCHETYPES: SceneArchetypeConfig[] = [
     presetId: 'env-misty-forest',
     settingLabel: 'Natural Forest Clearing & Woodland Structures',
     name: 'Reconstructed Forest Environment',
-    nameAr: 'Reconstructed Forest Environment',
+    nameAr: 'بيئة غابة وأشجار طبيعية معاد بناؤها',
     category: 'nature',
     groundSurface: 'grass-terrain',
     weather: 'fog',
@@ -312,7 +312,7 @@ const SCENE_ARCHETYPES: SceneArchetypeConfig[] = [
     presetId: 'env-desert-dunes',
     settingLabel: 'Coastal Sandy Beach & Ocean Shoreline',
     name: 'Reconstructed Coastal Beach & Ocean Set',
-    nameAr: 'Reconstructed Coastal Beach & Ocean Set',
+    nameAr: 'شاطئ ساحلي ومحيط مفتوح معاد بناؤه',
     category: 'coastal-beach',
     groundSurface: 'sand-dunes',
     weather: 'clear',
@@ -337,7 +337,7 @@ const SCENE_ARCHETYPES: SceneArchetypeConfig[] = [
     presetId: 'env-desert-dunes',
     settingLabel: 'Arid Desert Dunes & Sandstone Buildings',
     name: 'Reconstructed Desert & Canyon Set',
-    nameAr: 'Reconstructed Desert & Canyon Set',
+    nameAr: 'صحراء وكثبان رملية ووادي صخري معاد بناؤه',
     category: 'nature',
     groundSurface: 'sand-dunes',
     weather: 'clear',
@@ -364,7 +364,7 @@ const SCENE_ARCHETYPES: SceneArchetypeConfig[] = [
     presetId: 'env-studio-stage',
     settingLabel: 'Controlled Soundstage / Production Set',
     name: 'Reconstructed Soundstage Set',
-    nameAr: 'Reconstructed Soundstage Set',
+    nameAr: 'مسرح استوديو تصوير معاد بناؤه',
     category: 'studio',
     groundSurface: 'studio-floor',
     weather: 'clear',
@@ -659,12 +659,19 @@ function selectArchetype(
       return SCENE_ARCHETYPES.find((a) => a.key === 'desert-canyon-dunes')!;
     }
 
-    // Outdoor sky (top significantly brighter than floor or cool blue sky) with architectural sides -> urban street & buildings
+    // Bright outdoor daylight sky: choose open courtyard/plaza when strong architectural verticals exist,
+    // or open coastal/natural daylight horizon instead of a dark neon-night cyberpunk alley!
     if (
       (topZone.luminance > bottomZone.luminance * 1.22 && topZone.luminance > 95) ||
       (topZone.b > topZone.r * 1.18 && topZone.luminance > 80)
     ) {
-      return SCENE_ARCHETYPES.find((a) => a.key === 'cyberpunk-urban-alley')!;
+      if (verticalEdgeStrength > 0.24) {
+        return SCENE_ARCHETYPES.find((a) => a.key === 'historical-courtyard-temple')!;
+      }
+      if (topZone.b > topZone.r * 1.18 && bottomZone.luminance > 95) {
+        return SCENE_ARCHETYPES.find((a) => a.key === 'coastal-beach-shoreline')!;
+      }
+      return SCENE_ARCHETYPES.find((a) => a.key === 'nature-forest-clearing')!;
     }
 
     // High neon saturation in dark scene -> cyberpunk urban alley or scifi hangar

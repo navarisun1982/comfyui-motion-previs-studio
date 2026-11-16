@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   Box,
 } from 'lucide-react';
+import { resolveLocalApiUrl } from '../services/localApiBase';
 
 export interface BundledModelStatusItem {
   id: string;
@@ -107,7 +108,7 @@ export async function queryMocapNlfStatus(customModelDir?: string): Promise<Moca
   }
 
   try {
-    const res = await fetch(`/api/mocap-nlf/status${qs}`);
+    const res = await fetch(resolveLocalApiUrl(`/api/mocap-nlf/status${qs}`));
     if (res.ok) {
       return (await res.json()) as MocapNlfStatusResponse;
     }
@@ -170,7 +171,7 @@ export async function startMocapNlfDownload(customModelDir?: string): Promise<{
   }
 
   try {
-    const res = await fetch('/api/mocap-nlf/download', {
+    const res = await fetch(resolveLocalApiUrl('/api/mocap-nlf/download'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

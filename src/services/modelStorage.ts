@@ -13,6 +13,7 @@ import {
   saveModelBufferToStudioStorage,
   fetchModelBufferFromStudioStorage,
 } from './studioStorageClient';
+import { resolveLocalApiUrl } from './localApiBase';
 
 const DB_NAME = 'comfy_director_3d_models_v1';
 const STORE_NAME = 'models';
@@ -108,6 +109,16 @@ export interface StoredModelRecord {
   updatedAt: number;
 }
 
+export function isReferenceImageRecordId(id?: string | null): boolean {
+  if (!id) return false;
+  return id.startsWith('refimg-') || id.startsWith('refimg_') || id.startsWith('refimg://');
+}
+
+export function isBundledLocalModelUrl(url?: string | null): boolean {
+  if (!url) return false;
+  return url.startsWith('./models/') || url.startsWith('/models/') || url.startsWith('models/');
+}
+
 /**
  * Stores a model ArrayBuffer into memory and persistent IndexedDB.
  */
@@ -163,7 +174,7 @@ export async function storeModelBuffer(
   }
 
   // 4. Mirror to configured Studio Storage disk directory (<storageDir>/models/)
-  if (!id.startsWith('refimg_')) {
+  if (!isReferenceImageRecordId(id)) {
     saveModelBufferToStudioStorage(id, buffer, name, mimeType).catch(() => {});
   }
 
@@ -231,12 +242,13 @@ export async function getModelBuffer(idOrUrl: string): Promise<ArrayBuffer | nul
     idOrUrl.startsWith('/api/comfy-glb-output')
   ) {
     try {
-      const resp = await fetch(idOrUrl);
+      const fetchTarget = idOrUrl.startsWith('/api/') ? resolveLocalApiUrl(idOrUrl) : idOrUrl;
+      const resp = await fetch(fetchTarget);
       if (resp.ok) {
         const buf = await resp.arrayBuffer();
         bufferMemoryCache.set(idOrUrl, buf);
         if (idOrUrl.startsWith('http://') || idOrUrl.startsWith('https://')) {
-          storeModelBuffer(idOrUrl, buf, idOrUrl).catch(() => {});
+          await storeModelBuffer(idOrUrl, buf, idOrUrl).catch(() => {});
         }
         return buf;
       }
@@ -248,7 +260,7 @@ export async function getModelBuffer(idOrUrl: string): Promise<ArrayBuffer | nul
   // 5. Auto-synced ComfyUI output disk model fallback (comfy-disk-*)
   if (id.startsWith('comfy-disk-') && typeof fetch === 'function') {
     try {
-      const listResp = await fetch('/api/comfy-glb-output?list=1');
+      const listResp = await fetch(resolveLocalApiUrl('/api/comfy-glb-output?list=1'));
       if (listResp.ok) {
         const data = await listResp.json();
         if (data && Array.isArray(data.items)) {
@@ -258,7 +270,7 @@ export async function getModelBuffer(idOrUrl: string): Promise<ArrayBuffer | nul
               `comfy-disk-${String(item.filename || '')}` === id
           );
           if (match?.downloadUrl) {
-            const fileResp = await fetch(match.downloadUrl);
+            const fileResp = await fetch(resolveLocalApiUrl(match.downloadUrl));
             if (fileResp.ok) {
               const buf = await fileResp.arrayBuffer();
               await storeModelBuffer(id, buf, match.filename || id);
@@ -273,7 +285,7 @@ export async function getModelBuffer(idOrUrl: string): Promise<ArrayBuffer | nul
   }
 
   // 6. Configured Studio Storage disk folder fallback (<storageDir>/models/<id>.glb)
-  if (!id.startsWith('refimg_')) {
+  if (!isReferenceImageRecordId(id)) {
     const diskBuf = await fetchModelBufferFromStudioStorage(id);
     if (diskBuf && diskBuf.byteLength > 0) {
       bufferMemoryCache.set(id, diskBuf);
@@ -301,7 +313,7 @@ export async function getModelBlobUrl(idOrUrl: string): Promise<string> {
     idOrUrl.startsWith('https://') ||
     idOrUrl.startsWith('/api/comfy-glb-output')
   ) {
-    return idOrUrl;
+    return idOrUrl.startsWith('/api/') ? resolveLocalApiUrl(idOrUrl) : idOrUrl;
   }
 
   const id = idOrUrl.startsWith('model://') ? idOrUrl.replace('model://', '') : idOrUrl;
@@ -530,7 +542,7 @@ export async function syncAllIndexedDBModelsToDisk(): Promise<number> {
     });
     let synced = 0;
     for (const rec of records) {
-      if (!rec.id || rec.id.startsWith('refimg_') || !rec.buffer) continue;
+      if (!rec.id || isReferenceImageRecordId(rec.id) || !rec.buffer) continue;
       const ok = await saveModelBufferToStudioStorage(
         rec.id,
         rec.buffer,
@@ -543,6 +555,63 @@ export async function syncAllIndexedDBModelsToDisk(): Promise<number> {
   } catch {
     return 0;
   }
+}
+
+/**
+ * Counts how many of the supplied model URLs/IDs are actually available offline
+ * (either bundled under `./models/` or persisted in memory/IndexedDB).
+ */
+export async function countCachedModelUrls(urls: string[]): Promise<number> {
+  if (!Array.isArray(urls) || urls.length === 0) return 0;
+
+  const cachedKeys = new Set<string>();
+  for (const key of bufferMemoryCache.keys()) {
+    cachedKeys.add(key);
+  }
+
+  const db = await openDB();
+  if (db) {
+    try {
+      const dbKeys = await new Promise<string[]>((resolve) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        if (typeof store.getAllKeys === 'function') {
+          const req = store.getAllKeys();
+          req.onsuccess = () =>
+            resolve((req.result || []).map((k) => String(k)));
+          req.onerror = () => resolve([]);
+        } else {
+          const req = store.getAll();
+          req.onsuccess = () =>
+            resolve(
+              ((req.result as StoredModelRecord[]) || [])
+                .map((r) => r?.id)
+                .filter((k): k is string => Boolean(k))
+            );
+          req.onerror = () => resolve([]);
+        }
+      });
+      for (const k of dbKeys) {
+        cachedKeys.add(k);
+      }
+    } catch {
+      // Ignore IDB query error and rely on memory + bundled check
+    }
+  }
+
+  let count = 0;
+  for (const rawUrl of urls) {
+    if (!rawUrl) continue;
+    if (isBundledLocalModelUrl(rawUrl) || rawUrl.startsWith('data:')) {
+      count += 1;
+      continue;
+    }
+    const cleanId = rawUrl.startsWith('model://') ? rawUrl.slice('model://'.length) : rawUrl;
+    if (cachedKeys.has(rawUrl) || cachedKeys.has(cleanId)) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 /**

@@ -43,9 +43,13 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="welcome-modal-title"
+      onClick={handleDismiss}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200"
     >
-      <div className="relative w-full max-w-2xl rounded-2xl border border-white/15 bg-gradient-to-b from-[#131722] via-[#0d0f17] to-[#08090d] shadow-2xl overflow-hidden text-slate-200">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-2xl rounded-2xl border border-white/15 bg-gradient-to-b from-[#131722] via-[#0d0f17] to-[#08090d] shadow-2xl overflow-hidden text-slate-200"
+      >
         {/* Top Accent Gradient Bar */}
         <div className="h-1.5 w-full bg-gradient-to-r from-blue-500 via-indigo-500 to-amber-500" />
 
@@ -148,7 +152,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
               </div>
               <div className="flex items-center gap-2">
                 <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-cyan-300 border border-white/10">
-                  ` or F12
+                  ` or ~
                 </span>
                 <span>In-app log debugger</span>
               </div>

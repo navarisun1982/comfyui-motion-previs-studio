@@ -1044,7 +1044,7 @@ export function lookupCuratedSculptSpec(idOrPrompt?: string): SculptSpec | undef
     matchedKey = 'tactical hover drone';
   } else if (/(knight\s*shield|crusader\s*shield|درع\s*فارس)/i.test(lower)) {
     matchedKey = 'knight shield';
-  } else if (/(coiled\s*snake\s*ring|snake\s*ring|serpent\s*ring|خاتم\s*ذهبي\s*مفرغ|خاتم\s*أفعى|خاتم)/i.test(lower)) {
+  } else if (/(coiled\s*snake\s*ring|snake\s*ring|serpent\s*ring|خاتم\s*ذهبي\s*مفرغ|خاتم\s*أفعى|خاتم\s*ثعبان)/i.test(lower)) {
     matchedKey = 'coiled snake ring';
   } else if (/(sports\s*car|supercar|سيارة\s*رياضية)/i.test(lower)) {
     matchedKey = 'sports car';

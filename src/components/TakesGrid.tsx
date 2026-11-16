@@ -1,12 +1,13 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ShotRevisionV2, DirectorialSteeringPatch } from '../pipeline/revisionTypes';
 import { useHistoryStore } from '../stores/useHistoryStore';
 import { useShotStore } from '../stores/useShotStore';
 import { useQueueStore } from '../stores/useQueueStore';
 import { QualityProfile, GenerationMode } from '../pipeline/templateTypes';
 import { TakeComparisonModal } from './TakeComparisonModal';
-import { DirectorialSteeringModal } from './DirectorialSteeringModal';
+import { DirectorialSteeringModal, SteeredTakeEnqueuePayload } from './DirectorialSteeringModal';
 import { generateDirectorialSteeringPatch } from '../engine/directorialSteeringEngine';
+import { defaultComfyClient } from '../services/comfyClient';
 import {
   Film,
   Star,
@@ -19,24 +20,46 @@ import {
   XCircle,
   Compass,
   Wand2,
+  Play,
 } from 'lucide-react';
 import { MotionFidelityOverlay } from './MotionFidelityOverlay';
 import { analyzeVideoMotionFidelity } from '../engine/motionFidelityAnalyzer';
 
+export interface BatchQueueRequest {
+  count: number;
+  seedStrategy: 'random' | 'sequential';
+  promptOverride?: string;
+  negativeOverride?: string;
+  seedOverride?: number;
+  icLoraStrengthOverride?: number;
+  steeredFromTakeId?: string;
+  steeringPatch?: DirectorialSteeringPatch;
+}
+
 interface TakesGridProps {
+  activeEngine?: 'ltx-2.5' | 'minimax-h3';
+  baseSeed?: number;
   currentProfile?: QualityProfile;
   currentMode?: GenerationMode;
   icLoraModel?: string;
   icLoraStrength?: number;
   onNotice?: (notice: { type: 'warn' | 'error'; message: string }) => void;
+  onPrepareAndEnqueueBatch?: (request: BatchQueueRequest) => Promise<void>;
+  onLoadTakeIntoPlayer?: (take: ShotRevisionV2, resolvedVideoUrl?: string) => void;
+  onSyncSeedToDeck?: (seed: number) => void;
 }
 
 export const TakesGrid: React.FC<TakesGridProps> = ({
+  activeEngine,
+  baseSeed,
   currentProfile = 'final',
-  currentMode = 't2v',
+  currentMode = 'control',
   icLoraModel,
   icLoraStrength,
   onNotice,
+  onPrepareAndEnqueueBatch,
+  onLoadTakeIntoPlayer,
+  onSyncSeedToDeck,
 }) => {
   const { shot, compiledPrompt, previsVideoBlob, previsVideoUrl, setTakeAsActivePlate } = useShotStore();
   const { revisions, toggleCircledTake, deleteRevision, setTakeMotionFidelity } = useHistoryStore();
@@ -45,6 +68,25 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
   const [batchCount, setBatchCount] = useState<number>(3);
   const [seedStrategy, setSeedStrategy] = useState<'random' | 'sequential'>('random');
   const [filterMode, setFilterMode] = useState<'current-shot' | 'all'>('current-shot');
+  const [isPreparingQueue, setIsPreparingQueue] = useState<boolean>(false);
+  const [rehydratedVideoUrls, setRehydratedVideoUrls] = useState<Record<string, string>>({});
+  const rehydratedUrlsRef = useRef<string[]>([]);
+  const attemptedRehydrateRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    return () => {
+      for (const u of rehydratedUrlsRef.current) {
+        if (u.startsWith('blob:')) {
+          try {
+            URL.revokeObjectURL(u);
+          } catch {
+            // ignore revoke errors in test environments
+          }
+        }
+      }
+      rehydratedUrlsRef.current = [];
+    };
+  }, []);
 
   // Video element references for client-side optical flow analysis
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
@@ -71,9 +113,43 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
     (item) => item.status === 'queued' || item.status === 'running'
   );
 
+  const resolveTakePlayableUrl = (take: ShotRevisionV2): string | undefined => {
+    return rehydratedVideoUrls[take.id] || take.outputVideoUrl;
+  };
+
+  const handleVideoElementError = async (take: ShotRevisionV2) => {
+    if (!take.outputFilename || attemptedRehydrateRef.current.has(take.id)) return;
+    attemptedRehydrateRef.current.add(take.id);
+    try {
+      const freshUrl = await defaultComfyClient.fetchVideoBlobUrl(take.outputFilename);
+      if (freshUrl) {
+        rehydratedUrlsRef.current.push(freshUrl);
+        setRehydratedVideoUrls((prev) => ({ ...prev, [take.id]: freshUrl }));
+      }
+    } catch {
+      // ComfyUI offline or output file removed; leave as-is
+    }
+  };
+
   // Trigger batch generation
-  const handleEnqueueTakes = () => {
-    const engine = shot.targetModel === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5';
+  const handleEnqueueTakes = async () => {
+    if (onPrepareAndEnqueueBatch) {
+      setIsPreparingQueue(true);
+      try {
+        await onPrepareAndEnqueueBatch({
+          count: batchCount,
+          seedStrategy,
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        onNotice?.({ type: 'error', message: msg });
+      } finally {
+        setIsPreparingQueue(false);
+      }
+      return;
+    }
+
+    const engine = activeEngine || (shot.targetModel === 'minimax-h3' ? 'minimax-h3' : 'ltx-2.5');
     const mode = currentMode;
 
     let controlBlob: Blob | undefined = undefined;
@@ -99,7 +175,7 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
       profile: currentProfile,
       prompt: compiledPrompt.positivePrompt,
       negative: shot.negativePrompt,
-      baseSeed: shot.seed,
+      baseSeed: baseSeed ?? shot.seed,
       count: batchCount,
       seedStrategy,
       firstFrameFilename: mode === 'i2v' ? shot.referenceImage?.filename : undefined,
@@ -110,8 +186,34 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
     });
   };
 
+  const handleEnqueueSteeredFromModal = async (payload: SteeredTakeEnqueuePayload) => {
+    if (!onPrepareAndEnqueueBatch) return;
+    setIsPreparingQueue(true);
+    try {
+      await onPrepareAndEnqueueBatch({
+        count: 1,
+        seedStrategy: 'sequential',
+        promptOverride: payload.prompt,
+        negativeOverride: payload.negative,
+        seedOverride: payload.seed,
+        icLoraStrengthOverride: payload.icLoraStrength,
+        steeredFromTakeId: payload.steeredFromTakeId,
+        steeringPatch: payload.steeringPatch,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      onNotice?.({ type: 'error', message: msg });
+    } finally {
+      setIsPreparingQueue(false);
+    }
+  };
+
   // Compare selection handler
   const handleCompareClick = (take: ShotRevisionV2) => {
+    const hydratedTake: ShotRevisionV2 = {
+      ...take,
+      outputVideoUrl: resolveTakePlayableUrl(take),
+    };
     if (!selectedForCompareId) {
       setSelectedForCompareId(take.id);
     } else if (selectedForCompareId === take.id) {
@@ -119,7 +221,10 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
     } else {
       const takeA = revisions.find((r) => r.id === selectedForCompareId);
       if (takeA) {
-        setCompareModalPair({ takeA, takeB: take });
+        setCompareModalPair({
+          takeA: { ...takeA, outputVideoUrl: resolveTakePlayableUrl(takeA) },
+          takeB: hydratedTake,
+        });
         setSelectedForCompareId(null);
       } else {
         setSelectedForCompareId(take.id);
@@ -128,9 +233,10 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
   };
 
   const handleDownload = (take: ShotRevisionV2) => {
-    if (!take.outputVideoUrl) return;
+    const playableUrl = resolveTakePlayableUrl(take);
+    if (!playableUrl) return;
     const a = document.createElement('a');
-    a.href = take.outputVideoUrl;
+    a.href = playableUrl;
     a.download = take.outputFilename || `Take_${take.takeNumber ?? take.version}.mp4`;
     document.body.appendChild(a);
     a.click();
@@ -138,16 +244,18 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
   };
 
   const handleSetPlate = (take: ShotRevisionV2) => {
-    if (!take.outputVideoUrl) return;
+    const playableUrl = resolveTakePlayableUrl(take);
+    if (!playableUrl) return;
     setTakeAsActivePlate(
-      take.outputVideoUrl,
+      playableUrl,
       take.outputFilename || `Take_${take.takeNumber ?? take.version}.mp4`
     );
   };
 
   const handleAnalyzeMotion = async (take: ShotRevisionV2) => {
     const videoEl = videoRefs.current[take.id];
-    if (!videoEl || !take.outputVideoUrl) {
+    const playableUrl = resolveTakePlayableUrl(take);
+    if (!videoEl || !playableUrl) {
       onNotice?.({
         type: 'warn',
         message: 'Video element not ready for optical flow motion analysis. Ensure video is loaded.',
@@ -284,12 +392,23 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
         </div>
 
         <button
-          onClick={handleEnqueueTakes}
-          className="flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-110 text-white font-mono text-xs font-bold px-4 py-2 transition-all shadow-md active:scale-95 cursor-pointer"
+          onClick={() => void handleEnqueueTakes()}
+          disabled={isPreparingQueue}
+          data-testid="enqueue-takes-btn"
+          className="flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:brightness-110 disabled:opacity-50 text-white font-mono text-xs font-bold px-4 py-2 transition-all shadow-md active:scale-95 cursor-pointer"
           title={`Queue ${batchCount} take(s)`}
         >
-          <Plus className="h-4 w-4" />
-          <span>Queue {batchCount} Take{batchCount > 1 ? 's' : ''}</span>
+          {isPreparingQueue ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Preparing 3D Previs &amp; Refs...</span>
+            </>
+          ) : (
+            <>
+              <Plus className="h-4 w-4" />
+              <span>Queue {batchCount} Take{batchCount > 1 ? 's' : ''}</span>
+            </>
+          )}
         </button>
       </div>
 
@@ -436,13 +555,14 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
 
                 {/* Video Preview */}
                 <div className="relative aspect-video w-full bg-black flex items-center justify-center group overflow-hidden">
-                  {take.outputVideoUrl ? (
+                  {resolveTakePlayableUrl(take) ? (
                     <>
                       <video
                         ref={(el) => {
                           videoRefs.current[take.id] = el;
                         }}
-                        src={take.outputVideoUrl}
+                        src={resolveTakePlayableUrl(take)}
+                        onError={() => void handleVideoElementError(take)}
                         controls
                         playsInline
                         crossOrigin="anonymous"
@@ -517,7 +637,7 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
                       <div className="flex items-center gap-1.5">
                         <button
                           onClick={() => handleAnalyzeMotion(take)}
-                          disabled={analyzingTakeId === take.id || !take.outputVideoUrl}
+                          disabled={analyzingTakeId === take.id || !resolveTakePlayableUrl(take)}
                           className="flex items-center gap-1 rounded bg-director-gold/15 hover:bg-director-gold/25 text-director-gold border border-director-gold/30 px-2 py-0.5 font-bold transition-all cursor-pointer disabled:opacity-50"
                           title="Run optical flow analysis against directed 3D camera trajectory"
                         >
@@ -546,15 +666,27 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
                   </div>
 
                   {/* Actions Bar */}
-                  <div className="flex items-center justify-between pt-1 border-t border-white/5">
-                    <button
-                      onClick={() => handleSetPlate(take)}
-                      className="flex items-center gap-1 rounded bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 px-2 py-1 font-mono text-[9px] font-bold transition-all cursor-pointer"
-                      title="Inject this take into the 3D Soundstage & Video Deck as active background plate"
-                    >
-                      <CheckCircle2 className="h-3 w-3" />
-                      <span>Set as Plate</span>
-                    </button>
+                  <div className="flex items-center justify-between pt-1 border-t border-white/5 flex-wrap gap-1.5">
+                    <div className="flex items-center gap-1.5">
+                      {onLoadTakeIntoPlayer && resolveTakePlayableUrl(take) && (
+                        <button
+                          onClick={() => onLoadTakeIntoPlayer(take, resolveTakePlayableUrl(take))}
+                          className="flex items-center gap-1 rounded bg-emerald-500/20 hover:bg-emerald-500/35 text-emerald-300 border border-emerald-500/35 px-2 py-1 font-mono text-[9px] font-bold transition-all cursor-pointer"
+                          title="Load this take into the main Render & Export A/B Wipe Player above"
+                        >
+                          <Play className="h-2.5 w-2.5 fill-current" />
+                          <span>In Player</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleSetPlate(take)}
+                        className="flex items-center gap-1 rounded bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 px-2 py-1 font-mono text-[9px] font-bold transition-all cursor-pointer"
+                        title="Inject this take into the 3D Soundstage & Video Deck as active background plate"
+                      >
+                        <CheckCircle2 className="h-3 w-3" />
+                        <span>Set as Plate</span>
+                      </button>
+                    </div>
 
                     <div className="flex items-center gap-1.5">
                       <button
@@ -604,6 +736,8 @@ export const TakesGrid: React.FC<TakesGridProps> = ({
           currentMode={currentMode}
           onClose={() => setSteeringModalTarget(null)}
           onNotice={onNotice}
+          onApplySeedToDeck={onSyncSeedToDeck}
+          onEnqueueSteeredTake={onPrepareAndEnqueueBatch ? handleEnqueueSteeredFromModal : undefined}
         />
       )}
     </div>

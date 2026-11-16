@@ -97,8 +97,18 @@ export function verifyMixamoAnatomicalInvariants(rig: HumanoidRig): {
   const leftFootLocalX = lFoot ? lFoot.x : 0.08 * rig.height;
   const rightFootLocalX = rFoot ? rFoot.x : -0.08 * rig.height;
 
-  const feetBelowHips = leftFootLocalY < hipsLocalY - 0.05 * rig.height && rightFootLocalY < hipsLocalY - 0.05 * rig.height;
-  const notInverted = feetBelowHips && !Number.isNaN(leftFootLocalY) && !Number.isNaN(rightFootLocalY);
+  // Detect genuine upside-down Mixamo leg-flip corruption (where raw identity quaternions on LeftUpLeg/RightUpLeg
+  // flip BOTH feet ~180 deg into the sky well above Hips) without falsely resetting high kicks, prone crawls, or collapse falls.
+  const bothFeetFlippedSkyward =
+    leftFootLocalY > hipsLocalY + 0.18 * rig.height &&
+    rightFootLocalY > hipsLocalY + 0.18 * rig.height;
+  const hasFiniteCoords =
+    Number.isFinite(hipsLocalY) &&
+    Number.isFinite(leftFootLocalY) &&
+    Number.isFinite(rightFootLocalY) &&
+    Number.isFinite(leftFootLocalX) &&
+    Number.isFinite(rightFootLocalX);
+  const notInverted = hasFiniteCoords && !bothFeetFlippedSkyward;
 
   return {
     hipsLocalY,

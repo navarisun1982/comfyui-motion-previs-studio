@@ -171,15 +171,26 @@ export const StudioStorageSettingsCard: React.FC = () => {
       }
 
       safeSetItem(STORAGE_KEYS.SCENES, res.scenes);
-      if (res.shotsById && typeof res.shotsById === 'object') {
-        safeSetItem(STORAGE_KEYS.SHOTS_CACHE, res.shotsById);
-        const firstShotId = res.scenes[0]?.shots?.[0]?.id;
-        const firstSpec = firstShotId ? res.shotsById[firstShotId] : null;
-        useShotStore.setState((state) => ({
-          ...state,
-          shotsById: res.shotsById as any,
-          ...(firstSpec ? { shot: firstSpec } : {}),
-        }));
+      const firstShotId = res.scenes[0]?.shots?.[0]?.id;
+      useShotStore.getState().restoreProjectFromDiskState({
+        shotsById: (res.shotsById as any) || undefined,
+        activeShotId: firstShotId,
+        castPool: Array.isArray(res.castPool) ? (res.castPool as any) : undefined,
+      });
+      if (Array.isArray(res.customLibraryAssets) && res.customLibraryAssets.length > 0) {
+        const assetStore = useAssetLibraryStore.getState();
+        const existingIds = new Set(assetStore.customAssets.map((a) => a.id));
+        const mergedAssets = [...assetStore.customAssets];
+        for (const item of res.customLibraryAssets as any[]) {
+          if (item?.id && !existingIds.has(item.id)) {
+            mergedAssets.unshift(item);
+            existingIds.add(item.id);
+          }
+        }
+        if (mergedAssets.length !== assetStore.customAssets.length) {
+          useAssetLibraryStore.setState({ customAssets: mergedAssets });
+          safeSetItem('comfy_director_custom_3d_assets_v1', mergedAssets);
+        }
       }
       if (typeof window !== 'undefined') {
         window.dispatchEvent(

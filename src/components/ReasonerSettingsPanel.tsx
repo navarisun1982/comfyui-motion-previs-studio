@@ -429,7 +429,7 @@ export const ReasonerSettingsPanel: React.FC<{
         toSave.providers.openai = {
           ...toSave.providers.openai,
           baseUrl: '/api/openai',
-          model: toSave.providers.openai?.model || openAiAuth?.activeModel || 'gpt-5.6-sol',
+          model: toSave.providers.openai?.model || openAiAuth?.activeModel || 'gpt-4o',
           apiKey: '',
         };
       } else if (toSave.providers.openai?.apiKey) {
@@ -461,9 +461,12 @@ export const ReasonerSettingsPanel: React.FC<{
         {onClose && (
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              save();
+              onClose();
+            }}
             aria-label="Close Studio Settings"
-            title="Close"
+            title="Save & Close"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 hover:bg-rose-500/25 hover:border-rose-400/40 text-slate-300 hover:text-white transition-colors cursor-pointer"
             id="reasoner-settings-close"
           >

@@ -1111,11 +1111,13 @@ export function compileMiniMaxPrompt(shot: ShotSpec): CompiledPromptBundle {
     proxySpatialAnchors.length > 0
       ? ` and subject blocking (${proxySpatialAnchors.join('; ')})`
       : ' and environmental spatial depth';
+  const primaryVisualRefTag = visibleTop3.length > 0 ? '<Picture 1>' : '<Picture 4>';
+  const visualRefScope = visibleTop3.length > 0 ? 'subject and environment' : 'environment';
   subjectDefLines.push(
-    `<Video 1> is the original untextured 3D animation reference and the authoritative temporal and spatial source for the entire target video (${cameraMove}). It defines the exact subject animation, frame-by-frame pose and trajectory progression, altitude changes, viewing-angle transitions${blockingDetail}, environment parallax, camera angle, camera position, framing, tracking behavior, lens perspective, shot duration, and complete temporal progression. Whenever movement or framing implied by <Picture 1> differs from <Video 1>, <Video 1> takes absolute priority.`
+    `<Video 1> is the original untextured 3D animation reference and the authoritative temporal and spatial source for the entire target video (${cameraMove}). It defines the exact subject animation, frame-by-frame pose and trajectory progression, altitude changes, viewing-angle transitions${blockingDetail}, environment parallax, camera angle, camera position, framing, tracking behavior, lens perspective, shot duration, and complete temporal progression. Whenever movement or framing implied by ${primaryVisualRefTag} differs from <Video 1>, <Video 1> takes absolute priority.`
   );
   subjectDefLines.push(
-    `<Picture 1> is the finished visual reference for the target rendering, defining the photorealistic subject and environment appearance, material palette, surface textures, lighting relationships, atmospheric depth, and overall cinematic rendering style.`
+    `${primaryVisualRefTag} is the finished visual reference for the target rendering, defining the photorealistic ${visualRefScope} appearance, material palette, surface textures, lighting relationships, atmospheric depth, and overall cinematic rendering style.`
   );
   retentionLines.push(
     `<Video 1> (entire temporal structure): fully_preserved - preserve its complete animation, timing, camera transform, camera angle, framing, subject screen placement, scale proportions, altitude changes, orientation transitions, shot duration, and frame progression without alteration.`

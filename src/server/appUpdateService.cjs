@@ -155,17 +155,25 @@ async function applyAppUpdate(options = {}) {
 
   // 2. Check for local uncommitted edits or CRLF diffs and auto-stash them so git pull never fails
   let stashedChanges = false;
+  let restoredLocalChanges = false;
+  let stashBackupRef = null;
   const dirtyStatus = await runCmd('git', ['status', '--porcelain']).catch(() => '');
-  if (dirtyStatus.trim().length > 0) {
+  const dirtyPaths = dirtyStatus
+    .split(/\r?\n/)
+    .map((line) => line.slice(3).trim().replace(/^"(.*)"$/, '$1'))
+    .filter(Boolean);
+  if (dirtyPaths.length > 0) {
+    stashBackupRef = `cmpvs-auto-backup-${new Date().toISOString()}`;
     stepsLog.push('Backing up local file changes into git stash so update applies cleanly...');
     try {
       await runCmd(
         'git',
-        ['stash', 'push', '-u', '-m', `cmpvs-auto-backup-${new Date().toISOString()}`],
+        ['stash', 'push', '-u', '-m', stashBackupRef],
         20000
       );
       stashedChanges = true;
     } catch (stashErr) {
+      stashBackupRef = null;
       stepsLog.push(`Warning: Could not auto-stash local changes (${stashErr?.message || 'stash error'}). Proceeding carefully without destructive reset.`);
     }
   }
@@ -175,17 +183,38 @@ async function applyAppUpdate(options = {}) {
   try {
     await runCmd('git', ['pull', '--ff-only', 'origin', 'master'], 30000);
   } catch (pullErr) {
-    throw new Error(`Fast-forward git pull failed (${pullErr?.message || 'diverged branch'}). Local files were preserved safely.`);
+    if (stashedChanges) {
+      await runCmd('git', ['stash', 'pop'], 20000).catch(() => {});
+    }
+    throw new Error(`Fast-forward git pull failed (${pullErr?.message || 'diverged branch'}). Local files were restored safely.`);
   }
 
   // 4. Check if package.json or package-lock.json changed between beforeFullSha and targetFullSha
   let ranNpmInstall = false;
   const changedFilesRaw = await runCmd('git', ['diff', '--name-only', beforeFullSha, targetFullSha]).catch(() => '');
-  const changedFiles = changedFilesRaw.split(/\r?\n/).map((s) => s.trim());
+  const changedFiles = changedFilesRaw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   if (changedFiles.includes('package.json') || changedFiles.includes('package-lock.json')) {
     stepsLog.push('Dependencies changed in package.json — running npm install...');
     await runCmd('npm', ['install', '--no-audit', '--no-fund'], 180000);
     ranNpmInstall = true;
+  }
+
+  // 4b. Restore stashed local changes automatically when they do not overlap upstream-changed files
+  if (stashedChanges) {
+    const changedSet = new Set(changedFiles);
+    const hasOverlap = dirtyPaths.some((p) => changedSet.has(p));
+    if (!hasOverlap) {
+      try {
+        await runCmd('git', ['stash', 'pop'], 20000);
+        stashedChanges = false;
+        restoredLocalChanges = true;
+        stepsLog.push('Restored your local uncommitted changes cleanly on top of the updated commit.');
+      } catch {
+        stepsLog.push(`Notice: Local changes conflicted with incoming commit and remain safely preserved in git stash (${stashBackupRef}).`);
+      }
+    } else {
+      stepsLog.push(`Notice: Local changes touch updated files and remain safely preserved in git stash (${stashBackupRef}) to avoid conflict markers.`);
+    }
   }
 
   // 5. Rebuild dist/ if running in Electron mode
@@ -206,6 +235,8 @@ async function applyAppUpdate(options = {}) {
     newSha: finalStatus.localSha,
     updatedCommitsCount: behindCount,
     stashedChanges,
+    restoredLocalChanges,
+    stashBackupRef,
     ranNpmInstall,
     ranBuild,
     stepsLog,

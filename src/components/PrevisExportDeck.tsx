@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useShotStore } from '../stores/useShotStore';
 import { useComfyStore } from '../stores/useComfyStore';
+import { useQueueStore } from '../stores/useQueueStore';
+import { ShotRevisionV2 } from '../pipeline/revisionTypes';
 import { getAdapter } from '../adapters';
 import { getReasonerConfig } from '../services/objectReasoner';
 import { directPromptWithAI, refinePromptWithAIChat } from '../services/aiPromptDirector';
@@ -15,13 +17,16 @@ import { loadBundledTemplates } from '../pipeline/templateLoader';
 import { templateRegistry } from '../pipeline/templateRegistry';
 import {
   WorkflowChoiceItem,
+  autoDetectWorkflowBindings,
   ensureWorkflowSyncedToComfyUI,
   getActiveWorkflowForEngine,
   getWorkflowArchitectureProfile,
   syncActiveEngineWorkflowToRegistry,
 } from '../pipeline/customWorkflowResolver';
+import { BUNDLED_WORKFLOWS_CATALOG } from '../services/bundledWorkflowsCatalog';
 import { CustomWorkflowConfigBar } from './CustomWorkflowConfigBar';
 import { BundledWorkflowsModal } from './BundledWorkflowsModal';
+import { TakesGrid, BatchQueueRequest } from './TakesGrid';
 import {
   Download,
   Copy,
@@ -598,6 +603,189 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     );
   }, [shot.id, refSlotTargets, shot.actors, shot.environment]);
 
+  const prepareLiveComfyJobPayload = async (targetEngine: 'ltx-2.5' | 'minimax-h3') => {
+    const currentShot = useShotStore.getState().shot;
+    const currentWorkflow = getActiveWorkflowForEngine(targetEngine);
+    const trimmedRefs = refImageNames.map((n) => n.trim()) as [string, string, string, string];
+
+    // 1. Resolve which 3D Previs video pass is actively selected to send to ComfyUI ('clay' | 'rgb' | 'openpose' | 'depth' | 'id-mask')
+    const passToUpload: PrevisSourcePass =
+      activePassTab === 'rgb' ||
+      activePassTab === 'clay' ||
+      activePassTab === 'openpose' ||
+      activePassTab === 'depth' ||
+      activePassTab === 'id-mask'
+        ? activePassTab
+        : activeSourcePass;
+
+    const getPassUrlFromStore = (pass: PrevisSourcePass): string | undefined => {
+      const s = useShotStore.getState();
+      switch (pass) {
+        case 'clay':
+          return s.previsClayUrl;
+        case 'openpose':
+          return s.previsOpenPoseUrl;
+        case 'depth':
+          return s.previsDepthUrl;
+        case 'id-mask':
+          return s.previsIdMaskUrl;
+        case 'rgb':
+        default:
+          return s.previsVideoUrl;
+      }
+    };
+
+    const passHumanName =
+      passToUpload === 'clay'
+        ? 'Clay Layout'
+        : passToUpload === 'openpose'
+        ? 'OpenPose Rig'
+        : passToUpload === 'depth'
+        ? 'Volumetric Depth'
+        : passToUpload === 'id-mask'
+        ? 'Object ID Mask'
+        : 'RGB Plate';
+
+    let sourcePassUrl = getPassUrlFromStore(passToUpload);
+    const backdropChangedSinceRender =
+      lastRenderedBackdropHideRef.current !== null &&
+      lastRenderedBackdropHideRef.current !== backdropDecision.hide;
+    if (!sourcePassUrl || backdropChangedSinceRender) {
+      setComfyStatusText(
+        `Step 1/3: Rendering 24fps 3D ${passHumanName} MP4 (${selectedResolution}, ${
+          backdropDecision.hide ? 'Clean BG' : '3D Stage'
+        }) for <Video 1> reference...`
+      );
+      await renderPrevisVideo(passToUpload, selectedResolution);
+      lastRenderedBackdropHideRef.current = backdropDecision.hide;
+      sourcePassUrl = getPassUrlFromStore(passToUpload);
+    }
+    if (!sourcePassUrl) {
+      throw new Error(`Failed to generate 3D ${passHumanName} Previs video for ComfyUI upload.`);
+    }
+
+    // Fetch blob from object URL + resolve any DataURL thumbnails uploaded in Directing Stage into Blobs!
+    setComfyStatusText(
+      `Step 2/3: Uploading 3D ${passHumanName} MP4 & Reference Images to ComfyUI (127.0.0.1:8188)...`
+    );
+    const previsBlob = await (await fetch(sourcePassUrl)).blob();
+
+    const resolvedRefBlobs: [Blob | null, Blob | null, Blob | null, Blob | null] = [null, null, null, null];
+    const resolvedSlotUrls: [string | null, string | null, string | null, string | null] = [null, null, null, null];
+    const refImageDescriptions: [string, string, string, string] = ['', '', '', ''];
+    for (let i = 0; i < 4; i++) {
+      const slotTarget = refSlotTargets[i];
+      const matchedActor =
+        slotTarget && slotTarget !== 'environment' && slotTarget !== 'custom'
+          ? currentShot.actors.find((a) => a.id === slotTarget)
+          : undefined;
+      const rawActorImageUrl =
+        matchedActor?.conceptImageUrl &&
+        !/raw\.githubusercontent\.com\/lucas-martinic\/polyfork-catalog|images\.unsplash\.com/i.test(
+          matchedActor.conceptImageUrl
+        )
+          ? matchedActor.conceptImageUrl
+          : null;
+      const slotImageUrl =
+        slotTarget === 'environment'
+          ? currentShot.environment?.conceptImageUrl || null
+          : matchedActor
+          ? rawActorImageUrl
+          : refImageThumbs[i] || null;
+      resolvedSlotUrls[i] = slotImageUrl;
+
+      if (slotTarget === 'custom' && refImageFiles[i]) {
+        resolvedRefBlobs[i] = refImageFiles[i];
+      } else if (slotImageUrl) {
+        // If the environment slot (slot 3) shares the exact same composite reference image URL as an earlier subject slot,
+        // do not upload a duplicate copy of the same image unless the workflow explicitly requires 4 separate slots.
+        const isDuplicateCompositeEnv =
+          i === 3 &&
+          !currentWorkflow.requiresFourRefs &&
+          (slotImageUrl === resolvedSlotUrls[0] ||
+            slotImageUrl === resolvedSlotUrls[1] ||
+            slotImageUrl === resolvedSlotUrls[2]);
+        if (!isDuplicateCompositeEnv) {
+          try {
+            const res = await fetch(slotImageUrl);
+            resolvedRefBlobs[i] = await res.blob();
+          } catch {
+            resolvedRefBlobs[i] = null;
+          }
+        }
+      }
+
+      if (slotTarget === 'environment') {
+        refImageDescriptions[i] =
+          resolvedRefBlobs[i]
+            ? currentShot.environment?.promptDescription || currentShot.environment?.name || 'Active studio environment'
+            : '';
+      } else if (slotTarget && slotTarget !== 'custom') {
+        const isActorInPov = povReport.byActorId[slotTarget]?.everVisible ?? true;
+        if (matchedActor && isActorInPov && resolvedRefBlobs[i]) {
+          refImageDescriptions[i] = matchedActor.token || matchedActor.name || '';
+        } else {
+          // Do not inject off-screen or unpopulated actor descriptions into the generation job
+          resolvedRefBlobs[i] = null;
+          refImageDescriptions[i] = '';
+        }
+      }
+    }
+
+    let objInfo: Record<string, unknown> | null = null;
+    try {
+      objInfo = await defaultComfyClient.getObjectInfo();
+    } catch {
+      objInfo = null;
+    }
+    const verifiedRefFilenames: [string, string, string, string] = [0, 1, 2, 3].map((idx) => {
+      if (resolvedRefBlobs[idx]) return trimmedRefs[idx] || `ref_slot_${idx + 1}.png`;
+      return '';
+    }) as [string, string, string, string];
+
+    const { choice: activeWf, templateId: selectedTemplateId } =
+      syncActiveEngineWorkflowToRegistry(targetEngine, objInfo);
+    await ensureWorkflowSyncedToComfyUI(activeWf);
+
+    // 2. Compile / resolve active engine prompt & Auto-Tune parameters
+    const engineCompiled = getAdapter(targetEngine).compilePrompt(currentShot);
+    const rawLockedCustomForEngine = currentShot.customPositivePrompts?.[targetEngine]?.trim();
+    const lockedCustomForEngine = isCustomPromptCoherentWithShot(rawLockedCustomForEngine, currentShot)
+      ? rawLockedCustomForEngine
+      : undefined;
+    const effectivePrompt =
+      lockedCustomForEngine && lockedCustomForEngine.length > 0
+        ? lockedCustomForEngine
+        : engineCompiled.positivePrompt;
+    const effectiveNegative =
+      currentShot.negativePrompt ?? compiledPrompt?.negativePrompt ?? engineCompiled.negativePrompt ?? '';
+
+    // Guarantee that Auto-Tune uses the exact tuning for (targetEngine, activeWf.id, passToUpload)
+    const effectiveTuning = isWorkflowAutoTune
+      ? computeOptimalWorkflowTuning(targetEngine, activeWf.id, passToUpload)
+      : {
+          steps: wfSteps,
+          controlStrength: wfControlStrength,
+          firstPassScale: wfFirstPassScale,
+          referenceMode: wfReferenceMode,
+        };
+
+    return {
+      currentShot,
+      activeWf,
+      selectedTemplateId,
+      passHumanName,
+      previsBlob,
+      resolvedRefBlobs,
+      verifiedRefFilenames,
+      refImageDescriptions,
+      effectivePrompt,
+      effectiveNegative,
+      effectiveTuning,
+      isCustomPromptUsed: Boolean(lockedCustomForEngine && lockedCustomForEngine.length > 0),
+    };
+  };
+
   const handleRenderInComfyUI = async () => {
     setComfyErrorText(null);
     if (activeEngineTab === 'seedance') {
@@ -618,189 +806,31 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
     setIsSubmittingComfy(true);
     try {
-      // 1. Resolve which 3D Previs video pass is actively selected to send to ComfyUI ('clay' | 'rgb' | 'openpose' | 'depth' | 'id-mask')
-      const passToUpload: PrevisSourcePass =
-        activePassTab === 'rgb' ||
-        activePassTab === 'clay' ||
-        activePassTab === 'openpose' ||
-        activePassTab === 'depth' ||
-        activePassTab === 'id-mask'
-          ? activePassTab
-          : activeSourcePass;
-
-      const getPassUrlFromStore = (pass: PrevisSourcePass): string | undefined => {
-        const s = useShotStore.getState();
-        switch (pass) {
-          case 'clay':
-            return s.previsClayUrl;
-          case 'openpose':
-            return s.previsOpenPoseUrl;
-          case 'depth':
-            return s.previsDepthUrl;
-          case 'id-mask':
-            return s.previsIdMaskUrl;
-          case 'rgb':
-          default:
-            return s.previsVideoUrl;
-        }
-      };
-
-      const passHumanName =
-        passToUpload === 'clay'
-          ? 'Clay Layout'
-          : passToUpload === 'openpose'
-          ? 'OpenPose Rig'
-          : passToUpload === 'depth'
-          ? 'Volumetric Depth'
-          : passToUpload === 'id-mask'
-          ? 'Object ID Mask'
-          : 'RGB Plate';
-
-      let sourcePassUrl = getPassUrlFromStore(passToUpload);
-      const backdropChangedSinceRender =
-        lastRenderedBackdropHideRef.current !== null &&
-        lastRenderedBackdropHideRef.current !== backdropDecision.hide;
-      if (!sourcePassUrl || backdropChangedSinceRender) {
-        setComfyStatusText(
-          `Step 1/3: Rendering 24fps 3D ${passHumanName} MP4 (${selectedResolution}, ${
-            backdropDecision.hide ? 'Clean BG' : '3D Stage'
-          }) for <Video 1> reference...`
-        );
-        await renderPrevisVideo(passToUpload, selectedResolution);
-        lastRenderedBackdropHideRef.current = backdropDecision.hide;
-        sourcePassUrl = getPassUrlFromStore(passToUpload);
-      }
-      if (!sourcePassUrl) {
-        throw new Error(`Failed to generate 3D ${passHumanName} Previs video for ComfyUI upload.`);
-      }
-
-      // Fetch blob from object URL + resolve any DataURL thumbnails uploaded in Directing Stage into Blobs!
-      setComfyStatusText(
-        `Step 2/3: Uploading 3D ${passHumanName} MP4 & Reference Images to ComfyUI (127.0.0.1:8188)...`
-      );
-      const previsBlob = await (await fetch(sourcePassUrl)).blob();
-
-      const resolvedRefBlobs: [Blob | null, Blob | null, Blob | null, Blob | null] = [null, null, null, null];
-      const resolvedSlotUrls: [string | null, string | null, string | null, string | null] = [null, null, null, null];
-      const refImageDescriptions: [string, string, string, string] = ['', '', '', ''];
-      for (let i = 0; i < 4; i++) {
-        const slotTarget = refSlotTargets[i];
-        const matchedActor =
-          slotTarget && slotTarget !== 'environment' && slotTarget !== 'custom'
-            ? shot.actors.find((a) => a.id === slotTarget)
-            : undefined;
-        const rawActorImageUrl =
-          matchedActor?.conceptImageUrl &&
-          !/raw\.githubusercontent\.com\/lucas-martinic\/polyfork-catalog|images\.unsplash\.com/i.test(
-            matchedActor.conceptImageUrl
-          )
-            ? matchedActor.conceptImageUrl
-            : null;
-        const slotImageUrl =
-          slotTarget === 'environment'
-            ? shot.environment?.conceptImageUrl || null
-            : matchedActor
-            ? rawActorImageUrl
-            : refImageThumbs[i] || null;
-        resolvedSlotUrls[i] = slotImageUrl;
-
-        if (slotTarget === 'custom' && refImageFiles[i]) {
-          resolvedRefBlobs[i] = refImageFiles[i];
-        } else if (slotImageUrl) {
-          // If the environment slot (slot 3) shares the exact same composite reference image URL as an earlier subject slot,
-          // do not upload a duplicate copy of the same image unless the workflow explicitly requires 4 separate slots.
-          const isDuplicateCompositeEnv =
-            i === 3 &&
-            !currentWorkflow.requiresFourRefs &&
-            (slotImageUrl === resolvedSlotUrls[0] ||
-              slotImageUrl === resolvedSlotUrls[1] ||
-              slotImageUrl === resolvedSlotUrls[2]);
-          if (!isDuplicateCompositeEnv) {
-            try {
-              const res = await fetch(slotImageUrl);
-              resolvedRefBlobs[i] = await res.blob();
-            } catch {
-              resolvedRefBlobs[i] = null;
-            }
-          }
-        }
-
-        if (slotTarget === 'environment') {
-          refImageDescriptions[i] =
-            resolvedRefBlobs[i]
-              ? shot.environment?.promptDescription || shot.environment?.name || 'Active studio environment'
-              : '';
-        } else if (slotTarget && slotTarget !== 'custom') {
-          const isActorInPov = povReport.byActorId[slotTarget]?.everVisible ?? true;
-          if (matchedActor && isActorInPov && resolvedRefBlobs[i]) {
-            refImageDescriptions[i] = matchedActor.token || matchedActor.name || '';
-          } else {
-            // Do not inject off-screen or unpopulated actor descriptions into the generation job
-            resolvedRefBlobs[i] = null;
-            refImageDescriptions[i] = '';
-          }
-        }
-      }
-
-      let objInfo: Record<string, unknown> | null = null;
-      try {
-        objInfo = await defaultComfyClient.getObjectInfo();
-      } catch {
-        objInfo = null;
-      }
-      const verifiedRefFilenames: [string, string, string, string] = [0, 1, 2, 3].map((idx) => {
-        if (resolvedRefBlobs[idx]) return trimmedRefs[idx] || `ref_slot_${idx + 1}.png`;
-        return '';
-      }) as [string, string, string, string];
-
-      const { choice: activeWf, templateId: selectedTemplateId } =
-        syncActiveEngineWorkflowToRegistry(targetEngine, objInfo);
-      await ensureWorkflowSyncedToComfyUI(activeWf);
-
-      // 2. Queue job via JobRunner using active engine template (LTX-2.5 or MiniMax H3)
-      const engineCompiled = getAdapter(targetEngine).compilePrompt(shot);
-      const rawLockedCustomForEngine = shot.customPositivePrompts?.[targetEngine]?.trim();
-      const lockedCustomForEngine = isCustomPromptCoherentWithShot(rawLockedCustomForEngine, shot)
-        ? rawLockedCustomForEngine
-        : undefined;
-      const effectivePrompt =
-        lockedCustomForEngine && lockedCustomForEngine.length > 0
-          ? lockedCustomForEngine
-          : engineCompiled.positivePrompt;
-
-      // Guarantee that Auto-Tune uses the exact tuning for (targetEngine, activeWf.id, passToUpload)
-      const effectiveTuning = isWorkflowAutoTune
-        ? computeOptimalWorkflowTuning(targetEngine, activeWf.id, passToUpload)
-        : {
-            steps: wfSteps,
-            controlStrength: wfControlStrength,
-            firstPassScale: wfFirstPassScale,
-            referenceMode: wfReferenceMode,
-          };
+      const prepared = await prepareLiveComfyJobPayload(targetEngine);
 
       setComfyStatusText(
-        `Step 3/3: Binding "${activeWf.shortLabel}" (${passHumanName} • ${effectiveTuning.steps} steps • Str ${effectiveTuning.controlStrength.toFixed(
+        `Step 3/3: Binding "${prepared.activeWf.shortLabel}" (${prepared.passHumanName} • ${prepared.effectiveTuning.steps} steps • Str ${prepared.effectiveTuning.controlStrength.toFixed(
           2
-        )} • RefMode ${effectiveTuning.referenceMode}) & queuing in ComfyUI...`
+        )} • RefMode ${prepared.effectiveTuning.referenceMode}) & queuing in ComfyUI...`
       );
       await defaultJobRunner.run({
-        shot,
+        shot: prepared.currentShot,
         engine: targetEngine,
         mode: 'control',
-        templateId: selectedTemplateId,
-        profile: activeWf.forcedProfile || (selectedResolution === '1080p' ? 'final' : 'draft'),
-        prompt: effectivePrompt,
+        templateId: prepared.selectedTemplateId,
+        profile: prepared.activeWf.forcedProfile || (selectedResolution === '1080p' ? 'final' : 'draft'),
+        prompt: prepared.effectivePrompt,
         negative: displayNegativePrompt,
         seed: Math.max(0, Math.floor(comfySeed)),
-        steps: effectiveTuning.steps,
-        icLoraStrength: effectiveTuning.controlStrength,
-        firstPassScale: effectiveTuning.firstPassScale,
-        referenceMode: effectiveTuning.referenceMode,
-        promptSource: 'compiled',
-        controlVideoBlob: previsBlob,
-        refImageBlobs: resolvedRefBlobs,
-        refImageFilenames: verifiedRefFilenames,
-        refImageDescriptions,
+        steps: prepared.effectiveTuning.steps,
+        icLoraStrength: prepared.effectiveTuning.controlStrength,
+        firstPassScale: prepared.effectiveTuning.firstPassScale,
+        referenceMode: prepared.effectiveTuning.referenceMode,
+        promptSource: prepared.isCustomPromptUsed ? 'manual' : 'compiled',
+        controlVideoBlob: prepared.previsBlob,
+        refImageBlobs: prepared.resolvedRefBlobs,
+        refImageFilenames: prepared.verifiedRefFilenames,
+        refImageDescriptions: prepared.refImageDescriptions,
         onProgress: (pct, title) => {
           setComfyStatusText(`ComfyUI Executing (${pct}%): ${title}`);
         },
@@ -833,6 +863,85 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
       setComfyStatusText(null);
       setIsSubmittingComfy(false);
     }
+  };
+
+  const handlePrepareAndEnqueueBatch = async (req: BatchQueueRequest) => {
+    setComfyErrorText(null);
+    if (activeEngineTab === 'seedance') {
+      throw new Error(
+        'Seedance 2.0 is prompt-export only. Switch to LTX-2.5 or MiniMax H3 to queue multi-seed ComfyUI takes.'
+      );
+    }
+    const targetEngine: 'ltx-2.5' | 'minimax-h3' = activeEngineTab === 'ltx-2.5' ? 'ltx-2.5' : 'minimax-h3';
+    const currentWorkflow = getActiveWorkflowForEngine(targetEngine);
+    const trimmedRefs = refImageNames.map((n) => n.trim()) as [string, string, string, string];
+    if (currentWorkflow.requiresFourRefs && trimmedRefs.some((n) => n.length === 0)) {
+      throw new Error(
+        'All 4 Reference Image slots (<picture 1> to <picture 4>) must be filled before submitting to this workflow.'
+      );
+    }
+
+    const prepared = await prepareLiveComfyJobPayload(targetEngine);
+    const resolvedProfile =
+      prepared.activeWf.forcedProfile || (selectedResolution === '1080p' ? 'final' : 'draft');
+    const finalPrompt = req.promptOverride || prepared.effectivePrompt;
+    const finalNegative = req.negativeOverride ?? prepared.effectiveNegative;
+    const finalBaseSeed = req.seedOverride ?? Math.max(0, Math.floor(comfySeed));
+    const finalControlStrength = req.icLoraStrengthOverride ?? prepared.effectiveTuning.controlStrength;
+
+    setComfyStatusText(
+      `Queued ${req.count} ${req.count === 1 ? 'take' : 'takes'} via "${prepared.activeWf.shortLabel}" (${prepared.passHumanName} • ${req.seedStrategy} seeds)...`
+    );
+
+    useQueueStore.getState().enqueueBatch({
+      shot: prepared.currentShot,
+      engine: targetEngine,
+      mode: 'control',
+      templateId: prepared.selectedTemplateId,
+      profile: resolvedProfile,
+      prompt: finalPrompt,
+      negative: finalNegative,
+      promptSource: req.promptOverride || prepared.isCustomPromptUsed ? 'manual' : 'compiled',
+      baseSeed: finalBaseSeed,
+      count: req.count,
+      seedStrategy: req.seedStrategy,
+      steps: prepared.effectiveTuning.steps,
+      icLoraStrength: finalControlStrength,
+      firstPassScale: prepared.effectiveTuning.firstPassScale,
+      referenceMode: prepared.effectiveTuning.referenceMode,
+      controlVideoBlob: prepared.previsBlob,
+      refImageBlobs: prepared.resolvedRefBlobs,
+      refImageFilenames: prepared.verifiedRefFilenames,
+      refImageDescriptions: prepared.refImageDescriptions,
+      steeredFromTakeId: req.steeredFromTakeId,
+      steeringPatch: req.steeringPatch,
+      onTakeCompleted: (_revId, videoUrl, filename) => {
+        setFinalComfyVideoUrl(videoUrl);
+        setFinalComfyFilename(filename);
+        setFinalComfyMeta(
+          targetEngine === 'ltx-2.5'
+            ? `${selectedResolution === '1080p' ? '1080p Upscaled' : 'Native Draft'} • LTX-2.5 INT8`
+            : '1504×832 • 60fps RIFE + Audio'
+        );
+        setComfyStatusText(`Completed queued take: ${filename}`);
+        setActivePassTab('side-by-side');
+      },
+    });
+  };
+
+  const handleLoadTakeIntoPlayer = (take: ShotRevisionV2, resolvedVideoUrl?: string) => {
+    const playable = resolvedVideoUrl || take.outputVideoUrl;
+    if (!playable) return;
+    setFinalComfyVideoUrl(playable);
+    setFinalComfyFilename(take.outputFilename || `Take_${take.takeNumber ?? take.version}.mp4`);
+    setFinalComfyMeta(
+      `Take ${take.takeNumber ?? take.version} • Seed ${take.seed} • ${take.engine.toUpperCase()} (${take.profile})`
+    );
+    setComfySeed(take.seed);
+    setComfyStatusText(
+      `Loaded Take ${take.takeNumber ?? take.version} (Seed ${take.seed}) into A/B Wipe Player.`
+    );
+    setActivePassTab(previsVideoUrl ? 'side-by-side' : 'comfy-final');
   };
 
   const handleStopComfyRender = async () => {
@@ -870,6 +979,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
   }, [shot.targetModel]);
 
   useEffect(() => {
+    if (!import.meta.env.DEV && import.meta.env.MODE !== 'test') return;
     const onPreviewState = (e: Event) => {
       const detail = (e as CustomEvent).detail || {};
       if (detail.activePassTab) setActivePassTab(detail.activePassTab);
@@ -1151,6 +1261,48 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
     };
     downloadTextFile(JSON.stringify(fullBundle, null, 2), `${sanitized}_${activeEngineTab}_production_pack.json`);
   };
+
+  const handleDownloadActiveWorkflowJson = () => {
+    if (activeWorkflowChoice.kind === 'custom' && activeWorkflowChoice.savedEntry?.rawJson) {
+      const rawName = activeWorkflowChoice.savedEntry.label || 'custom_comfy_workflow';
+      const cleanName = rawName.toLowerCase().endsWith('.json') ? rawName : `${rawName.replace(/[^a-z0-9_-]/gi, '_')}.json`;
+      downloadTextFile(activeWorkflowChoice.savedEntry.rawJson, cleanName);
+      return;
+    }
+    const targetUiFile =
+      activeWorkflowChoice.uiFilename ||
+      (activeEngineTab === 'ltx-2.5' ? 'Stubelius_Ultimate_LTX.json' : 'Stubelius_Ultimate_H3.json');
+    const catalogMatch =
+      BUNDLED_WORKFLOWS_CATALOG.find((w) => w.uiFilename === targetUiFile) ||
+      BUNDLED_WORKFLOWS_CATALOG.find((w) => w.id === activeWorkflowChoice.id.replace(/_/g, '-'));
+    if (catalogMatch) {
+      const payload = catalogMatch.uiPayload || catalogMatch.apiPayload;
+      const outName = catalogMatch.uiFilename || catalogMatch.apiFilename;
+      downloadTextFile(JSON.stringify(payload, null, 2), outName);
+      return;
+    }
+    loadBundledTemplates();
+    const reg = templateRegistry.get(activeWorkflowChoice.id);
+    if (reg?.api) {
+      downloadTextFile(JSON.stringify(reg.api, null, 2), `${activeWorkflowChoice.id}.api.json`);
+    }
+  };
+
+  const customNegativeSlotBound = React.useMemo(() => {
+    if (activeEngineTab === 'seedance') return null;
+    if (activeWorkflowChoice.kind === 'custom' && activeWorkflowChoice.savedEntry?.rawJson) {
+      try {
+        const det = autoDetectWorkflowBindings(
+          activeWorkflowChoice.savedEntry.rawJson,
+          activeWorkflowChoice.savedEntry.overrides
+        );
+        return det.detectedSlots.negative || null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }, [activeEngineTab, activeWorkflowChoice]);
 
   const availablePassCount = [
     previsVideoUrl,
@@ -1797,7 +1949,79 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
             </div>
           </div>
 
-          {/* Live ComfyUI Render Bridge Card */}
+          {/* Live ComfyUI Render Bridge Card (or Seedance 2.0 External Export Card) */}
+          {activeEngineTab === 'seedance' ? (
+            <div className="rounded-2xl border border-amber-500/30 bg-gradient-to-br from-[#19130a] via-[#0d101b] to-[#141022] p-5 shadow-xl flex flex-col gap-3.5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 shrink-0">
+                    <FileCode className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-bold text-white tracking-tight">
+                        Seedance 2.0 External Export Pack
+                      </h3>
+                      <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-200 border border-amber-400/40 text-[10px] font-mono font-bold">
+                        PROMPT &amp; CAMERA MATRIX EXPORT ONLY
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 mt-1">
+                      Seedance 2.0 is a closed-weights external reference format (no local ComfyUI open weights). Export your compiled prompt, 3D Previs MP4 pass, and 4×4 camera extrinsics here, or switch to LTX-2.5 / MiniMax H3 for local ComfyUI rendering.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleCopyPrompt(displayPositivePrompt, false)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 border border-amber-400/40 text-xs font-semibold transition-all cursor-pointer"
+                >
+                  {copiedPrompt ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5 text-amber-300" />}
+                  <span>{copiedPrompt ? 'Copied Seedance Prompt!' : 'Copy Seedance Prompt'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadFullBundle}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 border border-indigo-400/40 text-xs font-semibold transition-all cursor-pointer"
+                >
+                  <Download className="h-3.5 w-3.5 text-indigo-300" />
+                  <span>Download Seedance Pack (.json)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadCameraExtrinsics}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/[0.06] hover:bg-white/[0.12] text-slate-200 border border-white/15 text-xs font-semibold transition-all cursor-pointer"
+                >
+                  <Compass className="h-3.5 w-3.5 text-cyan-300" />
+                  <span>Camera Extrinsics (c2w/w2c)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveEngineTab('ltx-2.5');
+                    updateTargetModel('ltx-2.5');
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 border border-emerald-400/35 text-xs font-semibold transition-all cursor-pointer"
+                >
+                  <Zap className="h-3.5 w-3.5 text-emerald-300" />
+                  <span>Switch to Local LTX-2.5</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveEngineTab('minimax-h3');
+                    updateTargetModel('minimax-h3');
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-purple-200 border border-purple-400/35 text-xs font-semibold transition-all cursor-pointer"
+                >
+                  <Zap className="h-3.5 w-3.5 text-purple-300" />
+                  <span>Switch to Local MiniMax H3</span>
+                </button>
+              </div>
+            </div>
+          ) : (
           <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-[#0e1224] via-[#0b0f1c] to-[#121024] p-5 shadow-xl flex flex-col gap-3.5">
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1844,7 +2068,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                       <span className="text-slate-600">|</span>
                       <span>4 Ref Images</span>
                       <span className="text-slate-600">|</span>
-                      <span>{activeEngineTab === 'ltx-2.5' ? 'Node 15' : 'Node 155'}</span>
+                      <span>{wfSaveNodeBadge.replace(/^Save:\s*/, '')}</span>
                     </p>
                   </div>
                 </div>
@@ -1852,15 +2076,9 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
               {/* Action Buttons Bar */}
               <div className="flex flex-wrap items-center gap-2.5">
-                <a
-                  href={`./workflows/${
-                    activeWorkflowChoice.uiFilename ||
-                    (activeEngineTab === 'ltx-2.5' ? 'Stubelius_Ultimate_LTX.json' : 'Stubelius_Ultimate_H3.json')
-                  }`}
-                  download={
-                    activeWorkflowChoice.uiFilename ||
-                    (activeEngineTab === 'ltx-2.5' ? 'Stubelius_Ultimate_LTX.json' : 'Stubelius_Ultimate_H3.json')
-                  }
+                <button
+                  type="button"
+                  onClick={handleDownloadActiveWorkflowJson}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-200 border border-amber-400/40 text-xs font-semibold transition-all cursor-pointer"
                   title={`Download the active ${
                     activeEngineTab === 'ltx-2.5' ? 'LTX-2.5' : 'MiniMax H3'
@@ -1868,7 +2086,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 >
                   <Download className="h-3.5 w-3.5 text-amber-400" />
                   <span>{activeEngineTab === 'ltx-2.5' ? 'LTX Workflow JSON' : 'MiniMax Workflow JSON'}</span>
-                </a>
+                </button>
                 <button
                   type="button"
                   onClick={handleLoadLatestComfyRender}
@@ -2198,7 +2416,7 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                     ) : (
                       <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
                     )}
-                    <span>
+                    <span dir="auto" className="select-text">
                       {comfyErrorText ||
                         comfyStatusText ||
                         `Latest ComfyUI Render Ready: ${finalComfyFilename} (${finalComfyMeta})`}
@@ -2537,11 +2755,15 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
                 );
               })}
 
-              {/* Seed Control (Node 3 for LTX-2.5 / Node 142 for MiniMax H3) */}
+              {/* Seed Control */}
               <div className="rounded-xl bg-black/50 border border-white/10 p-2 flex flex-col gap-1">
                 <div className="flex items-center justify-between text-[9px] font-mono">
                   <span className="text-amber-300 font-bold">
-                    {activeEngineTab === 'ltx-2.5' ? 'SEED (Node 3)' : 'SEED (Node 142)'}
+                    {activeEngineTab === 'ltx-2.5'
+                      ? 'SEED (Node 3)'
+                      : activeWorkflowChoice.id === 'h3_stubelius'
+                      ? 'SEED (Node 4)'
+                      : 'SEED (Node 142)'}
                   </span>
                   <button
                     type="button"
@@ -2560,6 +2782,30 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
               </div>
             </div>
           </div>
+          )}
+
+          {/* Multi-Take Contact Sheet, A/B Comparison, Optical-Flow Scoring & Closed-Loop Steering */}
+          {activeEngineTab !== 'seedance' && (
+            <TakesGrid
+              activeEngine={activeEngineTab === 'ltx-2.5' ? 'ltx-2.5' : 'minimax-h3'}
+              baseSeed={Math.max(0, Math.floor(comfySeed))}
+              currentProfile={
+                activeWorkflowChoice.forcedProfile || (selectedResolution === '1080p' ? 'final' : 'draft')
+              }
+              currentMode="control"
+              icLoraStrength={wfControlStrength}
+              onNotice={({ type, message }) => {
+                if (type === 'error') {
+                  setComfyErrorText(message);
+                } else {
+                  setComfyStatusText(message);
+                }
+              }}
+              onPrepareAndEnqueueBatch={handlePrepareAndEnqueueBatch}
+              onLoadTakeIntoPlayer={handleLoadTakeIntoPlayer}
+              onSyncSeedToDeck={(s) => setComfySeed(s)}
+            />
+          )}
 
           {/* Stage Temporal Beats & Timeline Choreography */}
           {temporalBeats.length > 0 && (
@@ -2975,10 +3221,34 @@ export const PrevisExportDeck: React.FC<PrevisExportDeckProps> = ({ onBackToPrev
 
             {/* Editable Negative Prompt Card */}
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-[10.5px] font-mono text-rose-300/90 uppercase tracking-wider font-semibold">
-                  Negative Prompt
-                </label>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="text-[10.5px] font-mono text-rose-300/90 uppercase tracking-wider font-semibold">
+                    Negative Prompt
+                  </label>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[9px] font-mono border ${
+                      activeEngineTab === 'seedance'
+                        ? 'bg-amber-500/10 text-amber-200 border-amber-400/30'
+                        : customNegativeSlotBound
+                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/35'
+                        : 'bg-slate-800/80 text-slate-400 border-white/10'
+                    }`}
+                    title={
+                      activeEngineTab === 'seedance'
+                        ? 'Exported inside the Seedance 2.0 JSON production pack.'
+                        : customNegativeSlotBound
+                        ? `Actively bound to ComfyUI Node #${customNegativeSlotBound.node}.${customNegativeSlotBound.input}`
+                        : 'Distilled 24GB local workflows run at CFG 1.0 (single-stream positive guidance); this negative prompt is exported in the JSON Production Pack and bound automatically on custom CFG > 1 workflows.'
+                    }
+                  >
+                    {activeEngineTab === 'seedance'
+                      ? 'Export Pack Active'
+                      : customNegativeSlotBound
+                      ? `Bound → Node #${customNegativeSlotBound.node}`
+                      : 'CFG 1.0 Distilled (Export Pack / Custom CFG>1)'}
+                  </span>
+                </div>
                 <button
                   onClick={() => handleCopyPrompt(displayNegativePrompt, true)}
                   className="text-[10.5px] font-mono text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"

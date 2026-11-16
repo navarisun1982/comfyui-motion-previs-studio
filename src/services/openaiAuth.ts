@@ -5,6 +5,8 @@
  * and automatic session refreshes.
  */
 
+import { resolveLocalApiUrl } from './localApiBase';
+
 export interface OpenAiAuthModel {
   id: string;
   label: string;
@@ -51,16 +53,9 @@ function notify(status: OpenAiAuthStatus) {
   }
 }
 
-function getApiBase(): string {
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin;
-  }
-  return '';
-}
-
 export async function fetchOpenAiAuthStatus(): Promise<OpenAiAuthStatus> {
   try {
-    const res = await fetch(`${getApiBase()}/api/openai/auth/status`);
+    const res = await fetch(resolveLocalApiUrl('/api/openai/auth/status'));
     if (res.ok) {
       const data: OpenAiAuthStatus = await res.json();
       notify(data);
@@ -73,7 +68,7 @@ export async function fetchOpenAiAuthStatus(): Promise<OpenAiAuthStatus> {
 }
 
 export async function startOpenAiBrowserLogin(): Promise<{ authorizeUrl: string; state: string }> {
-  const res = await fetch(`${getApiBase()}/api/openai/auth/login`, {
+  const res = await fetch(resolveLocalApiUrl('/api/openai/auth/login'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -89,7 +84,7 @@ export async function startOpenAiBrowserLogin(): Promise<{ authorizeUrl: string;
 
 export async function logoutOpenAi(): Promise<void> {
   try {
-    await fetch(`${getApiBase()}/api/openai/auth/logout`, {
+    await fetch(resolveLocalApiUrl('/api/openai/auth/logout'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });

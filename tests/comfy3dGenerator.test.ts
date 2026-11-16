@@ -54,9 +54,11 @@ describe('comfy3dGenerator', () => {
     expect(api['319']).toBeUndefined();
     expect(api['55']).toBeUndefined();
     expect(api['56']).toBeUndefined();
-    // BiRefNet nodes are pruned and LoadImage mask is wired directly
+    // BiRefNet and ImageCropToMask nodes are pruned so opaque RGB images are never cropped by LoadImage's inverted zero mask
     expect(api['192']).toBeUndefined();
-    expect(api['303'].inputs.mask).toEqual(['122', 1]);
+    expect(api['303']).toBeUndefined();
+    expect(api['312']).toBeUndefined();
+    expect(api['302'].inputs.images).toEqual(['122', 0]);
     // Full PBR nodes are preserved
     expect(api['288'].inputs.value).toBe(4096);
     expect(api['196']).toBeDefined();

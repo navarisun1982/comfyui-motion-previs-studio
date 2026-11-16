@@ -281,9 +281,20 @@ export function buildComfyTextTo3DWorkflow(
     const clone: ApiWorkflow = JSON.parse(JSON.stringify(api));
     const outputNodeIds: string[] = [];
 
+    const negativeLinkedIds = new Set<string>();
+    for (const node of Object.values(clone)) {
+      const negLink = node?.inputs?.negative ?? node?.inputs?.negative_prompt;
+      if (Array.isArray(negLink) && negLink.length >= 1) {
+        negativeLinkedIds.add(String(negLink[0]));
+      }
+    }
+
     for (const [nodeId, node] of Object.entries(clone)) {
       const ct = node.class_type;
-      if (ct === 'CLIPTextEncode' && typeof node.inputs?.text === 'string') {
+      const isNegativePromptNode =
+        negativeLinkedIds.has(nodeId) ||
+        String(node._meta?.title || '').toLowerCase().includes('negative');
+      if (ct === 'CLIPTextEncode' && typeof node.inputs?.text === 'string' && !isNegativePromptNode) {
         node.inputs.text = formattedPrompt;
       }
       if (
@@ -398,19 +409,26 @@ export function buildComfy3DWorkflow(
     api['122'].inputs.image = uploadedImageFilename;
   }
 
-  // Configure Background Removal (BiRefNet) vs Direct Image Alpha Mask
+  // Configure Background Removal (BiRefNet) vs Direct Full-Frame Image Input
   if (options.removeBackground) {
     if (api['248']) {
       api['248'].inputs.switch = true;
     }
   } else {
-    // Wire LoadImage mask ["122", 1] directly into MaskPreview ["303"] and prune BiRefNet nodes
-    if (api['303']) {
-      api['303'].inputs.mask = ['122', 1];
+    // LoadImage output 1 is inverted alpha (1.0 - alpha = 0.0 on opaque RGB images), which would
+    // crop opaque images to empty black in ImageCropToMask (312). Route LoadImage ["122", 0]
+    // directly into PreviewImage ["302"] and disable MoGe mask clipping when BG removal is OFF.
+    if (api['302']?.inputs) {
+      api['302'].inputs.images = ['122', 0];
+    }
+    if (api['56']?.inputs && 'apply_mask' in api['56'].inputs) {
+      api['56'].inputs.apply_mask = false;
     }
     delete api['192'];
     delete api['193'];
     delete api['248'];
+    delete api['303'];
+    delete api['312'];
   }
 
   applyShared3DBranchOptimizations(api, options, safeSeed, cleanPrefix);

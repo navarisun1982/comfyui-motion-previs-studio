@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { useShotStore, PrevisRendererFn, getEffectiveStageLights } from '../stores/useShotStore';
 import { logger } from '../stores/useLogStore';
-import { FocalLength, AspectRatio, Actor } from '../types/shotspec';
+import { AspectRatio, Actor } from '../types/shotspec';
 import {
   interpolateTrajectoryPosition,
   interpolateCameraPosition,
@@ -81,6 +81,7 @@ import {
   createIKHandleGizmo,
   buildCompactCinemaCameraRig,
 } from './stage/stageGizmoHelpers';
+import { computeCameraFovDeg } from '../engine/povVisibilityEngine';
 import {
   Play,
   Pause,
@@ -99,45 +100,7 @@ import {
   ArrowLeftRight,
 } from 'lucide-react';
 
-const FOV_MAP: Record<FocalLength, number> = {
-  '12mm': 122,
-  '14mm': 114,
-  '40mm': 56,
-  '70mm': 34,
-  '100mm': 24,
-  '200mm': 12,
-  '18mm': 100,
-  '24mm': 84,
-  '35mm': 63,
-  '50mm': 47,
-  '85mm': 28,
-  '135mm': 18,
-};
-
-function computeCameraFovDeg(lens: {
-  focalLength: FocalLength;
-  customFocalLengthMm?: number;
-  sensorSize?: string;
-}): number {
-  const mm = lens.customFocalLengthMm ?? (parseInt(lens.focalLength, 10) || 35);
-  const sensorWidthMm =
-    lens.sensorSize === 'imax-65mm'
-      ? 52.5
-      : lens.sensorSize === 'anamorphic'
-      ? 44.0
-      : lens.sensorSize === 'super35'
-      ? 24.89
-      : lens.sensorSize === 'micro-four-thirds'
-      ? 17.3
-      : 36.0;
-  if (!lens.customFocalLengthMm && (!lens.sensorSize || lens.sensorSize === 'full-frame')) {
-    return FOV_MAP[lens.focalLength] || 63;
-  }
-  const fovRad = 2 * Math.atan(sensorWidthMm / (2 * Math.max(8, mm)));
-  return Math.max(8, Math.min(135, Math.round((fovRad * 180) / Math.PI)));
-}
-export const _FOV_HELPER_READY = {
-};
+export const _FOV_HELPER_READY = {};
 
 /**
  * Applies uniform `actor.scale` plus optional SMPL 3D anthropometric `actor.bodyProportions`
@@ -743,6 +706,14 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
   // Keyboard Shortcut for Object Deletion (Delete / Backspace)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (
+        stageMountRef.current?.closest('.hidden') &&
+        viewfinderMountRef.current?.closest('.hidden')
+      ) {
+        return;
+      }
+      if (document.querySelector('[aria-modal="true"], [role="dialog"]')) return;
       const activeEl = document.activeElement as HTMLElement | null;
       if (
         activeEl?.tagName === 'INPUT' ||
@@ -751,7 +722,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       ) {
         return;
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedActorId) {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedActorId && selectedActorId !== '__camera__') {
+        e.preventDefault();
         removeActor(selectedActorId);
         setSelectedActorId(undefined);
       }
@@ -788,9 +760,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
                 : 2.85;
       const lookY = lookStageZ !== undefined ? baseLookH + (lookStageZ - 50) * 0.075 : baseLookH;
       const fovDeg = computeCameraFovDeg(liveShot.camera.lens);
+      if (vfCameraRef.current) {
+        vfCameraRef.current.fov = fovDeg;
+        vfCameraRef.current.updateProjectionMatrix();
+      }
       if (stageCameraRef.current) {
         stageCameraRef.current.position.set(camPos.x, camPos.y + 1.5, camPos.z);
-        stageCameraRef.current.fov = fovDeg;
+        // Keep stageCameraRef (free 3D Orbit viewport) at its standard perspective FOV (50 deg)
         stageCameraRef.current.updateProjectionMatrix();
         if (stageControlsRef.current) {
           stageControlsRef.current.target.set(lookX, lookY, lookZ);
@@ -1071,6 +1047,10 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1.45;
+      renderer.domElement.addEventListener('webglcontextlost', (ev) => {
+        ev.preventDefault();
+        console.warn('[StagePrevis3D] Stage WebGL context lost; awaiting restoration.');
+      });
       // Remove any lingering canvas elements in the mount to prevent ghost/frozen canvases
       const lingeringCanvases = stageMountRef.current.querySelectorAll('canvas');
       lingeringCanvases.forEach((c) => c.remove());
@@ -1503,6 +1483,18 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       const dt = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
 
+      // Pause 60fps WebGL rendering when the 3D Stage workspace is hidden (e.g. during ComfyUI GPU generation
+      // in Render & Export) so WebGL never competes with RTX 3090 VRAM/CUDA unless actively rendering Previs passes.
+      const isRenderingOffline = useShotStore.getState().isRenderingPrevis;
+      const isStageHidden =
+        !isRenderingOffline &&
+        (document.visibilityState === 'hidden' ||
+          (Boolean(stageMountRef.current?.closest('.hidden')) &&
+            Boolean(viewfinderMountRef.current?.closest('.hidden'))));
+      if (isStageHidden) {
+        return;
+      }
+
       // 1. Dynamic Organic Fireplace Light Flicker
       if (hearthLightRef.current) {
         const timeSec = now / 1000;
@@ -1698,17 +1690,66 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
   }, [showGrid]);
 
   // Stable signature of actor identities/kinds/tokens so dragging an actor's position
-  // NEVER triggers expensive 2048x2048 shadow-map light rebuilds or 3D environment rebuilds!
+  // NEVER triggers expensive 2048x2048 shadow-map light rebuilds!
   const envActorsSignature = shot.actors
     .map((a) => `${a.id}:${a.name}:${a.kind || ''}:${a.token || ''}`)
     .join('|');
+
+  // Coarse 4m-quantized camera sightline & actor corridor signature ONLY for outdoor vegetation biomes,
+  // keeping Studio/Urban/Sci-Fi/Interior dragging 100% free of rebuilds while updating forest sightlines smoothly.
+  const envOutdoorExclusionSig = useMemo(() => {
+    const rawCat = (shot.environment?.category || '').toLowerCase();
+    const rawText = `${shot.sceneDescription || ''} ${shot.environment?.promptDescription || ''} ${shot.environment?.name || ''}`.toLowerCase();
+    const hasExplicitVeg =
+      (shot.environment?.vegetation?.species && shot.environment.vegetation.species !== 'none') ||
+      (shot.environment?.terrain?.profile && shot.environment.terrain.profile !== 'auto' && shot.environment.terrain.profile !== 'flat');
+    const isOutdoorVegBiome =
+      Boolean(hasExplicitVeg) ||
+      rawCat.includes('nature') ||
+      rawCat.includes('forest') ||
+      rawCat.includes('coastal') ||
+      rawCat.includes('beach') ||
+      rawCat.includes('desert') ||
+      /\b(forest|woods|jungle|mountain|beach|desert|canyon|غابة|جبال|صحراء|شاطئ)\b/i.test(rawText);
+    if (!isOutdoorVegBiome) return '';
+
+    const q = (v?: number) => Math.round((v ?? 50) / 4);
+    const camPart =
+      shot.environment?.vegetation?.exclusionSightline !== false
+        ? `c:${q(shot.camera.movement.startPosition?.x)},${q(shot.camera.movement.startPosition?.y)}->${q(shot.camera.movement.endPosition?.x)},${q(shot.camera.movement.endPosition?.y)}@${q(shot.camera.movement.targetLookAt?.x)},${q(shot.camera.movement.targetLookAt?.y)}`
+        : 'c:off';
+    const actPart = shot.actors
+      .slice(0, 6)
+      .map(
+        (a) =>
+          `${a.id}:${q(a.trajectory?.startPosition?.x)},${q(a.trajectory?.startPosition?.y)}-${q(a.trajectory?.endPosition?.x)},${q(a.trajectory?.endPosition?.y)}`
+      )
+      .join(';');
+    return `${camPart}|${actPart}`;
+  }, [
+    shot.environment?.category,
+    shot.environment?.promptDescription,
+    shot.environment?.name,
+    shot.environment?.vegetation?.species,
+    shot.environment?.vegetation?.exclusionSightline,
+    shot.environment?.terrain?.profile,
+    shot.sceneDescription,
+    shot.camera.movement.startPosition?.x,
+    shot.camera.movement.startPosition?.y,
+    shot.camera.movement.endPosition?.x,
+    shot.camera.movement.endPosition?.y,
+    shot.camera.movement.targetLookAt?.x,
+    shot.camera.movement.targetLookAt?.y,
+    shot.actors,
+  ]);
 
   // 5. Update Lighting Rig in 3D Space
   useEffect(() => {
     const lightsGroup = lightsGroupRef.current;
     if (!lightsGroup) return;
 
-    // Clear old lights
+    // Dispose old light meshes and 2048x2048 shadow maps before clearing to prevent VRAM leaks
+    disposeObject3D(lightsGroup);
     lightsGroup.clear();
     hearthLightRef.current = null;
     hearthParticlesRef.current = null;
@@ -1936,7 +1977,13 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     if (stageBackdropFrameMeshRef.current) {
       setLayerRecursively(stageBackdropFrameMeshRef.current, cycloramaLayer);
     }
-  }, [shot.environment, shot.sceneDescription, shot.referenceImage?.previewUrl, envActorsSignature]);
+  }, [
+    shot.environment,
+    shot.sceneDescription,
+    shot.referenceImage?.previewUrl,
+    envActorsSignature,
+    envOutdoorExclusionSig,
+  ]);
 
   // 6. Update Actor Meshes in 3D Scene
   useEffect(() => {
@@ -2315,6 +2362,15 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       const trackedActor = liveShot.actors.find((a) => a.id === liveShot.camera.trackTargetActorId);
       if (trackedActor) {
         const trackedNow = getActorPositionAtTime(trackedActor, t);
+        const camTerrainConfig = (floorMeshRef.current?.userData?.terrainConfig ||
+          environmentGroupRef.current?.userData?.terrainConfig) as ResolvedTerrainConfig | undefined;
+        const trackedTerrainY = camTerrainConfig
+          ? evaluateTerrainHeight(trackedNow.x, trackedNow.z, camTerrainConfig)
+          : 0;
+        const trackedGroundedNowY = Math.max(
+          trackedTerrainY,
+          Math.max(0, trackedNow.y) + trackedTerrainY
+        );
         const trackedScale = trackedActor.scale ?? 1.0;
         const bone = liveShot.camera.trackTargetBone || 'head';
         const boneHeight =
@@ -2327,13 +2383,20 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
             : 0.45 * trackedScale;
         targetX = trackedNow.x;
         targetZ = trackedNow.z;
-        targetY = trackedNow.y + boneHeight;
+        targetY = trackedGroundedNowY + boneHeight;
 
         if (liveShot.camera.followActorMovement || liveShot.camera.movement.type === 'steadicam-follow') {
           const trackedStart = getActorPositionAtTime(trackedActor, 0);
+          const trackedStartTerrainY = camTerrainConfig
+            ? evaluateTerrainHeight(trackedStart.x, trackedStart.z, camTerrainConfig)
+            : 0;
+          const trackedGroundedStartY = Math.max(
+            trackedStartTerrainY,
+            Math.max(0, trackedStart.y) + trackedStartTerrainY
+          );
           effectiveCamX += trackedNow.x - trackedStart.x;
           effectiveCamZ += trackedNow.z - trackedStart.z;
-          effectiveCamY += trackedNow.y - trackedStart.y;
+          effectiveCamY += trackedGroundedNowY - trackedGroundedStartY;
         }
       }
     }
@@ -2498,18 +2561,9 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           (!actor.rigType || actor.rigType === 'auto'
             ? detectObjectPoseCategory(actor) === 'humanoid'
             : false);
-        const startPos0 = actor.trajectory.startPosition;
-        const endPos0 = actor.trajectory.endPosition;
-        const hasPathDisplacement =
-          Boolean(actor.trajectory.keyframes && actor.trajectory.keyframes.length > 1) ||
-          Math.hypot(endPos0.x - startPos0.x, endPos0.y - startPos0.y) > 1.0;
         const hasPoseTrack = Boolean(
           actor.trajectory.keyframes && actor.trajectory.keyframes.some((k) => k.pose !== undefined)
         );
-        const hasActiveMotion =
-          hasPathDisplacement ||
-          Boolean(actor.motionClip) ||
-          Boolean(actor.gait && actor.gait !== 'none' && actor.gait !== 'auto');
 
         // Automatic Terrain Height Grounding (Q1): actors walking onto surrounding 3D hills/dunes
         // climb smoothly along y = terrain.heightAt(x, z) while central 18m clearing stays at y = 0.
@@ -2524,10 +2578,15 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
           contactShadow.visible =
             !actor.socketToBone?.targetActorId && Math.abs(groundedY - terrainGroundY) < 0.25;
         }
-        if (typeof mesh.userData.update === 'function' && hasActiveMotion && !hasPoseTrack && t > 0) {
-          mesh.userData.update(0.016);
-        }
-        if (typeof mesh.userData.setAnimationTime === 'function' && hasActiveMotion && !hasPoseTrack) {
+        // Do NOT call `mesh.userData.update(0.016)` inside `syncPositions` (`animate()` already steps `dt` once per frame,
+        // preventing 2x speed during playback and forward drift when scrubbing backward).
+        // Drive embedded `.GLB` AnimationClips deterministically by `t` whenever no custom pose/motionClip overrides them.
+        if (
+          typeof mesh.userData.setAnimationTime === 'function' &&
+          !hasPoseTrack &&
+          !actor.pose &&
+          !actor.motionClip
+        ) {
           mesh.userData.setAnimationTime(t, actor.motionCycles ?? 1);
         }
         applyActorScaleAndBodyProportions(mesh, actor);
@@ -2714,6 +2773,30 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
 
     setPrevisRendering(true, 0);
 
+    const prevGizmoVis = cameraGizmoGroupRef.current ? cameraGizmoGroupRef.current.visible : true;
+    const prevTrajVis = trajectoryLineRef.current ? trajectoryLineRef.current.visible : true;
+    const prevGridVis = gridHelperRef.current ? gridHelperRef.current.visible : showGrid;
+    const prevIkVis = ikHandlesGroupRef.current ? ikHandlesGroupRef.current.visible : true;
+    const prevDiscsVis = jointDiscsGroupRef.current ? jointDiscsGroupRef.current.visible : true;
+    const prevBoneGizmoVis = boneGizmoGroupRef.current ? boneGizmoGroupRef.current.visible : false;
+    const prevFloorVis = floorMeshRef.current ? floorMeshRef.current.visible : true;
+    const prevEnvVis = environmentGroupRef.current ? environmentGroupRef.current.visible : true;
+    const prevBackdropVis = stageBackdropMeshRef.current ? stageBackdropMeshRef.current.visible : false;
+    const prevBackdropFrameVis = stageBackdropFrameMeshRef.current ? stageBackdropFrameMeshRef.current.visible : false;
+
+    const restorePrevisSceneVisibility = () => {
+      if (cameraGizmoGroupRef.current) cameraGizmoGroupRef.current.visible = prevGizmoVis;
+      if (trajectoryLineRef.current) trajectoryLineRef.current.visible = prevTrajVis;
+      if (gridHelperRef.current) gridHelperRef.current.visible = prevGridVis;
+      if (ikHandlesGroupRef.current) ikHandlesGroupRef.current.visible = prevIkVis;
+      if (jointDiscsGroupRef.current) jointDiscsGroupRef.current.visible = prevDiscsVis;
+      if (boneGizmoGroupRef.current) boneGizmoGroupRef.current.visible = prevBoneGizmoVis;
+      if (floorMeshRef.current) floorMeshRef.current.visible = prevFloorVis;
+      if (environmentGroupRef.current) environmentGroupRef.current.visible = prevEnvVis;
+      if (stageBackdropMeshRef.current) stageBackdropMeshRef.current.visible = prevBackdropVis;
+      if (stageBackdropFrameMeshRef.current) stageBackdropFrameMeshRef.current.visible = prevBackdropFrameVis;
+    };
+
     try {
       // Preload all 3D actor models so they are fully parsed and rendered
       const actorModelUrls = shot.actors.map((a) => a.modelUrl).filter((u): u is string => !!u);
@@ -2815,17 +2898,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         onProgress: (pct) => setPrevisRendering(true, pct),
       });
 
-      // Restore gizmos & stage backdrop visibility
-      if (cameraGizmoGroupRef.current) cameraGizmoGroupRef.current.visible = true;
-      if (trajectoryLineRef.current) trajectoryLineRef.current.visible = true;
-      if (gridHelperRef.current) gridHelperRef.current.visible = showGrid;
-      if (ikHandlesGroupRef.current) ikHandlesGroupRef.current.visible = true;
-      if (jointDiscsGroupRef.current) jointDiscsGroupRef.current.visible = true;
-      if (boneGizmoGroupRef.current) boneGizmoGroupRef.current.visible = false;
-      if (floorMeshRef.current) floorMeshRef.current.visible = true;
-      if (environmentGroupRef.current) environmentGroupRef.current.visible = true;
-      if (stageBackdropMeshRef.current) stageBackdropMeshRef.current.visible = true;
-      if (stageBackdropFrameMeshRef.current) stageBackdropFrameMeshRef.current.visible = true;
+      // Restore gizmos & stage backdrop visibility to exact pre-render state
+      restorePrevisSceneVisibility();
 
       // Restore positions to current time
       syncPositions(currentTime);
@@ -2878,17 +2952,8 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       return null;
     } catch (err) {
       console.error('In-app previs render failed:', err);
-      // Restore gizmos on error
-      if (cameraGizmoGroupRef.current) cameraGizmoGroupRef.current.visible = true;
-      if (trajectoryLineRef.current) trajectoryLineRef.current.visible = true;
-      if (gridHelperRef.current) gridHelperRef.current.visible = showGrid;
-      if (ikHandlesGroupRef.current) ikHandlesGroupRef.current.visible = true;
-      if (jointDiscsGroupRef.current) jointDiscsGroupRef.current.visible = true;
-      if (boneGizmoGroupRef.current) boneGizmoGroupRef.current.visible = false;
-      if (floorMeshRef.current) floorMeshRef.current.visible = true;
-      if (environmentGroupRef.current) environmentGroupRef.current.visible = true;
-      if (stageBackdropMeshRef.current) stageBackdropMeshRef.current.visible = true;
-      if (stageBackdropFrameMeshRef.current) stageBackdropFrameMeshRef.current.visible = true;
+      // Restore gizmos & backdrop visibility to exact pre-render state on error
+      restorePrevisSceneVisibility();
       syncPositions(currentTime);
       updateSizesRef.current?.();
       setPrevisRendering(false, 0);
@@ -3500,7 +3565,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
         dragStartStagePosRef.current = {
           x: st.x,
           y: st.y,
-          z: st.z ?? liveShot.camera.movement.startPosition.z ?? 20,
+          z: st.z ?? liveShot.camera.movement.startPosition.z ?? 50,
         };
       }
 
@@ -4301,15 +4366,17 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     }
   };
 
-  const handleRecordCurrentPoseCue = () => {
-    if (!selectedActorId || selectedActorId === '__camera__') return;
-    const actor = shot.actors.find((a) => a.id === selectedActorId);
+  const handleRecordCurrentPoseCue = (explicitActorId?: string) => {
+    const targetId = explicitActorId || selectedActorId;
+    if (!targetId || targetId === '__camera__') return;
+    const liveActors = useShotStore.getState().shot.actors;
+    const actor = liveActors.find((a) => a.id === targetId);
     if (!actor) return;
-    const actorMesh = actorMeshesRef.current.get(selectedActorId);
+    const actorMesh = actorMeshesRef.current.get(targetId);
     const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
     const currentPose = rig ? exportBonePose(rig) : actor.pose;
     recordActorPoseAtTime(
-      selectedActorId,
+      targetId,
       currentTime,
       currentPose,
       actor.posePreset,
@@ -4319,39 +4386,41 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
     logger.action(`Recorded pose cue for "${actor.name}" at ${currentTime.toFixed(1)}s`);
   };
 
-  const handleGroundSelectedActorFeet = () => {
-    if (!selectedActorId || selectedActorId === '__camera__') return;
-    const actorMesh = actorMeshesRef.current.get(selectedActorId);
+  const handleGroundSelectedActorFeet = (explicitActorId?: string) => {
+    const targetId = explicitActorId || selectedActorId;
+    if (!targetId || targetId === '__camera__') return;
+    const actorMesh = actorMeshesRef.current.get(targetId);
     const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
     if (rig) {
       beginGesture();
       groundBothFeet(rig);
       const newPose = exportBonePose(rig);
-      const targetActor = shot.actors.find((a) => a.id === selectedActorId);
+      const targetActor = useShotStore.getState().shot.actors.find((a) => a.id === targetId);
       const existingKfs = targetActor?.trajectory?.keyframes || [];
       if (stagingMoveMode === 'keyframe' || existingKfs.length > 0) {
-        recordActorPoseAtTime(selectedActorId, currentTime, newPose, undefined, 'none', duration);
+        recordActorPoseAtTime(targetId, currentTime, newPose, undefined, 'none', duration);
       } else {
-        updateActor(selectedActorId, { pose: newPose, gait: 'none' });
+        updateActor(targetId, { pose: newPose, gait: 'none' });
       }
       endGesture();
     }
   };
 
-  const handleResetSelectedActorPose = () => {
-    if (!selectedActorId || selectedActorId === '__camera__') return;
-    const actorMesh = actorMeshesRef.current.get(selectedActorId);
+  const handleResetSelectedActorPose = (explicitActorId?: string) => {
+    const targetId = explicitActorId || selectedActorId;
+    if (!targetId || targetId === '__camera__') return;
+    const actorMesh = actorMeshesRef.current.get(targetId);
     const rig: HumanoidRig | undefined = actorMesh?.userData?.rig;
     if (rig) {
       beginGesture();
       resetToRestPose(rig);
       const newPose = exportBonePose(rig);
-      const targetActor = shot.actors.find((a) => a.id === selectedActorId);
+      const targetActor = useShotStore.getState().shot.actors.find((a) => a.id === targetId);
       const existingKfs = targetActor?.trajectory?.keyframes || [];
       if (stagingMoveMode === 'keyframe' || existingKfs.length > 0) {
-        recordActorPoseAtTime(selectedActorId, currentTime, newPose, 't-pose', 'none', duration);
+        recordActorPoseAtTime(targetId, currentTime, newPose, 't-pose', 'none', duration);
       } else {
-        updateActor(selectedActorId, { pose: newPose, posePreset: 't-pose' });
+        updateActor(targetId, { pose: newPose, posePreset: 't-pose' });
       }
       endGesture();
     }
@@ -4366,34 +4435,36 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       const registered = await registerModelFile(file);
       await preloadGltfModels([registered.blobUrl]);
 
-      if (selectedActorId && selectedActorId !== '__camera__') {
-        updateActor(selectedActorId, {
-          modelUrl: registered.blobUrl,
-          name: registered.name,
-        });
-      } else {
-        addActor(registered.name, 'prop', `an authentic 3D model of ${registered.name}`, {
-          modelUrl: registered.blobUrl,
-          scale: 1.0,
-          actionDescription: `placed 3D model on stage: ${registered.name}`,
-        });
-      }
+      // Top-toolbar "Import .GLB" always adds a new 3D actor to the stage rather than silently overwriting a selected character!
+      addActor(registered.name, 'prop', `an authentic 3D model of ${registered.name}`, {
+        modelUrl: registered.blobUrl,
+        scale: 1.0,
+        actionDescription: `placed 3D model on stage: ${registered.name}`,
+      });
     } catch (err) {
       console.error('Failed to import GLB model:', err);
     }
   };
 
-  useEffect(() => {
-    const onGroundFeet = () => handleGroundSelectedActorFeet();
-    const onResetPose = () => handleResetSelectedActorPose();
-    const onRecordPoseCue = () => handleRecordCurrentPoseCue();
-    const onApplyPosePreset = (e: Event) => {
-      const detail = (e as CustomEvent<{ presetId: string; actorId?: string }>).detail;
-      if (detail?.presetId) handleApplyPresetToSelectedActor(detail.presetId, detail.actorId);
-    };
-    const onSelectActorBone = (e: Event) => {
-      const detail = (e as CustomEvent<{ actorId?: string; boneName?: HumanoidBone | null; bone?: HumanoidBone | null; mode?: 'fk' | 'ik' }>).detail;
-      if (!detail) return;
+  const poseEventHandlersRef = useRef<{
+    groundFeet: (actorId?: string) => void;
+    resetPose: (actorId?: string) => void;
+    recordCue: (actorId?: string) => void;
+    applyPreset: (presetId: string, actorId?: string) => void;
+    selectBone: (detail: {
+      actorId?: string;
+      boneName?: HumanoidBone | null;
+      bone?: HumanoidBone | null;
+      mode?: 'fk' | 'ik';
+    }) => void;
+  } | null>(null);
+
+  poseEventHandlersRef.current = {
+    groundFeet: handleGroundSelectedActorFeet,
+    resetPose: handleResetSelectedActorPose,
+    recordCue: handleRecordCurrentPoseCue,
+    applyPreset: handleApplyPresetToSelectedActor,
+    selectBone: (detail) => {
       const resolvedBone = detail.boneName ?? detail.bone ?? null;
       if (detail.actorId && detail.actorId !== selectedActorId) {
         setSelectedActorId(detail.actorId);
@@ -4409,6 +4480,38 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       }
       setSelectedBone(resolvedBone);
       selectedBoneRef.current = resolvedBone;
+    },
+  };
+
+  useEffect(() => {
+    const onGroundFeet = (e: Event) => {
+      const detail = (e as CustomEvent<{ actorId?: string }>).detail;
+      poseEventHandlersRef.current?.groundFeet(detail?.actorId);
+    };
+    const onResetPose = (e: Event) => {
+      const detail = (e as CustomEvent<{ actorId?: string }>).detail;
+      poseEventHandlersRef.current?.resetPose(detail?.actorId);
+    };
+    const onRecordPoseCue = (e: Event) => {
+      const detail = (e as CustomEvent<{ actorId?: string }>).detail;
+      poseEventHandlersRef.current?.recordCue(detail?.actorId);
+    };
+    const onApplyPosePreset = (e: Event) => {
+      const detail = (e as CustomEvent<{ presetId: string; actorId?: string }>).detail;
+      if (detail?.presetId) {
+        poseEventHandlersRef.current?.applyPreset(detail.presetId, detail.actorId);
+      }
+    };
+    const onSelectActorBone = (e: Event) => {
+      const detail = (e as CustomEvent<{
+        actorId?: string;
+        boneName?: HumanoidBone | null;
+        bone?: HumanoidBone | null;
+        mode?: 'fk' | 'ik';
+      }>).detail;
+      if (detail) {
+        poseEventHandlersRef.current?.selectBone(detail);
+      }
     };
     window.addEventListener('cmpvs:ground-actor-feet', onGroundFeet);
     window.addEventListener('cmpvs:reset-actor-pose', onResetPose);
@@ -4422,7 +4525,7 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
       window.removeEventListener('cmpvs:apply-pose-preset', onApplyPosePreset);
       window.removeEventListener('cmpvs:select-actor-bone', onSelectActorBone);
     };
-  });
+  }, []);
 
   const activeActor = shot.actors.find((a) => a.id === selectedActorId);
   const isCameraSelected = selectedActorId === '__camera__';
@@ -5006,14 +5109,14 @@ export const StagePrevis3D: React.FC<StagePrevis3DProps> = ({
                     </optgroup>
                   </select>
                   <button
-                    onClick={handleGroundSelectedActorFeet}
+                    onClick={() => handleGroundSelectedActorFeet()}
                     className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30 font-semibold"
                     title="Snap character feet to floor level"
                   >
                     Ground Feet
                   </button>
                   <button
-                    onClick={handleRecordCurrentPoseCue}
+                    onClick={() => handleRecordCurrentPoseCue()}
                     className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/30 font-semibold"
                     title={`Record pose keyframe at ${currentTime.toFixed(1)}s`}
                   >

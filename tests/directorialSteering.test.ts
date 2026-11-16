@@ -81,32 +81,39 @@ describe('Closed-Loop Directorial Auto-Steering Engine', () => {
   };
 
   describe('Steering Strategy Generation', () => {
-    it('generates counter-steering patch for directional drift (pan-left drifted to pan-right)', () => {
+    it('generates counter-steering patch for directional drift (pan-left drifted to pan-right) with clean natural language and safe <= 1.0 LoRA ceiling', () => {
       const take = createMockTake('take-1', 'pan-left', 'pan-right', 42, 28);
       const { patch, steeredShotSpec, suggestedSeed } = generateDirectorialSteeringPatch(take, {
-        currentIcLoraStrength: 1.0,
+        currentIcLoraStrength: 0.82,
       });
 
       expect(patch.sourceTakeId).toBe('take-1');
       expect(patch.steeredPositivePrompt).toContain('deliberate camera pan-left');
       expect(patch.steeredPositivePrompt).toContain('steady pan-left tracking shot');
       expect(patch.steeredNegativePrompt).toContain('camera pan right');
-      expect(patch.steeredIcLoraStrength).toBeGreaterThanOrEqual(1.25);
+      // Never inject legacy SD1.5 `(token:1.35)` syntax into Gemma / Qwen-VL encoders
+      expect(patch.steeredPositivePrompt).not.toMatch(/:\d+\.\d+\)/);
+      expect(patch.steeredNegativePrompt).not.toMatch(/:\d+\.\d+\)/);
+      expect(patch.steeredIcLoraStrength).toBe(0.97);
+      expect(patch.steeredIcLoraStrength).toBeLessThanOrEqual(1.0);
       expect(patch.appliedDirectives.length).toBeGreaterThan(1);
       expect(suggestedSeed).not.toBe(42);
       expect(steeredShotSpec.seed).toBe(suggestedSeed);
+      expect(steeredShotSpec.customPositivePrompts?.['ltx-2.5']).toBe(patch.steeredPositivePrompt);
     });
 
-    it('generates static camera locking patch when camera drifts on static shot', () => {
+    it('generates static camera locking patch when camera drifts on static shot and caps IC-LoRA at 1.0', () => {
       const take = createMockTake('take-2', 'static', 'pan-left', 48, 30);
       const { patch } = generateDirectorialSteeringPatch(take, {
-        currentIcLoraStrength: 0.9,
+        currentIcLoraStrength: 0.92,
       });
 
       expect(patch.steeredPositivePrompt).toContain('static locked camera');
       expect(patch.steeredPositivePrompt).toContain('locked tripod shot');
       expect(patch.steeredNegativePrompt).toContain('camera movement');
-      expect(patch.steeredIcLoraStrength).toBe(1.1); // 0.9 + 0.2
+      expect(patch.steeredPositivePrompt).not.toMatch(/:\d+\.\d+\)/);
+      expect(patch.steeredNegativePrompt).not.toMatch(/:\d+\.\d+\)/);
+      expect(patch.steeredIcLoraStrength).toBe(1.0); // Clamped safely at 1.0 ceiling
       expect(patch.appliedDirectives).toContain('Lock camera to stationary tripod anchor');
     });
 

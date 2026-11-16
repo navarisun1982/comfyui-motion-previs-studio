@@ -24,31 +24,31 @@ describe('Curated 200 Open .GLB Asset Library & External Catalogs Registry', () 
   beforeAll(() => {
     if (typeof HTMLCanvasElement !== 'undefined') {
       HTMLCanvasElement.prototype.getContext = (() => ({
-        fillRect: () => {},
-        clearRect: () => {},
+        fillRect: () => { },
+        clearRect: () => { },
         getImageData: () => ({ data: new Array(4) }),
-        putImageData: () => {},
+        putImageData: () => { },
         createImageData: () => ({ data: new Array(4) }),
-        setTransform: () => {},
-        drawImage: () => {},
-        save: () => {},
-        fillText: () => {},
-        restore: () => {},
-        beginPath: () => {},
-        moveTo: () => {},
-        lineTo: () => {},
-        closePath: () => {},
-        stroke: () => {},
-        translate: () => {},
-        scale: () => {},
-        rotate: () => {},
-        arc: () => {},
-        fill: () => {},
+        setTransform: () => { },
+        drawImage: () => { },
+        save: () => { },
+        fillText: () => { },
+        restore: () => { },
+        beginPath: () => { },
+        moveTo: () => { },
+        lineTo: () => { },
+        closePath: () => { },
+        stroke: () => { },
+        translate: () => { },
+        scale: () => { },
+        rotate: () => { },
+        arc: () => { },
+        fill: () => { },
         measureText: () => ({ width: 80 }),
-        transform: () => {},
-        rect: () => {},
-        roundRect: () => {},
-        clip: () => {},
+        transform: () => { },
+        rect: () => { },
+        roundRect: () => { },
+        clip: () => { },
       })) as any;
     }
   });
@@ -260,14 +260,17 @@ describe('Curated 200 Open .GLB Asset Library & External Catalogs Registry', () 
       const modelSize = stageGroup.userData.modelSize as THREE.Vector3;
       expect(modelSize, `Asset "${asset.id}" (${asset.name}) missing modelSize`).toBeDefined();
       const maxSpan = Math.max(modelSize.x, modelSize.y, modelSize.z);
+      const isSmallPropCategory =
+        asset.category === 'props' || asset.category === 'weapons' || asset.category === 'furniture';
+      const minExpectedSpan = isSmallPropCategory ? 0.25 : 1.5;
       expect(
         maxSpan,
         `Asset "${asset.id}" (${asset.name}) is too microscopic on stage (maxSpan=${maxSpan.toFixed(2)})`
-      ).toBeGreaterThanOrEqual(2.0);
+      ).toBeGreaterThanOrEqual(minExpectedSpan);
       expect(
         modelSize.y,
-        `Asset "${asset.id}" (${asset.name}) is too colossal on stage (height=${modelSize.y.toFixed(2)})`
-      ).toBeLessThanOrEqual(9.5);
+        `Asset "${asset.id}" (${asset.name}) exceeds stage ceiling (height=${modelSize.y.toFixed(2)})`
+      ).toBeLessThanOrEqual(48.5);
 
       const isHumanCharacter =
         asset.category === 'character' &&

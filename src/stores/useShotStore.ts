@@ -82,7 +82,13 @@ interface ShotState {
 
   // Setters & Actions
   switchShot: (shotId: string, initialFallback?: () => ShotSpec) => void;
-  updateShotName: (name: string) => void;
+  updateShotName: (name: string, targetShotId?: string) => void;
+  deleteShots: (shotIds: string[]) => void;
+  restoreProjectFromDiskState: (payload: {
+    shotsById?: Record<string, ShotSpec>;
+    activeShotId?: string;
+    castPool?: Actor[];
+  }) => void;
   setCreationMode: (mode: ShotCreationMode) => void;
   updateDuration: (seconds: number) => void;
   updateAspectRatio: (ratio: ShotSpec['aspectRatio']) => void;
@@ -172,6 +178,7 @@ interface ShotState {
   // Context & Reference
   setSceneDescription: (desc: string) => void;
   setNegativePrompt: (neg: string) => void;
+  setSeed: (seed: number) => void;
   setReferenceImage: (ref?: ShotSpec['referenceImage']) => void;
   updateVfxReference: (updates: Partial<NonNullable<ShotSpec['vfxReference']>>) => void;
   setTakeAsActivePlate: (videoUrl: string, fileName?: string) => void;
@@ -351,7 +358,7 @@ function isBuiltInFallbackShotSpec(shot?: ShotSpec | null): boolean {
   );
 }
 
-function healLoadedShotSpec(rawShot: ShotSpec): ShotSpec {
+export function healLoadedShotSpec(rawShot: ShotSpec): ShotSpec {
   const s: ShotSpec = { ...rawShot };
   if (!s.environment) {
     s.environment = { ...CINEMATIC_ENVIRONMENT_PRESETS[0].spec };
@@ -371,13 +378,17 @@ function healLoadedShotSpec(rawShot: ShotSpec): ShotSpec {
     const humanIndices = s.actors
       .map((a, idx) => (!a.kind || a.kind === 'human' || a.kind === 'character' ? idx : -1))
       .filter((idx) => idx >= 0);
+    // Only recover mocap pair positions when an imported coordinate is NaN or outside valid stage bounds,
+    // never teleporting intentionally spaced multi-person mocap blocking or overwriting saved cameras.
     const needsPairRecenter =
       hasMocapPerson &&
       humanIndices.length >= 2 &&
-      Math.abs(
-        (s.actors[humanIndices[1]]?.trajectory?.startPosition?.x ?? 50) -
-          (s.actors[humanIndices[0]]?.trajectory?.startPosition?.x ?? 50)
-      ) > 12;
+      humanIndices.some((hIdx) => {
+        const startPos = s.actors[hIdx]?.trajectory?.startPosition;
+        const sx = startPos?.x ?? 50;
+        const sy = startPos?.y ?? 50;
+        return !Number.isFinite(sx) || !Number.isFinite(sy) || sx < 2 || sx > 98 || sy < 2 || sy > 98;
+      });
 
     s.actors = s.actors.map((a, idx) => {
       let nextActor: Actor = {
@@ -394,8 +405,8 @@ function healLoadedShotSpec(rawShot: ShotSpec): ShotSpec {
           : a.trajectory,
       };
 
-      // Linearize legacy S-curve (smoothCycleU) locomotion keyframes so continuous walking/running
-      // starts at steady Mixamo stride velocity from t = 0.0s without first-second foot sliding.
+      // Linearize ONLY 1D collinear legacy S-curve (smoothCycleU) locomotion keyframes.
+      // Never flatten genuine 2D curved paths, NavMesh obstacle-bypass waypoints, vertical Z arcs, or custom turns.
       if (
         nextActor.trajectory?.keyframes &&
         nextActor.trajectory.keyframes.length >= 2 &&
@@ -415,28 +426,47 @@ function healLoadedShotSpec(rawShot: ShotSpec): ShotSpec {
           const kfs = nextActor.trajectory.keyframes;
           const firstKf = kfs[0];
           const lastKf = kfs[kfs.length - 1];
-          const spanDur = Math.max(0.001, lastKf.time - firstKf.time);
-          nextActor = {
-            ...nextActor,
-            trajectory: {
-              ...nextActor.trajectory,
-              keyframes: kfs.map((kf, kfIdx) => {
-                if (kfIdx === 0 || kfIdx === kfs.length - 1) return kf;
-                const alpha = Math.max(0, Math.min(1, (kf.time - firstKf.time) / spanDur));
-                return {
-                  ...kf,
-                  position: {
-                    x: Number(
-                      (firstKf.position.x + (lastKf.position.x - firstKf.position.x) * alpha).toFixed(2)
-                    ),
-                    y: Number(
-                      (firstKf.position.y + (lastKf.position.y - firstKf.position.y) * alpha).toFixed(2)
-                    ),
-                  },
-                };
-              }),
-            },
-          };
+          const dxChord = lastKf.position.x - firstKf.position.x;
+          const dyChord = lastKf.position.y - firstKf.position.y;
+          const chordLen = Math.hypot(dxChord, dyChord);
+          const firstZ = firstKf.position.z ?? 0;
+          const lastZ = lastKf.position.z ?? 0;
+          const isStrictlyCollinear =
+            chordLen > 0.001 &&
+            kfs.every((kf, kfIdx) => {
+              if (kfIdx === 0 || kfIdx === kfs.length - 1) return true;
+              if (kf.rotation !== undefined) return false;
+              const px = kf.position.x - firstKf.position.x;
+              const py = kf.position.y - firstKf.position.y;
+              const perpDist = Math.abs(px * dyChord - py * dxChord) / chordLen;
+              const spanDurCheck = Math.max(0.001, lastKf.time - firstKf.time);
+              const tAlpha = Math.max(0, Math.min(1, (kf.time - firstKf.time) / spanDurCheck));
+              const expectedZ = firstZ + (lastZ - firstZ) * tAlpha;
+              const zDev = Math.abs((kf.position.z ?? 0) - expectedZ);
+              return perpDist <= 0.25 && zDev <= 0.25;
+            });
+
+          if (isStrictlyCollinear) {
+            const spanDur = Math.max(0.001, lastKf.time - firstKf.time);
+            nextActor = {
+              ...nextActor,
+              trajectory: {
+                ...nextActor.trajectory,
+                keyframes: kfs.map((kf, kfIdx) => {
+                  if (kfIdx === 0 || kfIdx === kfs.length - 1) return kf;
+                  const alpha = Math.max(0, Math.min(1, (kf.time - firstKf.time) / spanDur));
+                  return {
+                    ...kf,
+                    position: {
+                      ...kf.position,
+                      x: Number((firstKf.position.x + dxChord * alpha).toFixed(2)),
+                      y: Number((firstKf.position.y + dyChord * alpha).toFixed(2)),
+                    },
+                  };
+                }),
+              },
+            };
+          }
         }
       }
 
@@ -531,6 +561,23 @@ function healLoadedShotSpec(rawShot: ShotSpec): ShotSpec {
   return s;
 }
 
+function evaluateShotSpec(shot: ShotSpec): {
+  validation: ValidationReport;
+  compiledPrompt: CompiledPromptBundle;
+} {
+  const adapter = getAdapter(shot.targetModel);
+  const validation = adapter.validate(shot);
+  const baseCompiled = adapter.compilePrompt(shot);
+  const lockedCustom = shot.customPositivePrompts?.[shot.targetModel];
+  const compiledPrompt =
+    typeof lockedCustom === 'string' &&
+    lockedCustom.trim().length > 0 &&
+    isCustomPromptCoherentWithShot(lockedCustom, shot)
+      ? { ...baseCompiled, positivePrompt: lockedCustom }
+      : baseCompiled;
+  return { validation, compiledPrompt };
+}
+
 const scheduleStartupHydration = () => {
   if (typeof window === 'undefined') return;
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
@@ -597,9 +644,7 @@ const scheduleStartupHydration = () => {
       if (changedFromDisk || changedFromImages) {
         const activeId = useShotStore.getState().shot.id;
         const activeNext = nextShots[activeId] || useShotStore.getState().shot;
-        const adapter = getAdapter(activeNext.targetModel);
-        const validation = adapter.validate(activeNext);
-        const compiledPrompt = adapter.compilePrompt(activeNext);
+        const { validation, compiledPrompt } = evaluateShotSpec(activeNext);
         useShotStore.setState({
           shotsById: nextShots,
           shot: activeNext,
@@ -830,7 +875,6 @@ const initialShotsMap: Record<string, ShotSpec> = {
   ...initialCachedShots,
   [initialShot.id]: initialShot,
 };
-const initialAdapter = getAdapter(initialShot.targetModel);
 
 const MAX_HISTORY_STEPS = 50;
 
@@ -849,19 +893,7 @@ function getShotHistory(shotId: string): ShotHistory {
 }
 
 export const useShotStore = create<ShotState>((set, get) => {
-  const evaluate = (shot: ShotSpec) => {
-    const adapter = getAdapter(shot.targetModel);
-    const validation = adapter.validate(shot);
-    const baseCompiled = adapter.compilePrompt(shot);
-    const lockedCustom = shot.customPositivePrompts?.[shot.targetModel];
-    const compiledPrompt =
-      typeof lockedCustom === 'string' &&
-      lockedCustom.trim().length > 0 &&
-      isCustomPromptCoherentWithShot(lockedCustom, shot)
-        ? { ...baseCompiled, positivePrompt: lockedCustom }
-        : baseCompiled;
-    return { validation, compiledPrompt };
-  };
+  const evaluate = (shot: ShotSpec) => evaluateShotSpec(shot);
 
   const commitShot = (
     rawUpdated: ShotSpec,
@@ -869,7 +901,7 @@ export const useShotStore = create<ShotState>((set, get) => {
     options?: { skipHistory?: boolean; immediatePersist?: boolean; preserveCustomPrompts?: boolean }
   ) => {
     const coherentLight = resolveCoherentLighting(rawUpdated);
-    const updated: ShotSpec = {
+    const baseUpdated: ShotSpec = {
       ...rawUpdated,
       sceneDescription: resolveCoherentSceneDescription(rawUpdated),
       lighting: {
@@ -877,7 +909,40 @@ export const useShotStore = create<ShotState>((set, get) => {
         ...coherentLight,
         contrast: coherentLight.contrast as ShotSpec['lighting']['contrast'],
       },
-      customPositivePrompts: options?.preserveCustomPrompts ? rawUpdated.customPositivePrompts : {},
+    };
+
+    let nextCustomPrompts: Record<string, string> | undefined = rawUpdated.customPositivePrompts;
+    let nextPromptHistory = rawUpdated.promptHistory;
+
+    if (!options?.preserveCustomPrompts) {
+      const keptCustom: Record<string, string> = {};
+      let historyCloned = false;
+      let mutableHistory = { ...(rawUpdated.promptHistory || {}) };
+      for (const [eng, text] of Object.entries(rawUpdated.customPositivePrompts || {})) {
+        if (typeof text !== 'string' || !text.trim()) continue;
+        if (isCustomPromptCoherentWithShot(text, baseUpdated)) {
+          keptCustom[eng] = text;
+        } else {
+          // Archive superseded prompt into per-engine promptHistory so user work is never permanently lost
+          historyCloned = true;
+          const engHist = [...(mutableHistory[eng] || [])];
+          if (engHist[engHist.length - 1] !== text) {
+            engHist.push(text);
+            if (engHist.length > 25) engHist.shift();
+          }
+          mutableHistory[eng] = engHist;
+        }
+      }
+      nextCustomPrompts = keptCustom;
+      if (historyCloned) {
+        nextPromptHistory = mutableHistory;
+      }
+    }
+
+    const updated: ShotSpec = {
+      ...baseUpdated,
+      customPositivePrompts: nextCustomPrompts,
+      promptHistory: nextPromptHistory,
     };
 
     const currentShot = get().shot;
@@ -916,8 +981,7 @@ export const useShotStore = create<ShotState>((set, get) => {
     shot: initialShot,
     shotsById: initialShotsMap,
     sceneCastPool: loadCachedCastPool(),
-    validation: initialAdapter.validate(initialShot),
-    compiledPrompt: initialAdapter.compilePrompt(initialShot),
+    ...evaluateShotSpec(initialShot),
     isDirty: false,
     canUndo: false,
     canRedo: false,
@@ -1083,10 +1147,100 @@ export const useShotStore = create<ShotState>((set, get) => {
       });
     },
 
-    updateShotName: (name) => {
-      const shot = { ...get().shot, name };
-      logger.action(`Renamed shot to "${name}"`);
-      commitShot(shot);
+    updateShotName: (name, targetShotId) => {
+      const state = get();
+      if (!targetShotId || targetShotId === state.shot.id) {
+        const shot = { ...state.shot, name };
+        logger.action(`Renamed shot to "${name}"`);
+        commitShot(shot, undefined, { preserveCustomPrompts: true });
+        return;
+      }
+      const existing = state.shotsById[targetShotId];
+      if (!existing) return;
+      const updatedTarget: ShotSpec = { ...existing, name, timestamp: Date.now() };
+      const nextShots = { ...state.shotsById, [targetShotId]: updatedTarget };
+      logger.action(`Renamed cached shot "${targetShotId}" to "${name}"`);
+      persistShotsMap(nextShots, true);
+      set({ shotsById: nextShots });
+    },
+
+    deleteShots: (shotIds) => {
+      if (!Array.isArray(shotIds) || shotIds.length === 0) return;
+      const toRemove = new Set(shotIds.filter(Boolean));
+      const state = get();
+      const nextShots: Record<string, ShotSpec> = {};
+      let removedCount = 0;
+      for (const [id, spec] of Object.entries(state.shotsById)) {
+        if (toRemove.has(id) && id !== state.shot.id) {
+          delete historyByShot[id];
+          removedCount += 1;
+        } else {
+          nextShots[id] = spec;
+        }
+      }
+      if (removedCount > 0) {
+        logger.action(`Purged ${removedCount} deleted shot(s) from store cache`);
+        persistShotsMap(nextShots, true);
+        set({ shotsById: nextShots });
+      }
+    },
+
+    restoreProjectFromDiskState: ({ shotsById, activeShotId, castPool }) => {
+      const state = get();
+      const healedMap: Record<string, ShotSpec> = {};
+      if (shotsById && typeof shotsById === 'object') {
+        for (const [id, rawSpec] of Object.entries(shotsById)) {
+          if (rawSpec) {
+            healedMap[id] = healLoadedShotSpec(rawSpec);
+          }
+        }
+      }
+      const nextShots = Object.keys(healedMap).length > 0 ? healedMap : state.shotsById;
+      const resolvedActive =
+        (activeShotId && nextShots[activeShotId]) ||
+        nextShots[state.shot.id] ||
+        Object.values(nextShots)[0] ||
+        state.shot;
+      nextShots[resolvedActive.id] = resolvedActive;
+
+      let nextCastPool = state.sceneCastPool;
+      if (Array.isArray(castPool) && castPool.length > 0) {
+        const merged = [...state.sceneCastPool];
+        for (const actor of castPool) {
+          if (actor?.id && !merged.some((p) => p.id === actor.id)) {
+            merged.unshift(actor);
+          }
+        }
+        nextCastPool = merged;
+        persistCastPool(nextCastPool);
+      }
+
+      persistShotsMap(nextShots, true);
+      const shotHistory = getShotHistory(resolvedActive.id);
+      gestureStartShot = null;
+      isGestureActive = false;
+      set({
+        shot: resolvedActive,
+        shotsById: nextShots,
+        sceneCastPool: nextCastPool,
+        selectedActorId: resolvedActive.actors[0]?.id,
+        ...evaluate(resolvedActive),
+        isDirty: false,
+        canUndo: shotHistory.past.length > 0,
+        canRedo: shotHistory.future.length > 0,
+        previsVideoUrl: undefined,
+        previsVideoBlob: undefined,
+        previsClayUrl: undefined,
+        previsClayBlob: undefined,
+        previsOpenPoseUrl: undefined,
+        previsOpenPoseBlob: undefined,
+        previsDepthUrl: undefined,
+        previsDepthBlob: undefined,
+        previsIdMaskUrl: undefined,
+        previsIdMaskBlob: undefined,
+        isRenderingPrevis: false,
+        previsProgress: 0,
+      });
     },
 
     setCreationMode: (creationMode) => {
@@ -2996,14 +3150,27 @@ export const useShotStore = create<ShotState>((set, get) => {
       commitShot(shot, undefined, { preserveCustomPrompts: true });
     },
 
+    setSeed: (seed) => {
+      const normalizedSeed = Math.max(0, Math.floor(Number(seed) || 0));
+      const shot = { ...get().shot, seed: normalizedSeed };
+      logger.action(`Updated shot RNG seed to ${normalizedSeed}`);
+      commitShot(shot, undefined, { preserveCustomPrompts: true });
+    },
+
     setCustomPositivePrompt: (engineId, promptText, pushHistory = false) => {
       const curShot = get().shot;
       const prevCustomMap = { ...(curShot.customPositivePrompts || {}) };
       const prevHistoryMap = { ...(curShot.promptHistory || {}) };
+      const hadCustomOverride = Boolean(prevCustomMap[engineId]?.trim());
       const currentPromptForEngine =
         prevCustomMap[engineId] || getAdapter(engineId).compilePrompt(curShot).positivePrompt;
 
-      if (pushHistory && currentPromptForEngine && currentPromptForEngine !== promptText) {
+      const shouldArchivePrev =
+        (pushHistory || (promptText === undefined && hadCustomOverride)) &&
+        Boolean(currentPromptForEngine) &&
+        currentPromptForEngine !== promptText;
+
+      if (shouldArchivePrev) {
         const engineHist = [...(prevHistoryMap[engineId] || [])];
         if (engineHist[engineHist.length - 1] !== currentPromptForEngine) {
           engineHist.push(currentPromptForEngine);
@@ -3023,7 +3190,12 @@ export const useShotStore = create<ShotState>((set, get) => {
         customPositivePrompts: prevCustomMap,
         promptHistory: prevHistoryMap,
       };
-      commitShot(updated, undefined, { skipHistory: true, preserveCustomPrompts: true });
+      // Record major AI-polish / explicit reset operations into main shot Undo stack as well,
+      // while skipping per-keystroke typing (`pushHistory === false && promptText !== undefined`).
+      commitShot(updated, undefined, {
+        skipHistory: !pushHistory && promptText !== undefined,
+        preserveCustomPrompts: true,
+      });
     },
 
     undoCustomPositivePrompt: (engineId) => {
@@ -3129,6 +3301,14 @@ export const useShotStore = create<ShotState>((set, get) => {
         canRedo: shotHistory.future.length > 0,
         previsVideoUrl: undefined,
         previsVideoBlob: undefined,
+        previsClayUrl: undefined,
+        previsClayBlob: undefined,
+        previsOpenPoseUrl: undefined,
+        previsOpenPoseBlob: undefined,
+        previsDepthUrl: undefined,
+        previsDepthBlob: undefined,
+        previsIdMaskUrl: undefined,
+        previsIdMaskBlob: undefined,
         isRenderingPrevis: false,
         previsProgress: 0,
       });
@@ -3150,6 +3330,14 @@ export const useShotStore = create<ShotState>((set, get) => {
           canRedo: false,
           previsVideoUrl: undefined,
           previsVideoBlob: undefined,
+          previsClayUrl: undefined,
+          previsClayBlob: undefined,
+          previsOpenPoseUrl: undefined,
+          previsOpenPoseBlob: undefined,
+          previsDepthUrl: undefined,
+          previsDepthBlob: undefined,
+          previsIdMaskUrl: undefined,
+          previsIdMaskBlob: undefined,
           isRenderingPrevis: false,
           previsProgress: 0,
         },
@@ -3190,6 +3378,9 @@ export const useShotStore = create<ShotState>((set, get) => {
     },
 
     undo: () => {
+      if (isGestureActive) {
+        get().endGesture();
+      }
       const currentShot = get().shot;
       const history = getShotHistory(currentShot.id);
       if (history.past.length === 0) return;
@@ -3207,11 +3398,14 @@ export const useShotStore = create<ShotState>((set, get) => {
           canUndo: history.past.length > 0,
           canRedo: history.future.length > 0,
         },
-        { skipHistory: true }
+        { skipHistory: true, preserveCustomPrompts: true }
       );
     },
 
     redo: () => {
+      if (isGestureActive) {
+        get().endGesture();
+      }
       const currentShot = get().shot;
       const history = getShotHistory(currentShot.id);
       if (history.future.length === 0) return;
@@ -3229,13 +3423,15 @@ export const useShotStore = create<ShotState>((set, get) => {
           canUndo: history.past.length > 0,
           canRedo: history.future.length > 0,
         },
-        { skipHistory: true }
+        { skipHistory: true, preserveCustomPrompts: true }
       );
     },
 
     beginGesture: () => {
-      isGestureActive = true;
-      gestureStartShot = get().shot;
+      if (!isGestureActive) {
+        isGestureActive = true;
+        gestureStartShot = get().shot;
+      }
     },
 
     endGesture: () => {

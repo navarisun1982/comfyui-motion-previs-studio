@@ -10,6 +10,7 @@ import {
   buildOpenAiRequest,
   buildGeminiRequest,
   extractResponseText,
+  parseModelJson,
   resolveWireUrl,
   PROVIDERS,
 } from './objectReasoner';
@@ -470,10 +471,10 @@ Apply the Director's request to the prompt while preserving the ${
   let parsedNegative = currentNegativePrompt;
   let parsedReply = '';
 
-  const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      const obj = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+  try {
+    const parsed = parseModelJson(rawText);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const obj = parsed as Record<string, unknown>;
       if (typeof obj.positivePrompt === 'string' && obj.positivePrompt.trim()) {
         parsedPositive = obj.positivePrompt.trim();
       }
@@ -483,9 +484,9 @@ Apply the Director's request to the prompt while preserving the ${
       if (typeof obj.assistantReply === 'string' && obj.assistantReply.trim()) {
         parsedReply = obj.assistantReply.trim();
       }
-    } catch {
-      // Fallback if JSON had unescaped newlines
     }
+  } catch {
+    // Fallback if LLM returned plain markdown text instead of JSON
   }
 
   if (!parsedPositive) {

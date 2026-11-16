@@ -33,6 +33,40 @@ let activeDownloadState = {
   completedAt: null,
 };
 
+let cachedPathEnv = null;
+let cachedPathPythonFound = null;
+
+function isExecutableInSystemPath(binName) {
+  const pathEnv = process.env.PATH || process.env.Path || '';
+  if (binName === 'python' && cachedPathEnv === pathEnv && cachedPathPythonFound !== null) {
+    return cachedPathPythonFound;
+  }
+  const dirs = pathEnv.split(path.delimiter).filter(Boolean);
+  const candidates =
+    process.platform === 'win32' ? [`${binName}.exe`, `${binName}.cmd`, binName] : [binName];
+  for (const dir of dirs) {
+    for (const exe of candidates) {
+      try {
+        const full = path.join(dir, exe);
+        if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+          if (binName === 'python') {
+            cachedPathEnv = pathEnv;
+            cachedPathPythonFound = true;
+          }
+          return true;
+        }
+      } catch {
+        // ignore inaccessible PATH entries
+      }
+    }
+  }
+  if (binName === 'python') {
+    cachedPathEnv = pathEnv;
+    cachedPathPythonFound = false;
+  }
+  return false;
+}
+
 function resolvePythonExecutable() {
   for (const candidate of PYTHON_CANDIDATES) {
     if (candidate === 'python') return candidate;
@@ -43,6 +77,18 @@ function resolvePythonExecutable() {
     }
   }
   return 'python';
+}
+
+function isPythonExecutableFound(pythonExe) {
+  if (!pythonExe) return false;
+  if (pythonExe === 'python') {
+    return isExecutableInSystemPath('python');
+  }
+  try {
+    return fs.existsSync(pythonExe);
+  } catch {
+    return false;
+  }
 }
 
 function resolveNlfModelPath(customModelDir) {
@@ -80,12 +126,8 @@ function resolveTargetInstallPath(customModelDir) {
     if (trimmed.endsWith('.torchscript')) return trimmed;
     return path.join(trimmed, 'nlf_l_multi_0.3.2.torchscript');
   }
-  if (fs.existsSync('D:\\ComfyUI\\models')) {
-    return 'D:\\ComfyUI\\models\\nlf\\nlf_l_multi_0.3.2.torchscript';
-  }
-  if (fs.existsSync('C:\\ComfyUI\\models')) {
-    return 'C:\\ComfyUI\\models\\nlf\\nlf_l_multi_0.3.2.torchscript';
-  }
+  // Keep new model downloads inside project-local `models/nlf/` so external ComfyUI
+  // model directories (`D:\ComfyUI\models`) are never modified unless explicitly selected.
   return path.resolve(__dirname, '../../models/nlf/nlf_l_multi_0.3.2.torchscript');
 }
 
@@ -153,7 +195,7 @@ function getBundledModelsStatus() {
 function getMocapNlfStatus(customModelDir) {
   const pythonExe = resolvePythonExecutable();
   const modelPath = resolveNlfModelPath(customModelDir);
-  const targetInstallPath = modelPath || resolveTargetInstallPath(customModelDir);
+  const targetInstallPath = resolveTargetInstallPath(customModelDir);
   const scriptPath = path.resolve(__dirname, '../../scripts/mocap_nlf_extractor.py');
   const scriptExists = fs.existsSync(scriptPath);
 
@@ -166,12 +208,14 @@ function getMocapNlfStatus(customModelDir) {
     }
   }
 
+  const pythonFound = isPythonExecutableFound(pythonExe);
+
   return {
-    ok: Boolean(modelPath && scriptExists),
-    available: Boolean(modelPath && scriptExists),
+    ok: Boolean(modelPath && scriptExists && pythonFound),
+    available: Boolean(modelPath && scriptExists && pythonFound),
     engine: 'nlf-l-multi-0.3.2-smpl24',
     pythonExe,
-    pythonFound: pythonExe !== 'python' || true,
+    pythonFound,
     modelPath,
     targetInstallPath,
     modelSizeBytes,
@@ -371,6 +415,28 @@ function startNlfModelDownload(options = {}) {
   };
 }
 
+function resolveVerifiedNlfModelPath(requestedPath, fallbackStatusModelPath) {
+  if (!requestedPath || typeof requestedPath !== 'string') {
+    return fallbackStatusModelPath;
+  }
+  const trimmed = requestedPath.trim();
+  if (!trimmed || trimmed.includes('\0')) {
+    return fallbackStatusModelPath;
+  }
+  if (!/\.(torchscript|pt|pth|jit)$/i.test(trimmed)) {
+    return fallbackStatusModelPath;
+  }
+  try {
+    const resolved = path.resolve(trimmed);
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+      return resolved;
+    }
+  } catch {
+    // ignore invalid path
+  }
+  return fallbackStatusModelPath;
+}
+
 function extractNlfSmpl3dFromFrames(payload = {}) {
   return new Promise((resolve) => {
     const status = getMocapNlfStatus(payload.customModelDir);
@@ -424,7 +490,7 @@ function extractNlfSmpl3dFromFrames(payload = {}) {
         inputJsonPath,
         JSON.stringify({
           ...nextPayload,
-          modelPath: nextPayload.modelPath || status.modelPath,
+          modelPath: resolveVerifiedNlfModelPath(nextPayload.modelPath, status.modelPath),
         }),
         'utf-8'
       );
@@ -544,6 +610,8 @@ function handleMocapNlfRequest(req, res) {
 
 module.exports = {
   getMocapNlfStatus,
+  isPythonExecutableFound,
+  resolveVerifiedNlfModelPath,
   startNlfModelDownload,
   extractNlfSmpl3dFromFrames,
   handleMocapNlfRequest,

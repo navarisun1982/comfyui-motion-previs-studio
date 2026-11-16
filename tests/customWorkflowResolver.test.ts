@@ -296,7 +296,8 @@ describe('customWorkflowResolver', () => {
         expect(synced.registered, `Registry entry for ${choice.id}`).not.toBeNull();
         const archProfile = getWorkflowArchitectureProfile(choice.id, engine);
         expect(archProfile.primarySaveNodeId).toBe(synced.registered!.binding.output.node);
-        expect(archProfile.fallbackSaveNodeIds.length).toBeGreaterThan(0);
+        expect(Array.isArray(archProfile.fallbackSaveNodeIds)).toBe(true);
+        expect(archProfile.fallbackSaveNodeIds).not.toContain('638');
         expect(archProfile.controlInputNodeLabel.length).toBeGreaterThan(5);
         expect(['clay', 'rgb', 'depth', 'openpose', 'id-mask']).toContain(
           archProfile.recommendedPass

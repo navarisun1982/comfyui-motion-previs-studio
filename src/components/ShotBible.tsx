@@ -3,7 +3,13 @@ import { useShotStore } from '../stores/useShotStore';
 import { logger } from '../stores/useLogStore';
 import { ShotCreationMode, Actor, ShotSpec, createDefaultShotSpec, FocalLength, CINEMATIC_ENVIRONMENT_PRESETS } from '../types/shotspec';
 import { compileReadyMadeMotionKeyframes } from '../engine/kinematics';
-import { safeGetItem, safeSetItem, safeRemoveItem, STORAGE_KEYS } from '../services/storage';
+import {
+  safeGetItem,
+  safeSetItem,
+  safeRemoveItem,
+  confirmDestructiveAction,
+  STORAGE_KEYS,
+} from '../services/storage';
 import { saveProjectToStudioStorage } from '../services/studioStorageClient';
 import {
   ChevronDown,
@@ -1283,7 +1289,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
   activeShotId = 'shot-01a',
   onSelectShot,
 }) => {
-  const { switchShot, shot, updateShotName } = useShotStore();
+  const { switchShot, shot, updateShotName, deleteShots } = useShotStore();
   const [scenes, setScenes] = useState<SceneItem[]>(loadSavedScenes);
   const [collapsedScenes, setCollapsedScenes] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
@@ -1479,6 +1485,13 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
       return;
     }
 
+    const shotToDelete = targetScene.shots.find((s) => s.id === shotId);
+    const shotLabel = shotToDelete?.code || shotId;
+    if (!confirmDestructiveAction(`Delete shot "${shotLabel}"? This action cannot be undone.`)) {
+      setOpenMenuShotId(null);
+      return;
+    }
+
     const updatedShots = targetScene.shots.filter((s) => s.id !== shotId);
     const updatedScenes = scenes.map((s) =>
       s.id === sceneId ? { ...s, shots: updatedShots } : s
@@ -1486,7 +1499,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
 
     setScenes(updatedScenes);
 
-    // If the deleted shot was currently selected, select another valid shot
+    // If the deleted shot was currently selected, select another valid shot BEFORE purging cache
     if (activeShotId === shotId) {
       let nextShot: ShotBibleItem | undefined = updatedShots[0];
       if (!nextShot) {
@@ -1503,6 +1516,7 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
       }
     }
 
+    deleteShots([shotId]);
     setOpenMenuShotId(null);
   };
 
@@ -1516,6 +1530,15 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
     }
 
     const sceneToDelete = scenes.find((s) => s.id === sceneId);
+    const shotCount = sceneToDelete?.shots.length ?? 0;
+    if (
+      !confirmDestructiveAction(
+        `Delete scene "${sceneToDelete?.name || sceneId}" and all ${shotCount} shot(s) inside it?`
+      )
+    ) {
+      return;
+    }
+
     const updatedScenes = scenes.filter((s) => s.id !== sceneId);
 
     setScenes(updatedScenes);
@@ -1526,6 +1549,10 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
       if (nextShot) {
         handleSelectShot(nextShot);
       }
+    }
+
+    if (sceneToDelete && sceneToDelete.shots.length > 0) {
+      deleteShots(sceneToDelete.shots.map((s) => s.id));
     }
   };
 
@@ -1585,14 +1612,22 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
       s.id === sceneId
         ? {
             ...s,
-            shots: s.shots.map((sh) => (sh.id === shotId ? { ...sh, code: trimmed, title: trimmed } : sh)),
+            shots: s.shots.map((sh) =>
+              sh.id === shotId
+                ? {
+                    ...sh,
+                    code: trimmed,
+                    title: sh.title && sh.title !== sh.code ? sh.title : '',
+                  }
+                : sh
+            ),
           }
         : s
     );
     setScenes(updatedScenes);
-    if (activeShotId === shotId) {
-      updateShotName(trimmed);
-      if (onSelectShot) onSelectShot(shotId, trimmed, targetScene?.name);
+    updateShotName(trimmed, shotId);
+    if (activeShotId === shotId && onSelectShot) {
+      onSelectShot(shotId, trimmed, targetScene?.name);
     }
     setEditingShotId(null);
   };
@@ -1798,9 +1833,15 @@ export const ShotBible: React.FC<ShotBibleProps> = ({
                                   setEditingShotId(shotItem.id);
                                 }}
                                 className="font-semibold text-[11px] leading-tight text-[#F0F3FA] truncate"
-                                title={`${shotItem.code} — ${shotItem.title} (Double-click to rename)`}
+                                title={
+                                  shotItem.title && shotItem.title !== shotItem.code
+                                    ? `${shotItem.code} — ${shotItem.title} (Double-click to rename)`
+                                    : `${shotItem.code} (Double-click to rename)`
+                                }
                               >
-                                {shotItem.code} · {shotItem.title}
+                                {shotItem.title && shotItem.title !== shotItem.code
+                                  ? `${shotItem.code} · ${shotItem.title}`
+                                  : shotItem.code}
                               </span>
                             )}
                             <div className="relative flex items-center gap-0.5 shrink-0">

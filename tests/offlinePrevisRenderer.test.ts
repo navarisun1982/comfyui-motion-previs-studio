@@ -391,9 +391,9 @@ describe('offlinePrevisRenderer', () => {
 
       expect(capturedDuringClayRender.length).toBeGreaterThan(0);
       // Verify zero-chrominance (R === G === B) clay colors, normalized light intensity, and hidden cyclorama backdrop during render
-      expect(capturedDuringClayRender[0].actorColorHex).toBe(0xb4b4b4);
-      expect(capturedDuringClayRender[0].floorColorHex).toBe(0x626262);
-      expect(capturedDuringClayRender[0].oceanColorHex).toBe(0x525252);
+      expect(capturedDuringClayRender[0].actorColorHex).toBe(0xb0b0b0);
+      expect(capturedDuringClayRender[0].floorColorHex).toBe(0x484848);
+      expect(capturedDuringClayRender[0].oceanColorHex).toBe(0x5c5c5c);
       expect(capturedDuringClayRender[0].lightColorHex).toBe(0xffffff);
       expect(capturedDuringClayRender[0].lightIntensity).toBeCloseTo(1.15, 2);
       expect(capturedDuringClayRender[0].backdropVisible).toBe(false);
@@ -405,6 +405,86 @@ describe('offlinePrevisRenderer', () => {
       expect(backdropMesh.visible).toBe(true);
       expect(coloredLight.color.getHex()).toBe(0xff33aa);
       expect(coloredLight.intensity).toBe(1.5);
+    });
+
+    it('preserves 67.js RGBA alpha-cutout foliage silhouettes in both Clay and Depth passes without chrominance bleed', async () => {
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.5, 200);
+
+      // 2x2 RGBA DataTexture with half transparent (alpha=0) and half opaque green (alpha=255)
+      const rgba = new Uint8Array([
+        40, 140, 30, 0,
+        40, 140, 30, 255,
+        40, 140, 30, 255,
+        40, 140, 30, 0,
+      ]);
+      const leafTex = new THREE.DataTexture(rgba, 2, 2, THREE.RGBAFormat);
+      leafTex.needsUpdate = true;
+
+      const origFoliageMat = new THREE.MeshStandardMaterial({ map: leafTex, alphaTest: 0.5 });
+      const foliageMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), origFoliageMat);
+      foliageMesh.userData.alphaCutoutMap = leafTex;
+      scene.add(foliageMesh);
+
+      const solidMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshStandardMaterial({ color: 0x8b4513 })
+      );
+      scene.add(solidMesh);
+
+      const observedRenders: Array<{
+        foliageMatType: string;
+        foliageColorHex?: number;
+        foliageAlphaTest: number;
+        hasNeutralAlphaMap: boolean;
+        overrideWasNull: boolean;
+      }> = [];
+
+      const fakeRenderer = {
+        domElement: document.createElement('canvas'),
+        shadowMap: { enabled: true },
+        toneMappingExposure: 1.0,
+        getSize: (v: THREE.Vector2) => v.set(64, 36),
+        setSize: vi.fn(),
+        render: vi.fn(() => {
+          const mat = foliageMesh.material as THREE.MeshStandardMaterial & THREE.MeshDepthMaterial;
+          observedRenders.push({
+            foliageMatType: mat.type,
+            foliageColorHex: (mat as THREE.MeshStandardMaterial).color?.getHex(),
+            foliageAlphaTest: mat.alphaTest,
+            hasNeutralAlphaMap: Boolean((mat as THREE.MeshStandardMaterial).alphaMap),
+            overrideWasNull: scene.overrideMaterial === null,
+          });
+        }),
+      } as unknown as THREE.WebGLRenderer;
+
+      await renderOfflinePrevisPasses({
+        scene,
+        camera,
+        renderer: fakeRenderer,
+        durationSeconds: 0.1,
+        fps: 10,
+        width: 64,
+        height: 36,
+        renderPass: 'all',
+        syncPositions: vi.fn(),
+      });
+
+      // Clay pass uses neutral 0x757575 MeshStandardMaterial + neutral alphaMap + alphaTest 0.5
+      const clayObs = observedRenders.find(
+        (r) => r.foliageMatType === 'MeshStandardMaterial' && r.foliageColorHex === 0x757575
+      );
+      expect(clayObs).toBeDefined();
+      expect(clayObs?.foliageAlphaTest).toBe(0.5);
+      expect(clayObs?.hasNeutralAlphaMap).toBe(true);
+
+      // Depth pass uses cutout MeshDepthMaterial with scene.overrideMaterial === null so cards don't turn into opaque squares
+      const depthObs = observedRenders.find((r) => r.foliageMatType === 'MeshDepthMaterial');
+      expect(depthObs).toBeDefined();
+      expect(depthObs?.overrideWasNull).toBe(true);
+
+      // Original foliage material restored cleanly
+      expect(foliageMesh.material).toBe(origFoliageMat);
     });
   });
 });

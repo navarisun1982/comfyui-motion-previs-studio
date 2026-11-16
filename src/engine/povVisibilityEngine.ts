@@ -8,42 +8,33 @@ import {
 
 export type ActorSpec = ShotSpec['actors'][number];
 
-const FOV_MAP: Record<FocalLength, number> = {
-  '12mm': 122,
-  '14mm': 114,
-  '40mm': 56,
-  '70mm': 34,
-  '100mm': 24,
-  '200mm': 12,
-  '18mm': 100,
-  '24mm': 84,
-  '35mm': 63,
-  '50mm': 47,
-  '85mm': 28,
-  '135mm': 18,
-};
+/** Canonical stage metric scale: 1.75m adult human = 5.06 stage units (~2.8914 stage units per meter). */
+export const STAGE_UNITS_PER_METER = 5.06 / 1.75;
 
+/**
+ * Computes Three.js `PerspectiveCamera.fov` (Vertical Field of View in degrees)
+ * from true cinema sensor gate height (`sensorHeightMm`) and focal length (`mm`).
+ * On Full-Frame (36x24mm, `sensorHeightMm = 24.0`), 35mm yields 37.85° vertical FOV
+ * (~62.7° horizontal FOV on 16:9), preventing ultra-wide vertical lens distortion.
+ */
 export function computeCameraFovDeg(lens: {
   focalLength: FocalLength;
   customFocalLengthMm?: number;
   sensorSize?: string;
 }): number {
-  const mm = lens.customFocalLengthMm ?? (parseInt(lens.focalLength, 10) || 35);
-  const sensorWidthMm =
+  const mm = Math.max(8, lens.customFocalLengthMm ?? (parseInt(lens.focalLength, 10) || 35));
+  const sensorHeightMm =
     lens.sensorSize === 'imax-65mm'
-      ? 52.5
+      ? 38.5
       : lens.sensorSize === 'anamorphic' || lens.sensorSize === 'anamorphic-2x'
-      ? 44.0
+      ? 21.0
       : lens.sensorSize === 'super35' || lens.sensorSize === 'super-35'
-      ? 24.89
+      ? 18.66
       : lens.sensorSize === 'micro-four-thirds'
-      ? 17.3
-      : 36.0;
-  if (!lens.customFocalLengthMm && (!lens.sensorSize || lens.sensorSize === 'full-frame')) {
-    return FOV_MAP[lens.focalLength] || 63;
-  }
-  const fovRad = 2 * Math.atan(sensorWidthMm / (2 * Math.max(8, mm)));
-  return Math.max(8, Math.min(135, Math.round((fovRad * 180) / Math.PI)));
+      ? 13.0
+      : 24.0;
+  const vFovRad = 2 * Math.atan(sensorHeightMm / (2 * mm));
+  return Math.max(6, Math.min(130, Number(((vFovRad * 180) / Math.PI).toFixed(2))));
 }
 
 export type BeatPhase = 'open' | 'mid' | 'close';

@@ -1258,22 +1258,22 @@ function solveCameraMotionFromFrames(
       );
       if (nlfAtU.visibleBodyRatio < 0.95) {
         // On the 3D Stage (`StagePrevis3D.tsx`), the humanoid character stands from Y = 0.0 (soles) to Y = 4.65 (crown of head),
-        // and `computeCameraFovDeg` sets `vfCamera.fov` (vertical FOV) from `sensorWidthMm = 36.0` (`2 * tan(vFOV/2) = 36.0 / f_mm`).
+        // and `computeCameraFovDeg` sets `vfCamera.fov` (vertical FOV) from `sensorHeightMm = 24.0` (`2 * tan(vFOV/2) = 24.0 / f_mm`).
         // Solve the exact per-frame vertical frustum span (`fullScreenSpanThreeY`) and headroom (`crownYNorm`) so the
         // Left Stage Viewfinder dynamically pushes in and shifts its vertical framing (e.g. from knees to chest) across time.
         const visRatio = clamp(nlfAtU.visibleBodyRatio, 0.28, 0.95);
         const visibleBboxSpan = clamp(nlfAtU.bboxH, 0.35, 0.95);
-        const fullScreenSpanThreeY = (4.65 * visRatio) / visibleBboxSpan;
+        const fullScreenSpanThreeY = (4.45 * visRatio) / visibleBboxSpan;
         const headroomFrac = clamp(nlfAtU.crownYNorm, 0.01, Math.max(0.02, 1.0 - visibleBboxSpan));
-        const topCutThreeY = 4.65 + headroomFrac * fullScreenSpanThreeY;
+        const topCutThreeY = 4.45 + headroomFrac * fullScreenSpanThreeY;
         const bottomCutThreeY = topCutThreeY - fullScreenSpanThreeY;
         const cropLookThreeY = 0.5 * (topCutThreeY + bottomCutThreeY);
         const opticalCropDist =
-          ((fullScreenSpanThreeY * customFocalLengthMm) / 36.0) *
+          ((fullScreenSpanThreeY * customFocalLengthMm) / 24.0) *
           Math.max(0.65, Math.cos(pitchRadAtU));
         const minHorizDist =
           grp.spanX > 0.5
-            ? (((grp.spanX + 1.8) / (16 / 9)) * customFocalLengthMm) / 36.0
+            ? ((grp.spanX + 1.8) * customFocalLengthMm) / (24.0 * (16 / 9))
             : 0;
         const cropDist = clamp(Math.max(opticalCropDist, minHorizDist), 2.2, 24.0);
         // Smooth C0 blend between cropped-frustum framing (visRatio <= 0.85) and full-body framing (visRatio >= 0.95)
@@ -5099,12 +5099,17 @@ export async function extractMocapFromVideoFile(
           options.onProgress?.('Capture complete', 100);
           return result;
         }
+        throw new Error(
+          `Could not decode enough video frames from "${fileName}" (decoded ${sampled?.frames.length ?? 0} frames). Ensure the file is a valid H.264/WebM/MP4 video.`
+        );
       }
+      throw new Error(`Unable to open video source for "${fileName}".`);
     } catch (err: any) {
       if (err?.isDurationLimitError) {
         throw err;
       }
-      // Fall through to deterministic synthetic fallback below
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Video motion extraction failed for "${fileName}": ${msg}`);
     } finally {
       if (objectUrlToRevoke && typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
         try {
@@ -5116,7 +5121,7 @@ export async function extractMocapFromVideoFile(
     }
   }
 
-  // Safe fallback for JSDOM / Node tests or unsupported video codecs
+  // Headless JSDOM / Node unit-test environment (no HTML5 hardware video decoder):
   options.onProgress?.('Synthesizing multi-person 19-bone motion & 3D scene...', 85);
   const fallbackDuration = options.targetDurationSeconds ?? 3.0;
   const fallbackFps = clamp(options.sampleFps ?? 8, 4, 24);
@@ -5176,7 +5181,7 @@ async function sampleVideoFramesInBrowser(
   }
 
   const loadReady = new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Video load timeout')), 2800);
+    const timer = setTimeout(() => reject(new Error('Video load timeout (exceeded 15s waiting for browser decoder)')), 15000);
     const done = () => {
       clearTimeout(timer);
       resolve();

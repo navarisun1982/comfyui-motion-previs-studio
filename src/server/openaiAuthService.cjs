@@ -8,52 +8,78 @@ const CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const REDIRECT_URI = 'http://localhost:1455/auth/callback';
 const CALLBACK_PORT = 1455;
 
-function getAuthFilePath() {
+function getStudioAuthFilePath() {
+  if (process.env.CMPVS_OPENAI_AUTH_FILE) {
+    return path.resolve(process.env.CMPVS_OPENAI_AUTH_FILE);
+  }
   const home = process.env.USERPROFILE || process.env.HOME || '';
-  const codexPath = path.join(home, '.codex', 'auth.json');
-  const cozyPath = path.join(home, '.config', 'cozyclay', 'codex-auth.json');
-  if (fs.existsSync(codexPath)) return codexPath;
-  if (fs.existsSync(cozyPath)) return cozyPath;
-  return codexPath;
+  return path.join(home, '.config', 'comfy-motion-previs-studio', 'openai-auth.json');
+}
+
+function getLegacyReadOnlyAuthPaths() {
+  const home = process.env.USERPROFILE || process.env.HOME || '';
+  return [
+    path.join(home, '.codex', 'auth.json'),
+    path.join(home, '.config', 'cozyclay', 'codex-auth.json'),
+  ];
 }
 
 function loadTokens() {
-  const p = getAuthFilePath();
+  const studioPath = getStudioAuthFilePath();
   try {
-    if (fs.existsSync(p)) {
-      const data = JSON.parse(fs.readFileSync(p, 'utf8'));
-      return data.tokens || null;
+    if (fs.existsSync(studioPath)) {
+      const studioData = JSON.parse(fs.readFileSync(studioPath, 'utf8'));
+      if (studioData && studioData.auth_mode === 'none') {
+        return null;
+      }
+      if (studioData && studioData.tokens) {
+        return studioData.tokens;
+      }
     }
   } catch (err) {
-    console.warn('[OpenAI Auth] Failed to read auth file:', err.message);
+    console.warn('[OpenAI Auth] Failed to read studio auth file:', err.message);
+  }
+
+  // Read-only fallback to existing local CLI auth files (never mutated by saveTokens/logout)
+  if (!process.env.CMPVS_OPENAI_AUTH_FILE) {
+    for (const legacyPath of getLegacyReadOnlyAuthPaths()) {
+      try {
+        if (fs.existsSync(legacyPath)) {
+          const data = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
+          if (data && data.tokens) return data.tokens;
+        }
+      } catch {
+        // ignore unreadable legacy file
+      }
+    }
   }
   return null;
 }
 
 function saveTokens(tokens) {
-  const home = process.env.USERPROFILE || process.env.HOME || '';
-  const codexDir = path.join(home, '.codex');
-  const cozyDir = path.join(home, '.config', 'cozyclay');
-
-  const targets = [
-    { dir: codexDir, file: path.join(codexDir, 'auth.json') },
-    { dir: cozyDir, file: path.join(cozyDir, 'codex-auth.json') }
-  ];
-
-  for (const t of targets) {
-    try {
-      if (!fs.existsSync(t.dir)) fs.mkdirSync(t.dir, { recursive: true });
-      let existing = {};
-      if (fs.existsSync(t.file)) {
-        try { existing = JSON.parse(fs.readFileSync(t.file, 'utf8')); } catch { existing = {}; }
-      }
-      existing.auth_mode = 'chatgpt';
-      existing.tokens = tokens;
-      existing.last_refresh = new Date().toISOString();
-      fs.writeFileSync(t.file, JSON.stringify(existing, null, 2), 'utf8');
-    } catch (err) {
-      console.warn(`[OpenAI Auth] Could not save to ${t.file}:`, err.message);
+  const studioFile = getStudioAuthFilePath();
+  const studioDir = path.dirname(studioFile);
+  try {
+    if (!fs.existsSync(studioDir)) {
+      fs.mkdirSync(studioDir, { recursive: true, mode: 0o700 });
     }
+    let existing = {};
+    if (fs.existsSync(studioFile)) {
+      try {
+        existing = JSON.parse(fs.readFileSync(studioFile, 'utf8'));
+      } catch {
+        existing = {};
+      }
+    }
+    existing.auth_mode = 'chatgpt';
+    existing.tokens = tokens;
+    existing.last_refresh = new Date().toISOString();
+    fs.writeFileSync(studioFile, JSON.stringify(existing, null, 2), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+  } catch (err) {
+    console.warn(`[OpenAI Auth] Could not save to ${studioFile}:`, err.message);
   }
 }
 
@@ -81,7 +107,7 @@ async function refreshTokens(refreshToken) {
 
     const req = https.request('https://auth.openai.com/oauth/token', {
       method: 'POST',
-      rejectUnauthorized: false,
+      rejectUnauthorized: true,
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Content-Length': Buffer.byteLength(body),
@@ -222,7 +248,7 @@ function startBrowserLogin() {
 
             const tokenReq = https.request('https://auth.openai.com/oauth/token', {
               method: 'POST',
-              rejectUnauthorized: false,
+              rejectUnauthorized: true,
               headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Content-Length': Buffer.byteLength(body),
@@ -307,7 +333,7 @@ function startBrowserLogin() {
       reject(err);
     });
 
-    server.listen(CALLBACK_PORT, () => {
+    server.listen(CALLBACK_PORT, '127.0.0.1', () => {
       activeAuthServer = server;
       const authorizeUrl =
         'https://auth.openai.com/oauth/authorize?' +
@@ -338,14 +364,27 @@ function startBrowserLogin() {
 }
 
 function logout() {
-  const p = getAuthFilePath();
+  const studioFile = getStudioAuthFilePath();
+  const studioDir = path.dirname(studioFile);
   try {
-    if (fs.existsSync(p)) {
-      const data = JSON.parse(fs.readFileSync(p, 'utf8'));
-      data.tokens = null;
-      data.auth_mode = 'none';
-      fs.writeFileSync(p, JSON.stringify(data, null, 2), 'utf8');
+    if (!fs.existsSync(studioDir)) {
+      fs.mkdirSync(studioDir, { recursive: true, mode: 0o700 });
     }
+    let data = {};
+    if (fs.existsSync(studioFile)) {
+      try {
+        data = JSON.parse(fs.readFileSync(studioFile, 'utf8'));
+      } catch {
+        data = {};
+      }
+    }
+    data.tokens = null;
+    data.auth_mode = 'none';
+    data.last_logout = new Date().toISOString();
+    fs.writeFileSync(studioFile, JSON.stringify(data, null, 2), {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
   } catch (err) {
     console.warn('[OpenAI Auth] Logout file update error:', err.message);
   }
@@ -394,17 +433,35 @@ async function proxyChatCompletions(reqBody) {
     };
   });
 
-  const payload = JSON.stringify({
+  const responsesBody = {
     model,
     store: false,
     stream: true,
-    input
-  });
+    input,
+  };
+  if (reqBody && reqBody.response_format && typeof reqBody.response_format === 'object') {
+    const rf = reqBody.response_format;
+    if (rf.type === 'json_schema' && rf.json_schema && rf.json_schema.schema) {
+      responsesBody.text = {
+        format: {
+          type: 'json_schema',
+          name: rf.json_schema.name || 'reasoner_output',
+          schema: rf.json_schema.schema,
+          strict: Boolean(rf.json_schema.strict),
+        },
+      };
+    } else if (rf.type === 'json_object') {
+      responsesBody.text = {
+        format: { type: 'json_object' },
+      };
+    }
+  }
+  const payload = JSON.stringify(responsesBody);
 
   return new Promise((resolve, reject) => {
     const req = https.request('https://chatgpt.com/backend-api/codex/responses', {
       method: 'POST',
-      rejectUnauthorized: false,
+      rejectUnauthorized: true,
       headers: {
         'Authorization': `Bearer ${tokens.access_token}`,
         'ChatGPT-Account-ID': accountId,
@@ -576,7 +633,158 @@ async function proxyDirectChatCompletions(apiKey, reqBody) {
   });
 }
 
+function handleOpenAiHttpRequest(req, res, resolveCorsOrigin) {
+  const rawUrl = req.url || '';
+  const pathname = rawUrl.split('?')[0].replace(/\/+$/, '') || '/';
+  const isOpenAiAuthOrApi =
+    pathname === '/api/openai' ||
+    pathname.startsWith('/api/openai/') ||
+    pathname === '/api/openai-proxy' ||
+    pathname.startsWith('/api/openai-proxy/');
+
+  if (!isOpenAiAuthOrApi) return false;
+
+  const corsOrigin =
+    typeof resolveCorsOrigin === 'function' ? resolveCorsOrigin(req) : 'http://127.0.0.1:5173';
+  res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return true;
+  }
+
+  if (pathname === '/api/openai/auth/status' && req.method === 'GET') {
+    getAuthStatus()
+      .then((status) => {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(status));
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+    return true;
+  }
+
+  if (pathname === '/api/openai/auth/login' && req.method === 'POST') {
+    startBrowserLogin()
+      .then((loginInfo) => {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(loginInfo));
+      })
+      .catch((err) => {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+    return true;
+  }
+
+  if (pathname === '/api/openai/auth/logout' && req.method === 'POST') {
+    try {
+      const result = logout();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(result));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return true;
+  }
+
+  if (
+    (pathname === '/api/openai/models' ||
+      pathname === '/api/openai/v1/models' ||
+      pathname === '/api/openai-proxy/models' ||
+      pathname === '/api/openai-proxy/v1/models') &&
+    req.method === 'GET'
+  ) {
+    const authHeader = String(req.headers['authorization'] || '');
+    const apiKey = authHeader.replace(/^Bearer\s+/i, '').trim();
+    const isDirectProxy = pathname.startsWith('/api/openai-proxy');
+    if ((authHeader && /^Bearer\s+sk-/i.test(authHeader)) || (isDirectProxy && apiKey)) {
+      fetchRemoteModels(apiKey)
+        .then((models) => {
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify(models));
+        })
+        .catch((err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: { message: err.message } }));
+        });
+    } else if (isDirectProxy) {
+      res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: { message: 'Missing OpenAI API key in Authorization header.' } }));
+    } else {
+      getAuthStatus()
+        .then((status) => {
+          const modelsData = {
+            object: 'list',
+            data: (status.availableModels || []).map((m) => ({
+              id: m.id,
+              object: 'model',
+              created: Date.now(),
+              owned_by: 'openai',
+            })),
+          };
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify(modelsData));
+        })
+        .catch((err) => {
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: { message: err.message } }));
+        });
+    }
+    return true;
+  }
+
+  if (
+    (pathname === '/api/openai/chat/completions' ||
+      pathname === '/api/openai/v1/chat/completions' ||
+      pathname === '/api/openai-proxy/chat/completions' ||
+      pathname === '/api/openai-proxy/v1/chat/completions') &&
+    req.method === 'POST'
+  ) {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', async () => {
+      try {
+        const bodyStr = Buffer.concat(chunks).toString('utf-8');
+        const body = bodyStr ? JSON.parse(bodyStr) : {};
+        const authHeader = String(req.headers['authorization'] || '');
+        const apiKey = authHeader.replace(/^Bearer\s+/i, '').trim();
+        const isDirectProxy = pathname.startsWith('/api/openai-proxy');
+        let completion;
+        if ((authHeader && /^Bearer\s+sk-/i.test(authHeader)) || (isDirectProxy && apiKey)) {
+          completion = await proxyDirectChatCompletions(apiKey, body);
+        } else if (isDirectProxy) {
+          res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: { message: 'Missing OpenAI API key in Authorization header.' } }));
+          return;
+        } else {
+          completion = await proxyChatCompletions(body);
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(completion));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: { message: err.message } }));
+      }
+    });
+    return true;
+  }
+
+  res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({ error: { message: `Unknown OpenAI local endpoint: ${pathname}` } }));
+  return true;
+}
+
 module.exports = {
+  getStudioAuthFilePath,
+  loadTokens,
+  saveTokens,
   getAuthStatus,
   startBrowserLogin,
   refreshTokens,
@@ -584,6 +792,7 @@ module.exports = {
   proxyChatCompletions,
   proxyDirectChatCompletions,
   fetchRemoteModels,
+  handleOpenAiHttpRequest,
   AVAILABLE_MODELS
 };
 

@@ -9,12 +9,6 @@ function registerComfyIpcHandlers() {
   ipcHandlersRegistered = true;
 
   const getComfySyncService = () => {
-    try {
-      const resolved = require.resolve('../src/server/comfyWorkflowSyncService.cjs');
-      delete require.cache[resolved];
-    } catch {
-      // ignore
-    }
     return require('../src/server/comfyWorkflowSyncService.cjs');
   };
 
@@ -388,10 +382,28 @@ function startLocalProxyServer() {
       }
     }
 
+    if (
+      pathname === '/api/openai' ||
+      pathname.startsWith('/api/openai/') ||
+      pathname === '/api/openai-proxy' ||
+      pathname.startsWith('/api/openai-proxy/')
+    ) {
+      try {
+        const openaiAuthService = require('../src/server/openaiAuthService.cjs');
+        if (openaiAuthService.handleOpenAiHttpRequest(req, res, resolveSafeCorsOrigin)) {
+          return;
+        }
+      } catch (err) {
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: { message: err.message } }));
+        }
+        return;
+      }
+    }
+
     if (rawUrl.startsWith('/api/mocap-nlf') || rawUrl.startsWith('/__local_mocap_nlf')) {
       try {
-        const resolved = require.resolve('../src/server/mocapNlfService.cjs');
-        delete require.cache[resolved];
         const mocapNlfService = require('../src/server/mocapNlfService.cjs');
         if (mocapNlfService.handleMocapNlfRequest(req, res)) {
           return;
@@ -523,8 +535,13 @@ function startLocalProxyServer() {
     } else if (rawUrl.startsWith('/api/lmstudio')) {
       targetPort = 1234;
       forwardPath = rawUrl.replace(/^\/api\/lmstudio/, '') || '/';
+    } else if (rawUrl.startsWith('/api/')) {
+      // Never forward unrecognized local studio /api/* endpoints (or their Authorization headers) to ComfyUI :8188
+      res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: `Unknown local studio API endpoint: ${pathname}` }));
+      return;
     } else {
-      // Any other direct route goes through ComfyUI multi-port forwarder
+      // Direct ComfyUI routes (/view, /prompt, /history, /system_stats, etc.) go through multi-port forwarder
       const comfySyncService = require('../src/server/comfyWorkflowSyncService.cjs');
       comfySyncService.forwardComfyRequest(req, res, forwardPath);
       return;
@@ -553,7 +570,7 @@ function startLocalProxyServer() {
             cleanHeaders[k] = v;
           }
         }
-        cleanHeaders['Access-Control-Allow-Origin'] = '*';
+        cleanHeaders['Access-Control-Allow-Origin'] = resolveSafeCorsOrigin(req);
         cleanHeaders['Access-Control-Allow-Headers'] = '*';
         cleanHeaders['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
         res.writeHead(proxyRes.statusCode || 200, cleanHeaders);
@@ -636,7 +653,7 @@ function createWindow() {
       shell.openExternal(url);
       return { action: 'deny' };
     }
-    return { action: 'allow' };
+    return { action: 'deny' };
   });
 
   // Register F12 / DevTools, and F5 / Ctrl+R reload shortcuts

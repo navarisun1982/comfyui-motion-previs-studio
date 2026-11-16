@@ -4,6 +4,7 @@ import { useAssetLibraryStore } from '../stores/useAssetLibraryStore';
 import { StagePrevis3D } from './StagePrevis3D';
 import { interpolateTrajectoryPosition } from '../engine/trajectoryMath';
 import { logger } from '../stores/useLogStore';
+import { confirmDestructiveAction } from '../services/storage';
 import {
   Play,
   Pause,
@@ -249,6 +250,8 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   // Keyboard Shortcut for Cue Deletion (Priority 1) or Object Deletion (Priority 2) (Delete / Backspace)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (timelineRef.current?.closest('.hidden')) return;
+      if (document.querySelector('[aria-modal="true"], [role="dialog"]')) return;
       const activeEl = document.activeElement as HTMLElement | null;
       if (
         activeEl?.tagName === 'INPUT' ||
@@ -260,10 +263,13 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selectedTimelineCue) {
           e.preventDefault();
+          e.stopImmediatePropagation();
           deleteSelectedTimelineCue();
           return;
         }
         if (selectedActorId && selectedActorId !== '__camera__') {
+          e.preventDefault();
+          e.stopImmediatePropagation();
           removeActor(selectedActorId);
           setSelectedActorId(undefined);
         }
@@ -276,7 +282,18 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
   // Spacebar Play/Pause Keyboard Handler
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (timelineRef.current?.closest('.hidden')) return;
+      if (document.querySelector('[aria-modal="true"], [role="dialog"]')) return;
+      const targetEl = e.target as HTMLElement | null;
+      if (
+        targetEl instanceof HTMLInputElement ||
+        targetEl instanceof HTMLTextAreaElement ||
+        targetEl instanceof HTMLSelectElement ||
+        targetEl?.tagName === 'BUTTON' ||
+        targetEl?.isContentEditable
+      ) {
+        return;
+      }
       if (e.code === 'Space') {
         e.preventDefault();
         setIsPlaying((p) => !p);
@@ -413,9 +430,16 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
     }
   };
 
+  useEffect(() => {
+    if (draggingTimelineCue) {
+      useShotStore.getState().beginGesture();
+    }
+  }, [draggingTimelineCue]);
+
   const handleTimelinePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (draggingTimelineCue) {
       setDraggingTimelineCue(null);
+      useShotStore.getState().endGesture();
       try {
         timelineRef.current?.releasePointerCapture(e.pointerId);
       } catch {}
@@ -711,7 +735,15 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
         <div className="flex items-center gap-1.5 shrink-0 font-mono text-[10.5px]">
           {shot.actors.length > 1 && (
             <button
-              onClick={() => useShotStore.getState().resetActorsToDefaultLead()}
+              onClick={() => {
+                if (
+                  confirmDestructiveAction(
+                    `Reset the soundstage to a single Lead Subject and remove ${shot.actors.length - 1} other actor(s)/prop(s)?`
+                  )
+                ) {
+                  useShotStore.getState().resetActorsToDefaultLead();
+                }
+              }}
               className="flex items-center gap-1 rounded-lg bg-[#131C2E] hover:bg-[#1A2436] text-[#D0D9E8] hover:text-white border border-[#273247] px-2.5 py-1 transition-all"
               title="Reset soundstage to a single centered Lead Subject"
             >
@@ -1687,6 +1719,10 @@ export const MotionPrevisStage: React.FC<MotionPrevisStageProps> = ({
               onClick={() => {
                 setTrimStartPct(0);
                 setTrimEndPct(100);
+                updateVfxReference({
+                  trimStartSeconds: 0,
+                  trimEndSeconds: Number(duration.toFixed(2)),
+                });
               }}
               className="rounded-md bg-[#1A2436] hover:bg-[#223047] border border-[#273247] px-2 py-0.5 text-[#D0D9E8] hover:text-white text-[9.5px]"
             >

@@ -70,8 +70,11 @@ export function verifyBinding(api: ApiWorkflow, binding: TemplateBinding): Verif
     }
   };
 
-  // 2. Required fields.
-  for (const f of REQUIRED_FIELDS) {
+  // 2. Required fields (custom user workflows may derive frame count from VHS_LoadVideo or fixed latent nodes).
+  const isCustomUserWorkflow =
+    binding.api === 'custom_user_workflow.api.json' || /_custom_user$|^custom[_-]/i.test(t);
+  const requiredFields = isCustomUserWorkflow ? (['prompt'] as const) : REQUIRED_FIELDS;
+  for (const f of requiredFields) {
     if (!binding.fields[f]) errors.push(`${t}: required field "${f}" is not bound.`);
   }
   if (binding.modes.includes('i2v') && !binding.fields.timeline) {

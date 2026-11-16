@@ -13,6 +13,7 @@ import {
   extractResponseText,
   resolveWireUrl,
 } from './objectReasoner';
+import { logger } from '../stores/useLogStore';
 import {
   UniversalKinematicPhase,
   UniversalKinematicProgram,
@@ -206,6 +207,10 @@ No preamble, markdown backticks, or explanation.`;
       if (res.ok) {
         const data = await res.json();
         rawText = extractResponseText('gemini', data);
+      } else if (res.status === 401 || res.status === 403 || res.status === 429) {
+        logger.warn(
+          `AI Acting Director: ${cfg.info.label} returned HTTP ${res.status} (auth/quota); using deterministic acting cues.`
+        );
       }
     } else if (cfg.provider === 'ollama') {
       const { url, headers, body } = buildOllamaRequest(cfg, prompt, 'object', systemInstruction, undefined, 'Acting sequence prompt: ');
@@ -228,7 +233,7 @@ No preamble, markdown backticks, or explanation.`;
         body: JSON.stringify(body),
         signal,
       });
-      if (!res.ok && mode !== 'none') {
+      if (!res.ok && mode !== 'none' && res.status !== 401 && res.status !== 403 && res.status !== 429) {
         const fallbackReq = buildOpenAiRequest(cfg, prompt, 'none', systemInstruction);
         res = await fetch(resolveWireUrl(fallbackReq.url, cfg.provider), {
           method: 'POST',
@@ -240,6 +245,10 @@ No preamble, markdown backticks, or explanation.`;
       if (res.ok) {
         const data = await res.json();
         rawText = extractResponseText('openai', data);
+      } else if (res.status === 401 || res.status === 403 || res.status === 429) {
+        logger.warn(
+          `AI Acting Director: ${cfg.info.label} returned HTTP ${res.status} (auth/quota); using deterministic acting cues.`
+        );
       }
     }
 
@@ -374,6 +383,10 @@ No markdown fences or commentary.`;
       if (res.ok) {
         const data = await res.json();
         rawText = extractResponseText('gemini', data);
+      } else if (res.status === 401 || res.status === 403 || res.status === 429) {
+        logger.warn(
+          `AI Acting Director (Universal IK): ${cfg.info.label} returned HTTP ${res.status} (auth/quota); using offline kinematic synthesizer.`
+        );
       }
     } else if (cfg.provider === 'ollama') {
       const { url, headers, body } = buildOllamaRequest(
@@ -403,7 +416,7 @@ No markdown fences or commentary.`;
         body: JSON.stringify(body),
         signal,
       });
-      if (!res.ok && mode !== 'none') {
+      if (!res.ok && mode !== 'none' && res.status !== 401 && res.status !== 403 && res.status !== 429) {
         const fallbackReq = buildOpenAiRequest(cfg, prompt, 'none', systemInstruction);
         res = await fetch(resolveWireUrl(fallbackReq.url, cfg.provider), {
           method: 'POST',
@@ -415,6 +428,10 @@ No markdown fences or commentary.`;
       if (res.ok) {
         const data = await res.json();
         rawText = extractResponseText('openai', data);
+      } else if (res.status === 401 || res.status === 403 || res.status === 429) {
+        logger.warn(
+          `AI Acting Director (Universal IK): ${cfg.info.label} returned HTTP ${res.status} (auth/quota); using offline kinematic synthesizer.`
+        );
       }
     }
 
