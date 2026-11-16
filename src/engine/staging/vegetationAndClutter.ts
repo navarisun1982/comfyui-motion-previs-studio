@@ -5,9 +5,31 @@ import {
   VegetationSpecies,
 } from '../../types/environment';
 import {
+  evaluateTerrainHeight,
   evaluateTerrainNormalAndSlope,
   ResolvedTerrainConfig,
 } from './terrainGenerator';
+import {
+  chooseSpecies,
+  createFlowerPatchGeometry,
+  createGrassClumpGeometry,
+  createTree,
+  poissonDiskPoints,
+  rawBuffersToThreeGeometry,
+} from './vendor67/vegetationCore';
+import {
+  BarkTextureKind,
+  LeafTextureKind,
+  TreeSpeciesName,
+} from './vendor67/vegetationSpecies';
+import {
+  getBarkDataTexture,
+  getLeafDataTexture,
+} from './vendor67/vegetationTextures';
+import {
+  buildClutterBatches,
+  ClutterPresetName,
+} from './vendor67/clutterCore';
 
 export interface ExclusionTrajectoryActor {
   name?: string;
@@ -44,6 +66,142 @@ export interface ResolvedVegetationConfig {
   clutterEnabled: boolean;
   clutterDensity: number;
   grassRing: boolean;
+}
+
+interface CachedTreeVariant {
+  barkGeo: THREE.BufferGeometry;
+  foliageGeo: THREE.BufferGeometry;
+  barkTexture: BarkTextureKind;
+  barkTint: readonly [number, number, number];
+  leafTexture: LeafTextureKind;
+  leafColor: readonly [number, number, number];
+  leafTint: readonly [number, number, number];
+  alphaCutout: boolean;
+}
+
+const SPECIES_SEED_SALT: Record<TreeSpeciesName, number> = {
+  broadleaf: 101,
+  birch: 211,
+  conifer: 307,
+  palm: 401,
+  bush: 503,
+};
+
+const treeVariantCache = new Map<string, CachedTreeVariant>();
+const sharedUndergrowthGeoCache = new Map<string, THREE.BufferGeometry>();
+
+function getCachedTreeVariant(
+  species: TreeSpeciesName,
+  variantIndex: number,
+  lodIndex: 0 | 1
+): CachedTreeVariant {
+  const key = `${species}:v${variantIndex}:lod${lodIndex}`;
+  const existing = treeVariantCache.get(key);
+  if (existing) return existing;
+
+  const variantSeed = SPECIES_SEED_SALT[species] + variantIndex * 997;
+  const treeData = createTree({ species, leaves: 'cards' }, variantSeed);
+  const level = treeData.levels[lodIndex] ?? treeData.levels[0];
+  const [barkPart, foliagePart] = level.parts;
+
+  const barkGeo = rawBuffersToThreeGeometry(barkPart.geometry);
+  barkGeo.userData.isSharedResource = true;
+
+  const foliageGeo = rawBuffersToThreeGeometry(foliagePart.geometry);
+  foliageGeo.userData.isSharedResource = true;
+
+  const entry: CachedTreeVariant = {
+    barkGeo,
+    foliageGeo,
+    barkTexture: barkPart.barkTexture ?? 'rough',
+    barkTint: barkPart.barkTint ?? [0.5, 0.4, 0.31],
+    leafTexture: foliagePart.leafTexture ?? 'sprig',
+    leafColor: foliagePart.leafColor ?? [60, 112, 42],
+    leafTint: foliagePart.leafTint ?? [1, 1, 1],
+    alphaCutout: foliagePart.alphaCutout,
+  };
+  treeVariantCache.set(key, entry);
+  return entry;
+}
+
+function getCachedGrassGeometry(isHD: boolean): THREE.BufferGeometry {
+  const key = isHD ? 'grass:hd' : 'grass:simple';
+  const cached = sharedUndergrowthGeoCache.get(key);
+  if (cached) return cached;
+  const raw = createGrassClumpGeometry({
+    blades: isHD ? 14 : 8,
+    height: 0.52,
+    radius: 0.18,
+    widthScale: 1.25,
+    seed: 67,
+  });
+  const geo = rawBuffersToThreeGeometry(raw);
+  geo.userData.isSharedResource = true;
+  sharedUndergrowthGeoCache.set(key, geo);
+  return geo;
+}
+
+function getCachedFlowerGeometry(seedOffset: number): THREE.BufferGeometry {
+  const key = `flower:${seedOffset}`;
+  const cached = sharedUndergrowthGeoCache.get(key);
+  if (cached) return cached;
+  const palettes: Array<[number, number, number]> = [
+    [0.95, 0.82, 0.24],
+    [0.92, 0.48, 0.58],
+    [0.68, 0.62, 0.94],
+  ];
+  const raw = createFlowerPatchGeometry({
+    flowers: 5,
+    height: 0.42,
+    color: palettes[seedOffset % palettes.length],
+    seed: 67 + seedOffset * 31,
+  });
+  const geo = rawBuffersToThreeGeometry(raw);
+  geo.userData.isSharedResource = true;
+  sharedUndergrowthGeoCache.set(key, geo);
+  return geo;
+}
+
+/**
+ * Injects subtle GPU leaf-tip wind flutter (`1.0 - uv.y` pinned at stem `uv.y = 1.0`)
+ * so individual 67.js sprig/needle cards shimmer organically in real time while keeping
+ * whole-tree root sway synchronized via `instanceMatrix` across RGB, Clay, and Depth passes.
+ */
+function attachFoliageFlutterShader(
+  material: THREE.MeshStandardMaterial,
+  windStrength: number
+): { uWindTime: { value: number }; uWindStrength: { value: number } } {
+  const windUniforms = {
+    uWindTime: { value: 0 },
+    uWindStrength: { value: windStrength },
+  };
+  material.userData.windUniforms = windUniforms;
+  material.customProgramCacheKey = () => 'comfy67-foliage-flutter-v1';
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uWindTime = windUniforms.uWindTime;
+    shader.uniforms.uWindStrength = windUniforms.uWindStrength;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform float uWindTime;
+uniform float uWindStrength;`
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+float tipWeight67 = clamp(1.0 - uv.y, 0.0, 1.0);
+vec3 instOrigin67 = vec3(0.0);
+#ifdef USE_INSTANCING
+  instOrigin67 = instanceMatrix[3].xyz;
+#endif
+float flutterPhase67 = uWindTime * 4.4 + instOrigin67.x * 0.37 + instOrigin67.z * 0.29 + position.x * 2.9 + position.y * 2.3 + position.z * 3.1;
+transformed.x += sin(flutterPhase67) * 0.016 * uWindStrength * tipWeight67;
+transformed.y += cos(flutterPhase67 * 1.13) * 0.011 * uWindStrength * tipWeight67;
+transformed.z += sin(flutterPhase67 * 0.87 + 1.2) * 0.016 * uWindStrength * tipWeight67;`
+      );
+  };
+  return windUniforms;
 }
 
 function seededRandom(seed: number): () => number {
@@ -95,7 +253,9 @@ export function resolveEffectiveVegetationConfig(
   const detailLevel: EnvironmentDetailLevel = env?.detailLevel === 'hd' ? 'hd' : 'simple';
   const clutterEnabled = env?.clutter?.enabled !== false;
   const clutterDensity = Math.max(0, Math.min(2.5, env?.clutter?.density ?? 1.0));
-  const grassRing = Boolean(env?.clutter?.grassRing || (detailLevel === 'hd' && terrainConfig.groundSurface === 'grass-terrain'));
+  const grassRing = Boolean(
+    env?.clutter?.grassRing || (detailLevel === 'hd' && terrainConfig.groundSurface === 'grass-terrain')
+  );
 
   if (rawSpecies !== 'auto') {
     return {
@@ -150,7 +310,7 @@ export function resolveEffectiveVegetationConfig(
  * Triple Smart Exclusion Zone (Q3):
  * Prevents procedural trees from spawning inside:
  * 1. Central Acting Clearing (r < clearingRadius)
- * 2. Active Actor / Vehicle Movement Trajectory Corridors (5.5m buffer)
+ * 2. Active Actor / Vehicle Movement Trajectory Corridors (5.8m buffer)
  * 3. Camera-to-Subject Sightline Frustum Cone so a tree never blocks an actor's face in the lens!
  */
 export function isPointExcludedFromScattering(
@@ -239,8 +399,9 @@ export function isPointExcludedFromScattering(
 }
 
 /**
- * Appends a single procedural tree's trunk and foliage instance matrices into per-species buckets
- * and builds batched InstancedMesh objects for 60 FPS Previs performance.
+ * Scatters genuine 67.js recursive branching trees (with flared roots, multi-level tapered limbs,
+ * tileable bark, and 128x128 RGBA alpha-cutout sprig/needle foliage cards), plane-chipped mossy
+ * ground clutter, and multi-blade grass/wildflower tufts into batched Three.js meshes.
  */
 export function buildProceduralVegetationAndClutter(
   envGroup: THREE.Group,
@@ -249,57 +410,85 @@ export function buildProceduralVegetationAndClutter(
   const vegConfig = resolveEffectiveVegetationConfig(ctx);
   const { terrainConfig } = ctx;
   const rand = seededRandom(vegConfig.seed);
-
   const isHD = vegConfig.detailLevel === 'hd';
 
-  // 1. Procedural Vegetation (Trees & Shrubs)
+  // 1. Genuine 67.js Parametric Recursive Branching Trees & Shrubs
   if (vegConfig.species !== 'none' && vegConfig.density > 0.01) {
     const baseTreeCount =
       vegConfig.species === 'bush'
         ? isHD
-          ? 42
-          : 16
+          ? 44
+          : 18
         : isHD
-        ? 64
+        ? 58
         : 26;
     const targetCount = Math.max(4, Math.round(baseTreeCount * vegConfig.density));
+    const minSpacing = vegConfig.species === 'bush' ? 3.2 : isHD ? 4.6 : 5.8;
 
-    const trunkMatrices: THREE.Matrix4[] = [];
-    const trunkColors: THREE.Color[] = [];
-    const canopyMatrices: THREE.Matrix4[] = [];
-    const canopyColors: THREE.Color[] = [];
+    // Curated midground parallax framing anchors first (filtered by Triple Smart Exclusion)
+    const candidatePoints: Array<{ x: number; z: number; scale: number }> = [
+      { x: -24, z: -28, scale: 1.05 },
+      { x: 25, z: -26, scale: 1.12 },
+      { x: -34, z: -14, scale: 0.98 },
+      { x: 35, z: -12, scale: 1.02 },
+      { x: -28, z: 16, scale: 0.96 },
+      { x: 29, z: 18, scale: 1.06 },
+      { x: -22, z: 32, scale: 1.0 },
+      { x: 24, z: 30, scale: 1.08 },
+    ];
 
-    const speciesList: Array<Exclude<VegetationSpecies, 'auto' | 'none' | 'mixed'>> = [
+    // Bridson multi-restart Poisson-disk scatter across the 112m x 112m stage perimeter
+    const poissonPts = poissonDiskPoints(
+      { minX: -55, maxX: 55, minZ: -55, maxZ: 55 },
+      minSpacing,
+      rand,
+      ([px, pz]) => !isPointExcludedFromScattering(px, pz, ctx, vegConfig, true)
+    );
+
+    // Deterministic Fisher-Yates shuffle so perimeter coverage is uniform at any targetCount
+    for (let i = poissonPts.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      const tmp = poissonPts[i];
+      poissonPts[i] = poissonPts[j];
+      poissonPts[j] = tmp;
+    }
+
+    for (const [px, pz] of poissonPts) {
+      candidatePoints.push({
+        x: px,
+        z: pz,
+        scale: 0.92 + rand() * 0.34,
+      });
+    }
+
+    const mixedSpeciesNames: readonly TreeSpeciesName[] = [
       'conifer',
       'broadleaf',
       'birch',
       'bush',
     ];
+    const mixedWeights: Record<TreeSpeciesName, number> = {
+      conifer: 0.34,
+      broadleaf: 0.32,
+      birch: 0.18,
+      palm: 0,
+      bush: 0.16,
+    };
 
-    // Always include curated midground parallax positions first (filtered by sightline exclusion!)
-    const candidatePoints: Array<{ x: number; z: number; scale: number }> = [
-      { x: -24, z: -28, scale: 0.95 },
-      { x: 25, z: -26, scale: 1.05 },
-      { x: -34, z: -14, scale: 0.88 },
-      { x: 35, z: -12, scale: 0.92 },
-      { x: -28, z: 16, scale: 0.86 },
-      { x: 29, z: 18, scale: 0.95 },
-      { x: -22, z: 32, scale: 0.9 },
-      { x: 24, z: 30, scale: 1.0 },
-    ];
-
-    for (let i = 0; i < targetCount * 3; i++) {
-      const angle = rand() * Math.PI * 2;
-      const dist = terrainConfig.clearingRadius + 3 + rand() * (56 - terrainConfig.clearingRadius);
-      candidatePoints.push({
-        x: Math.cos(angle) * dist,
-        z: Math.sin(angle) * dist,
-        scale: 0.78 + rand() * 0.48,
-      });
+    interface VariantBucket {
+      species: TreeSpeciesName;
+      variantIndex: number;
+      lodIndex: 0 | 1;
+      matrices: THREE.Matrix4[];
+      barkInstanceColors: THREE.Color[];
+      foliageInstanceColors: THREE.Color[];
     }
 
+    const buckets = new Map<string, VariantBucket>();
     const placedPositions: Array<{ x: number; z: number }> = [];
     const dummy = new THREE.Object3D();
+    const variantCount = isHD ? 3 : 2;
+    const isDesertScrub = terrainConfig.biomeCategory.includes('desert');
 
     for (const pt of candidatePoints) {
       if (placedPositions.length >= targetCount) break;
@@ -309,165 +498,147 @@ export function buildProceduralVegetationAndClutter(
         continue;
       }
 
-      // Minimum spacing between trees
-      const minSpacing = vegConfig.species === 'bush' ? 3.2 : isHD ? 4.2 : 5.5;
-      if (placedPositions.some((p) => Math.hypot(p.x - pt.x, p.z - pt.z) < minSpacing)) {
+      if (placedPositions.some((p) => Math.hypot(p.x - pt.x, p.z - pt.z) < minSpacing * 0.88)) {
         continue;
       }
 
       const { height: groundY, slopeDeg } = evaluateTerrainNormalAndSlope(pt.x, pt.z, terrainConfig);
-      if (slopeDeg > 36) continue; // Slope limit: trees don't grow on vertical cliffs
+      if (slopeDeg > 35) continue;
 
+      const placedIndex = placedPositions.length;
       placedPositions.push({ x: pt.x, z: pt.z });
 
-      const activeSp =
+      const activeSp: TreeSpeciesName =
         vegConfig.species === 'mixed'
-          ? speciesList[placedPositions.length % speciesList.length]
+          ? chooseSpecies(mixedSpeciesNames, mixedWeights, pt.x, pt.z, vegConfig.seed, rand)
           : vegConfig.species;
-      const s = pt.scale;
+
+      const variantIndex = placedIndex % variantCount;
+      const distFromOrigin = Math.hypot(pt.x, pt.z);
+      const lodIndex: 0 | 1 = isHD && distFromOrigin <= 38 ? 0 : 1;
+      const bucketKey = `${activeSp}:v${variantIndex}:lod${lodIndex}`;
+
+      let bucket = buckets.get(bucketKey);
+      if (!bucket) {
+        bucket = {
+          species: activeSp,
+          variantIndex,
+          lodIndex,
+          matrices: [],
+          barkInstanceColors: [],
+          foliageInstanceColors: [],
+        };
+        buckets.set(bucketKey, bucket);
+      }
+
+      const scaleBoost = activeSp === 'bush' ? 1.15 : 1.12;
+      const s = pt.scale * scaleBoost;
       const yaw = rand() * Math.PI * 2;
+      const tiltX = (rand() - 0.5) * 0.04;
+      const tiltZ = (rand() - 0.5) * 0.04;
 
-      if (activeSp === 'bush') {
-        // Low scrub / coastal or desert bush (2 clustered foliage spheres)
-        const bushColor =
-          terrainConfig.biomeCategory.includes('desert')
-            ? new THREE.Color(0x5c6b38).offsetHSL(0, 0, (rand() - 0.5) * 0.08)
-            : new THREE.Color(0x234d20).offsetHSL(0, 0, (rand() - 0.5) * 0.08);
-        for (let c = 0; c < 2; c++) {
-          dummy.position.set(
-            pt.x + (c - 0.5) * 0.8 * s,
-            groundY + 0.9 * s,
-            pt.z + (rand() - 0.5) * 0.6 * s
-          );
-          dummy.rotation.set(0, yaw + c, 0);
-          dummy.scale.set(1.8 * s, 1.25 * s, 1.8 * s);
-          dummy.updateMatrix();
-          canopyMatrices.push(dummy.matrix.clone());
-          canopyColors.push(bushColor);
-        }
-        continue;
-      }
-
-      // Trunk placement
-      const trunkHeight = activeSp === 'palm' ? 11.5 * s : activeSp === 'birch' ? 12.5 * s : 13.5 * s;
-      const trunkWidth = activeSp === 'birch' ? 0.42 * s : activeSp === 'palm' ? 0.52 * s : 0.78 * s;
-      const leanX = activeSp === 'palm' ? (rand() - 0.5) * 0.16 : (rand() - 0.5) * 0.04;
-      const leanZ = activeSp === 'palm' ? (rand() - 0.5) * 0.16 : (rand() - 0.5) * 0.04;
-
-      dummy.position.set(pt.x, groundY + trunkHeight * 0.48, pt.z);
-      dummy.rotation.set(leanX, yaw, leanZ);
-      dummy.scale.set(trunkWidth, trunkHeight, trunkWidth);
+      dummy.position.set(pt.x, groundY, pt.z);
+      dummy.rotation.set(tiltX, yaw, tiltZ);
+      dummy.scale.set(s, s, s);
       dummy.updateMatrix();
-      trunkMatrices.push(dummy.matrix.clone());
+      bucket.matrices.push(dummy.matrix.clone());
 
-      const trunkCol =
-        activeSp === 'birch'
-          ? new THREE.Color(0xd6d3d1)
-          : activeSp === 'palm'
-          ? new THREE.Color(0x6b4c35)
-          : new THREE.Color(0x3b2314);
-      trunkColors.push(trunkCol);
+      const barkShade = 0.9 + rand() * 0.18;
+      bucket.barkInstanceColors.push(new THREE.Color(barkShade, barkShade, barkShade));
 
-      // Canopy tiers by species
-      if (activeSp === 'conifer') {
-        const baseFolCol = new THREE.Color(0x133818).offsetHSL(0, 0, (rand() - 0.5) * 0.06);
-        for (let tier = 0; tier < 3; tier++) {
-          const tierRadius = (4.3 - tier * 0.95) * s;
-          const tierHeight = 6.6 * s;
-          dummy.position.set(pt.x, groundY + (11.2 + tier * 4.2) * s, pt.z);
-          dummy.rotation.set(0, yaw + tier * 0.5, 0);
-          dummy.scale.set(tierRadius, tierHeight, tierRadius);
-          dummy.updateMatrix();
-          canopyMatrices.push(dummy.matrix.clone());
-          canopyColors.push(baseFolCol.clone().offsetHSL(0, 0, tier * 0.02));
-        }
-      } else if (activeSp === 'palm') {
-        const frondCol = new THREE.Color(0x2d6a2e).offsetHSL(0, 0, (rand() - 0.5) * 0.06);
-        const topX = pt.x + Math.sin(leanZ) * (-trunkHeight * 0.45);
-        const topZ = pt.z + Math.sin(leanX) * (trunkHeight * 0.45);
-        const topY = groundY + trunkHeight * 0.94;
-        for (let f = 0; f < 5; f++) {
-          const fAngle = yaw + (f / 5) * Math.PI * 2;
-          dummy.position.set(
-            topX + Math.cos(fAngle) * 2.2 * s,
-            topY - 0.3 * s,
-            topZ + Math.sin(fAngle) * 2.2 * s
+      const folColor = isDesertScrub && activeSp === 'bush'
+        ? new THREE.Color(0xc4b882).offsetHSL((rand() - 0.5) * 0.04, 0, (rand() - 0.5) * 0.08)
+        : new THREE.Color(1, 1, 1).offsetHSL(
+            (rand() - 0.5) * 0.03,
+            0,
+            (rand() - 0.5) * 0.09
           );
-          dummy.rotation.set(0.45, -fAngle, 0.35);
-          dummy.scale.set(2.8 * s, 0.55 * s, 1.15 * s);
-          dummy.updateMatrix();
-          canopyMatrices.push(dummy.matrix.clone());
-          canopyColors.push(frondCol);
-        }
-      } else {
-        // Broadleaf / Birch rounded multi-crown clusters
-        const crownCol =
-          activeSp === 'birch'
-            ? new THREE.Color(0x65a30d).offsetHSL((rand() - 0.5) * 0.05, 0, (rand() - 0.5) * 0.07)
-            : new THREE.Color(0x1e4d22).offsetHSL(0, 0, (rand() - 0.5) * 0.06);
-        const puffs = [
-          { ox: 0, oy: 12.8, oz: 0, rx: 4.2, ry: 4.8, rz: 4.2 },
-          { ox: -1.8, oy: 11.2, oz: 1.2, rx: 3.1, ry: 3.4, rz: 3.1 },
-          { ox: 1.9, oy: 11.5, oz: -1.1, rx: 3.2, ry: 3.5, rz: 3.2 },
-        ];
-        for (const pf of puffs) {
-          dummy.position.set(pt.x + pf.ox * s, groundY + pf.oy * s, pt.z + pf.oz * s);
-          dummy.rotation.set(0, yaw, 0);
-          dummy.scale.set(pf.rx * s, pf.ry * s, pf.rz * s);
-          dummy.updateMatrix();
-          canopyMatrices.push(dummy.matrix.clone());
-          canopyColors.push(crownCol);
-        }
-      }
+      bucket.foliageInstanceColors.push(folColor);
     }
 
-    if (trunkMatrices.length > 0) {
-      const trunkGeo = new THREE.CylinderGeometry(0.36, 0.62, 1.0, isHD ? 10 : 7);
-      const trunkMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        roughness: 0.92,
+    // Sort buckets by instance count descending so index 0 holds the primary named InstancedMesh
+    const sortedBuckets = Array.from(buckets.values()).sort(
+      (a, b) => b.matrices.length - a.matrices.length
+    );
+
+    sortedBuckets.forEach((bucket, bucketIdx) => {
+      if (bucket.matrices.length === 0) return;
+      const variant = getCachedTreeVariant(bucket.species, bucket.variantIndex, bucket.lodIndex);
+      const count = bucket.matrices.length;
+
+      // 1a. Bark InstancedMesh (flared roots + recursive tapered branches + tileable furrow/birch bark)
+      const barkTex = getBarkDataTexture(variant.barkTexture);
+      const barkMat = new THREE.MeshStandardMaterial({
+        map: barkTex,
+        color: new THREE.Color().setRGB(
+          variant.barkTint[0],
+          variant.barkTint[1],
+          variant.barkTint[2],
+          THREE.SRGBColorSpace
+        ),
+        roughness: variant.barkTexture === 'birch' ? 0.78 : 0.92,
         metalness: 0.02,
       });
-      const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, trunkMatrices.length);
+
+      const trunkInst = new THREE.InstancedMesh(variant.barkGeo, barkMat, count);
       trunkInst.castShadow = true;
       trunkInst.receiveShadow = true;
-      trunkInst.name = '__procedural_tree_trunks__';
-      for (let i = 0; i < trunkMatrices.length; i++) {
-        trunkInst.setMatrixAt(i, trunkMatrices[i]);
-        trunkInst.setColorAt(i, trunkColors[i]);
+      trunkInst.name =
+        bucketIdx === 0 ? '__procedural_tree_trunks__' : `__procedural_tree_trunks__${bucketIdx}`;
+      trunkInst.userData.isVegetationBark = true;
+      trunkInst.userData.baseMatrices = bucket.matrices.map((m) => m.clone());
+      trunkInst.userData.windStrength = vegConfig.windStrength;
+
+      for (let i = 0; i < count; i++) {
+        trunkInst.setMatrixAt(i, bucket.matrices[i]);
+        trunkInst.setColorAt(i, bucket.barkInstanceColors[i]);
       }
       trunkInst.instanceMatrix.needsUpdate = true;
       if (trunkInst.instanceColor) trunkInst.instanceColor.needsUpdate = true;
       envGroup.add(trunkInst);
-    }
 
-    if (canopyMatrices.length > 0) {
-      const isConeCanopy = vegConfig.species === 'conifer';
-      const canopyGeo = isConeCanopy
-        ? new THREE.ConeGeometry(1.0, 1.0, isHD ? 10 : 7)
-        : new THREE.DodecahedronGeometry(1.0, isHD ? 1 : 0);
-      const canopyMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        roughness: 0.86,
+      // 1b. Foliage InstancedMesh (128x128 RGBA alpha-cutout sprig/needles/frond cards + crown AO)
+      const leafTex = getLeafDataTexture(variant.leafTexture, variant.leafColor);
+      const foliageMat = new THREE.MeshStandardMaterial({
+        map: leafTex,
+        color: new THREE.Color().setRGB(
+          variant.leafTint[0],
+          variant.leafTint[1],
+          variant.leafTint[2],
+          THREE.SRGBColorSpace
+        ),
+        vertexColors: true,
+        alphaTest: variant.alphaCutout ? 0.5 : 0,
+        side: THREE.FrontSide, // 67.js addLeafSurface emits explicit front & back faces with canopy normals
+        roughness: bucket.species === 'palm' ? 0.68 : 0.82,
         metalness: 0.02,
       });
-      const canopyInst = new THREE.InstancedMesh(canopyGeo, canopyMat, canopyMatrices.length);
+      const windUniforms = attachFoliageFlutterShader(foliageMat, vegConfig.windStrength);
+
+      const canopyInst = new THREE.InstancedMesh(variant.foliageGeo, foliageMat, count);
       canopyInst.castShadow = true;
       canopyInst.receiveShadow = true;
-      canopyInst.name = '__procedural_tree_canopies__';
-      canopyInst.userData.baseMatrices = canopyMatrices.map((m) => m.clone());
+      canopyInst.name =
+        bucketIdx === 0
+          ? '__procedural_tree_canopies__'
+          : `__procedural_tree_canopies__${bucketIdx}`;
+      canopyInst.userData.isVegetationFoliage = true;
+      canopyInst.userData.alphaCutoutMap = variant.alphaCutout ? leafTex : undefined;
+      canopyInst.userData.windUniforms = windUniforms;
+      canopyInst.userData.baseMatrices = bucket.matrices.map((m) => m.clone());
       canopyInst.userData.windStrength = vegConfig.windStrength;
-      for (let i = 0; i < canopyMatrices.length; i++) {
-        canopyInst.setMatrixAt(i, canopyMatrices[i]);
-        canopyInst.setColorAt(i, canopyColors[i]);
+
+      for (let i = 0; i < count; i++) {
+        canopyInst.setMatrixAt(i, bucket.matrices[i]);
+        canopyInst.setColorAt(i, bucket.foliageInstanceColors[i]);
       }
       canopyInst.instanceMatrix.needsUpdate = true;
       if (canopyInst.instanceColor) canopyInst.instanceColor.needsUpdate = true;
       envGroup.add(canopyInst);
-    }
+    });
   }
 
-  // 2. Ground Clutter (Beveled Rocks, Mossy Boulders, Pebbles) — Simple (14) vs HD (78)
+  // 2. Genuine 67.js Plane-Chipped Mossy Rocks, Rounded Pebbles, Twigs & Fallen Leaves
   const isOutdoorBiome =
     terrainConfig.profile !== 'flat' ||
     terrainConfig.biomeCategory.includes('nature') ||
@@ -476,123 +647,193 @@ export function buildProceduralVegetationAndClutter(
     Boolean(ctx.env?.clutter?.enabled);
 
   if (vegConfig.clutterEnabled && isOutdoorBiome && vegConfig.clutterDensity > 0.05) {
-    const baseRockCount = isHD ? 78 : 14;
-    const rockCount = Math.max(4, Math.round(baseRockCount * vegConfig.clutterDensity));
-    const rockGeo = new THREE.DodecahedronGeometry(1.0, isHD ? 1 : 0);
-    const rockMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.9,
-      metalness: 0.06,
+    const isDesert =
+      terrainConfig.profile === 'sand-dunes' ||
+      terrainConfig.profile === 'canyon-valley' ||
+      terrainConfig.biomeCategory.includes('desert');
+    const isCoastal =
+      terrainConfig.profile === 'coastal-slope' ||
+      terrainConfig.biomeCategory.includes('coastal');
+
+    const presetName: ClutterPresetName = isDesert
+      ? 'scree'
+      : isCoastal
+      ? 'riverbed'
+      : vegConfig.species === 'none'
+      ? 'meadow'
+      : 'forest';
+
+    const stoneColor: [number, number, number] = isDesert
+      ? [0.52, 0.35, 0.21]
+      : isCoastal
+      ? [0.39, 0.44, 0.49]
+      : [0.34, 0.32, 0.29];
+
+    const mossAmount = isDesert ? 0.02 : isCoastal ? 0.16 : 0.72;
+    const rockCount = Math.max(4, Math.round((isHD ? 56 : 18) * vegConfig.clutterDensity));
+    const pebbleCount = Math.round((isHD ? 92 : 26) * vegConfig.clutterDensity);
+    const twigCount = isHD && presetName === 'forest' ? Math.round(44 * vegConfig.clutterDensity) : 0;
+    const leafCount = isHD && presetName === 'forest' ? Math.round(96 * vegConfig.clutterDensity) : 0;
+
+    const batches = buildClutterBatches({
+      preset: presetName,
+      seed: vegConfig.seed + 131,
+      detail: isHD ? 1 : 0,
+      area: { minX: -54, maxX: 54, minZ: -54, maxZ: 54 },
+      rockCount,
+      pebbleCount,
+      twigCount,
+      leafCount,
+      rockSize: isDesert ? [0.45, 1.85] : [0.32, 1.45],
+      pebbleSize: [0.09, 0.28],
+      stoneColor,
+      moss: mossAmount,
+      terrainHeight: (x, z) => evaluateTerrainHeight(x, z, terrainConfig),
+      exclude: (x, z) => isPointExcludedFromScattering(x, z, ctx, vegConfig, false),
     });
 
-    const rockMatrices: THREE.Matrix4[] = [];
-    const rockColors: THREE.Color[] = [];
-    const dummy = new THREE.Object3D();
-
-    const baseRockPalette =
-      terrainConfig.profile === 'sand-dunes' || terrainConfig.biomeCategory.includes('desert')
-        ? new THREE.Color(0x855834)
-        : terrainConfig.profile === 'coastal-slope'
-        ? new THREE.Color(0x64748b)
-        : new THREE.Color(0x57534e);
-
-    for (let i = 0; i < rockCount * 2; i++) {
-      if (rockMatrices.length >= rockCount) break;
-      const angle = rand() * Math.PI * 2;
-      const minR = Math.max(12, terrainConfig.clearingRadius - 2);
-      const dist = minR + rand() * (54 - minR);
-      const rx = Math.cos(angle) * dist;
-      const rz = Math.sin(angle) * dist;
-
-      if (isPointExcludedFromScattering(rx, rz, ctx, vegConfig, false)) continue;
-
-      const { height: gy } = evaluateTerrainNormalAndSlope(rx, rz, terrainConfig);
-      const sx = (0.45 + rand() * 1.45) * (isHD ? 0.9 : 1.1);
-      const sy = sx * (0.42 + rand() * 0.38);
-      const sz = sx * (0.75 + rand() * 0.5);
-
-      dummy.position.set(rx, gy + sy * 0.35, rz);
-      dummy.rotation.set((rand() - 0.5) * 0.4, rand() * Math.PI * 2, (rand() - 0.5) * 0.4);
-      dummy.scale.set(sx, sy, sz);
-      dummy.updateMatrix();
-      rockMatrices.push(dummy.matrix.clone());
-
-      const rCol = baseRockPalette.clone().offsetHSL(0, (rand() - 0.5) * 0.05, (rand() - 0.5) * 0.12);
-      rockColors.push(rCol);
+    if (batches.rocks) {
+      const rockGeo = rawBuffersToThreeGeometry(batches.rocks);
+      const rockMat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.9,
+        metalness: 0.04,
+      });
+      const rockMesh = new THREE.Mesh(rockGeo, rockMat);
+      rockMesh.castShadow = true;
+      rockMesh.receiveShadow = true;
+      rockMesh.name = '__procedural_ground_clutter__';
+      envGroup.add(rockMesh);
     }
 
-    if (rockMatrices.length > 0) {
-      const rockInst = new THREE.InstancedMesh(rockGeo, rockMat, rockMatrices.length);
-      rockInst.castShadow = true;
-      rockInst.receiveShadow = true;
-      rockInst.name = '__procedural_ground_clutter__';
-      for (let i = 0; i < rockMatrices.length; i++) {
-        rockInst.setMatrixAt(i, rockMatrices[i]);
-        rockInst.setColorAt(i, rockColors[i]);
-      }
-      rockInst.instanceMatrix.needsUpdate = true;
-      if (rockInst.instanceColor) rockInst.instanceColor.needsUpdate = true;
-      envGroup.add(rockInst);
+    if (batches.pebbles) {
+      const pebbleGeo = rawBuffersToThreeGeometry(batches.pebbles);
+      const pebbleMat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.88,
+        metalness: 0.04,
+      });
+      const pebbleMesh = new THREE.Mesh(pebbleGeo, pebbleMat);
+      pebbleMesh.castShadow = isHD;
+      pebbleMesh.receiveShadow = true;
+      pebbleMesh.name = '__procedural_ground_pebbles__';
+      envGroup.add(pebbleMesh);
+    }
+
+    if (batches.litter) {
+      const litterGeo = rawBuffersToThreeGeometry(batches.litter);
+      const litterMat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.86,
+        metalness: 0.02,
+        side: THREE.DoubleSide,
+      });
+      const litterMesh = new THREE.Mesh(litterGeo, litterMat);
+      litterMesh.receiveShadow = true;
+      litterMesh.name = '__procedural_ground_litter__';
+      envGroup.add(litterMesh);
     }
   }
 
-  // 3. Optional Foreground Grass Ring (enabled in HD mode or when grassRing toggle is checked)
+  // 3. Genuine 67.js Multi-Blade Grass Clumps & Wildflower Patches
   if (vegConfig.grassRing && isOutdoorBiome) {
-    const tuftCount = isHD ? 220 : 90;
-    const bladeGeo = new THREE.ConeGeometry(0.18, 0.85, 4);
-    bladeGeo.translate(0, 0.42, 0);
-    const bladeMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      roughness: 0.85,
+    const tuftCount = isHD ? 180 : 76;
+    const grassGeo = getCachedGrassGeometry(isHD);
+    const grassMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.82,
       metalness: 0.02,
+      side: THREE.FrontSide,
     });
-    const grassInst = new THREE.InstancedMesh(bladeGeo, bladeMat, tuftCount);
+    const grassInst = new THREE.InstancedMesh(grassGeo, grassMat, tuftCount);
+    grassInst.receiveShadow = true;
     grassInst.name = '__procedural_grass_ring__';
-    const dummy = new THREE.Object3D();
-    const baseGrassCol = new THREE.Color(0x2f5e27);
 
+    const dummy = new THREE.Object3D();
+    const grassMatrices: THREE.Matrix4[] = [];
     let placed = 0;
-    for (let i = 0; i < tuftCount * 2 && placed < tuftCount; i++) {
+
+    for (let i = 0; i < tuftCount * 3 && placed < tuftCount; i++) {
       const angle = rand() * Math.PI * 2;
-      const dist = Math.max(9, terrainConfig.clearingRadius - 5) + rand() * 18;
+      const dist = Math.max(9.5, terrainConfig.clearingRadius - 5) + rand() * 20;
       const gx = Math.cos(angle) * dist;
       const gz = Math.sin(angle) * dist;
+      if (isPointExcludedFromScattering(gx, gz, ctx, vegConfig, false)) continue;
+
       const { height: gy, slopeDeg } = evaluateTerrainNormalAndSlope(gx, gz, terrainConfig);
       if (slopeDeg > 32) continue;
 
-      const s = 0.65 + rand() * 0.75;
+      const s = 0.8 + rand() * 0.65;
       dummy.position.set(gx, gy, gz);
-      dummy.rotation.set((rand() - 0.5) * 0.25, rand() * Math.PI * 2, (rand() - 0.5) * 0.25);
+      dummy.rotation.set((rand() - 0.5) * 0.16, rand() * Math.PI * 2, (rand() - 0.5) * 0.16);
       dummy.scale.set(s, s, s);
       dummy.updateMatrix();
+      grassMatrices.push(dummy.matrix.clone());
       grassInst.setMatrixAt(placed, dummy.matrix);
       grassInst.setColorAt(
         placed,
-        baseGrassCol.clone().offsetHSL((rand() - 0.5) * 0.04, 0, (rand() - 0.5) * 0.1)
+        new THREE.Color(1, 1, 1).offsetHSL((rand() - 0.5) * 0.04, 0, (rand() - 0.5) * 0.08)
       );
       placed++;
     }
+
     grassInst.count = placed;
+    grassInst.userData.baseMatrices = grassMatrices;
+    grassInst.userData.windStrength = vegConfig.windStrength * 1.35;
     grassInst.instanceMatrix.needsUpdate = true;
     if (grassInst.instanceColor) grassInst.instanceColor.needsUpdate = true;
     envGroup.add(grassInst);
+
+    // Scatter wildflower accents in HD meadow/grass-terrain mode
+    if (isHD && terrainConfig.groundSurface === 'grass-terrain') {
+      const flowerCount = 28;
+      const flowerGeo = getCachedFlowerGeometry(vegConfig.seed % 3);
+      const flowerMat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        roughness: 0.76,
+        metalness: 0.02,
+        side: THREE.FrontSide,
+      });
+      const flowerInst = new THREE.InstancedMesh(flowerGeo, flowerMat, flowerCount);
+      flowerInst.receiveShadow = true;
+      flowerInst.name = '__procedural_wildflowers__';
+
+      const flowerMatrices: THREE.Matrix4[] = [];
+      let fPlaced = 0;
+      for (let i = 0; i < flowerCount * 3 && fPlaced < flowerCount; i++) {
+        const angle = rand() * Math.PI * 2;
+        const dist = Math.max(11, terrainConfig.clearingRadius - 3.5) + rand() * 16;
+        const fx = Math.cos(angle) * dist;
+        const fz = Math.sin(angle) * dist;
+        if (isPointExcludedFromScattering(fx, fz, ctx, vegConfig, false)) continue;
+
+        const { height: fy, slopeDeg } = evaluateTerrainNormalAndSlope(fx, fz, terrainConfig);
+        if (slopeDeg > 28) continue;
+
+        const fs = 0.85 + rand() * 0.45;
+        dummy.position.set(fx, fy, fz);
+        dummy.rotation.set(0, rand() * Math.PI * 2, 0);
+        dummy.scale.set(fs, fs, fs);
+        dummy.updateMatrix();
+        flowerMatrices.push(dummy.matrix.clone());
+        flowerInst.setMatrixAt(fPlaced, dummy.matrix);
+        fPlaced++;
+      }
+
+      flowerInst.count = fPlaced;
+      flowerInst.userData.baseMatrices = flowerMatrices;
+      flowerInst.userData.windStrength = vegConfig.windStrength * 1.2;
+      flowerInst.instanceMatrix.needsUpdate = true;
+      envGroup.add(flowerInst);
+    }
   }
 }
 
 /**
- * Deterministic wind sway for procedural tree canopies (pure function of shot time `t`
- * so offline 4-Pass Previs export is 100% frame-reproducible).
+ * Deterministic wind sway for 67.js procedural trees & grass tufts (pure function of shot time `t`
+ * so offline 4-Pass Previs export is 100% frame-reproducible across RGB, Clay, and Depth passes).
  */
 export function updateVegetationWind(envGroup: THREE.Group, timeSec: number): void {
-  const canopyInst = envGroup.getObjectByName('__procedural_tree_canopies__') as
-    | THREE.InstancedMesh
-    | undefined;
-  if (!canopyInst) return;
-
-  const baseMatrices = canopyInst.userData.baseMatrices as THREE.Matrix4[] | undefined;
-  const windStrength = Number(canopyInst.userData.windStrength ?? 0.45);
-  if (!baseMatrices || baseMatrices.length === 0 || windStrength <= 0.01) return;
-
   const pos = new THREE.Vector3();
   const quat = new THREE.Quaternion();
   const scale = new THREE.Vector3();
@@ -600,17 +841,32 @@ export function updateVegetationWind(envGroup: THREE.Group, timeSec: number): vo
   const swayQuat = new THREE.Quaternion();
   const mat = new THREE.Matrix4();
 
-  for (let i = 0; i < baseMatrices.length; i++) {
-    baseMatrices[i].decompose(pos, quat, scale);
-    const phase = pos.x * 0.17 + pos.z * 0.13 + i * 0.31;
-    const swayX = Math.sin(timeSec * 1.85 + phase) * 0.035 * windStrength;
-    const swayZ = Math.cos(timeSec * 1.45 + phase * 1.3) * 0.028 * windStrength;
-    swayEuler.set(swayX, 0, swayZ);
-    swayQuat.setFromEuler(swayEuler);
-    quat.multiply(swayQuat);
-    mat.compose(pos, quat, scale);
-    canopyInst.setMatrixAt(i, mat);
-  }
-  canopyInst.instanceMatrix.needsUpdate = true;
-}
+  envGroup.traverse((child) => {
+    const windUniforms = child.userData?.windUniforms as
+      | { uWindTime: { value: number }; uWindStrength: { value: number } }
+      | undefined;
+    if (windUniforms) {
+      windUniforms.uWindTime.value = timeSec;
+    }
 
+    if (!(child instanceof THREE.InstancedMesh)) return;
+    const baseMatrices = child.userData.baseMatrices as THREE.Matrix4[] | undefined;
+    const windStrength = Number(child.userData.windStrength ?? 0);
+    if (!baseMatrices || baseMatrices.length === 0 || windStrength <= 0.01) return;
+
+    const count = Math.min(child.count, baseMatrices.length);
+    for (let i = 0; i < count; i++) {
+      baseMatrices[i].decompose(pos, quat, scale);
+      // Pure spatial phase so shared (pos.x, pos.z) roots keep bark & foliage 100% locked together
+      const phase = pos.x * 0.17 + pos.z * 0.13;
+      const swayX = Math.sin(timeSec * 1.65 + phase) * 0.022 * windStrength;
+      const swayZ = Math.cos(timeSec * 1.28 + phase * 1.31) * 0.018 * windStrength;
+      swayEuler.set(swayX, 0, swayZ);
+      swayQuat.setFromEuler(swayEuler);
+      quat.multiply(swayQuat);
+      mat.compose(pos, quat, scale);
+      child.setMatrixAt(i, mat);
+    }
+    child.instanceMatrix.needsUpdate = true;
+  });
+}

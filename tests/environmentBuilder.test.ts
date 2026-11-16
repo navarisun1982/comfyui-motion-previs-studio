@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import {
   applyGroundSurface,
   applyTerrainToFloorMesh,
+  disposeEnvironmentGroup,
   evaluateTerrainHeight,
   resolveEffectiveTerrainConfig,
   updateVegetationWind,
@@ -16,6 +17,9 @@ import {
   isPointExcludedFromScattering,
   resolveEffectiveVegetationConfig,
 } from '../src/engine/staging/vegetationAndClutter';
+import { createTree } from '../src/engine/staging/vendor67/vegetationCore';
+import { getBarkDataTexture, getLeafDataTexture } from '../src/engine/staging/vendor67/vegetationTextures';
+import { buildClutterBatches } from '../src/engine/staging/vendor67/clutterCore';
 import {
   evaluateVehicleDriveState,
   applyVehicleDriveKinematicsToMesh,
@@ -355,5 +359,122 @@ describe('Staging Textures & Environment Builder', () => {
     expect(navResult.keyframes.length).toBeGreaterThan(0);
     // Intermediate waypoints steer away from y=50 to avoid the obstacle at (50, 50)
     expect(navResult.keyframes.some((kf) => Math.abs(kf.position.y - 50) > 2.5)).toBe(true);
+  });
+
+  it('generates genuine 67.js recursive branching trees across all 5 species, 128x128 RGBA leaf/bark textures, and plane-chipped clutter', () => {
+    const speciesList = ['broadleaf', 'birch', 'conifer', 'palm', 'bush'] as const;
+    for (const sp of speciesList) {
+      const tree = createTree({ species: sp, leaves: 'cards' }, 67);
+      expect(tree.levels.length).toBe(4);
+      // Root flare collar extends below y=0 so trees plant cleanly on sloped hillsides
+      expect(tree.bounds.minimum[1]).toBeLessThan(-0.05);
+      expect(tree.bounds.maximum[1]).toBeGreaterThan(1.0);
+      // Highest detail LOD 0 always exceeds simplified LOD 1 and horizon clump LOD 3
+      expect(tree.levels[0].triangles).toBeGreaterThan(tree.levels[1].triangles);
+      expect(tree.levels[0].triangles).toBeGreaterThan(tree.levels[3].triangles);
+    }
+
+    // Verify 128x128 RGBA leaf sprig texture has flipY=false and both transparent & opaque pixels
+    const sprigTex = getLeafDataTexture('sprig', [60, 112, 42]);
+    expect(sprigTex.flipY).toBe(false);
+    expect(sprigTex.userData.isSharedResource).toBe(true);
+    const imgData = (sprigTex.image as { data: Uint8Array; width: number; height: number }).data;
+    expect(imgData.length).toBe(128 * 128 * 4);
+    let transparentCount = 0;
+    let opaqueCount = 0;
+    for (let i = 3; i < imgData.length; i += 4) {
+      if (imgData[i] === 0) transparentCount++;
+      else if (imgData[i] > 200) opaqueCount++;
+    }
+    expect(transparentCount).toBeGreaterThan(1000);
+    expect(opaqueCount).toBeGreaterThan(500);
+
+    const birchBarkTex = getBarkDataTexture('birch');
+    expect(birchBarkTex.wrapS).toBe(THREE.RepeatWrapping);
+    expect(birchBarkTex.userData.isSharedResource).toBe(true);
+
+    // Verify 67.js plane-chipped mossy rocks, pebbles, curved twigs, and cupped fallen leaves
+    const clutter = buildClutterBatches({
+      preset: 'forest',
+      seed: 67,
+      detail: 1,
+      area: { minX: -20, maxX: 20, minZ: -20, maxZ: 20 },
+      rockCount: 8,
+      pebbleCount: 12,
+      twigCount: 10,
+      leafCount: 16,
+      terrainHeight: () => 0,
+    });
+    expect(clutter.rocks).not.toBeNull();
+    expect(clutter.pebbles).not.toBeNull();
+    expect(clutter.litter).not.toBeNull();
+    expect(clutter.rocks!.colors).not.toBeNull();
+  });
+
+  it('matches PlaneGeometry triangle raycast height with 0.000m error, switches splat/base materials cleanly, and omits legacy cartoon cones in nature biome', () => {
+    const natureEnv = makeEnv({
+      category: 'nature',
+      groundSurface: 'grass-terrain',
+      detailLevel: 'simple',
+      terrain: { profile: 'mountain-ridge', heightScale: 1.5, clearingRadius: 18, seed: 67 },
+    });
+    const biome = inferSemanticEnvironmentBiome(natureEnv);
+
+    const baseMat = new THREE.MeshStandardMaterial({ color: 0x22293a });
+    const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), baseMat);
+    floorMesh.rotation.x = -Math.PI * 0.5;
+    const cfg = applyTerrainToFloorMesh(floorMesh, natureEnv, biome);
+
+    // Splat shader material active on displaced terrain
+    expect(floorMesh.material).toBe(floorMesh.userData._splatStandardMaterial);
+    expect(floorMesh.material).not.toBe(baseMat);
+
+    // Raycast against actual displaced PlaneGeometry triangles at non-grid interior coordinates
+    floorMesh.updateMatrixWorld(true);
+    const raycaster = new THREE.Raycaster();
+    const sampleCoords = [
+      { x: 27.35, z: -31.8 },
+      { x: -39.1, z: 24.65 },
+      { x: 0.0, z: 0.0 },
+    ];
+    for (const pt of sampleCoords) {
+      raycaster.set(new THREE.Vector3(pt.x, 100, pt.z), new THREE.Vector3(0, -1, 0));
+      const hits = raycaster.intersectObject(floorMesh, false);
+      expect(hits.length).toBeGreaterThanOrEqual(1);
+      const cpuHeight = evaluateTerrainHeight(pt.x, pt.z, cfg);
+      expect(hits[0].point.y).toBeCloseTo(cpuHeight, 4);
+    }
+
+    // Switching back to flat studio restores untouched base MeshStandardMaterial
+    const studioEnv = makeEnv({ category: 'studio', groundSurface: 'studio-floor' });
+    const studioBiome = inferSemanticEnvironmentBiome(studioEnv);
+    applyTerrainToFloorMesh(floorMesh, studioEnv, studioBiome);
+    expect(floorMesh.material).toBe(baseMat);
+
+    // Nature biome uses genuine 67.js instanced bark/foliage & chipped clutter with zero legacy SphereGeometry/ConeGeometry mounds
+    const envGroup = new THREE.Group();
+    buildPerimeterEnvironment(envGroup, natureEnv);
+    let legacyConeOrSphereCount = 0;
+    let alphaCutoutFoliageCount = 0;
+    envGroup.traverse((child) => {
+      const m = child as THREE.Mesh;
+      if (
+        m.geometry instanceof THREE.ConeGeometry ||
+        m.geometry instanceof THREE.SphereGeometry
+      ) {
+        legacyConeOrSphereCount++;
+      }
+      if (m.userData?.alphaCutoutMap) {
+        alphaCutoutFoliageCount++;
+      }
+    });
+    expect(legacyConeOrSphereCount).toBe(0);
+    expect(alphaCutoutFoliageCount).toBeGreaterThan(0);
+
+    // Safe disposal keeps shared 67.js cached tree geometries intact
+    const canopyInst = envGroup.getObjectByName('__procedural_tree_canopies__') as THREE.InstancedMesh;
+    expect(canopyInst.geometry.userData.isSharedResource).toBe(true);
+    disposeEnvironmentGroup(envGroup);
+    expect(canopyInst.geometry.attributes.position.count).toBeGreaterThan(0);
   });
 });
